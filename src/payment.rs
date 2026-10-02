@@ -65,6 +65,7 @@ impl Payer {
 }
 #[derive(Clone)]
 pub struct PaidClient {
+    public_only: bool,
     timeout: std::time::Duration,
     payer: Option<Arc<RwLock<Arc<Payer>>>>,
     managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
@@ -72,6 +73,7 @@ pub struct PaidClient {
 impl PaidClient {
     pub fn new(payer: Payer) -> Self {
         Self {
+            public_only: false,
             timeout: std::time::Duration::from_secs(60),
             payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
             managed: None,
@@ -79,6 +81,7 @@ impl PaidClient {
     }
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
+            public_only: false,
             timeout: std::time::Duration::from_secs(60),
             payer: None,
             managed: Some(pool),
@@ -86,6 +89,10 @@ impl PaidClient {
     }
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+    pub fn public_destinations(mut self) -> Self {
+        self.public_only = true;
         self
     }
     pub fn timeout(&self) -> std::time::Duration {
@@ -138,7 +145,14 @@ impl PaidClient {
                 .map(|c| c.address.as_str())
                 .or_else(|| payer.as_ref().map(|p| p.address.as_str()))
                 .context("network_identity_missing: payer")?;
-            let http = crate::network::global().http(
+            let factory = crate::network::global();
+            let build = if self.public_only {
+                crate::network::NetworkContext::http_public
+            } else {
+                crate::network::NetworkContext::http
+            };
+            let http = build(
+                factory,
                 &crate::network::IsolationId::evm(address)?,
                 request.url().as_str(),
                 self.timeout,

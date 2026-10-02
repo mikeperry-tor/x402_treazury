@@ -343,3 +343,37 @@ async fn live_tor_unfunded_smoke() {
         .unwrap();
     assert!(!tree.ironwood_tree.is_empty());
 }
+
+#[tokio::test]
+async fn public_only_tor_uses_remote_dns_and_existing_isolation_without_fallback() {
+    let proxy = Socks::start(BTreeMap::new(), Fault::Refuse).await;
+    let context = NetworkContext::new(policy(&proxy)).unwrap();
+    let url = "https://api.example.com/openapi.json";
+    for id in [
+        IsolationId::discovery(url).unwrap(),
+        IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap(),
+    ] {
+        let client = context
+            .http_public(&id, url, Duration::from_secs(2))
+            .unwrap();
+        assert!(client.get(url).send().await.is_err());
+        let records = proxy.records.lock().unwrap();
+        let record = records.last().unwrap();
+        assert_eq!(record.host, "api.example.com");
+        assert_eq!(record.address_type, 3);
+        assert_eq!(
+            (record.user.clone(), record.password.clone()),
+            context.credentials(&id)
+        );
+    }
+    assert_eq!(proxy.records.lock().unwrap().len(), 2);
+    assert!(
+        context
+            .http_public(
+                &IsolationId::bootstrap(),
+                "https://127.0.0.1/",
+                Duration::from_secs(2)
+            )
+            .is_err()
+    );
+}

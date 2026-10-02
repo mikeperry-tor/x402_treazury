@@ -146,6 +146,7 @@ impl IsolationId {
 }
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct HttpKey {
+    public_only: bool,
     runtime: Option<tokio::runtime::Id>,
     identity: IsolationId,
     origin: String,
@@ -183,12 +184,31 @@ impl NetworkContext {
         }
     }
     pub fn http(&self, id: &IsolationId, url: &str, timeout: Duration) -> Result<reqwest::Client> {
+        self.http_policy(id, url, timeout, false)
+    }
+    pub fn http_public(
+        &self,
+        id: &IsolationId,
+        url: &str,
+        timeout: Duration,
+    ) -> Result<reqwest::Client> {
+        public_url(url)?;
+        self.http_policy(id, url, timeout, true)
+    }
+    fn http_policy(
+        &self,
+        id: &IsolationId,
+        url: &str,
+        timeout: Duration,
+        public_only: bool,
+    ) -> Result<reqwest::Client> {
         let parsed = reqwest::Url::parse(url).context("invalid network URL")?;
         ensure!(
             matches!(parsed.scheme(), "http" | "https"),
             "unsupported network URL scheme"
         );
         let key = HttpKey {
+            public_only,
             runtime: tokio::runtime::Handle::try_current().ok().map(|h| h.id()),
             identity: id.clone(),
             origin: parsed.origin().ascii_serialization(),
@@ -204,6 +224,9 @@ impl NetworkContext {
             .timeout(timeout)
             .connect_timeout(self.policy.timeout())
             .redirect(reqwest::redirect::Policy::none());
+        if public_only && self.policy.mode == Mode::Direct {
+            builder = builder.dns_resolver(Arc::new(PublicResolver));
+        }
         if self.policy.mode == Mode::Tor {
             let (user, pass) = self.credentials(id);
             let proxy =
@@ -311,5 +334,120 @@ impl NetworkContext {
         }
         cache.insert(key, client.clone());
         Ok(client)
+    }
+}
+
+/// Restrict untrusted, agent-selected endpoints without changing trusted TOML sources.
+pub fn public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v) => {
+            let o = v.octets();
+            !(v.is_private()
+                || v.is_loopback()
+                || v.is_link_local()
+                || v.is_broadcast()
+                || v.is_documentation()
+                || v.is_unspecified()
+                || v.is_multicast()
+                || o[0] == 0
+                || o[0] >= 240
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+                || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                || (o[0] == 192 && o[1] == 88 && o[2] == 99))
+        }
+        std::net::IpAddr::V6(v) => v
+            .to_ipv4_mapped()
+            .map(|v| public_ip(v.into()))
+            .unwrap_or_else(|| {
+                let s = v.segments();
+                (s[0] & 0xe000) == 0x2000
+                    && !(s[0] == 0x2001 && (s[1] < 0x200 || s[1] == 0xdb8))
+                    && s[0] != 0x2002
+                    && !(s[0] == 0x3fff && s[1] < 0x1000)
+            }),
+    }
+}
+pub fn public_url(url: &str) -> Result<reqwest::Url> {
+    let u = reqwest::Url::parse(url).map_err(|_| anyhow::anyhow!("invalid source URL"))?;
+    ensure!(
+        u.scheme() == "https"
+            && u.username().is_empty()
+            && u.password().is_none()
+            && u.fragment().is_none(),
+        "source URLs require HTTPS without userinfo or fragments"
+    );
+    let host = u
+        .host_str()
+        .context("source URL requires host")?
+        .trim_end_matches('.');
+    if let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        ensure!(public_ip(ip), "non-public destination rejected");
+    } else {
+        ensure!(
+            host.contains('.')
+                && ![
+                    "localhost",
+                    "local",
+                    "internal",
+                    "home",
+                    "lan",
+                    "test",
+                    "invalid",
+                    "example",
+                    "onion"
+                ]
+                .iter()
+                .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}"))),
+            "non-public destination name rejected"
+        );
+    }
+    Ok(u)
+}
+struct PublicResolver;
+impl reqwest::dns::Resolve for PublicResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let addresses: Vec<_> = tokio::net::lookup_host((name.as_str(), 0)).await?.collect();
+            validate_public_addresses(&addresses)?;
+            Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+fn validate_public_addresses(addresses: &[std::net::SocketAddr]) -> std::io::Result<()> {
+    if addresses.is_empty() || addresses.iter().any(|a| !public_ip(a.ip())) {
+        return Err(std::io::Error::other("non-public DNS destination rejected"));
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod public_destination_tests {
+    use super::*;
+    #[test]
+    fn every_dns_answer_is_checked_at_each_resolution() {
+        let good = "1.1.1.1:443".parse().unwrap();
+        let bad = "127.0.0.1:443".parse().unwrap();
+        assert!(validate_public_addresses(&[good]).is_ok());
+        assert!(validate_public_addresses(&[good, bad]).is_err());
+        assert!(validate_public_addresses(&[bad]).is_err());
+        assert!(validate_public_addresses(&[]).is_err());
+        for ip in [
+            "10.0.0.1",
+            "100.64.0.1",
+            "192.88.99.1",
+            "198.19.0.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "2001:db8::1",
+            "2002:7f00:1::",
+            "3fff::1",
+            "::ffff:127.0.0.1",
+            "0.0.0.0",
+            "255.255.255.255",
+        ] {
+            assert!(!public_ip(ip.parse().unwrap()), "{ip}");
+        }
     }
 }
