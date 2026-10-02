@@ -6,6 +6,7 @@ version = 1
 [sources.pdl]
 extends = "../../providers/pdl.toml"
 timeout = 30
+# wallet = "default" # Optional source override, shared across listeners using pdl.
 
 [sources.lonestar]
 extends = "../../providers/lonestar.toml"

@@ -438,16 +438,19 @@ private_key_env="KEY"
 [sources.api]
 spec="spec.json"
 probe_pricing=false
+[sources.managed]
+spec="spec.json"
+probe_pricing=false
+wallet="research"
 [servers.one]
 listen="127.0.0.1:0"
 bearer_token_env="TOKEN"
-wallet="research"
-sources=["api"]
+wallet="static_wallet"
+sources=["managed"]
 [servers.two]
 listen="127.0.0.1:0"
 bearer_token_env="TOKEN"
-wallet="research"
-sources=["api"]
+sources=["managed"]
 [servers.three]
 listen="127.0.0.1:0"
 bearer_token_env="TOKEN"
@@ -485,7 +488,7 @@ sources=["api"]
         if name == "three" {
             continue;
         }
-        let response:Value=reqwest::Client::new().post(format!("http://{address}/mcp")).bearer_auth("secret").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api_pay","arguments":{}}})).send().await.unwrap().json().await.unwrap();
+        let response:Value=reqwest::Client::new().post(format!("http://{address}/mcp")).bearer_auth("secret").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"managed_pay","arguments":{}}})).send().await.unwrap().json().await.unwrap();
         assert_eq!(response["result"]["isError"], true, "{response}");
         assert!(
             response.to_string().contains("wallet_not_ready"),

@@ -502,3 +502,169 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
     task.await.unwrap().unwrap();
     vendor.abort();
 }
+
+#[tokio::test]
+async fn wallet_bindings_are_explicit_offline_and_provider_files_cannot_assign_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = configuration().replace("[sources.beta]", "[sources.beta]\nwallet = 'specific'")
+        + "\n[wallets.specific]\nmode='static'\nprivate_key_env='SOURCE_KEY'\n";
+    let path = write_config(dir.path(), &text);
+    // Specs intentionally absent: showing configuration must not load catalogs.
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(shown["sources"]["beta"]["wallet"], "specific");
+    assert!(shown["sources"]["beta"]["settings"].get("wallet").is_none());
+    assert_eq!(
+        shown["wallet_bindings"]["research"]["alpha"],
+        json!({"wallet":"shared","origin":"servers.research.wallet"})
+    );
+    assert_eq!(
+        shown["wallet_bindings"]["research"]["beta"],
+        json!({"wallet":"specific","origin":"sources.beta.wallet"})
+    );
+    assert_eq!(
+        shown["wallet_bindings"]["beta_only"]["beta"]["wallet"],
+        "specific"
+    );
+    for (bad, expected) in [
+        (
+            text.replace("wallet = 'specific'", "wallet = 'missing'"),
+            "unknown wallet",
+        ),
+        (
+            text.replace("wallet = 'specific'", "wallet = ''"),
+            "unknown wallet",
+        ),
+        (text.replace("wallet = 'specific'", "wallet = 1"), "string"),
+        (
+            text.replace("wallet = \"shared\"\n", ""),
+            "wallet required on source or server",
+        ),
+        (
+            text.replace("wallet = \"shared\"", "wallet = 'missing'"),
+            "unknown wallet",
+        ),
+    ] {
+        write_config(dir.path(), &bad);
+        let error = Deployment::show_config(&path).await.unwrap_err();
+        assert!(format!("{error:#}").contains(expected), "{error:#}");
+    }
+    let source_only = text
+        .replace("wallet = \"shared\"\n", "")
+        .replace("[sources.alpha]", "[sources.alpha]\nwallet='shared'");
+    write_config(dir.path(), &source_only);
+    assert!(
+        Deployment::show_config(&path).await.unwrap()["servers"]["research"]["wallet"].is_null()
+    );
+    for file in ["alpha.json", "beta.json"] {
+        std::fs::write(
+            dir.path().join(file),
+            spec("https://example.invalid").to_string(),
+        )
+        .unwrap();
+    }
+    let deployment = Deployment::load(&path).await.unwrap();
+    let inventory = deployment.inventory();
+    assert!(inventory[1].default_wallet.is_none());
+    assert_eq!(inventory[1].wallet_bindings["beta"].wallet, "specific");
+    // Provider files cannot set identities, even when the source overrides them.
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='alpha.json'\nwallet='shared'\n",
+    )
+    .unwrap();
+    write_config(
+        dir.path(),
+        &source_only.replace("spec = \"alpha.json\"", "extends='provider.toml'"),
+    );
+    assert!(Deployment::show_config(&path).await.is_err());
+    assert!(
+        x402_mcp_prototype::config::load(&dir.path().join("provider.toml"))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn source_wallet_overrides_route_real_signatures_across_server_defaults() {
+    let (base, _, vendor) = vendor("api", "/api").await;
+    let dir = tempfile::tempdir().unwrap();
+    for file in ["alpha.json", "beta.json"] {
+        std::fs::write(dir.path().join(file), spec(&base).to_string()).unwrap();
+    }
+    let text = configuration()
+        .replace("[sources.beta]", "[sources.beta]\nwallet='specific'")
+        .replace("sources = [\"beta\"]", "sources = [\"alpha\", \"beta\"]")
+        .replace(
+            "include_tools = [\"beta_pay\"]",
+            "include_tools = [\"alpha_pay\", \"beta_pay\"]",
+        );
+    let (research, beta) = text.split_once("[servers.beta_only]").unwrap();
+    let text = format!(
+        "{research}[servers.beta_only]{}",
+        beta.replace("wallet = \"shared\"", "wallet='other'")
+    ) + r#"
+[wallets.specific]
+mode='static'
+private_key_env='SOURCE_KEY'
+[wallets.other]
+mode='static'
+private_key_env='OTHER_KEY'
+[wallets.unused]
+mode='static'
+private_key_env='DO_NOT_READ'
+[servers.source_only]
+listen='127.0.0.1:0'
+bearer_token_env='BETA_TOKEN'
+sources=['beta']
+include_tools=['beta_pay']
+[servers.overridden]
+listen='127.0.0.1:0'
+bearer_token_env='BETA_TOKEN'
+wallet='unused'
+sources=['beta']
+include_tools=['beta_pay']
+"#;
+    let path = write_config(dir.path(), &text);
+    let deployment = Deployment::load(&path).await.unwrap();
+    let mut env = env();
+    env.insert("SOURCE_KEY".into(), format!("{:064x}", 2));
+    env.insert("OTHER_KEY".into(), format!("{:064x}", 3));
+    // The overridden default has no environment secret and must not load a signer.
+    let running = deployment.bind(&env).await.unwrap();
+    let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let http = reqwest::Client::new();
+    for (server, tool, key) in [
+        ("research", "alpha_pay", 1),
+        ("research", "beta_pay", 2),
+        ("beta_only", "alpha_pay", 3),
+        ("beta_only", "beta_pay", 2),
+        ("source_only", "beta_pay", 2),
+        ("overridden", "beta_pay", 2),
+    ] {
+        let reply = rpc(
+            &http,
+            addresses[server],
+            if server == "research" {
+                "research-secret"
+            } else {
+                "beta-secret"
+            },
+            "tools/call",
+            json!({"name":tool,"arguments":{}}),
+        )
+        .await;
+        let body: Value =
+            serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
+        assert_eq!(
+            body["payer"].as_str().unwrap().to_lowercase(),
+            signer.address().to_string().to_lowercase(),
+            "{server}/{tool}"
+        );
+    }
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    vendor.abort();
+}

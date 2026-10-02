@@ -26,7 +26,18 @@ pub struct MetaConfig {
     pub wallets: BTreeMap<String, WalletConfig>,
     pub servers: BTreeMap<String, ListenerConfig>,
 }
-pub type SourceConfig = toml::Table;
+#[derive(Deserialize, Serialize)]
+pub struct SourceConfig {
+    pub wallet: Option<String>,
+    #[serde(flatten)]
+    pub provider: toml::Table,
+}
+#[derive(Clone, Serialize)]
+pub struct WalletBinding {
+    pub wallet: String,
+    pub origin: String,
+}
+type WalletBindings = BTreeMap<String, BTreeMap<String, WalletBinding>>;
 pub use crate::rotation::config::WalletConfig;
 use crate::rotation::config::{FundingConfig, TreasuryConfig};
 #[derive(Clone, Deserialize, Serialize)]
@@ -34,7 +45,7 @@ use crate::rotation::config::{FundingConfig, TreasuryConfig};
 pub struct ListenerConfig {
     pub listen: SocketAddr,
     pub bearer_token_env: String,
-    pub wallet: String,
+    pub wallet: Option<String>,
     pub sources: Vec<String>,
     #[serde(default)]
     pub include_tools: Vec<String>,
@@ -58,7 +69,8 @@ struct Source {
 pub struct Inventory {
     pub server: String,
     pub listen: SocketAddr,
-    pub wallet: String,
+    pub default_wallet: Option<String>,
+    pub wallet_bindings: BTreeMap<String, WalletBinding>,
     pub tools: Vec<InventoryTool>,
 }
 #[derive(Serialize)]
@@ -71,6 +83,7 @@ pub struct Deployment {
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
+    wallet_bindings: WalletBindings,
 }
 fn pattern(text: &str) -> Result<Regex> {
     ensure!(!text.is_empty(), "empty tool selector");
@@ -87,6 +100,21 @@ fn pattern(text: &str) -> Result<Regex> {
     Ok(Regex::new(&expression)?)
 }
 impl MetaConfig {
+    fn wallet_bindings(&self) -> Result<WalletBindings> {
+        self.servers.iter().map(|(server_name, server)| {
+            let bindings = server.sources.iter().map(|source_name| {
+                let source = self.sources.get(source_name).context("unknown source")?;
+                let (wallet, origin) = if let Some(wallet) = &source.wallet {
+                    (wallet, format!("sources.{source_name}.wallet"))
+                } else {
+                    (server.wallet.as_ref().with_context(|| format!("server {server_name}, source {source_name}: wallet required on source or server"))?, format!("servers.{server_name}.wallet"))
+                };
+                Ok((source_name.clone(), WalletBinding { wallet: wallet.clone(), origin }))
+            }).collect::<Result<_>>()?;
+            Ok((server_name.clone(), bindings))
+        }).collect()
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.version == 1,
@@ -128,6 +156,14 @@ impl MetaConfig {
                 f.validate()?;
             }
         }
+        for (name, source) in &self.sources {
+            if let Some(wallet) = &source.wallet {
+                ensure!(
+                    self.wallets.contains_key(wallet),
+                    "source {name}: unknown wallet {wallet}"
+                );
+            }
+        }
         let mut addresses = BTreeSet::new();
         for (name, server) in &self.servers {
             ensure!(
@@ -143,11 +179,12 @@ impl MetaConfig {
                 !server.bearer_token_env.trim().is_empty(),
                 "server {name}: bearer_token_env is required"
             );
-            ensure!(
-                self.wallets.contains_key(&server.wallet),
-                "server {name}: unknown wallet {}",
-                server.wallet
-            );
+            if let Some(wallet) = &server.wallet {
+                ensure!(
+                    self.wallets.contains_key(wallet),
+                    "server {name}: unknown wallet {wallet}"
+                );
+            }
             ensure!(
                 !server.sources.is_empty(),
                 "server {name}: sources cannot be empty"
@@ -171,6 +208,7 @@ impl MetaConfig {
                 pattern(selector)?;
             }
         }
+        self.wallet_bindings()?;
         Ok(())
     }
 }
@@ -183,17 +221,20 @@ impl Deployment {
         }
         let mut resolved = BTreeMap::new();
         for (id, source) in &config.sources {
-            let mut provider = crate::config::resolve(source.clone(), path).await?;
+            let mut provider = crate::config::resolve(source.provider.clone(), path).await?;
             if provider.settings.prefix.is_none() {
                 provider.settings.prefix = Some(id.clone());
                 provider
                     .origins
                     .insert("prefix".into(), "source identifier".into());
             }
-            resolved.insert(id, provider);
+            let mut resolved_source = serde_json::to_value(provider)?;
+            resolved_source["wallet"] = serde_json::to_value(&source.wallet)?;
+            resolved.insert(id, resolved_source);
         }
+        let wallet_bindings = config.wallet_bindings()?;
         Ok(
-            serde_json::json!({"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers}),
+            serde_json::json!({"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_bindings}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -203,9 +244,10 @@ impl Deployment {
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
+        let wallet_bindings = config.wallet_bindings()?;
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
-            let mut cfg = crate::config::resolve(source.clone(), path)
+            let mut cfg = crate::config::resolve(source.provider.clone(), path)
                 .await
                 .with_context(|| format!("source {id}"))?
                 .settings;
@@ -326,6 +368,7 @@ impl Deployment {
             config,
             sources,
             selected,
+            wallet_bindings,
         })
     }
     pub fn inventory(&self) -> Vec<Inventory> {
@@ -335,7 +378,8 @@ impl Deployment {
             .map(|(name, s)| Inventory {
                 server: name.clone(),
                 listen: s.listen,
-                wallet: s.wallet.clone(),
+                default_wallet: s.wallet.clone(),
+                wallet_bindings: self.wallet_bindings[name].clone(),
                 tools: self.selected[name]
                     .iter()
                     .map(|(source, tool)| InventoryTool {
@@ -383,22 +427,29 @@ impl Deployment {
             }
         }
         let mut wallets = BTreeMap::new();
-        for cfg in self.config.servers.values() {
-            if !wallets.contains_key(&cfg.wallet)
-                && let WalletConfig::Static {
-                    private_key_env,
-                    max_price_usd,
-                } = &self.config.wallets[&cfg.wallet]
+        // Only effective static profiles for selected tools need keys. An overridden
+        // default or a source removed by listener filters must not load a signer.
+        let used_wallets: BTreeSet<_> = self
+            .selected
+            .iter()
+            .flat_map(|(server, tools)| {
+                tools
+                    .iter()
+                    .map(|(source, _)| self.wallet_bindings[server][source].wallet.clone())
+            })
+            .collect();
+        for name in used_wallets {
+            if let WalletConfig::Static {
+                private_key_env,
+                max_price_usd,
+            } = &self.config.wallets[&name]
             {
                 let payer = Payer::new(
                     &secret(private_key_env)?,
                     SpendPolicy::dollars(max_price_usd)?,
                 )
-                .with_context(|| format!("wallet {}: invalid signing configuration", cfg.wallet))?;
-                wallets.insert(
-                    cfg.wallet.clone(),
-                    PaidClient::new(reqwest::Client::new(), payer),
-                );
+                .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
+                wallets.insert(name, PaidClient::new(reqwest::Client::new(), payer));
             }
         }
         #[cfg(feature = "zcash")]
@@ -523,7 +574,8 @@ impl Deployment {
                     let source = &self.sources[id];
                     (
                         t.clone(),
-                        wallets[&cfg.wallet].with_http(source.http.clone()),
+                        wallets[&self.wallet_bindings[name][id].wallet]
+                            .with_http(source.http.clone()),
                         source.base_url.clone(),
                     )
                 })

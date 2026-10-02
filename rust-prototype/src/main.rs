@@ -140,12 +140,14 @@ async fn main() -> Result<()> {
         if args.check {
             for server in deployment.inventory() {
                 println!(
-                    "{}: {} tools on {} (wallet {})",
+                    "{}: {} tools on {}",
                     server.server,
                     server.tools.len(),
-                    server.listen,
-                    server.wallet
+                    server.listen
                 );
+                for (source, binding) in server.wallet_bindings {
+                    println!("  {source}: wallet {} ({})", binding.wallet, binding.origin);
+                }
             }
             return Ok(());
         }

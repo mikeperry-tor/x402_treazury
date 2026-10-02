@@ -12,9 +12,10 @@ A single Zcash treasury funds one or more named virtual EVM wallets. Each virtua
 wallet is a durable rotation pool, exposed as an entry in TOML `wallets`, with
 its own `deposit_size` in native Base USDC (decimal string, default **5.00**),
 per-payment cap, active address and fully funded standby. Managed funding uses
-confidential ZEC-to-USDC swaps. Servers select a virtual wallet by name using
-the existing `wallet` field; multiple servers selecting the same name share
-that pool. Different virtual wallets never share EVM keys, balances or payment
+confidential ZEC-to-USDC swaps. Each deployment source may select a virtual
+wallet by name using `wallet`, overriding the server's optional default `wallet`.
+Every server/source binding must resolve to a named profile; bindings selecting
+the same name share that pool. Different virtual wallets never share EVM keys, balances or payment
 reservations, even though they draw from the same Zcash treasury.
 
 For each pool, maintain one active address and one fully funded standby. When the active
@@ -86,7 +87,7 @@ starting points:
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 46 tests, with two offline treasury tests and one
+The standalone Rust suite has 48 tests, with two offline treasury tests and one
 managed deployment test under `--features zcash`, plus two fixture utility tests. The combined suite runs 12 shared
 payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
@@ -170,8 +171,11 @@ Use the existing `--meta-config` TOML model in `deployment.rs`: named sources,
 wallet profiles, and MCP listeners. Extend wallet profiles with managed rotation
 settings. Every `mode = "zcash_rotation"` profile is a separate virtual EVM
 wallet with its own pool manager and `deposit_size`; all managed profiles refer
-to the singleton process treasury implicitly. Multiple listeners referencing
-the same profile share that pool, payment admission gate and spend policy.
+to the singleton process treasury implicitly. Source wallet assignments override
+listener defaults; assignments belong in the deployment, never provider files.
+Bindings referencing the same profile share that pool, payment admission gate
+and spend policy. `--show-config`, `--check` and inventory expose the effective
+wallet and source/server field origin for every declared binding.
 Static profiles may coexist and do not use the treasury. Do not replicate the
 Zcash wallet or state directory per virtual wallet.
 
@@ -705,8 +709,7 @@ Reject unknown fields, nonfinite amounts, negatives, zero where positive is
 required, fractional atomic units, overprecision and overflow. Require all risk
 limits for managed serving. Reject `private_key_env` on a managed profile and
 managed-only fields on a static profile; unrelated static profiles and their
-key environment variables remain valid. Only referenced static profiles load
-signers. All declared managed profiles explicitly request durable pools and
+key environment variables remain valid. Only effective static profiles used by selected tools load signers. All declared managed profiles explicitly request durable pools and
 bootstrap, even if no listener currently selects them. Inspection/discovery
 commands never create pools or initialize a treasury.
 
