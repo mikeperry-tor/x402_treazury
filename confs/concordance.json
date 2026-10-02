@@ -1,0 +1,27 @@
+{
+  "spec": "confs/concordance/concordance_digest.json",
+  "name": "Concordance",
+  "base_url": "https://concordancehq.duckdns.org",
+  "prefix": "concordance",
+  "include": ["/tools"],
+  "additional_properties": false,
+  "instructions_text": "Concordance aggregates 18 refreshed-on-schedule data sources (SEC EDGAR, FRED, World Bank, UN Comtrade, GDELT news, CourtListener, govinfo, arXiv/CORE, Hacker News, Stack Exchange, Wikipedia, weather, DefiLlama, finnhub/twelvedata/polygon quotes) into six paid tools, $0.01-$0.05 per call in USDC (Base or Solana). Every tool takes a flat JSON body; responses cite real sources, never black-box summaries. concordance_search: one-query full-text search with optional source/category/since filters. concordance_digest: one call groups a topic across every category with counts (not an LLM summary). concordance_timeline: coverage ordered oldest-first for tracking a story. concordance_corroboration: counts DISTINCT sources backing a claim - the trust signal. concordance_company_brief: quotes from 3 market providers + SEC filings + mentions for one ticker or company name; partial sections are normal. concordance_series: tabular series by source + series_id (fred GDP/CPIAUCSL/UNRATE/FEDFUNDS/DGS10; world_bank US-<indicator>). Call concordance_help for the vendor's full document.",
+  "help_url": "https://concordancehq.duckdns.org/llms.txt",
+  "overrides": {
+    "concordance_search": {
+      "description": "Full-text search across every aggregated data source in one call: news, SEC filings, court opinions, academic papers, government records, and developer discussions. One query surfaces everything concordant across independently-sourced, citable results (source, category, title, content, url, published_at) -- not a single-source wrapper. Optional source/category/since filters; limit 1-100 (default 20). $0.01 per call."
+    },
+    "concordance_series": {
+      "description": "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. $0.01 per call. Source slugs and series ids are listed in the param notes; the vendor's free /catalog endpoint has the live list.",
+      "params": {
+        "source": "Catalog source slug: arxiv, core, courtlistener, defillama, finnhub, gdelt, govinfo, hackernews, open_meteo, polygon, regulations_gov, sec_edgar, stackexchange, twelvedata, un_comtrade, wikipedia, world_bank, fred.",
+        "series_id": "Vendor series id, e.g. fred: GDP, CPIAUCSL, UNRATE, FEDFUNDS, DGS10; world_bank: US-NY.GDP.MKTP.CD (<COUNTRY>-<indicator>). The vendor's free /catalog endpoint lists every live series."
+      }
+    },
+    "concordance_company_brief": {
+      "params": {
+        "company": "Ticker (AAPL) or company name (Apple). Coverage is a bounded vendor watchlist."
+      }
+    }
+  }
+}

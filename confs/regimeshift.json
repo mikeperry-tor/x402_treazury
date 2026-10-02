@@ -1,0 +1,42 @@
+{
+  "spec": "https://regimeshift.xyz/openapi.json",
+  "name": "RegimeShift",
+  "base_url": "https://regimeshift.xyz/api",
+  "prefix": "regimeshift",
+  "include": ["/v1"],
+  "pricing_key": "x-payment-info",
+  "instructions_text": "RegimeShift on Base mainnet: Agent-SOFR USD short-rate benchmark, variance-aware max-LTV, and ETH/BTC volatility risk premium at $0.001/call each (x402 USDC), plus a free on-chain RFQ clearinghouse. Typical flow: read regimeshift_rate_sofr_usd and regimeshift_risk_max_ltv, POST a lend/borrow intent (free), then long-poll regimeshift_intent_intent_id_match (run this server with --timeout 320 so the up-to-300s poll survives) or watch the intents/matches endpoints; matched quotes carry EIP-712 payloads ready for on-chain originate() via InterAgentRepoV4.",
+  "overrides": {
+    "regimeshift_intent_lend": {
+      "description": "Free — no payment required. Submit a lender intent to the order book (wallet, USDC amount, min rate, max duration); matching runs synchronously on each new intent and a matched quote payload becomes available via regimeshift_matches_recent."
+    },
+    "regimeshift_intent_borrow": {
+      "description": "Free — no payment required. Submit a borrower intent (wallet, USDC principal wanted vs WETH collateral, max rate, max duration); matching runs synchronously and returns a match payload when a compatible lender is found."
+    },
+    "regimeshift_intents_open": {
+      "description": "Free — no payment required. All currently-open intents from both sides — the live order book. Matching requires overlap on duration first (borrower's needed term ≤ lender's max), then rate, then amount + collateral fit."
+    },
+    "regimeshift_intent_intent_id_match": {
+      "description": "Free — no payment required. Long-poll for a match on an open intent: holds the connection up to wait seconds (max 300) and returns immediately when a match is found, otherwise a timeout packet — re-poll on timeout. Run this server with --timeout 320 so the long poll survives. stream=true (newline-delimited JSON) is not usable through MCP — leave it false.",
+      "params": {
+        "wait": "Seconds to hold the connection waiting for a match (up to 300).",
+        "stream": "Ignore — ndjson streaming is not usable through MCP; leave false."
+      }
+    },
+    "regimeshift_intent_intent_id_matches": {
+      "description": "Free — no payment required. All matches for an intent plus its fill status (the sweep view): every match behind a partially-filled lender intent, each with the full signed quote payload, plus filled vs remaining capacity."
+    },
+    "regimeshift_matches_recent": {
+      "description": "Free — no payment required. Recent matches with full signed-quote payloads (EIP-712 signature, rate decomposition, contract address) ready for on-chain originate()."
+    },
+    "regimeshift_active_loans": {
+      "description": "Free — no payment required. All currently-active loans with their current Chainlink-priced LTV, liquidatable or not — useful for lender position monitoring."
+    },
+    "regimeshift_liquidatable_loans": {
+      "description": "Free — no payment required. Active loans with on-chain LTV ≥ 95% whose grace period has passed — anyone can call InterAgentRepoV4.liquidate(loanId) for the 3% bounty. Read-only; does not execute liquidations."
+    },
+    "regimeshift_loans_registry": {
+      "description": "Free — no payment required. Full lifecycle of every V4 loan reconstructed from on-chain event logs: the last limit originated loans (~14h lookback, 30s cache) with status, counterparties, principal/collateral, rate, LTV and originate/close tx hashes."
+    }
+  }
+}

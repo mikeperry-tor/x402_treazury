@@ -20,9 +20,9 @@ svm = ["x402[svm]>=2.24.0,<3"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-x402-mcp-pdl = "x402_mcp.pdl:main"
-x402-mcp-deepline = "x402_mcp.deepline:main"
 x402-mcp-socialfetch = "x402_mcp.socialfetch:main"
+x402-mcp-generic = "x402_mcp.generic:main"
+x402-mcp-lonestar = "x402_mcp.lonestar:main"
 
 [build-system]
 requires = ["hatchling"]

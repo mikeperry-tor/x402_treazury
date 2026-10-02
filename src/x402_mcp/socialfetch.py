@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from importlib.resources import files
 
+from .digest import sanitize_schema, slug_suffix
 from .runner import ToolSpec, serve
 
 BASE_URL = "https://api.socialfetch.dev"
@@ -71,8 +71,6 @@ MAIN = ["tiktok", "instagram", "twitter", "youtube", "facebook", "linkedin", "re
 # Not available over the x402 rail (need an API key) or interactive-account only.
 EXCLUDED_PREFIXES = ("/v1/whoami", "/v1/balance", "/v1/ask", "/v1/monitors", "/v1/webhook")
 
-_NONSLUG_RE = re.compile(r"[^0-9a-z]+")
-
 
 def load_digest() -> dict:
     raw = files("x402_mcp.data").joinpath("socialfetch_openapi_digest.json").read_text()
@@ -88,14 +86,6 @@ def resolve_selector(token: str) -> list[tuple[str, str]]:
             "(also: 'main', 'all')"
         )
     return PLATFORMS[key]
-
-
-def _slug(prefix: str, path: str, method: str) -> str:
-    rest = path[len(prefix):].strip("/")
-    slug = _NONSLUG_RE.sub("_", rest.lower()).strip("_")
-    if not slug:
-        slug = "root"
-    return slug
 
 
 def build_tools(platforms: list[str]) -> list[ToolSpec]:
@@ -115,7 +105,7 @@ def build_tools(platforms: list[str]) -> list[ToolSpec]:
         for prefix, tprefix in selected:
             if path != prefix and not path.startswith(prefix + "/"):
                 continue
-            name = f"{tprefix}_{_slug(prefix, path, op['method'])}"
+            name = f"{tprefix}_{slug_suffix(prefix, path)}"
             if name in seen:
                 raise RuntimeError(f"duplicate tool name {name}")
             seen.add(name)
@@ -159,13 +149,20 @@ def _tool_from_op(name: str, op: dict) -> ToolSpec:
     input_schema: dict = {"type": "object", "properties": properties}
     if required:
         input_schema["required"] = sorted(set(required))
+    input_schema = sanitize_schema(input_schema)
 
-    desc_parts = [op.get("summary") or f"{op['method'].upper()} {op['path']}"]
-    if op.get("description") and op["description"] != op.get("summary"):
-        desc_parts.append(op["description"])
+    # One vendor text, never both: the long `description` supersedes the
+    # `summary` stub (pairing them duplicated nearly every tool — vendors
+    # either echo the summary inside the description or paraphrase it as a
+    # terse stub). Falls back to summary, then METHOD path.
+    head = (
+        op.get("description")
+        or op.get("summary")
+        or f"{op['method'].upper()} {path_of(op)}"
+    )
+    desc_parts = [head]
     if op.get("pricing"):
         desc_parts.append(f"Pricing: {op['pricing']} (~${CREDIT_USD}/credit via x402 USDC on Base).")
-    desc_parts.append(f"Endpoint: {op['method'].upper()} {path_of(op)}.")
 
     return ToolSpec(
         name=name,

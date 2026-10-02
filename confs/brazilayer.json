@@ -1,0 +1,73 @@
+{
+  "spec": "https://api.brazilayer.com/openapi.json",
+  "name": "Brazilayer — Brazilian Company Data (CNPJ)",
+  "base_url": "https://api.brazilayer.com",
+  "prefix": "brazilayer",
+  "include": [
+    "/v1"
+  ],
+  "instructions_text": "Official Brazilian registry and market data: Receita Federal CNPJ registry, CVM fund disclosures, BACEN authorizations, PNCP tenders, sanctions lists, EUDR deforestation, commodity/macros feeds. Response keys use Portuguese legal terms (razao_social, situacao_cadastral, ...). Paid calls settle x402 USDC on Base; each tool states its price ($0.001–$0.10 per call). Validate a CNPJ free with brazilayer_ferramentas_cnpj__valor_ before any paid lookup — an invalid CNPJ never resolves anywhere. The twelve *_amostra tools are free shape samples of each dataset. brazilayer_cnpj_busca and brazilayer_cnpj_socio__busca require at least one filter; result totals cap at the string \"10000+\". brazilayer_pacotes__brasil bundles the 13 parameter-free endpoints in one call for $0.09.",
+  "overrides": {
+    "brazilayer_health": {
+      "description": "Free — no payment required. Service status and data reference month (free)"
+    },
+    "brazilayer_ferramentas": {
+      "description": "Free — no payment required. Free tools index — no payment, no limit, no signup"
+    },
+    "brazilayer_ferramentas_cnpj_valor": {
+      "description": "Free — no payment required. Check digits, normalized 14-digit form, punctuated form, 8-digit root (economic group) and headquarters/branch flag. Pure arithmetic — no database lookup. Use it before paying: an invalid CNPJ never resolves in any paid endpoint."
+    },
+    "brazilayer_ferramentas_cpf_valor": {
+      "description": "Free — no payment required. Check-digit validation only. Pure arithmetic: nothing is stored or looked up, and the response never echoes the full number — only the masked form."
+    },
+    "brazilayer_cnpj_amostra": {
+      "description": "Free — no payment required. Free full sample (format of /v1/empresa/{cnpj}/completo) for one fixed CNPJ"
+    },
+    "brazilayer_integridade_amostra": {
+      "description": "Free — no payment required. Free sample screening response (real sanctioned company)"
+    },
+    "brazilayer_licitacoes_amostra": {
+      "description": "Free — no payment required. Free sample of the supplier-contracts response"
+    },
+    "brazilayer_bcb_amostra": {
+      "description": "Free — no payment required. Free sample of the Central Bank check response"
+    },
+    "brazilayer_empresa_amostra": {
+      "description": "Free — no payment required. Free sample of the enriched profile (a sanctioned company with public contracts)"
+    },
+    "brazilayer_mercado_amostra": {
+      "description": "Free — no payment required. Free sample of the markets dataset (news + indicators)"
+    },
+    "brazilayer_pacotes_amostra": {
+      "description": "Free — no payment required. Free list of the packs, what each contains and what it saves"
+    },
+    "brazilayer_commodities_amostra": {
+      "description": "Free — no payment required. Free sample of the commodity signals dataset"
+    },
+    "brazilayer_fundos_amostra": {
+      "description": "Free — no payment required. Free sample of the fund industry dataset"
+    },
+    "brazilayer_tributos_amostra": {
+      "description": "Free — no payment required. Free sample of the tax reform dataset"
+    },
+    "brazilayer_cadeias_amostra": {
+      "description": "Free — no payment required. Free sample of a full causal chain"
+    },
+    "brazilayer_desmatamento_amostra": {
+      "description": "Free — no payment required. Free sample of the deforestation dataset"
+    },
+    "brazilayer_cnpj_busca": {
+      "params": {
+        "nome": "Full-text on legal and trade names (Portuguese, accent-insensitive). Example: padaria."
+      }
+    },
+    "brazilayer_cnpj_socio_busca": {
+      "params": {
+        "nome": "Person or entity name (full-text, accent-insensitive); at least 3 characters."
+      }
+    },
+    "brazilayer_integridade_consulta_cnpj": {
+      "description": "Screens a Brazilian company against CEIS, CNEP, CEPIM, the slave-labor\nblacklist (MTE) and leniency agreements. Legal-entity records only.\nSources updated daily. Price: $0.01 per call (vendor summary)."
+    }
+  }
+}

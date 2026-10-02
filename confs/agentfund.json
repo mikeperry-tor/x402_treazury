@@ -1,0 +1,9 @@
+{
+  "spec": "https://x402.agentfund.net/openapi.json",
+  "name": "AgentFund US Economic, SEC & On-Chain Data",
+  "prefix": "agentfund",
+  "include": ["/x402"],
+  "pricing_key": "x-payment-info",
+  "additional_properties": false,
+  "instructions_text": "AgentFund pay-per-call US public data and deterministic text utilities, settled in USDC on Base; prices run $0.001-$0.03 per call and failed upstream calls are never charged. Every tool is POST with a flat JSON body. Three data groups: US macro (treasury_yield_curve with computed 2s10s/3m10y spreads, bls_cpi, macro_jobs, macro_pce, macro_gdp, macro_retail_sales, macro_housing, macro_energy, macro_release_calendar), SEC EDGAR (edgar_insider_transactions Form 4, edgar_financials XBRL, edgar_13f_holdings, edgar_filings_feed, edgar_full_text_search), and on-chain EVM reads (onchain_token_balances, onchain_portfolio, onchain_cross_chain_balances, onchain_oracle_price, onchain_gas; chain = base | ethereum | optimism | arbitrum | polygon). Plus structured_json_repair and tabular_to_json for messy LLM/tool output (CSV/TSV/Markdown). Sources are free public-domain US government data or direct RPC reads, so figures carry each source's publication lag and revision policy."
+}

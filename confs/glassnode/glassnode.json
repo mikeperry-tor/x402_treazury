@@ -1,0 +1,9 @@
+{
+  "spec": "confs/glassnode/glassnode_digest.json",
+  "name": "Glassnode x402",
+  "base_url": "https://x402.glassnode.com",
+  "prefix": "glassnode",
+  "include": ["/v1"],
+  "instructions_text": "Glassnode x402 gateway — pay-per-call on-chain analytics, no API key: $0.05 per /v1/metrics call, $0.01 per /v1/metadata call, settled in USDC on Base (the 402 challenge price is authoritative; vendor docs say pricing can change). Flow: glassnode_metadata_metrics lists metric paths -> glassnode_metadata_metric shows one metric's allowed parameters, intervals, defaults and description -> glassnode_metrics_category_metric fetches the data (category = first path segment, metric = second segment, a = asset symbol like BTC). Responses are [{t, v, o?}] time series: unix timestamp, value, optional multi-value object.",
+  "help_url": "https://docs.glassnode.com/basic-api/x402.md"
+}

@@ -1,0 +1,10 @@
+{
+  "spec": "https://api.arkm.com/x402/openapi.json",
+  "name": "Arkham Intel (x402)",
+  "base_url": "https://api.arkm.com/x402",
+  "prefix": "arkham",
+  "pricing_key": "x-payment-info",
+  "exclude": ["/chains", "/networks/status", "/arkm/circulating"],
+  "instructions_text": "Arkham wallet intelligence: pre-trade due diligence, counterparty and smart-money analysis, balances, portfolios, flows, token/market data, and Polymarket activity. All routes are POST with JSON body fields (path parameters become body fields; EVM addresses are lowercased). $0.20 per credit; per-row endpoints (transfers, swaps) price from `limit` — pass the smallest useful limit. Rate limits: 100 req/s per wallet on most endpoints, 5 req/s on heavy ones (transfers, swaps, token/top, counterparties, flow, search). Failed upstream requests are not charged.",
+  "help_url": "https://api.arkm.com/x402/llms.txt"
+}

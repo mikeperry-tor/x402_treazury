@@ -1,0 +1,35 @@
+{
+  "spec": "https://stablepeopledata.dev/openapi.json",
+  "name": "People Data Labs",
+  "base_url": "https://stablepeopledata.dev",
+  "prefix": "pdl",
+  "include": ["/api/pdl"],
+  "pricing_key": "x-payment-info",
+  "additional_properties": false,
+  "overrides": {
+    "pdl_person_enrich": {
+      "description": "People Data Labs person enrichment. $0.28 per match, free on no match. Returns demographics, work history, education, contact info, social profiles, skills. Provide at least one identifier: pdl_id, email, phone, profile URL (e.g. LinkedIn), name parts, or company/school + location.",
+      "params": {
+        "min_likelihood": "Minimum confidence score 1-10 (default 2). Higher = fewer, better matches."
+      }
+    },
+    "pdl_company_enrich": {
+      "description": "People Data Labs company enrichment. $0.10 per match, free on no match. Returns firmographics, industry codes, funding, social profiles. Provide at least one identifier: pdl_id (or LinkedIn slug), name, website domain, ticker, profile URL, or HQ location.",
+      "params": {
+        "min_likelihood": "Minimum confidence score 1-10 (default 2). Higher = fewer, better matches."
+      }
+    },
+    "pdl_person_search": {
+      "description": "Search 3B+ People Data Labs person records via Elasticsearch DSL or SQL. $0.28 x size (max $28); free when the result set is empty. Recommended size 1-5. Paginate with the returned scroll_token. dataset picks record sources (resume, email, phone, mobile_phone, street_address, consumer_social, developer, all).",
+      "params": {
+        "size": "Batch size 1-100 (default 1). Price scales with size."
+      }
+    },
+    "pdl_company_search": {
+      "description": "Search 30M+ People Data Labs company records via Elasticsearch DSL or SQL. $0.10 x size (max $10); free when the result set is empty. Paginate with the returned scroll_token.",
+      "params": {
+        "size": "Batch size 1-100 (default 1). Price scales with size."
+      }
+    }
+  }
+}

@@ -22,10 +22,41 @@ from x402.http.clients import x402HttpxClient
 from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 from x402.mechanisms.evm.upto import UptoEvmScheme
+from x402.schemas import PaymentRequired, PaymentRequiredV1
 
 from .config import ConfigError, PaymentConfig
 
 logger = logging.getLogger("x402_mcp")
+
+# Coinbase's CDP facilitator validates the echoed `resource.description` with
+# a 500-character maximum; some vendors inline their full op prose into the
+# 402 challenge and CDP then rejects every payment for those routes with
+# "'paymentPayload' is invalid: must match one of [x402V2Pay…]". The
+# description is not covered by the payment signature and the seller does not
+# re-check it, so we trim it challenge-side before it reaches the payload.
+MAX_CHALLENGE_DESCRIPTION = 500
+
+
+class _ChallengeSanitizingHTTPClient(x402HTTPClient):
+    """x402HTTPClient that trims over-long challenge resource descriptions."""
+
+    def get_payment_required_response(
+        self,
+        get_header,
+        body=None,
+    ) -> PaymentRequired | PaymentRequiredV1:
+        parsed = super().get_payment_required_response(get_header, body)
+        resource = getattr(parsed, "resource", None)
+        description = getattr(resource, "description", None)
+        if isinstance(description, str) and len(description) > MAX_CHALLENGE_DESCRIPTION:
+            resource.description = description[:MAX_CHALLENGE_DESCRIPTION]
+            logger.info(
+                "trimmed x402 challenge description from %d to %d chars "
+                "(facilitator limit)",
+                len(description),
+                MAX_CHALLENGE_DESCRIPTION,
+            )
+        return parsed
 
 
 def _log_before_payment(ctx) -> None:
@@ -88,7 +119,7 @@ def build_paid_http_client(
     import httpx
 
     http = x402HttpxClient(
-        x402_client,
+        _ChallengeSanitizingHTTPClient(x402_client),
         base_url=base_url,
         timeout=httpx.Timeout(timeout_s, connect=15.0),
         follow_redirects=True,
