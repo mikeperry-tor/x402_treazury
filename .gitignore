@@ -20,3 +20,6 @@ target/
 # Local managed-wallet state and encryption material
 /state/
 /secrets/
+
+# Local copies of runnable demo profiles
+/rust-prototype/examples/*.local.toml

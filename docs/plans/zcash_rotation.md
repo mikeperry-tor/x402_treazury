@@ -972,15 +972,12 @@ spend; none is authorized by this plan alone.
    ownership, budget ledger, snapshot ordering, role transitions and outbox.
    Use fake treasury/Base adapters to prove per-pool crash boundaries, independent
    admission, fair shared-treasury scheduling and aggregate budget concurrency.
-3. **Complete the embedded treasury.** Retain the synthetic-note proof and mined
-   deposit/reorg regressions documented in `rust-prototype/tests/REGTEST.md`.
-   Extend regtest coverage to refund discovery/shielding, expiry recovery and
-   explicit repair of spends invalidated after accounting confirmation. Wire the serialized
-   owner into the funding worker, including the guarded offline `wallet recover-unprepared` command. The serialized owner and
-opt-in funding coordinator are implemented; refund derivation is atomically persisted,
-while high-index discovery and shielding still require regtest coverage.
-   Exercise shielded-to-transparent deposits,
-   refunds and exact-byte recovery in isolated regtest.
+3. **Qualify the embedded treasury.** Retain synthetic-note proofs and the mined
+   deposit/reorg, high-index refund shielding and expired-input recovery regressions
+   in `rust-prototype/tests/LIFECYCLE.md`. Use the serialized owner for every sync,
+   preparation and submission. Preserve guarded offline recovery commands and
+   fail closed on reorgs that contradict accounting; deep finalized-chain repair
+   requires operator review, never an automatic accounting reset.
 4. **Implement NEAR funding and qualification.** Capture public token/quote/status
    fixtures and dry confidential exact-output quotes around the configured target.
    Verify route minimums, fees, refund compatibility, authentication and deadline
@@ -993,8 +990,13 @@ while high-index discovery and shielding still require regtest coverage.
 6. **Finish operation and release qualification.** Provide backup/recovery and
    status commands, configuration examples, multi-catalog setup, dependency-patch
    maintenance and measured replenishment behavior. Run an explicitly authorized
-   small live swap only after regtest recovery passes. Document unverified live
-   conditions; do not call a compile/test result a production funding validation.
+   small live swap only after regtest recovery passes. Follow
+   `rust-prototype/docs/public-swap-demo.md`: one pool, two $5 deposits, a single
+   approved payment capped at $0.05, source caps reviewed against a fresh quote,
+   and an explicit stop afterward. A funded EVM key qualifies only seller payment
+   acceptance; ZEC treasury funding is required to qualify public swaps. Mainnet
+   execution remains unqualified until performed with operator-supplied funds.
+   Do not call a compile/test result a production funding validation.
 
 The NEAR HTTP adapter validates tokens, quote bindings and cost limits in
 `rotation/near.rs`. A live public 5-USDC quote and unfunded status lookup work

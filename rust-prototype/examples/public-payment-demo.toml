@@ -1,0 +1,19 @@
+# Funded EVM-key alternative: tests seller/payment transport, not Zcash rotation.
+version = 1
+
+[wallets.demo]
+mode = "static"
+private_key_env = "PUBLIC_DEMO_EVM_PRIVATE_KEY"
+max_price_usd = "0.05"
+
+[sources.socialfetch]
+extends = "../../providers/socialfetch.toml"
+spec = "../../tests/fixtures/socialfetch_openapi.json"
+probe_pricing = false
+
+[servers.demo]
+listen = "127.0.0.1:8000"
+bearer_token_env = "PUBLIC_DEMO_MCP_TOKEN"
+wallet = "demo"
+sources = ["socialfetch"]
+include_tools = ["socialfetch_twitter_profiles_handle"]
