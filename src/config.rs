@@ -51,6 +51,18 @@ pub fn validate(settings: &Config) -> Result<()> {
         settings.max_description_chars != Some(0),
         "max_description_chars must be positive"
     );
+    for operation in &settings.include_operations {
+        let (method, path) = operation
+            .split_once(' ')
+            .context("include_operations requires METHOD path")?;
+        ensure!(
+            ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method)
+                && (path.starts_with('/')
+                    || path.starts_with("https://")
+                    || path.starts_with("http://")),
+            "invalid include_operations entry"
+        );
+    }
     crate::pricing::validate(settings)
 }
 pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<ResolvedProvider> {

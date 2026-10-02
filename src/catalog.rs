@@ -48,6 +48,8 @@ pub struct Config {
     pub prefix: Option<String>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include_operations: Vec<String>,
     pub tags: Vec<String>,
     pub exclude_tags: Vec<String>,
     pub pricing_key: Option<String>,
@@ -74,6 +76,7 @@ impl Default for Config {
             prefix: None,
             include: vec![],
             exclude: vec![],
+            include_operations: vec![],
             tags: vec![],
             exclude_tags: vec![],
             pricing_key: None,
@@ -463,6 +466,13 @@ pub fn build_tools_with_prices(
     let mut counts = BTreeMap::<String, usize>::new();
     for op in ops {
         let path = op["path"].as_str().unwrap();
+        let operation = format!(
+            "{} {path}",
+            op["method"].as_str().unwrap().to_ascii_uppercase()
+        );
+        if !cfg.include_operations.is_empty() && !cfg.include_operations.contains(&operation) {
+            continue;
+        }
         if anchor(path, &cfg.exclude).is_some() {
             continue;
         }

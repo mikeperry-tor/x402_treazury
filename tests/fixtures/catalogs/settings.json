@@ -789,26 +789,7 @@
   "providers/x402-list.toml": {
     "additional_properties": null,
     "base_url": "https://x402-list.com/api/v1",
-    "exclude": [
-      "/services/{slug}/uptime",
-      "/services/{slug}/price",
-      "/services/{slug}/scores",
-      "/services/{slug}/volume",
-      "/services/{slug}/buyers",
-      "/services/{slug}/checks",
-      "/facilitators",
-      "/facilitators/{id}",
-      "/checks",
-      "/status",
-      "/changes",
-      "/stats",
-      "/submit",
-      "/services/{slug}/request-update",
-      "/services/{slug}/reissue-token",
-      "/services/{slug}/verify-ownership",
-      "/suggestions",
-      "/assess"
-    ],
+    "exclude": [],
     "exclude_tags": [],
     "help_url": null,
     "include": [
@@ -830,6 +811,13 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402-list.com/api/v1/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "include_operations": [
+      "GET /services",
+      "GET /services/{slug}",
+      "GET /best",
+      "GET /categories",
+      "GET /networks"
+    ]
   }
 }
