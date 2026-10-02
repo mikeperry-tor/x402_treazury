@@ -1,10 +1,15 @@
-//! Offline embedded zingolib treasury. Never starts sync, save_task, or broadcast.
-use crate::rotation::store::{Status, Store, StoreHandle};
+//! Embedded treasury with encrypted sync checkpoints. Never broadcasts or starts save_task.
+use crate::rotation::{
+    base::now,
+    store::{Status, Store, StoreHandle, SyncObservation, SyncPhase},
+};
 use anyhow::{Context, Result, ensure};
+use std::time::Duration;
 use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
 };
+use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 use zingolib::{
     config::{ClientConfig, WalletConfig},
@@ -14,11 +19,32 @@ use zingolib::{
 
 pub struct Treasury {
     _scratch: tempfile::TempDir,
-    client: LightClient,
+    client: Option<LightClient>,
     store: StoreHandle,
     worker: tokio::task::JoinHandle<()>,
     revision: i64,
     healthy: bool,
+    sync_settings: Option<SyncSettings>,
+}
+/// Endpoint is intentionally excluded from Debug/serialization and status output.
+#[derive(Clone)]
+pub struct SyncSettings {
+    endpoint: String,
+    confirmations: NonZeroU32,
+    max_age_seconds: u64,
+}
+impl SyncSettings {
+    pub fn new(endpoint: String, confirmations: u64, max_age_seconds: u64) -> Result<Self> {
+        crate::rotation::base::secure_endpoint(&endpoint)?;
+        let confirmations = NonZeroU32::new(u32::try_from(confirmations)?)
+            .context("confirmations must be positive")?;
+        ensure!(max_age_seconds > 0, "sync age must be positive");
+        Ok(Self {
+            endpoint,
+            confirmations,
+            max_age_seconds,
+        })
+    }
 }
 fn config(dir: &Path, wallet: WalletConfig) -> Result<ClientConfig> {
     ClientConfig::builder()
@@ -81,17 +107,19 @@ impl Treasury {
         let (store, worker) = StoreHandle::spawn(store);
         Ok(Self {
             _scratch: scratch,
-            client,
+            client: Some(client),
             store,
             worker,
             revision: 1,
             healthy: true,
+            sync_settings: None,
         })
     }
     pub async fn open(dir: PathBuf, key: PathBuf, id: String) -> Result<Self> {
         let path = dir.clone();
         let (store, revision, bytes) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let store = Store::open(&path, &key, &id)?;
+            let mut store = Store::open(&path, &key, &id)?;
+            store.set_sync_phase(SyncPhase::Offline)?;
             let (revision, bytes) = store.snapshot()?;
             Ok((store, revision, bytes))
         })
@@ -111,11 +139,12 @@ impl Treasury {
         let (store, worker) = StoreHandle::spawn(store);
         Ok(Self {
             _scratch: scratch,
-            client,
+            client: Some(client),
             store,
             worker,
             revision,
             healthy: true,
+            sync_settings: None,
         })
     }
     pub(crate) fn store_handle(&self) -> StoreHandle {
@@ -126,7 +155,13 @@ impl Treasury {
     }
     pub async fn addresses(&self) -> Result<serde_json::Value> {
         Ok(serde_json::from_str(
-            &self.client.unified_addresses_json().await.to_string(),
+            &self
+                .client
+                .as_ref()
+                .context("treasury sync interrupted; reopen required")?
+                .unified_addresses_json()
+                .await
+                .to_string(),
         )?)
     }
     pub async fn derive_address(&mut self) -> Result<serde_json::Value> {
@@ -136,10 +171,17 @@ impl Treasury {
         );
         self.healthy = false;
         self.client
+            .as_mut()
+            .context("treasury sync interrupted; reopen required")?
             .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("address derivation failed"))?;
-        let bytes = snapshot(&self.client).await?;
+        let bytes = snapshot(
+            self.client
+                .as_ref()
+                .context("treasury sync interrupted; reopen required")?,
+        )
+        .await?;
         let expected = self.revision;
         self.revision = self
             .store
@@ -157,9 +199,245 @@ impl Treasury {
             .call(move |s| s.ensure_pool(&name, &deposit_size))
             .await
     }
-    pub async fn close(self) -> Result<()> {
+    pub fn configure_sync(&mut self, settings: SyncSettings) {
+        self.sync_settings = Some(settings);
+    }
+    async fn checkpoint(&mut self, observation: SyncObservation) -> Result<()> {
+        let bytes = snapshot(
+            self.client
+                .as_ref()
+                .context("treasury sync interrupted; reopen required")?,
+        )
+        .await?;
+        let expected = self.revision;
+        self.revision = self
+            .store
+            .call(move |s| s.save_sync_snapshot(expected, &bytes, Some(observation)))
+            .await?;
+        Ok(())
+    }
+    /// Cancellation must be requested through `stop`, then this future awaited.
+    /// Adapter errors are sanitized; endpoints are not persisted in status.
+    pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
+        ensure!(
+            self.healthy,
+            "treasury requires reopen after failed persistence"
+        );
+        let settings = self
+            .sync_settings
+            .clone()
+            .context("sync endpoint not configured")?;
+        self.healthy = false;
+        self.client
+            .as_mut()
+            .context("treasury sync interrupted; reopen required")?
+            .wallet()
+            .write()
+            .await
+            .wallet_settings
+            .min_confirmations = settings.confirmations;
+        let mut observation = self.status().await?.sync.unwrap_or(SyncObservation {
+            phase: SyncPhase::Syncing,
+            last_error: None,
+            snapshot_revision: self.revision,
+            checked_at: None,
+            checkpoint_at: 0,
+            scanned_blocks: 0,
+            target_height: None,
+            height: None,
+            confirmations: settings.confirmations.get(),
+            max_age_seconds: settings.max_age_seconds,
+            confirmed_shielded_zatoshis: 0,
+            spendable_shielded_zatoshis: 0,
+        });
+        observation.phase = SyncPhase::Syncing;
+        observation.confirmations = settings.confirmations.get();
+        observation.max_age_seconds = settings.max_age_seconds;
+        self.checkpoint(observation.clone()).await?;
+        let session = SyncSession {
+            client: self
+                .client
+                .take()
+                .context("treasury sync interrupted; reopen required")?,
+            store: self.store.clone(),
+            revision: self.revision,
+        };
+        let cancelled = stop.child_token();
+        let _cancel_on_drop = cancelled.clone().drop_guard();
+        // Upstream sync launches detached fetch/mempool tasks. Isolate each cycle
+        // so cancellation/error cannot leave those tasks connected on the MCP runtime.
+        let (session, mut observation, outcome) =
+            tokio::task::spawn_blocking(move || session.run(settings, observation, cancelled))
+                .await
+                .context("treasury sync worker failed")??;
+        self.revision = session.revision;
+        self.client = Some(session.client);
+        observation.phase = if stop.is_cancelled() {
+            SyncPhase::Offline
+        } else if outcome.is_ok() {
+            SyncPhase::Ready
+        } else {
+            SyncPhase::Failed
+        };
+        observation.last_error = outcome.as_ref().err().map(|e| e.to_string());
+        self.checkpoint(observation).await?;
+        self.healthy = true;
+        outcome
+    }
+    /// One owner periodically syncs while Base payment admission remains independent.
+    pub async fn run_sync(mut self, stop: CancellationToken) -> Result<()> {
+        let delay = self
+            .sync_settings
+            .as_ref()
+            .context("sync endpoint not configured")?
+            .max_age_seconds
+            .saturating_div(2)
+            .clamp(1, 60);
+        while !stop.is_cancelled() {
+            if let Err(error) = self.sync_once(&stop).await {
+                if !self.healthy {
+                    if let Some(client) = &mut self.client {
+                        client.go_offline().await;
+                    }
+                    tracing::error!("treasury persistence failed; funding disabled until restart");
+                    // Persistence failure is fatal to treasury ownership, not Base payments.
+                    self.close().await?;
+                    return Err(error);
+                }
+                if !stop.is_cancelled() {
+                    tracing::warn!("treasury sync unavailable; retrying");
+                }
+            }
+            tokio::select! {
+                _ = stop.cancelled() => break,
+                _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+            }
+        }
+        self.close().await
+    }
+    pub async fn close(mut self) -> Result<()> {
+        if let Some(client) = &mut self.client {
+            client.go_offline().await;
+        }
+        let result = self
+            .store
+            .call(|s| s.set_sync_phase(SyncPhase::Offline))
+            .await;
         drop(self.store);
         self.worker.await.context("store worker failed")?;
+        result
+    }
+}
+
+struct SyncSession {
+    client: LightClient,
+    store: StoreHandle,
+    revision: i64,
+}
+impl SyncSession {
+    fn run(
+        mut self,
+        settings: SyncSettings,
+        mut observation: SyncObservation,
+        cancelled: CancellationToken,
+    ) -> Result<(Self, SyncObservation, Result<()>)> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()?;
+        let outcome = runtime.block_on(async {
+            let outcome = tokio::select! {
+                biased;
+                _ = cancelled.cancelled() => Err(anyhow::anyhow!("treasury sync cancelled")),
+                result = self.sync_inner(&settings, &mut observation) => result,
+            };
+            self.client.go_offline().await;
+            outcome
+        });
+        // Join blocking workers and tear down detached async tasks before the
+        // owner reads the final snapshot, including on unwind from an SDK panic.
+        drop(runtime);
+        Ok((self, observation, outcome))
+    }
+    async fn checkpoint(&mut self, observation: SyncObservation) -> Result<()> {
+        let bytes = snapshot(&self.client).await?;
+        let expected = self.revision;
+        self.revision = self
+            .store
+            .call(move |s| s.save_sync_snapshot(expected, &bytes, Some(observation)))
+            .await?;
+        Ok(())
+    }
+    async fn sync_inner(
+        &mut self,
+        settings: &SyncSettings,
+        observation: &mut SyncObservation,
+    ) -> Result<()> {
+        let uri = settings
+            .endpoint
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid indexer URI"))?;
+        tokio::time::timeout(Duration::from_secs(15), self.client.set_indexer_uri(uri))
+            .await
+            .map_err(|_| anyhow::anyhow!("indexer connection timed out"))?
+            .map_err(|_| anyhow::anyhow!("indexer connection failed"))?;
+        let info = tokio::time::timeout(Duration::from_secs(15), self.client.info())
+            .await
+            .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
+            .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
+        ensure!(info.chain_name == "main", "indexer is not on mainnet");
+        observation.target_height = Some(info.latest_block_height);
+        self.client
+            .sync()
+            .await
+            .map_err(|_| anyhow::anyhow!("treasury sync launch failed"))?;
+        let result = loop {
+            tokio::select! {
+                result = self.client.await_sync() => break result.map_err(|_| anyhow::anyhow!("treasury sync failed"))?,
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                    if let Some(progress) = self.client.latest_sync_status() {
+                        observation.scanned_blocks = progress.total_blocks_scanned;
+                    }
+                    self.checkpoint(observation.clone()).await?;
+                }
+            }
+        };
+        observation.scanned_blocks = self
+            .client
+            .latest_sync_status()
+            .map_or(result.blocks_scanned, |progress| {
+                progress.total_blocks_scanned
+            });
+        let checked_at = now()?;
+        let info = tokio::time::timeout(Duration::from_secs(15), self.client.info())
+            .await
+            .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
+            .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
+        let height = u64::from(u32::from(result.sync_end_height));
+        ensure!(
+            info.chain_name == "main" && info.latest_block_height == height,
+            "treasury requires another sync to the current mainnet tip"
+        );
+        let wallet = self.client.wallet();
+        let wallet = wallet.read().await;
+        let balance = wallet
+            .account_balance(zip32::AccountId::ZERO)
+            .map_err(|_| anyhow::anyhow!("treasury balance unavailable"))?;
+        observation.confirmed_shielded_zatoshis = [
+            balance.confirmed_ironwood_balance,
+            balance.confirmed_orchard_balance,
+            balance.confirmed_sapling_balance,
+        ]
+        .into_iter()
+        .flatten()
+        .map(|z| z.into_u64())
+        .sum();
+        observation.spendable_shielded_zatoshis = wallet
+            .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+            .map_err(|_| anyhow::anyhow!("treasury spendable balance unavailable"))?
+            .into_u64();
+        observation.checked_at = Some(checked_at);
+        observation.height = Some(height);
         Ok(())
     }
 }

@@ -376,6 +376,50 @@ serializes bootstrap deposits and replenishment across all pools but avoids reus
 inputs. No new treasury operation may proceed while an outgoing transaction's
 outcome is unknown. Payment calls using already funded EVM wallets remain usable.
 
+### Sync ownership and persisted readiness
+
+`rust-prototype/src/treasury/mod.rs` owns the embedded client. Offline initialization
+and restore keep the indexer disconnected. `wallet sync --meta-config FILE` reads
+only treasury settings and the configured indexer environment reference; managed
+serving configures the same adapter and starts one shared background worker after
+all listeners bind. Inspection and static-only deployments never start it.
+The CLI requires exclusive ownership, loads no API specs or `.env`, and responds
+to SIGINT/SIGTERM by cancelling and awaiting checkpoint cleanup.
+
+Apply `treasury.confirmations` to the restored wallet before syncing. Validate
+mainnet diagnostics before launch, then require successful sync followed by a
+fresh diagnostic check at the same tip height. A moving tip requires another
+cycle. Indexer connect/diagnostic calls have 15-second timeouts. Refresh/retry
+intervals are half `max_sync_age_seconds`, clamped to 1–60 seconds. Network failures
+must not prevent already funded Base wallets from serving payments.
+
+Each cycle runs in a dedicated Tokio runtime because upstream sync error and abort
+paths can detach fetch/mempool tasks. Cancel through the owner, call `go_offline`,
+then tear down that runtime and join blocking work before taking the final snapshot.
+Never move an active upstream sync task onto the MCP runtime. A dropped caller
+cancels the cycle but cannot reuse its owner; reopen persisted state to recover.
+
+Checkpoint the wallet under its write lock every 30 seconds and at termination.
+Commit encrypted bytes and `SyncObservation` in the same SQLite transaction with a
+snapshot revision CAS. The observation includes phase, checkpoint time, scan target
+and scanned-block count, last successful height/tip-check time, confirmation policy,
+confirmed/spendable shielded zatoshis and last error. Retain the current snapshot and
+all revisions referenced by outgoing records, pruning other snapshots. `treasury_sync`
+is added through user_version 2; the encrypted record format stays version 1.
+Read-only status works with older schemas and never mutates or unlocks them.
+
+`sync_fresh` requires a ready observation for the current revision, non-future
+check time and age within the configured bound. Cached balances during failed or
+in-progress sync are not spend permission. Reopen/shutdown invalidate readiness.
+`Store::require_spend_ready` additionally rejects unresolved outgoing operations,
+zero input and input exceeding shielded spendable funds. A production preparer must
+call it inside the serialized treasury operation before reserving/calculating.
+Preparation and sync must share that owner; never run an independent send task that
+can overwrite a sync snapshot. `rotation/transaction.rs` defines the preparation
+and submission contracts; `PreparedTransaction` can only be loaded from a committed
+unresolved outgoing record. Concrete calculation, submission and confirmed
+reconciliation remain to be implemented using the sequence below.
+
 ### Prepare, persist, broadcast and recover
 
 1. Reserve an operation ID and funding budget. Check sync freshness and
@@ -773,6 +817,9 @@ and existing journals, not listener selections, determine recovery scope:
   birthday/network and generating an encrypted snapshot; refuse overwrite.
   Return the treasury UUID and deposit address, never the seed. Take an import
   seed from a protected file or prompt. No swap is initiated by initialization.
+- `wallet sync --meta-config FILE`: sync the existing treasury, persist encrypted
+  scan progress and report balances/readiness without broadcasting. Require exclusive
+  ownership, mainnet indexer settings and the encryption key; no NEAR credentials.
 - `wallet status`: read committed SQLite state without acquiring write ownership,
   unlocking keys or making network requests. Report its snapshot age, active/
   standby readiness, balances, pending operations and budget for each pool, plus
@@ -876,9 +923,9 @@ spend; none is authorized by this plan alone.
    ownership, budget ledger, snapshot ordering, role transitions and outbox.
    Use fake treasury/Base adapters to prove per-pool crash boundaries, independent
    admission, fair shared-treasury scheduling and aggregate budget concurrency.
-3. **Implement the embedded treasury.** Add offline init/restore and status,
-   controlled sync, durable preparation/raw extraction, endpoint-constrained
-   submission and reconciliation. Exercise shielded-to-transparent deposits,
+3. **Complete the embedded treasury.** Build on offline init/restore, encrypted
+   sync checkpoints and spend readiness to implement durable preparation/raw
+   extraction, endpoint-constrained submission and reconciliation. Exercise shielded-to-transparent deposits,
    refunds and exact-byte recovery in isolated regtest.
 4. **Implement NEAR funding and qualification.** Capture public token/quote/status
    fixtures and dry confidential exact-output quotes around the configured target.

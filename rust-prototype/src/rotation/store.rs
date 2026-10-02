@@ -9,7 +9,7 @@ use chacha20poly1305::{
 };
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     path::Path,
@@ -35,6 +35,42 @@ pub struct Status {
     pub birthday: u32,
     pub snapshot_revision: i64,
     pub pools: Vec<PoolStatus>,
+    pub sync: Option<SyncObservation>,
+    pub outgoing_pending: bool,
+    pub sync_fresh: bool,
+}
+/// Persisted observations, never an authorization to spend on their own.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SyncObservation {
+    pub phase: SyncPhase,
+    pub last_error: Option<String>,
+    pub snapshot_revision: i64,
+    pub checked_at: Option<u64>,
+    pub checkpoint_at: u64,
+    pub scanned_blocks: u32,
+    pub target_height: Option<u64>,
+    pub height: Option<u64>,
+    pub confirmations: u32,
+    pub max_age_seconds: u64,
+    pub confirmed_shielded_zatoshis: u64,
+    pub spendable_shielded_zatoshis: u64,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPhase {
+    Syncing,
+    Ready,
+    Failed,
+    Offline,
+}
+impl SyncObservation {
+    pub fn fresh(&self, now: u64, revision: i64) -> bool {
+        self.phase == SyncPhase::Ready
+            && self.snapshot_revision == revision
+            && self
+                .checked_at
+                .is_some_and(|at| now >= at && now - at <= self.max_age_seconds)
+    }
 }
 #[derive(Serialize)]
 pub struct PoolStatus {
@@ -254,6 +290,15 @@ impl Store {
         ))
     }
     pub fn save_snapshot(&mut self, expected: i64, bytes: &[u8]) -> Result<i64> {
+        self.save_sync_snapshot(expected, bytes, None)
+    }
+    /// Commit encrypted wallet and its observation under the same revision CAS.
+    pub fn save_sync_snapshot(
+        &mut self,
+        expected: i64,
+        bytes: &[u8],
+        observation: Option<SyncObservation>,
+    ) -> Result<i64> {
         ensure!(!bytes.is_empty(), "empty snapshot");
         let revision = expected
             .checked_add(1)
@@ -272,8 +317,41 @@ impl Store {
             "INSERT INTO snapshots VALUES (?1,?2)",
             params![revision, encrypted],
         )?;
+        tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing)", [revision])?;
+        if let Some(mut observation) = observation {
+            observation.snapshot_revision = revision;
+            observation.checkpoint_at = crate::rotation::base::now()?;
+            tx.execute(
+                "INSERT OR REPLACE INTO treasury_sync VALUES (1,?1)",
+                [serde_json::to_string(&observation)?],
+            )?;
+        }
         tx.commit()?;
         Ok(revision)
+    }
+    pub fn set_sync_phase(&mut self, phase: SyncPhase) -> Result<()> {
+        if let Some(mut observation) = self.status()?.sync {
+            observation.phase = phase;
+            self.db.execute(
+                "INSERT OR REPLACE INTO treasury_sync VALUES (1,?1)",
+                [serde_json::to_string(&observation)?],
+            )?;
+        }
+        Ok(())
+    }
+    pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
+        let status = self.status()?;
+        ensure!(!status.outgoing_pending, "treasury_send_pending");
+        let observation = status.sync.context("treasury_not_synced")?;
+        ensure!(
+            observation.fresh(now, status.snapshot_revision),
+            "treasury_sync_stale"
+        );
+        ensure!(
+            input_zatoshis > 0 && input_zatoshis <= observation.spendable_shielded_zatoshis,
+            "treasury_insufficient_spendable_funds"
+        );
+        Ok(())
     }
     pub fn ensure_pool(&mut self, name: &str, deposit_size: &str) -> Result<String> {
         ensure!(
@@ -542,6 +620,13 @@ impl Store {
         tx.commit()?;
         Ok(next)
     }
+    pub fn operation_pending(&self, id: &str) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='PREPARED')",
+            [id],
+            |r| r.get(0),
+        )?)
+    }
     pub fn prepared_bytes(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
         let bytes: Vec<u8> =
             self.db
@@ -669,7 +754,31 @@ fn read_status(db: &Connection) -> Result<Status> {
             .collect::<rusqlite::Result<_>>()?;
         pools.push(pool);
     }
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let sync: Option<SyncObservation> = if version >= 2 {
+        db.query_row(
+            "SELECT observation FROM treasury_sync WHERE singleton=1",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .map(|s| serde_json::from_str(&s))
+        .transpose()?
+    } else {
+        None
+    };
+    let outgoing_pending = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
+        [],
+        |r| r.get(0),
+    )?;
+    let sync_fresh = sync.as_ref().is_some_and(|observation| {
+        crate::rotation::base::now().is_ok_and(|now| observation.fresh(now, revision))
+    });
     Ok(Status {
+        sync_fresh,
+        sync,
+        outgoing_pending,
         treasury_id: id,
         birthday,
         snapshot_revision: revision,
@@ -713,12 +822,18 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 1, "unsupported admission schema");
+    ensure!(version <= 2, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
 CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY REFERENCES pools(id),height INTEGER NOT NULL,hash TEXT NOT NULL);
 PRAGMA user_version=1;
+COMMIT;")?;
+    }
+    if version < 2 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE treasury_sync(singleton INTEGER PRIMARY KEY CHECK(singleton=1),observation TEXT NOT NULL);
+PRAGMA user_version=2;
 COMMIT;")?;
     }
     Ok(())

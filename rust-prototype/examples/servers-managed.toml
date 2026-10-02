@@ -1,5 +1,5 @@
 # Build with scripts/zcash.sh. Initialize the treasury explicitly before serving.
-# NEAR funding is not implemented; startup creates queued funding jobs only.
+# Serving syncs the Zcash treasury; NEAR funding jobs remain queued (no submission).
 version = 1
 
 [treasury]

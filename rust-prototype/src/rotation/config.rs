@@ -159,7 +159,9 @@ impl TreasuryConfig {
         zatoshis(&self.daily_input_zec)?;
         zatoshis(&self.shield_max_fee_zec)?;
         ensure!(
-            self.confirmations > 0 && self.max_sync_age_seconds > 0,
+            self.confirmations > 0
+                && self.confirmations <= u32::MAX as u64
+                && self.max_sync_age_seconds > 0,
             "invalid treasury limits"
         );
         Ok(())

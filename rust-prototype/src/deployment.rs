@@ -463,8 +463,12 @@ impl Deployment {
                 };
                 let t = self.config.treasury.as_ref().unwrap();
                 let f = self.config.funding.as_ref().unwrap();
-                // Validate required endpoint references without contacting Zcash/NEAR.
-                secure_endpoint(&secret(&t.indexer_url_env)?)?;
+                // Resolve endpoints now; the treasury sync worker starts only when serving.
+                let sync_settings = crate::treasury::SyncSettings::new(
+                    secret(&t.indexer_url_env)?,
+                    t.confirmations,
+                    t.max_sync_age_seconds,
+                )?;
                 secure_endpoint(&secret(&t.submission_url_env)?)?;
                 if let Some(key) = &f.near_api_key_env {
                     secret(key)?;
@@ -474,12 +478,13 @@ impl Deployment {
                     f.base_confirmations,
                     f.base_max_block_age_seconds,
                 )?;
-                let owner = crate::treasury::Treasury::open(
+                let mut owner = crate::treasury::Treasury::open(
                     t.state_dir.clone(),
                     t.key_file.clone(),
                     t.id.clone(),
                 )
                 .await?;
+                owner.configure_sync(sync_settings);
                 let store = owner.store_handle();
                 let managed = self
                     .wallet_resolution
@@ -625,6 +630,11 @@ impl RunningDeployment {
     }
     pub async fn serve(self, shutdown: CancellationToken) -> Result<()> {
         let stop = CancellationToken::new();
+        let _cancel_on_drop = stop.clone().drop_guard();
+        #[cfg(feature = "zcash")]
+        let treasury_task = self
+            .treasury
+            .map(|owner| tokio::spawn(owner.run_sync(stop.clone())));
         let mut tasks = JoinSet::new();
         for (name, listener, app) in self.listeners {
             let stopped = stop.clone();
@@ -657,8 +667,8 @@ impl RunningDeployment {
             ));
         }
         #[cfg(feature = "zcash")]
-        if let Some(treasury) = self.treasury {
-            treasury.close().await?;
+        if let Some(task) = treasury_task {
+            task.await.context("treasury worker failed")??;
         }
         result
     }

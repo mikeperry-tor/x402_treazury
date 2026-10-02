@@ -32,7 +32,7 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     // Simulate a database produced by the offline foundation, before admission tables.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "DROP TABLE payment_attempts; DROP TABLE payment_anchors; PRAGMA user_version=0;",
+        "DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_sync; PRAGMA user_version=0;",
     )
     .unwrap();
     drop(db);
@@ -279,4 +279,106 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
     assert_eq!(s.ensure_pool("crash", "5").unwrap(), persisted.pools[0].id);
     assert_eq!(s.status().unwrap().pools[0].addresses.len(), 2);
     assert!(s.reserve("duplicate", None, 2, 1, 100).is_err());
+}
+
+#[test]
+fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
+    use x402_mcp_prototype::rotation::store::{SyncObservation, SyncPhase};
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let ready = SyncObservation {
+        phase: SyncPhase::Ready,
+        last_error: None,
+        snapshot_revision: 0,
+        checked_at: Some(100),
+        checkpoint_at: 0,
+        scanned_blocks: 1,
+        target_height: Some(2_000_000),
+        height: Some(2_000_000),
+        confirmations: 3,
+        max_age_seconds: 10,
+        confirmed_shielded_zatoshis: 1_000,
+        spendable_shielded_zatoshis: 500,
+    };
+    assert!(s.require_spend_ready(100, 1).is_err());
+    let revision = s
+        .save_sync_snapshot(1, b"synced-wallet", Some(ready.clone()))
+        .unwrap();
+    assert_eq!(revision, 2);
+    s.require_spend_ready(110, 500).unwrap();
+    for (now, amount) in [(111, 1), (99, 1), (100, 501), (100, 0)] {
+        assert!(s.require_spend_ready(now, amount).is_err());
+    }
+    let mut stale = ready.clone();
+    stale.phase = SyncPhase::Failed;
+    assert!(
+        s.save_sync_snapshot(1, b"stale-wallet", Some(stale))
+            .is_err()
+    );
+    assert_eq!(s.snapshot().unwrap().1.as_slice(), b"synced-wallet");
+    assert_eq!(s.status().unwrap().sync.unwrap().phase, SyncPhase::Ready);
+    s.save_snapshot(2, b"derived-address").unwrap();
+    assert!(s.require_spend_ready(100, 1).is_err());
+    s.save_sync_snapshot(3, b"resynced", Some(ready.clone()))
+        .unwrap();
+    s.reserve("outgoing", None, 1, 100, 1_000).unwrap();
+    s.prepare("outgoing", 4, b"calculated", b"signed-transaction")
+        .unwrap();
+    s.save_sync_snapshot(5, b"still-pending", Some(ready))
+        .unwrap();
+    assert_eq!(
+        s.require_spend_ready(100, 1).unwrap_err().to_string(),
+        "treasury_send_pending"
+    );
+    s.confirm_spend("outgoing", 100, 1).unwrap();
+    s.set_sync_phase(SyncPhase::Offline).unwrap();
+    assert!(s.require_spend_ready(100, 1).is_err());
+    let snapshot = s.snapshot().unwrap();
+    let id = s.id().to_owned();
+    drop(s);
+    let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert_eq!(s.snapshot().unwrap().0, snapshot.0);
+    assert_eq!(s.snapshot().unwrap().1, snapshot.1);
+    assert!(s.require_spend_ready(100, 1).is_err());
+}
+
+#[test]
+fn sync_schema_migrates_admission_state_without_changing_wallet() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = create(dir.path());
+    let id = s.id().to_owned();
+    drop(s);
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch("DROP TABLE treasury_sync; PRAGMA user_version=1;")
+        .unwrap();
+    drop(db);
+    assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
+    let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert_eq!(s.snapshot().unwrap().0, 1);
+    assert!(s.status().unwrap().sync.is_none());
+}
+
+#[test]
+fn submission_contract_only_accepts_durable_pending_bytes() {
+    use x402_mcp_prototype::rotation::transaction::PreparedTransaction;
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    assert!(PreparedTransaction::load(&s, "op").is_err());
+    s.reserve("op", None, 1, 100, 1000).unwrap();
+    assert!(PreparedTransaction::load(&s, "op").is_err());
+    s.prepare("op", 1, b"calculated", b"exact-bytes").unwrap();
+    // Later sync checkpoints must preserve the snapshot referenced by this send.
+    s.save_snapshot(2, b"synced-after-calculation").unwrap();
+    assert_eq!(
+        s.prepare("op", 1, b"calculated", b"exact-bytes").unwrap(),
+        2
+    );
+    let id = s.id().to_owned();
+    drop(s);
+    let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    let durable = PreparedTransaction::load(&s, "op").unwrap();
+    assert_eq!(durable.operation_id(), "op");
+    assert_eq!(durable.bytes(), b"exact-bytes");
+    s.confirm_spend("op", 100, 1).unwrap();
+    assert!(PreparedTransaction::load(&s, "op").is_err());
 }

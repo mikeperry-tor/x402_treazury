@@ -1,4 +1,4 @@
-//! Local offline wallet commands. No command here submits or funds anything.
+//! Wallet administration. Sync is explicit; no command submits or funds anything.
 #[cfg(feature = "zcash")]
 use anyhow::Context;
 use anyhow::Result;
@@ -12,6 +12,11 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Sync an existing treasury using its deployment settings; no API specs are loaded.
+    Sync {
+        #[arg(long)]
+        meta_config: PathBuf,
+    },
     /// Read last persisted metadata without unlocking or network access.
     Status {
         #[arg(long)]
@@ -65,12 +70,49 @@ pub async fn run() -> Result<()> {
     }
     #[cfg(not(feature = "zcash"))]
     {
-        anyhow::bail!("offline treasury commands require a build with --features zcash")
+        anyhow::bail!("treasury commands require a build with --features zcash")
     }
     #[cfg(feature = "zcash")]
     {
         use crate::treasury::Treasury;
         let treasury = match args.command {
+            Command::Sync { meta_config } => {
+                let config: crate::deployment::MetaConfig =
+                    toml::from_str(&tokio::fs::read_to_string(&meta_config).await?)?;
+                anyhow::ensure!(config.version == 1, "unsupported deployment version");
+                let mut settings = config.treasury.context("missing [treasury]")?;
+                settings.validate()?;
+                settings.resolve(&meta_config);
+                let endpoint = std::env::var(&settings.indexer_url_env)
+                    .context("missing indexer endpoint environment variable")?;
+                let sync = crate::treasury::SyncSettings::new(
+                    endpoint,
+                    settings.confirmations,
+                    settings.max_sync_age_seconds,
+                )?;
+                let mut treasury =
+                    Treasury::open(settings.state_dir, settings.key_file, settings.id).await?;
+                treasury.configure_sync(sync);
+                let stop = tokio_util::sync::CancellationToken::new();
+                let result = {
+                    let work = treasury.sync_once(&stop);
+                    tokio::pin!(work);
+                    tokio::select! {
+                        result = &mut work => result,
+                        signal = shutdown_signal() => {
+                            stop.cancel();
+                            let result = work.await;
+                            signal?;
+                            result
+                        }
+                    }
+                };
+                if let Err(error) = result {
+                    treasury.close().await?;
+                    return Err(error);
+                }
+                treasury
+            }
             Command::Init {
                 state_dir,
                 key_file,
@@ -129,4 +171,16 @@ pub async fn run() -> Result<()> {
         );
         treasury.close().await
     }
+}
+
+#[cfg(feature = "zcash")]
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! { result = tokio::signal::ctrl_c() => result?, _ = term.recv() => {} }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await?;
+    Ok(())
 }
