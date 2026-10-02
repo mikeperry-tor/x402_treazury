@@ -1,5 +1,5 @@
 """Regenerate independent test vectors with the project's Python dependencies.
-Run from repo root: .venv/bin/python rust-prototype/tests/generate_crypto_vectors.py
+Run from repo root: .venv/bin/python tests/generate_crypto_vectors.py
 The private key here is public test data, never a funded wallet.
 """
 import json

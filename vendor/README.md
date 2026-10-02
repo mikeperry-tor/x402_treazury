@@ -19,7 +19,7 @@ texts are copied from upstream commit `87080853083c909b34f8c8cff3622570c114985d`
 Verify that no other source changes have occurred:
 
 ```sh
-python3 rust-prototype/vendor/verify.py
+python3 vendor/verify.py
 ```
 
 Both the prototype's root manifest and the separate zingolib experiment root

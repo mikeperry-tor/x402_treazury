@@ -4,7 +4,7 @@
 
 Implement the service as one Rust process containing the MCP server, x402 paid
 HTTP client, named virtual EVM wallet pools, NEAR Intents funding worker, and
-one embedded zingolib Zcash treasury. Evolve `rust-prototype/` into this implementation.
+one embedded zingolib Zcash treasury. Evolve `` into this implementation.
 The executable owns its wallet state directly; there is no separately running
 wallet daemon, Python payment coordinator, or wallet RPC protocol.
 
@@ -79,16 +79,16 @@ starting points:
 
 | Existing source | Reuse and required extension |
 | --- | --- |
-| [catalog.rs](../../rust-prototype/src/catalog.rs) | JSON OpenAPI/digest loading, schema normalization, names, filters, descriptions and argument routing; retain explicit-only text limits |
-| [payment.rs](../../rust-prototype/src/payment.rs) | Static/managed dispatch, SDK signing, Base USDC cap, description sanitization and one paid retry; extend structured receipt capture |
-| [server.rs](../../rust-prototype/src/server.rs), [main.rs](../../rust-prototype/src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; extend shutdown to persist wallet outcomes |
-| [deployment.rs](../../rust-prototype/src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static/managed profiles, singleton treasury ownership, atomic binding and bounded shutdown |
-| [tests](../../rust-prototype/tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
-| [store.rs](../../rust-prototype/src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives, atomic admission/promotion and durable authorizations; add full funding phases and funding-policy hashes |
-| [treasury adapter](../../rust-prototype/src/treasury/mod.rs), [wallet CLI](../../rust-prototype/src/wallet_cli.rs) | Upstream-pinned init/restore, encrypted sync, calculate-only preparation, explicit submission/reconciliation and pool allocation; add serialized funding-worker commands and backup |
-| [managed admission](../../rust-prototype/src/rotation/manager.rs), [Base adapter](../../rust-prototype/src/rotation/base.rs), [settings](../../rust-prototype/src/rotation/config.rs) | Strict TOML profiles, immutable leases, per-pool deadlines, on-demand canonical balance/nonce reconciliation; add background reconciliation and reorg recovery |
-| [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
-| [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
+| [catalog.rs](../../src/catalog.rs) | JSON OpenAPI/digest loading, schema normalization, names, filters, descriptions and argument routing; retain explicit-only text limits |
+| [payment.rs](../../src/payment.rs) | Static/managed dispatch, SDK signing, Base USDC cap, description sanitization and one paid retry; extend structured receipt capture |
+| [server.rs](../../src/server.rs), [main.rs](../../src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; extend shutdown to persist wallet outcomes |
+| [deployment.rs](../../src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static/managed profiles, singleton treasury ownership, atomic binding and bounded shutdown |
+| [tests](../../tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
+| [store.rs](../../src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives, atomic admission/promotion and durable authorizations; add full funding phases and funding-policy hashes |
+| [treasury adapter](../../src/treasury/mod.rs), [wallet CLI](../../src/wallet_cli.rs) | Upstream-pinned init/restore, encrypted sync, calculate-only preparation, explicit submission/reconciliation and pool allocation; add serialized funding-worker commands and backup |
+| [managed admission](../../src/rotation/manager.rs), [Base adapter](../../src/rotation/base.rs), [settings](../../src/rotation/config.rs) | Strict TOML profiles, immutable leases, per-pool deadlines, on-demand canonical balance/nonce reconciliation; add background reconciliation and reorg recovery |
+| [combined test crate](../../compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
+| [vendor directory](../../vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
 The standalone Rust suite covers configuration, catalog, payment and durable
 rotation behavior; `--features zcash` adds treasury, sync, submission and managed
@@ -112,7 +112,7 @@ expired-source recovery remain required.
 The opt-in `zcash-testutils` suite prepares a deposit from synthetic Orchard notes,
 verifies its proof, and checks exact-byte encrypted restart recovery using public
 test keys. Local gRPC fixtures cover sync and submission, including changing-block
-and malformed-inclusion rejection. The opt-in [regtest suite](../../rust-prototype/tests/REGTEST.md)
+and malformed-inclusion rejection. The opt-in [regtest suite](../../tests/REGTEST.md)
 uses mined shielded funds and pinned Zebra/Zaino containers to exercise saved-byte
 submission, confirmation accounting, a shallow fork before confirmation depth,
 identical-byte rebroadcast, and quarantine across reopen after an accounted spend
@@ -145,7 +145,7 @@ lightwallet-protocol = { git = "https://github.com/zingolabs/lightwallet-protoco
 Both vendored Alloy crates are version 1.7.3. Their sole changes are the
 normalized manifests' `sha3` requirements, from `0.11.0` to **`=0.10.9`**.
 Keep upstream Rust source, provenance and license texts intact, and run
-`python3 rust-prototype/vendor/verify.py`. This permits SHA-3's `digest 0.10`
+`python3 vendor/verify.py`. This permits SHA-3's `digest 0.10`
 to coexist with zingolib's `digest 0.11.0-pre.9`; it does not force a digest API
 upgrade on wallet cryptography. Repeat root patches in any separate test
 workspace, because Cargo does not inherit dependency-workspace patches.
@@ -165,8 +165,8 @@ build blocker; do not silently substitute a tag or an unpinned local checkout.
 The reference-path combined test remains a diagnostic, not the production
 wallet dependency.
 
-Provide a build script under `rust-prototype/scripts/` that resolves the existing
-Cargo-managed [protoc package](../../rust-prototype/compat/protoc/Cargo.toml),
+Provide a build script under `scripts/` that resolves the existing
+Cargo-managed [protoc package](../../compat/protoc/Cargo.toml),
 sets `PROTOC` for the entire Cargo invocation, and builds/tests with `--locked`.
 Run Cargo from the package directory so its pinned toolchain is selected.
 A dependent crate's build script cannot configure sibling dependencies' protoc.
@@ -235,7 +235,7 @@ inventory, all-or-nothing listener binding, and coordinated shutdown. Extend
 the shutdown path to persist pending authorizations and funding outcomes before
 closing the encrypted store. Preserve the existing single-source invocation.
 
-| Proposed source under `rust-prototype/src/` | Responsibility |
+| Proposed source under `src/` | Responsibility |
 | --- | --- |
 | `runtime.rs` | Own task lifetimes, readiness, cancellation, and ordered shutdown |
 | `rotation/config.rs` | Strict managed-mode settings, integer/decimal validation |
@@ -393,7 +393,7 @@ outcome is unknown. Payment calls using already funded EVM wallets remain usable
 
 ### Sync ownership and persisted readiness
 
-`rust-prototype/src/treasury/mod.rs` owns the embedded client. Offline initialization
+`src/treasury/mod.rs` owns the embedded client. Offline initialization
 and restore keep the indexer disconnected. `wallet sync --meta-config FILE` reads
 only treasury settings and the configured indexer environment reference; managed
 serving configures the same adapter and starts one shared background worker after
@@ -979,7 +979,7 @@ spend; none is authorized by this plan alone.
    admission, fair shared-treasury scheduling and aggregate budget concurrency.
 3. **Qualify the embedded treasury.** Retain synthetic-note proofs and the mined
    deposit/reorg, high-index refund shielding and expired-input recovery regressions
-   in `rust-prototype/tests/LIFECYCLE.md`. Use the serialized owner for every sync,
+   in `tests/LIFECYCLE.md`. Use the serialized owner for every sync,
    preparation and submission. Preserve guarded offline recovery commands and
    fail closed on reorgs that contradict accounting; deep finalized-chain repair
    requires operator review, never an automatic accounting reset.
@@ -996,7 +996,7 @@ spend; none is authorized by this plan alone.
    status commands, configuration examples, multi-catalog setup, dependency-patch
    maintenance and measured replenishment behavior. Run an explicitly authorized
    small live swap only after regtest recovery passes. Follow
-   `rust-prototype/docs/public-swap-demo.md`: one pool, two $5 deposits, a single
+   `docs/public-swap-demo.md`: one pool, two $5 deposits, a single
    approved payment capped at $0.05, source caps reviewed against a fresh quote,
    and an explicit stop afterward. A funded EVM key qualifies only seller payment
    acceptance; ZEC treasury funding is required to qualify public swaps. Mainnet
@@ -1019,7 +1019,7 @@ injected transports. Tests must never load a developer's `.env`, wallet key
 files, real seed or mainnet RPC by default. Build-time proving-parameter downloads
 are separate from runtime tests. Regtest-only tests are separately gated and use
 local node/indexer infrastructure, with exact setup/invocation documented in
-`rust-prototype/README.md`.
+`docs/usage.md`.
 
 | Scenario | Required assertion |
 | --- | --- |
@@ -1056,13 +1056,13 @@ local node/indexer infrastructure, with exact setup/invocation documented in
 Run the existing baseline commands while integrating:
 
 ```bash
-python3 rust-prototype/vendor/verify.py
-cargo test --locked --manifest-path rust-prototype/Cargo.toml
-cargo clippy --locked --manifest-path rust-prototype/Cargo.toml --all-targets -- -D warnings
-cargo fmt --manifest-path rust-prototype/Cargo.toml --check
-python3 rust-prototype/compat/check.py
+python3 vendor/verify.py
+cargo test --locked --manifest-path Cargo.toml
+cargo clippy --locked --manifest-path Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path Cargo.toml --check
+python3 compat/check.py
 uv sync
-.venv/bin/python rust-prototype/tests/compatibility.py
+.venv/bin/python tests/compatibility.py
 uv run pytest tests/ -q
 ```
 

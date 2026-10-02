@@ -6,11 +6,8 @@ use x402_mcp_prototype::{
 };
 fn fixture() -> (Config, Value) {
     (
-        toml::from_str(include_str!("../../providers/socialfetch.toml")).unwrap(),
-        serde_json::from_str(include_str!(
-            "../../tests/fixtures/socialfetch_openapi.json"
-        ))
-        .unwrap(),
+        toml::from_str(include_str!("../providers/socialfetch.toml")).unwrap(),
+        serde_json::from_str(include_str!("../tests/fixtures/socialfetch_openapi.json")).unwrap(),
     )
 }
 #[test]
@@ -70,7 +67,7 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
 }
 #[tokio::test]
 async fn meta_sources_override_tags_and_cli_inventories_need_no_credentials() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = tempfile::tempdir().unwrap();
     let (mut cfg, root) = fixture();
     cfg.spec = repo

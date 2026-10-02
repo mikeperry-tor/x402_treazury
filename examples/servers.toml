@@ -4,12 +4,12 @@ version = 1
 # Provider definitions control startup pricing discovery; set probe_pricing = false
 # on a source to disable it. Results and failures are shared for the process lifetime.
 [sources.pdl]
-extends = "../../providers/pdl.toml"
+extends = "../providers/pdl.toml"
 timeout = 30
 # wallet = "default" # Optional source override, shared across listeners using pdl.
 
 [sources.lonestar]
-extends = "../../providers/lonestar.toml"
+extends = "../providers/lonestar.toml"
 timeout = 90
 
 [wallets.default]

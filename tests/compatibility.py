@@ -1,5 +1,5 @@
 """Offline catalog differential against the existing Python implementation.
-Run from repo root: .venv/bin/python rust-prototype/tests/compatibility.py
+Run from repo root: .venv/bin/python tests/compatibility.py
 """
 import dataclasses
 import json
@@ -7,11 +7,11 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from x402_mcp.generic import GenericConfig, build_tools, default_prefix, load_source
 
-ROOT = Path(__file__).resolve().parents[2]
-BIN = ROOT / 'rust-prototype/target/debug/x402-mcp-prototype'
+ROOT = Path(__file__).resolve().parents[1]
+BIN = ROOT / 'target/debug/x402-mcp-prototype'
 CASES = [(f'confs/{name}.json', f'tests/fixtures/{fixture}_openapi.json') for name, fixture in [
     ('socialfetch', 'socialfetch'), ('pdl', 'pdl'), ('deepline', 'deepline'), ('kronos', 'kronos'),
     ('regimeshift', 'regimeshift'), ('agentfund', 'agentfund'), ('otto', 'otto'),

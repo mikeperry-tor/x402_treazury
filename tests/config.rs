@@ -94,7 +94,7 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
 
 #[tokio::test]
 async fn bundled_provider_settings_match_reviewed_snapshots() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let expected: std::collections::BTreeMap<String, Value> =
         serde_json::from_str(include_str!("fixtures/catalogs/settings.json")).unwrap();
     assert_eq!(expected.len(), 18);

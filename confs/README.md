@@ -47,7 +47,7 @@ Regenerate it with the Rust development utility (replace the URL with a local
 spec path for offline operation):
 
 ```sh
-cargo run --locked --manifest-path rust-prototype/Cargo.toml --example snapshot_spec -- \
+cargo run --locked --manifest-path Cargo.toml --example snapshot_spec -- \
   https://www.socialfetch.dev/openapi.json tests/fixtures/socialfetch_openapi.json
 ```
 

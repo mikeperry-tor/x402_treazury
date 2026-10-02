@@ -11,7 +11,7 @@ struct Case {
 #[test]
 fn bundled_catalogs_match_reviewed_tool_contracts() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repo = root.parent().unwrap();
+    let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
     assert_eq!(cases.len(), 14);

@@ -4,8 +4,8 @@ version = 1
 
 [treasury]
 id = "11111111-1111-4111-8111-111111111111" # Replace with wallet init's treasury_id.
-state_dir = "../../state/public-demo"
-key_file = "../../secrets/public-demo.key"
+state_dir = "../state/public-demo"
+key_file = "../secrets/public-demo.key"
 indexer_url_env = "ZCASH_INDEXER_URL"
 submission_url_env = "ZCASH_SUBMISSION_URL"
 daily_input_zec = "0.012"
@@ -34,9 +34,9 @@ max_attempts = 3
 wait_seconds = 30
 
 [sources.socialfetch]
-extends = "../../providers/socialfetch.toml"
+extends = "../providers/socialfetch.toml"
 # Committed request schema: inspection requires no vendor fetch or pricing probes.
-spec = "../../tests/fixtures/socialfetch_openapi.json"
+spec = "../tests/fixtures/socialfetch_openapi.json"
 probe_pricing = false
 
 [servers.demo]

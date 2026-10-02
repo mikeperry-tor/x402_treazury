@@ -17,7 +17,7 @@ Cargo manifests expand workspace-inherited dependencies, pin sibling Git crates 
 the same revision and omit upstream standalone test/example/bench targets and dev
 dependencies. Library sources (including testutils used by our consensus suite),
 build scripts and licenses are preserved. The combined compatibility manifest uses
-these same patches. Run `python3 rust-prototype/vendor/verify_zingo.py` to check all
+these same patches. Run `python3 vendor/verify_zingo.py` to check all
 reviewed files against `zingo-sources.json`; compare `zingo-connector.patch` with the
 pinned upstream commit when updating. Never edit a reference checkout or Cargo's
 Git cache to implement this patch.
