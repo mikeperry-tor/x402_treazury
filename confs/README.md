@@ -40,7 +40,14 @@ request. Use a 90-second timeout for slow search/transcript calls.
 `tests/fixtures/socialfetch_openapi.json` pins the 2026-10-02 source: 259
 operations, 237 selected tools including Yelp. It retains tags, descriptions,
 request schemas and vendor extensions, omitting response documentation only.
-Regenerate it with `python scripts/build_socialfetch_fixture.py [local-spec-or-url]`.
+Regenerate it with the Rust development utility (replace the URL with a local
+spec path for offline operation):
+
+```sh
+cargo run --locked --manifest-path rust-prototype/Cargo.toml --example snapshot_spec -- \
+  https://www.socialfetch.dev/openapi.json tests/fixtures/socialfetch_openapi.json
+```
+
 The custom launcher's committed digest is independent and unchanged.
 
 ## deepline.json — Deepline GTM (stable-deepline.dev)
