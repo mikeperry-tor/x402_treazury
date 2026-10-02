@@ -97,7 +97,7 @@ async fn bundled_provider_settings_match_reviewed_snapshots() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let expected: std::collections::BTreeMap<String, Value> =
         serde_json::from_str(include_str!("fixtures/catalogs/settings.json")).unwrap();
-    assert_eq!(expected.len(), 18);
+    assert_eq!(expected.len(), 19);
     for (provider, expected) in expected {
         let resolved = config::load(&repo.join(&provider)).await.unwrap();
         let mut actual = serde_json::to_value(&resolved.settings).unwrap();

@@ -785,5 +785,51 @@
     "spec": "https://x402stock.xyz/openapi.json",
     "tags": [],
     "timeout": 30.0
+  },
+  "providers/x402-list.toml": {
+    "additional_properties": null,
+    "base_url": "https://x402-list.com/api/v1",
+    "exclude": [
+      "/services/{slug}/uptime",
+      "/services/{slug}/price",
+      "/services/{slug}/scores",
+      "/services/{slug}/volume",
+      "/services/{slug}/buyers",
+      "/services/{slug}/checks",
+      "/facilitators",
+      "/facilitators/{id}",
+      "/checks",
+      "/status",
+      "/changes",
+      "/stats",
+      "/submit",
+      "/services/{slug}/request-update",
+      "/services/{slug}/reissue-token",
+      "/services/{slug}/verify-ownership",
+      "/suggestions",
+      "/assess"
+    ],
+    "exclude_tags": [],
+    "help_url": null,
+    "include": [
+      ""
+    ],
+    "instructions_text": "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. Use a documented OpenAPI URL with treazure_source_preview/add when those tools are authorized. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL.",
+    "max_description_chars": null,
+    "name": null,
+    "overrides": {},
+    "prefix": "x402_list",
+    "pricing_key": null,
+    "probe_concurrency": 4,
+    "probe_max_endpoints": 200,
+    "probe_methods": [
+      "GET"
+    ],
+    "probe_pricing": false,
+    "probe_timeout": 5.0,
+    "probe_ttl_seconds": 3600.0,
+    "spec": "https://x402-list.com/api/v1/openapi.json",
+    "tags": [],
+    "timeout": 30.0
   }
 }

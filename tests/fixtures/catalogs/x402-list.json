@@ -1,0 +1,241 @@
+[
+  {
+    "name": "x402_list_best",
+    "description": "Ranks the directory and returns the best x402 service(s) for a stated need, in one request (no paging). The ranking is the same two-stage relevance-then-quality scoring the MCP x402_find_best_service tool uses, run server-side. It is scored mostly on per-service reliability (live status, verification, uptime, response time), x402 compliance, and price (USD), filtered by category and network, with a SMALL (about 10%) weight on on-chain traction (settlement volume, transaction count, and unique buyers measured per service over its known payTo via recognized settlers, a conservative undercount). A deterministic danger flag removes a service from this surface entirely (its slug is listed in excluded_danger); a residual warning is penalized but kept. When a free-text q is given, each candidate is also scored on how well the query matches its AI-derived capability tags and summary plus its name/description/category (falling back to a plain substring match). The x402 compliance term is the share of deterministic conformance checks the service passes, capped at 0.6 (the floor of the C band) when at least one of its EVM routes is missing the EIP-712 domain parameters a standard x402 client needs in order to sign a payment. That cap is a statement about the payment envelope, not about the merit of the service, and it is what moved the scoring to generation 2. The generation served today is 3, which also gates the on-chain traction term on an absolute 30-day volume floor, discounts a payout concentrated on one buyer, and scores a service that publishes no payTo as zero instead of renormalizing around it. Scores produced under an earlier generation are not comparable with these; meta.ranking_version on every response says which one produced it. This endpoint is free and metered like every other GET on /api/v1/* (beyond the free daily quota it answers 402; see the metering note). Prices are decimal US dollars. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/best",
+    "input_schema": {
+      "properties": {
+        "category": {
+          "description": "Desired service category from the closed category set (case-insensitive). A value outside the set returns 400; omit for all.",
+          "enum": [
+            "AI",
+            "Blockchain",
+            "Compute",
+            "Content",
+            "Data",
+            "Finance",
+            "Other",
+            "Verification"
+          ],
+          "type": "string"
+        },
+        "include_facilitator_context": {
+          "default": false,
+          "description": "If true, also return top facilitators by 7d settlement volume as separate ecosystem context (NOT per-service). A value other than true/false returns 400.",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 5,
+          "description": "How many ranked recommendations to return (clamped to 1-20).",
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_price_usd": {
+          "description": "Cap on min_price_usd in US dollars; a service priced cheaper or equal passes (a service with no known price is excluded).",
+          "minimum": 0,
+          "type": "number"
+        },
+        "network": {
+          "description": "Required network name or abbreviation, e.g. \"Base\" or \"BSE\". A value outside the known network set returns 400.",
+          "type": "string"
+        },
+        "prefer": {
+          "default": "balanced",
+          "description": "Tie-breaking emphasis for the ranking weights. A value outside the enum returns 400.",
+          "enum": [
+            "balanced",
+            "cheapest",
+            "fastest",
+            "most_reliable"
+          ],
+          "type": "string"
+        },
+        "q": {
+          "description": "Free-text need description, matched against each service name/description/category plus its AI-derived capability tags and summary.",
+          "type": "string"
+        },
+        "require_verified": {
+          "default": false,
+          "description": "If true, only FORTE-tier verified services are eligible (treno D3: a paid delivery-probe settled and delivered, drift-revocable; the payment-ready base tier is NOT included). A hard filter on the eligible pool, not a scoring input, so it does not change ranking_version. A value other than true/false returns 400.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "category": "query",
+      "include_facilitator_context": "query",
+      "limit": "query",
+      "max_price_usd": "query",
+      "network": "query",
+      "prefer": "query",
+      "q": "query",
+      "require_verified": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "x402_list_categories",
+    "description": "Returns the distinct list of categories currently used by listed services. Useful for populating filter dropdowns or submission forms. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/categories",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "x402_list_networks",
+    "description": "Returns all blockchain networks that x402 services accept payments on. Each network includes a service count and average uptime. Uses CAIP-2 identifiers. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/networks",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "x402_list_services",
+    "description": "Returns a paginated list of registered x402 services with computed fields like uptime, pricing, and endpoint count. Supports filtering by network, status, category, verification state, signability of the 402 envelope, and full-text search. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/services",
+    "input_schema": {
+      "properties": {
+        "category": {
+          "description": "Filter by category, one of the closed category set (case-insensitive). A value outside the set returns 400 Bad Request; omit to include every category.",
+          "enum": [
+            "AI",
+            "Blockchain",
+            "Compute",
+            "Content",
+            "Data",
+            "Finance",
+            "Other",
+            "Verification"
+          ],
+          "type": "string"
+        },
+        "network": {
+          "description": "Filter by single network abbreviation (e.g. BSE, SOL, POL; the full list is served by /networks). An unrecognized abbreviation returns 400 Bad Request.",
+          "type": "string"
+        },
+        "page": {
+          "default": 1,
+          "description": "Page number",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "payment_ready": {
+          "description": "Filter by the BASE payment-ready tier: the endpoint answered a valid x402 402 challenge and is alive within the decay window (a probe success within the last 7 days, or it is api-key exempt). true = payment-ready only, false = everything else. Omit to include both. This is the broad discovery signal the verified parameter used to carry before treno D3. Applied server-side, so meta.total counts the filtered set. Any other value returns 400 Bad Request.",
+          "enum": [
+            "true",
+            "false"
+          ],
+          "type": "string"
+        },
+        "per_page": {
+          "default": 25,
+          "description": "Results per page",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "q": {
+          "description": "Case-insensitive substring search across name, description, category, and base URL. The search and query parameters are accepted as aliases; q takes precedence when more than one is sent.",
+          "type": "string"
+        },
+        "signable": {
+          "description": "Filter on the SIGNABILITY of the last observed 402 envelope: true = no EVM route of the service was observed missing the EIP-712 domain parameters (extra.name and extra.version) that a standard x402 client requires in order to sign a payment; false = at least one such route was observed. This describes the payment envelope on the wire, not the merit or reliability of the service. Derived from the eip712_domain_extra check of the latest assessment (the same id that appears in assessment.compliance_failed_checks). A service whose latest assessment has not measured that check yet (never assessed, assessed before the check existed, or assessed with no 402 payload captured at all) matches NEITHER value: omit the parameter to include it. Applied server-side, so meta.total counts the filtered set. Any other value returns 400 Bad Request.",
+          "enum": [
+            "true",
+            "false"
+          ],
+          "type": "string"
+        },
+        "sort": {
+          "default": "newest",
+          "description": "Sort order. A value outside the enum returns 400 Bad Request.",
+          "enum": [
+            "newest",
+            "uptime",
+            "cheapest",
+            "endpoints"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "description": "Filter by provenance (how the listing entered the directory, matching the source field on each item): submitted, imported (any imported:* origin), imported:bazaar, imported:x402scan, or all for no filter. An unrecognized value returns 400 Bad Request.",
+          "enum": [
+            "submitted",
+            "imported",
+            "imported:bazaar",
+            "imported:x402scan",
+            "all"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "description": "Filter by service status. An unrecognized value returns 400 Bad Request; omit the parameter to include every status.",
+          "enum": [
+            "online",
+            "degraded",
+            "offline",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "verified": {
+          "description": "Filter by the FORTE verification tier: a paid delivery-probe settled on-chain and delivered AND the badge was not since revoked on payTo/schema drift (no time decay). true = delivery-verified only, false = everything else. Omit to include both. SEMANTIC CHANGE (treno D3): this filter previously meant \"answered a valid x402 challenge and is alive\" - that broad signal is now the payment_ready parameter. This tier starts empty and grows only with real payments, so verified=true can legitimately return 0 rows. Applied server-side, so meta.total counts the filtered set. Any other value returns 400 Bad Request.",
+          "enum": [
+            "true",
+            "false"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "category": "query",
+      "network": "query",
+      "page": "query",
+      "payment_ready": "query",
+      "per_page": "query",
+      "q": "query",
+      "signable": "query",
+      "sort": "query",
+      "source": "query",
+      "status": "query",
+      "verified": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "x402_list_services_slug",
+    "description": "Returns full details for a single service including all active endpoints with their current pricing, uptime windows (24h/7d/30d/90d), average response time, and total check count. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/services/{slug}",
+    "input_schema": {
+      "properties": {
+        "slug": {
+          "description": "Service URL slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "slug": "path"
+    },
+    "has_body": false
+  }
+]

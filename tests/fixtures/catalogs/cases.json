@@ -68,5 +68,10 @@
     "name": "glassnode",
     "provider": "providers/glassnode/provider.toml",
     "spec": null
+  },
+  {
+    "name": "x402-list",
+    "provider": "providers/x402-list.toml",
+    "spec": "tests/fixtures/x402_list_openapi.json"
   }
 ]
