@@ -16,6 +16,8 @@ use x402_mcp_prototype::{
 struct Args {
     #[arg(long)]
     meta_config: Option<std::path::PathBuf>,
+    #[arg(long, conflicts_with = "meta_config")]
+    network_config: Option<std::path::PathBuf>,
     #[arg(long, requires = "meta_config")]
     check: bool,
     #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
@@ -107,13 +109,14 @@ async fn run() -> Result<()> {
             let id = argument.get_id();
             if matches.value_source(id.as_str()) == Some(clap::parser::ValueSource::CommandLine) {
                 ensure!(
-                    ["show_config", "config", "meta_config"].contains(&id.as_str()),
+                    ["show_config", "config", "meta_config", "network_config"]
+                        .contains(&id.as_str()),
                     "--show-config resolves configuration files only; omit --{}",
                     id.as_str().replace('_', "-")
                 );
             }
         }
-        let value = if let Some(path) = &args.meta_config {
+        let mut value = if let Some(path) = &args.meta_config {
             x402_mcp_prototype::deployment::Deployment::show_config(path).await?
         } else {
             let path = args
@@ -124,8 +127,22 @@ async fn run() -> Result<()> {
                 x402_mcp_prototype::config::load(std::path::Path::new(path)).await?,
             )?
         };
+        if args.meta_config.is_none() {
+            let policy = args
+                .network_config
+                .as_ref()
+                .map(|path| x402_mcp_prototype::network::NetworkPolicy::load(path))
+                .transpose()?
+                .unwrap_or_default();
+            value["network"] = policy.inspection();
+        }
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
+    }
+    if let Some(path) = &args.network_config {
+        x402_mcp_prototype::network::install(x402_mcp_prototype::network::NetworkPolicy::load(
+            path,
+        )?)?;
     }
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if let Some(path) = &args.env_file {
@@ -249,10 +266,14 @@ async fn run() -> Result<()> {
         cfg.timeout = timeout;
     }
     x402_mcp_prototype::config::validate(&cfg)?;
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs_f64(cfg.timeout))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
+    let http = x402_mcp_prototype::network::discovery(
+        if cfg.spec.starts_with("http") {
+            &cfg.spec
+        } else {
+            "https://local.invalid"
+        },
+        Duration::from_secs_f64(cfg.timeout),
+    )?;
     let root = catalog::load_json(&cfg.spec, &http).await?;
     if args.list_tags {
         println!(
@@ -308,7 +329,7 @@ async fn run() -> Result<()> {
     tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
     let mut server = Server::new(
         tools,
-        PaidClient::new(http, payer),
+        PaidClient::new(payer).with_timeout(Duration::from_secs_f64(cfg.timeout)),
         base,
         cfg.instructions_text,
         args.max_response_chars,

@@ -158,7 +158,7 @@ impl Harness {
         let base = format!("http://{}", listener.local_addr().unwrap());
         let app = Router::new()
             .route("/rpc", post(rpc))
-            .route("/pay", get(seller))
+            .route("/pay", get(seller).post(seller))
             .with_state(f.clone());
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let client = make_client(store.clone(), pool.clone(), &base);
@@ -199,19 +199,12 @@ fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
         2,
     )
     .unwrap();
-    PaidClient::managed(
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .unwrap(),
-        Arc::new(manager),
-    )
+    PaidClient::managed(Arc::new(manager))
 }
 #[tokio::test]
 async fn concurrent_calls_reserve_before_send_and_cannot_churn_busy_active() {
     let h = Harness::new().await;
-    let other = h.client.with_http(h.client.http.clone());
+    let other = h.client.clone();
     let (a, b) = tokio::join!(h.client.execute(h.route()), other.execute(h.route()));
     assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
     let error = a.err().or_else(|| b.err()).unwrap().to_string();
@@ -651,20 +644,17 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
         .await
         .unwrap();
     *h.f.challenge.lock().unwrap() = challenge("6000000");
-    let client = PaidClient::managed(
-        h.client.http.clone(),
-        Arc::new(
-            ManagedPool::new(
-                h.store.clone(),
-                h.pool.clone(),
-                BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
-                "10",
-                SpendPolicy::dollars("none").unwrap(),
-                2,
-            )
-            .unwrap(),
-        ),
-    );
+    let client = PaidClient::managed(Arc::new(
+        ManagedPool::new(
+            h.store.clone(),
+            h.pool.clone(),
+            BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
+            "10",
+            SpendPolicy::dollars("none").unwrap(),
+            2,
+        )
+        .unwrap(),
+    ));
     assert!(
         client
             .execute(h.route())
@@ -724,3 +714,83 @@ async fn background_reconciliation_releases_confirmed_payment_without_rotating_o
 #[cfg(feature = "zcash")]
 #[path = "support/lifecycle.rs"]
 mod lifecycle;
+
+#[path = "support/socks.rs"]
+mod socks;
+#[tokio::test]
+async fn managed_payments_use_isolated_tor_connections() {
+    let proxy = socks::Socks::start(
+        std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
+        socks::Fault::None,
+    )
+    .await;
+    let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "tor_managed_child", "--nocapture"])
+        .env("TOR_TEST_PROXY", proxy.address.to_string())
+        .env("RUST_BACKTRACE", "0")
+        // Policy must win even against ambient proxy bypass instructions.
+        .env("ALL_PROXY", "http://127.0.0.1:1")
+        .env("NO_PROXY", "*")
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records = proxy.records.lock().unwrap();
+    assert!(records.len() > 4);
+    assert!(records.iter().all(|r| r.user == "<torS0X>0"));
+    assert!(
+        records
+            .iter()
+            .map(|r| r.password.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            > 3
+    );
+}
+#[test]
+#[ignore = "subprocess helper runs with its own immutable Tor policy"]
+fn tor_managed_child() {
+    use x402_mcp_prototype::network::{Mode, NetworkPolicy, install};
+    install(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(std::env::var("TOR_TEST_PROXY").unwrap().parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    confirmed_depletion_promotes_once_and_queues_one_replacement();
+    concurrent_calls_reserve_before_send_and_cannot_churn_busy_active();
+    unsupported_and_over_target_offers_have_no_admission_side_effects();
+    rejected_payment_remains_reserved_across_restart_and_is_not_replayed();
+    free_calls_do_not_touch_admission_and_bootstrap_requires_both_candidates();
+    post_rotation_returns_before_signing_and_requires_caller_retry();
+}
+
+#[tokio::test]
+async fn post_rotation_returns_before_signing_and_requires_caller_retry() {
+    let h = Harness::new().await;
+    h.client.execute(h.route()).await.unwrap();
+    let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
+        .address
+        .clone();
+    h.f.used.store(true, Ordering::SeqCst);
+    h.f.balances.lock().unwrap().insert(active, 0);
+    let mut route = h.route();
+    route.method = "POST".into();
+    let error = h.client.execute(route).await.unwrap_err();
+    assert!(error.to_string().contains("payer_changed_before_payment"));
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    assert_eq!(
+        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
+        1
+    );
+    let mut route = h.route();
+    route.method = "POST".into();
+    h.client.execute(route).await.unwrap();
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    h.close().await;
+}

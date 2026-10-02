@@ -65,35 +65,31 @@ impl Payer {
 }
 #[derive(Clone)]
 pub struct PaidClient {
-    pub http: reqwest::Client,
+    timeout: std::time::Duration,
     payer: Option<Arc<RwLock<Arc<Payer>>>>,
     managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
 }
 impl PaidClient {
-    pub fn new(http: reqwest::Client, payer: Payer) -> Self {
+    pub fn new(payer: Payer) -> Self {
         Self {
-            http,
+            timeout: std::time::Duration::from_secs(60),
             payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
             managed: None,
         }
     }
-    pub fn managed(
-        http: reqwest::Client,
-        pool: Arc<crate::rotation::manager::ManagedPool>,
-    ) -> Self {
+    pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
-            http,
+            timeout: std::time::Duration::from_secs(60),
             payer: None,
             managed: Some(pool),
         }
     }
-    /// Share the wallet identity/policy while using a source-specific transport.
-    pub fn with_http(&self, http: reqwest::Client) -> Self {
-        Self {
-            http,
-            payer: self.payer.clone(),
-            managed: self.managed.clone(),
-        }
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+    pub fn timeout(&self) -> std::time::Duration {
+        self.timeout
     }
     pub fn replace_payer(&self, payer: Payer) {
         *self
@@ -108,7 +104,8 @@ impl PaidClient {
             .payer
             .as_ref()
             .map(|p| p.read().expect("payer lock poisoned").clone());
-        let mut request = self.http.request(route.method.parse()?, &route.url);
+        let mut request =
+            reqwest::Request::new(route.method.parse()?, reqwest::Url::parse(&route.url)?);
         let mut query = Vec::new();
         for (key, value) in route.query {
             if let Some(values) = value.as_array() {
@@ -119,45 +116,92 @@ impl PaidClient {
                 query.push((key, arg_text(&value)));
             }
         }
-        request = request.query(&query);
+        if !query.is_empty() {
+            request.url_mut().query_pairs_mut().extend_pairs(query);
+        }
         if let Some(body) = route.body {
-            request = request.json(&body);
+            *request.body_mut() = Some(serde_json::to_vec(&body)?.into());
+            request.headers_mut().insert(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static("application/json"),
+            );
         }
-        let request = request.build()?;
-        let retry = request
-            .try_clone()
-            .context("request body cannot be retried")?;
-        let mut response = self.http.execute(request).await?;
-        if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
-            if let Some(pool) = &self.managed {
-                response = pool.pay(&self.http, retry, response).await?;
-            } else {
-                if let Some(header) = response.headers().get("payment-required") {
-                    let mut challenge: Value =
-                        serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
-                    if let Some(desc) = challenge.pointer_mut("/resource/description")
-                        && let Some(text) = desc.as_str()
+        let idempotent = matches!(request.method().as_str(), "GET" | "HEAD");
+        let mut attempt = 0;
+        let response = loop {
+            let candidate = match &self.managed {
+                Some(pool) => Some(pool.candidate().await?),
+                None => None,
+            };
+            let address = candidate
+                .as_ref()
+                .map(|c| c.address.as_str())
+                .or_else(|| payer.as_ref().map(|p| p.address.as_str()))
+                .context("network_identity_missing: payer")?;
+            let http = crate::network::global().http(
+                &crate::network::IsolationId::evm(address)?,
+                request.url().as_str(),
+                self.timeout,
+            )?;
+            let unsigned = request
+                .try_clone()
+                .context("request body cannot be retried")?;
+            let retry = request
+                .try_clone()
+                .context("request body cannot be retried")?;
+            let mut response = http.execute(unsigned).await?;
+            if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+                if let Some(pool) = &self.managed {
+                    match pool
+                        .pay(
+                            &http,
+                            candidate.expect("managed candidate"),
+                            retry,
+                            response,
+                        )
+                        .await
                     {
-                        *desc = Value::String(text.chars().take(500).collect());
+                        Ok(paid) => response = paid,
+                        Err(error)
+                            if error.downcast_ref::<crate::rotation::error::AdmissionError>()
+                                == Some(&crate::rotation::error::AdmissionError::PayerChanged)
+                                && idempotent
+                                && attempt == 0 =>
+                        {
+                            attempt += 1;
+                            continue;
+                        }
+                        Err(error) => return Err(error),
                     }
-                    response.headers_mut().insert(
-                        "payment-required",
-                        STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
-                    );
+                } else {
+                    if let Some(header) = response.headers().get("payment-required") {
+                        let mut challenge: Value =
+                            serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
+                        if let Some(desc) = challenge.pointer_mut("/resource/description")
+                            && let Some(text) = desc.as_str()
+                        {
+                            *desc = Value::String(text.chars().take(500).collect());
+                        }
+                        response.headers_mut().insert(
+                            "payment-required",
+                            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
+                        );
+                    }
+                    // Selection (asset/network/cap) happens inside the SDK before signing.
+                    let headers = payer
+                        .as_ref()
+                        .expect("static payer")
+                        .client
+                        .make_payment_headers(response)
+                        .await
+                        .context("x402 challenge rejected or signing failed")?;
+                    let mut retry = retry;
+                    retry.headers_mut().extend(headers);
+                    response = http.execute(retry).await?;
                 }
-                // Selection (asset/network/cap) happens inside the SDK before signing.
-                let headers = payer
-                    .as_ref()
-                    .expect("static payer")
-                    .client
-                    .make_payment_headers(response)
-                    .await
-                    .context("x402 challenge rejected or signing failed")?;
-                let mut retry = retry;
-                retry.headers_mut().extend(headers);
-                response = self.http.execute(retry).await?;
             }
-        }
+            break response;
+        };
         let status = response.status();
         let detail = response
             .headers()

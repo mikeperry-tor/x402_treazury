@@ -6601,6 +6601,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "fs2",
+ "hyper-util",
  "orchard",
  "pepper-sync",
  "percent-encoding",
@@ -6610,6 +6611,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "subtle",
  "tempfile",
  "tokio",
@@ -7093,7 +7095,6 @@ dependencies = [
 [[package]]
 name = "zingo-netutils"
 version = "5.0.1"
-source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "http",
  "lightwallet-protocol",
@@ -7141,7 +7142,6 @@ source = "git+https://github.com/zingolabs/infrastructure.git?rev=89cf104a241614
 [[package]]
 name = "zingolib"
 version = "6.0.0"
-source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "append-only-vec",
  "bech32",

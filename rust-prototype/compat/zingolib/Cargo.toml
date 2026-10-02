@@ -7,7 +7,7 @@ publish = false
 [workspace]
 [dependencies]
 x402-mcp-prototype = { path = "../.." }
-zingolib = { path = "../../../reference_repos/zingolib/zingolib", default-features = false }
+zingolib = { path = "../../vendor/zingolib", default-features = false }
 
 # Experimental compatibility patch: see vendor/README.md.
 [patch.crates-io]
@@ -37,3 +37,7 @@ path = "../../tests/server.rs"
 [[test]]
 name = "crypto_vectors"
 path = "../../tests/crypto_vectors.rs"
+
+[patch."https://github.com/zingolabs/zingolib"]
+zingolib = { path = "../../vendor/zingolib" }
+zingo-netutils = { path = "../../vendor/zingo-netutils" }

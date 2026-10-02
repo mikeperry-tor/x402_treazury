@@ -42,14 +42,15 @@ impl GrpcSubmission {
             indexer,
         })
     }
-    async fn connect(&self, endpoint: &str) -> Result<GrpcIndexer> {
-        let uri = endpoint
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid treasury endpoint"))?;
-        let mut client = tokio::time::timeout(TIMEOUT, GrpcIndexer::new(uri))
-            .await
-            .map_err(|_| anyhow::anyhow!("treasury connection timed out"))?
-            .map_err(|_| anyhow::anyhow!("treasury connection failed"))?;
+    async fn connect(
+        &self,
+        endpoint: &str,
+        identity: &crate::network::IsolationId,
+    ) -> Result<GrpcIndexer> {
+        let mut client =
+            tokio::time::timeout(TIMEOUT, crate::network::global().grpc(identity, endpoint))
+                .await
+                .map_err(|_| anyhow::anyhow!("treasury connection timed out"))??;
         let info = client
             .get_lightd_info(TIMEOUT)
             .await
@@ -76,6 +77,7 @@ impl TransactionSubmission for GrpcSubmission {
     async fn submit(&mut self, transaction: BroadcastTransaction) -> Result<SubmissionOutcome> {
         let first_attempt = transaction.attempt() == 1;
         let transaction = transaction.transaction();
+        let _identity = transaction.network_identity()?;
         let raw = decode(transaction.bytes())?;
         let expected = raw.txid().to_string();
         let facts = transaction
@@ -86,7 +88,9 @@ impl TransactionSubmission for GrpcSubmission {
             "durable transaction identity mismatch"
         );
         let result = tokio::time::timeout(TIMEOUT, async {
-            let mut client = self.connect(&self.submission).await?;
+            let mut client = self
+                .connect(&self.submission, &transaction.network_identity()?)
+                .await?;
             let tip = client
                 .get_latest_block(TIMEOUT)
                 .await
@@ -125,10 +129,13 @@ impl TransactionSubmission for GrpcSubmission {
         })
     }
     async fn lookup(&mut self, transaction: &PreparedTransaction) -> Result<TransactionPresence> {
+        let _identity = transaction.network_identity()?;
         let raw = decode(transaction.bytes())?;
         let hash = raw.txid().as_ref().to_vec();
         let result = tokio::time::timeout(TIMEOUT, async {
-            let mut client = self.connect(&self.indexer).await?;
+            let mut client = self
+                .connect(&self.indexer, &transaction.network_identity()?)
+                .await?;
             let found = match client
                 .get_transaction(
                     TxFilter {

@@ -51,7 +51,6 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
     let tools = build_tools(&cfg, &root, "test").unwrap();
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     let client = PaidClient::new(
-        http.clone(),
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     );
     let server = Server::new(tools, client, vendor, cfg.instructions_text, None);

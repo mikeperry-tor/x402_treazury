@@ -122,18 +122,15 @@ impl PricingCache {
         candidates.sort_by_key(|t| (&t.path, &t.method));
         candidates.dedup_by_key(|t| (&t.path, &t.method));
         candidates.truncate(cfg.probe_max_endpoints);
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs_f64(cfg.probe_timeout))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent("x402-mcp-rust-probe/0.1")
-            .build()?;
         let mut lines = BTreeMap::new();
         // Each batch bounds per-source concurrency; LIMIT bounds the whole process.
         for batch in candidates.chunks(cfg.probe_concurrency.min(4)) {
             let mut pending = Vec::new();
             for tool in batch {
                 let url = tool.route(base, &serde_json::Map::new())?.url;
-                pending.push((tool, self.get(url, http.clone(), cfg.probe_ttl_seconds)));
+                let http =
+                    crate::network::discovery(&url, Duration::from_secs_f64(cfg.probe_timeout))?;
+                pending.push((tool, self.get(url, http, cfg.probe_ttl_seconds)));
             }
             // Scoped futures are polled concurrently without detached work.
             let mut futures: Vec<_> = pending.into_iter().map(|(t, f)| (t, Box::pin(f))).collect();

@@ -58,13 +58,22 @@ impl BaseRpc {
     pub fn new(url: &str, confirmations: u64, max_age: u64) -> Result<Self> {
         ensure!(confirmations > 0 && max_age > 0, "invalid Base RPC limits");
         Ok(Self {
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(15))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()?,
+            http: crate::network::discovery(url, Duration::from_secs(15))?,
             url: secure_endpoint(url)?,
             confirmations,
             max_age,
+        })
+    }
+    fn for_address(&self, address: &str) -> Result<Self> {
+        Ok(Self {
+            http: crate::network::global().http(
+                &crate::network::IsolationId::evm(address)?,
+                self.url.as_str(),
+                Duration::from_secs(15),
+            )?,
+            url: self.url.clone(),
+            confirmations: self.confirmations,
+            max_age: self.max_age,
         })
     }
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
@@ -155,8 +164,9 @@ impl BaseRpc {
         for (id, address) in query.wallets {
             let address: Address = address.parse()?;
             let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
-            let stable = self.call(data.clone(), &confirmed).await?;
-            let current = self.call(data, &latest).await?;
+            let scoped = self.for_address(&address.to_string())?;
+            let stable = scoped.call(data.clone(), &confirmed).await?;
+            let current = scoped.call(data, &latest).await?;
             balances.insert(id, stable.min(current));
         }
         let mut released = Vec::new();
@@ -170,7 +180,10 @@ impl BaseRpc {
                 format!("{payer:x}"),
                 alloy_primitives::hex::encode(nonce)
             );
-            let used = self.call(data, &confirmed).await?;
+            let used = self
+                .for_address(&auth.payer)?
+                .call(data, &confirmed)
+                .await?;
             ensure!(used <= U256::from(1), "invalid authorizationState result");
             if used == U256::from(1) || confirmed_time > auth.valid_before {
                 released.push(auth.id);

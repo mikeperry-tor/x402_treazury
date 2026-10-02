@@ -93,14 +93,7 @@ fn payer(key: &str, cap: &str) -> Payer {
     Payer::new(key, SpendPolicy::dollars(cap).unwrap()).unwrap()
 }
 fn client(cap: &str) -> PaidClient {
-    PaidClient::new(
-        reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap(),
-        payer(KEY1, cap),
-    )
+    PaidClient::new(payer(KEY1, cap))
 }
 fn route(url: String) -> RoutedRequest {
     RoutedRequest {
@@ -276,7 +269,7 @@ async fn source_transports_share_payer_replacement_but_profiles_are_isolated() {
     let gate = gate(challenge("exact", "1"));
     let (url, task) = start(gate.clone()).await;
     let wallet = client("1");
-    let source = wallet.with_http(reqwest::Client::builder().no_proxy().build().unwrap());
+    let source = wallet.clone();
     let independent = client("1");
     wallet.replace_payer(payer(KEY2, "1"));
     source.execute(route(url.clone())).await.unwrap();

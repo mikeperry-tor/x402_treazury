@@ -3799,6 +3799,7 @@ dependencies = [
 [[package]]
 name = "pepper-sync"
 version = "0.5.0"
+source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "bip32",
  "byteorder",
@@ -6563,9 +6564,11 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chacha20poly1305",
+ "chrono",
  "clap",
  "dotenvy",
  "fs2",
+ "hyper-util",
  "percent-encoding",
  "regex",
  "reqwest",
@@ -6573,6 +6576,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "subtle",
  "tempfile",
  "tokio",
@@ -7008,6 +7012,7 @@ dependencies = [
 [[package]]
 name = "zingo-memo"
 version = "0.1.1"
+source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "zcash_address",
  "zcash_encoding",
@@ -7018,6 +7023,7 @@ dependencies = [
 [[package]]
 name = "zingo-net-diag"
 version = "0.1.0"
+source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "serde",
 ]
@@ -7040,6 +7046,7 @@ dependencies = [
 [[package]]
 name = "zingo-price"
 version = "0.1.0"
+source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "byteorder",
  "zcash_encoding",
@@ -7048,6 +7055,7 @@ dependencies = [
 [[package]]
 name = "zingo-status"
 version = "0.2.1"
+source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "byteorder",
  "zcash_protocol",

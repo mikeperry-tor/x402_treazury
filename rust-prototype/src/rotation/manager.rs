@@ -17,6 +17,12 @@ use x402_chain_eip155::V2Eip155ExactClient;
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 
+#[derive(Clone, Debug)]
+pub struct PaymentCandidateHandle {
+    pub wallet: String,
+    pub address: String,
+    pub generation: i64,
+}
 pub struct ManagedPool {
     store: StoreHandle,
     pool: String,
@@ -76,9 +82,14 @@ impl ManagedPool {
             .call(move |s| s.reconcile_pool(&pool, view))
             .await
     }
+    pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
+        let pool = self.pool.clone();
+        self.store.call(move |s| s.payment_candidate(&pool)).await
+    }
     pub async fn pay(
         &self,
         http: &reqwest::Client,
+        expected: PaymentCandidateHandle,
         mut retry: reqwest::Request,
         mut response: reqwest::Response,
     ) -> Result<reqwest::Response> {
@@ -114,7 +125,7 @@ impl ManagedPool {
             let amount = offer.amount;
             let lease = self
                 .store
-                .call(move |s| s.admit(&pool, amount, &hash, view))
+                .call(move |s| s.admit_for(&pool, amount, &hash, view, Some(&expected)))
                 .await?;
             let signer = PrivateKeySigner::from_slice(&lease.key)
                 .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;

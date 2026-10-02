@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 pub struct WalletArgs {
+    #[arg(long, global = true)]
+    network_config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -123,6 +125,20 @@ pub async fn run() -> Result<()> {
     let args = WalletArgs::parse_from(
         std::iter::once("wallet".to_owned()).chain(std::env::args().skip(2)),
     );
+    if let Some(path) = &args.network_config {
+        let uses_meta = matches!(
+            &args.command,
+            Command::Sync { .. }
+                | Command::Reconcile { .. }
+                | Command::RecoverExpired { .. }
+                | Command::ShieldRefunds { .. }
+        );
+        anyhow::ensure!(
+            !uses_meta,
+            "configure network in the meta-config; --network-config cannot override it"
+        );
+        crate::network::install(crate::network::NetworkPolicy::load(path)?)?;
+    }
     if let Command::Status { state_dir } = args.command {
         let status =
             tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
@@ -418,6 +434,7 @@ async fn configured(
 )> {
     let config: crate::deployment::MetaConfig =
         toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+    crate::network::install(config.network.clone())?;
     anyhow::ensure!(config.version == 1, "unsupported deployment version");
     let mut settings = config.treasury.context("missing [treasury]")?;
     settings.validate()?;

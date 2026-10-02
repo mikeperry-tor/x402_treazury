@@ -6,6 +6,17 @@ use x402_mcp_prototype::rotation::{
 };
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[derive(clap::Parser)]
+    struct Args {
+        #[arg(long)]
+        network_config: Option<std::path::PathBuf>,
+    }
+    let args = <Args as clap::Parser>::parse();
+    if let Some(path) = &args.network_config {
+        x402_mcp_prototype::network::install(x402_mcp_prototype::network::NetworkPolicy::load(
+            path,
+        )?)?;
+    }
     let client = NearClient::new(None)?;
     let assets = client.assets().await?;
     let instant = now()?;

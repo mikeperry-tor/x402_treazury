@@ -1,0 +1,45 @@
+bin = [{"name" = "nym-proxy", "required-features" = ["nym"]}, {"name" = "live-indexer-discovery", "required-features" = ["nym"]}]
+[package]
+"name" = "zingo-netutils"
+"version" = "5.0.1"
+"description" = "network utility crate"
+"authors" = ["zingo@zingolabs.org"]
+"edition" = "2024"
+"repository" = "https://github.com/zingolabs/zingolib"
+"homepage" = "https://github.com/zingolabs/zingolib"
+"license" = "MIT"
+"autotests" = false
+"autoexamples" = false
+"autobenches" = false
+
+[badges]
+"maintenance" = {"status" = "actively-developed"}
+
+[dependencies]
+"http" = {"version" = "1"}
+"rustls" = {"version" = "0.23.40", "features" = ["prefer-post-quantum"]}
+"thiserror" = {"version" = "2"}
+"tokio-rustls" = {"version" = "0.26", "default-features" = false, "features" = ["aws_lc_rs", "logging", "tls12"]}
+"tonic" = {"version" = "0.14", "features" = ["tls-webpki-roots", "tls-aws-lc"]}
+"lightwallet-protocol" = {"version" = "0.3.0", "features" = ["rebuild-proto"]}
+"tokio-stream" = {"version" = "0.1", "optional" = true}
+"nym-sdk" = {"version" = "1.21.2", "optional" = true}
+"nym-http-api-client" = {"version" = "1.21.3", "optional" = true}
+"nym-validator-client" = {"version" = "1.21.3", "optional" = true, "default-features" = false, "features" = ["http-client"]}
+"tokio-socks" = {"version" = "0.5", "optional" = true}
+"reqwest" = {"version" = "0.12.15", "default-features" = false, "optional" = true, "features" = ["rustls-tls-webpki-roots-no-provider", "socks"]}
+"hyper-util" = {"version" = "0.1.20", "optional" = true}
+"tower" = {"version" = "0.5", "optional" = true}
+"tokio" = {"version" = "1", "optional" = true, "features" = ["time", "rt-multi-thread", "macros", "signal", "io-std", "io-util"]}
+"zingo-net-diag" = {"version" = "0.1.0", "path" = "../zingo-net-diag", "optional" = true}
+"rand" = "0.8"
+"serde" = {"version" = "1.0.229", "features" = ["derive"]}
+
+[features]
+"globally-public-transparent" = ["dep:tokio-stream"]
+"ping-very-insecure" = []
+"testutils" = []
+"socks5-transmit" = ["dep:tokio-socks", "dep:hyper-util", "dep:tower", "dep:tokio", "dep:zingo-net-diag"]
+"socks5-fetch" = ["dep:reqwest", "dep:zingo-net-diag"]
+"nym" = ["dep:nym-sdk", "dep:nym-http-api-client", "dep:nym-validator-client", "dep:tokio-socks", "dep:tokio", "socks5-transmit", "dep:zingo-net-diag"]
+

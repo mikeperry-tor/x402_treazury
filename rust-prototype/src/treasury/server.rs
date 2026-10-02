@@ -2,7 +2,7 @@
 use anyhow::{Result, ensure};
 use std::time::Duration;
 use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
-use zingo_netutils::{GrpcIndexer, Indexer, lightwallet_protocol::BlockId};
+use zingo_netutils::{Indexer, lightwallet_protocol::BlockId};
 
 pub(crate) async fn check(
     client: &mut impl Indexer,
@@ -37,6 +37,7 @@ pub(crate) async fn check(
 
 pub(crate) async fn check_endpoint(
     endpoint: &str,
+    identity: &crate::network::IsolationId,
     chain: &impl Parameters,
     height: u64,
 ) -> Result<()> {
@@ -44,13 +45,13 @@ pub(crate) async fn check_endpoint(
         return Ok(());
     }
     tokio::time::timeout(Duration::from_secs(30), async {
-        let uri = endpoint
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid indexer URI"))?;
-        let mut client = tokio::time::timeout(Duration::from_secs(15), GrpcIndexer::new(uri))
-            .await
-            .map_err(|_| anyhow::anyhow!("indexer capability connection timed out"))?
-            .map_err(|_| anyhow::anyhow!("indexer capability connection failed"))?;
+        let mut client = tokio::time::timeout(
+            Duration::from_secs(15),
+            crate::network::global().grpc(identity, endpoint),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("indexer capability connection timed out"))?
+        .map_err(|_| anyhow::anyhow!("indexer capability connection failed"))?;
         check(&mut client, chain, height).await
     })
     .await

@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod config;
 pub mod deployment;
+pub mod network;
 pub mod payment;
 pub mod pricing;
 pub mod rotation;
@@ -8,3 +9,7 @@ pub mod server;
 #[cfg(feature = "zcash")]
 pub mod treasury;
 pub mod wallet_cli;
+
+#[cfg(test)]
+#[path = "../tests/support/socks.rs"]
+mod test_socks;

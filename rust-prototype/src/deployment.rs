@@ -20,6 +20,8 @@ use tokio_util::sync::CancellationToken;
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     pub version: u32,
+    #[serde(default)]
+    pub network: crate::network::NetworkPolicy,
     pub treasury: Option<TreasuryConfig>,
     pub funding: Option<FundingConfig>,
     pub sources: BTreeMap<String, SourceConfig>,
@@ -62,7 +64,6 @@ struct Source {
     document: serde_json::Value,
     tools: Vec<ToolSpec>,
     base_url: String,
-    http: reqwest::Client,
     instructions: Option<String>,
 }
 #[derive(Serialize)]
@@ -101,6 +102,7 @@ fn pattern(text: &str) -> Result<Regex> {
 }
 impl MetaConfig {
     fn validate(&self) -> Result<Resolution> {
+        self.network.validate()?;
         ensure!(
             self.version == 1,
             "unsupported meta-config version {}",
@@ -219,13 +221,14 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
         let wallet_resolution = config.validate()?;
+        crate::network::install(config.network.clone())?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
@@ -238,10 +241,14 @@ impl Deployment {
             if cfg.prefix.is_none() {
                 cfg.prefix = Some(id.clone());
             }
-            let http = reqwest::Client::builder()
-                .timeout(Duration::from_secs_f64(cfg.timeout))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()?;
+            let http = crate::network::discovery(
+                if cfg.spec.starts_with("http") {
+                    &cfg.spec
+                } else {
+                    "https://local.invalid"
+                },
+                Duration::from_secs_f64(cfg.timeout),
+            )?;
             let document = catalog::load_json(&cfg.spec, &http)
                 .await
                 .with_context(|| format!("source {id}: loading spec"))?;
@@ -267,7 +274,6 @@ impl Deployment {
                 Source {
                     tools,
                     base_url,
-                    http,
                     instructions: cfg.instructions_text.clone(),
                     config: cfg,
                     document,
@@ -442,7 +448,7 @@ impl Deployment {
                     SpendPolicy::dollars(max_price_usd)?,
                 )
                 .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
-                wallets.insert(name, PaidClient::new(reqwest::Client::new(), payer));
+                wallets.insert(name, PaidClient::new(payer));
             }
         }
         #[cfg(feature = "zcash")]
@@ -528,10 +534,7 @@ impl Deployment {
                         )?;
                         let manager = std::sync::Arc::new(manager);
                         managed_pools.push(manager.clone());
-                        wallets.insert(
-                            name.clone(),
-                            PaidClient::managed(reqwest::Client::new(), manager),
-                        );
+                        wallets.insert(name.clone(), PaidClient::managed(manager));
                     }
                 }
                 if f.auto_fund {
@@ -613,7 +616,8 @@ impl Deployment {
                     (
                         t.clone(),
                         wallets[&self.wallet_resolution.bindings[name][id].wallet]
-                            .with_http(source.http.clone()),
+                            .clone()
+                            .with_timeout(Duration::from_secs_f64(source.config.timeout)),
                         source.base_url.clone(),
                     )
                 })

@@ -14,6 +14,8 @@ use x402_mcp_prototype::{
     rotation::store::SyncPhase,
     treasury::{SyncSettings, Treasury},
 };
+#[path = "support/socks.rs"]
+mod socks;
 const TIP: u64 = 2_000_000;
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -340,6 +342,12 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
     restored.close().await.unwrap();
     // The operator command uses treasury settings without fetching provider specs
     // or requiring the deliberately absent submission endpoint environment value.
+    let proxy = socks::Socks::start(
+        std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
+        socks::Fault::None,
+    )
+    .await;
+    let proxy_address = proxy.address;
     let config = dir.path().join("sync.toml");
     std::fs::write(
         &config,
@@ -354,6 +362,9 @@ indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
 daily_input_zec="0.1"
 shield_max_fee_zec="0.001"
+[network]
+mode="tor"
+socks_endpoint="{proxy_address}"
 [sources.unloaded]
 spec="nonexistent.json"
 "#
@@ -379,6 +390,15 @@ spec="nonexistent.json"
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["state"]["sync"]["phase"], "ready");
     assert_eq!(output["state"]["sync_fresh"], true);
+    assert!(!proxy.records.lock().unwrap().is_empty());
+    assert!(
+        proxy
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r.user == "<torS0X>0")
+    );
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     server.abort();
 }

@@ -24,6 +24,7 @@ pub struct PrepareRequest {
 /// Deliberately lacks Debug/Serialize: signed bytes must not enter logs or tools.
 pub struct PreparedTransaction {
     operation_id: String,
+    recipient_identity: Option<String>,
     raw: Zeroizing<Vec<u8>>,
     facts: Option<TransactionFacts>,
 }
@@ -35,6 +36,7 @@ impl PreparedTransaction {
         );
         Ok(Self {
             operation_id: operation_id.into(),
+            recipient_identity: store.operation_recipient(operation_id)?,
             raw: store.prepared_bytes(operation_id)?,
             facts: store
                 .status()?
@@ -43,6 +45,11 @@ impl PreparedTransaction {
                 .find(|o| o.operation_id == operation_id)
                 .map(|o| o.facts),
         })
+    }
+    pub fn network_identity(&self) -> Result<crate::network::IsolationId> {
+        crate::network::IsolationId::evm(self.recipient_identity.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("network_identity_missing: durable operation recipient")
+        })?)
     }
     pub fn facts(&self) -> Option<&TransactionFacts> {
         self.facts.as_ref()

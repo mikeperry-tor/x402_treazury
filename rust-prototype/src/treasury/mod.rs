@@ -350,6 +350,7 @@ impl Treasury {
         observation.max_age_seconds = settings.max_age_seconds;
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
+            identity: crate::network::IsolationId::treasury(&self.status().await?.treasury_id),
             network: self.network,
             client: self
                 .client
@@ -427,6 +428,7 @@ impl Treasury {
 }
 
 struct SyncSession {
+    identity: crate::network::IsolationId,
     network: TreasuryNetwork,
     client: LightClient,
     store: StoreHandle,
@@ -450,6 +452,7 @@ impl SyncSession {
                 result = self.sync_inner(&settings, &mut observation) => result,
             };
             self.client.go_offline().await;
+            crate::network::global().release_grpc(&self.identity).await;
             outcome
         });
         // Join blocking workers and tear down detached async tasks before the
@@ -471,14 +474,13 @@ impl SyncSession {
         settings: &SyncSettings,
         observation: &mut SyncObservation,
     ) -> Result<()> {
-        let uri = settings
-            .endpoint
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid indexer URI"))?;
-        tokio::time::timeout(Duration::from_secs(15), self.client.set_indexer_uri(uri))
-            .await
-            .map_err(|_| anyhow::anyhow!("indexer connection timed out"))?
-            .map_err(|_| anyhow::anyhow!("indexer connection failed"))?;
+        let indexer = tokio::time::timeout(
+            Duration::from_secs(30),
+            crate::network::global().grpc(&self.identity, &settings.endpoint),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
+        self.client.set_indexer(indexer);
         let info = tokio::time::timeout(Duration::from_secs(15), self.client.info())
             .await
             .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
@@ -489,6 +491,7 @@ impl SyncSession {
         );
         server::check_endpoint(
             &settings.endpoint,
+            &self.identity,
             &self.network.chain(),
             info.latest_block_height,
         )
@@ -527,7 +530,13 @@ impl SyncSession {
             self.network.name(),
             info.latest_block_height
         );
-        server::check_endpoint(&settings.endpoint, &self.network.chain(), height).await?;
+        server::check_endpoint(
+            &settings.endpoint,
+            &self.identity,
+            &self.network.chain(),
+            height,
+        )
+        .await?;
         // A later fork can invalidate a spend whose source cost was already
         // accounted. Keep that cost consumed and fail closed until the same
         // transaction regains the required depth; never make it spendable again

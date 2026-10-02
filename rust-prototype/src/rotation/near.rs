@@ -38,7 +38,7 @@ pub enum SwapStatus {
     Unknown,
 }
 pub struct NearClient {
-    http: reqwest::Client,
+    headers: reqwest::header::HeaderMap,
     origin: String,
 }
 impl NearClient {
@@ -64,12 +64,18 @@ impl NearClient {
         }
         Ok(Self {
             origin: origin.into(),
-            http: reqwest::Client::builder()
-                .default_headers(headers)
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(30))
-                .build()?,
+            headers,
         })
+    }
+    fn wallet_http(&self, request: &Value) -> Result<reqwest::Client> {
+        let address = request["recipient"]
+            .as_str()
+            .context("network_identity_missing: quote recipient")?;
+        crate::network::global().http(
+            &crate::network::IsolationId::evm(address)?,
+            &self.origin,
+            Duration::from_secs(30),
+        )
     }
     async fn response(&self, request: reqwest::RequestBuilder) -> Result<Value> {
         let mut response = request
@@ -98,15 +104,20 @@ impl NearClient {
     pub async fn assets(&self) -> Result<Assets> {
         validate_assets(
             &self
-                .response(self.http.get(format!("{}/v0/tokens", self.origin)))
+                .response(
+                    crate::network::discovery(&self.origin, Duration::from_secs(30))?
+                        .get(format!("{}/v0/tokens", self.origin))
+                        .headers(self.headers.clone()),
+                )
                 .await?,
         )
     }
     pub async fn quote(&self, request: Value, limits: &Limits, now: u64) -> Result<Quote> {
         let response = self
             .response(
-                self.http
+                self.wallet_http(&request)?
                     .post(format!("{}/v0/quote", self.origin))
+                    .headers(self.headers.clone())
                     .json(&request),
             )
             .await?;
@@ -119,8 +130,9 @@ impl NearClient {
             .context("dry quote has no status")?;
         let v = self
             .response(
-                self.http
+                self.wallet_http(&quote.request)?
                     .get(format!("{}/v0/status", self.origin))
+                    .headers(self.headers.clone())
                     .query(&[("depositAddress", deposit)]),
             )
             .await?;
@@ -381,6 +393,106 @@ pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_socks as socks;
+
+    #[test]
+    fn near_requests_use_recipient_and_discovery_isolation() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "rotation::near::tests::proxied_near_child",
+            ])
+            .env("ALL_PROXY", "http://127.0.0.1:1")
+            .env("NO_PROXY", "*")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "isolated process network policy; exercised by parent test"]
+    async fn proxied_near_child() {
+        use crate::network::{IsolationId, Mode, NetworkPolicy};
+        let (request, response, limits) = fixture(false);
+        let quote_response = response.clone();
+        let status_response = json!({"status":"SUCCESS", "quoteResponse":response});
+        let app = axum::Router::new()
+            .route(
+                "/v0/tokens",
+                axum::routing::get(|| async {
+                    axum::Json(
+                        serde_json::from_str::<Value>(include_str!(
+                            "../../tests/fixtures/near/tokens.json"
+                        ))
+                        .unwrap(),
+                    )
+                }),
+            )
+            .route(
+                "/v0/quote",
+                axum::routing::post(move || {
+                    let v = quote_response.clone();
+                    async move { axum::Json(v) }
+                }),
+            )
+            .route(
+                "/v0/status",
+                axum::routing::get(move || {
+                    let v = status_response.clone();
+                    async move { axum::Json(v) }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = socks::Socks::start(
+            std::collections::BTreeMap::from([(
+                "near.invalid".into(),
+                listener.local_addr().unwrap(),
+            )]),
+            socks::Fault::None,
+        )
+        .await;
+        crate::network::install(NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(proxy.address),
+            ..Default::default()
+        })
+        .unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = NearClient::at("http://near.invalid", None, None).unwrap();
+        client.assets().await.unwrap();
+        let quote = client
+            .quote(request.clone(), &limits, 2_000_000_000)
+            .await
+            .unwrap();
+        assert_eq!(client.status(&quote).await.unwrap(), SwapStatus::Success);
+        // Reconstruct the client and quote as recovery does; recipient identity must persist.
+        let recovered: Quote =
+            serde_json::from_value(serde_json::to_value(&quote).unwrap()).unwrap();
+        assert_eq!(
+            NearClient::at("http://near.invalid", None, None)
+                .unwrap()
+                .status(&recovered)
+                .await
+                .unwrap(),
+            SwapStatus::Success
+        );
+        let records = proxy.records.lock().unwrap();
+        assert_eq!(records.len(), 2);
+        for (record, id) in records.iter().zip([
+            IsolationId::discovery("http://near.invalid").unwrap(),
+            IsolationId::evm(request["recipient"].as_str().unwrap()).unwrap(),
+        ]) {
+            assert_eq!(record.password, crate::network::global().credentials(&id).1);
+            assert_eq!(record.address_type, 3);
+        }
+        server.abort();
+    }
     fn fixture(dry: bool) -> (Value, Value, Limits) {
         let assets = validate_assets(
             &serde_json::from_str(include_str!("../../tests/fixtures/near/tokens.json")).unwrap(),

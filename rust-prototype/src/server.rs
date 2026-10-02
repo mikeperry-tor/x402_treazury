@@ -80,8 +80,7 @@ impl Server {
             self.help[url]
                 .get_or_try_init(|| async {
                     Ok::<_, anyhow::Error>(
-                        client
-                            .http
+                        crate::network::discovery(url, client.timeout())?
                             .get(url)
                             .send()
                             .await?

@@ -1033,7 +1033,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 9, "unsupported state schema");
+    ensure!(version <= 10, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1090,6 +1090,9 @@ INSERT OR IGNORE INTO funding_health(job_id,started_at) SELECT j.job_id,unixepoc
 PRAGMA user_version=9;
 COMMIT;")?;
     }
+    if version < 10 {
+        db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT NOT NULL); PRAGMA user_version=10; COMMIT;")?;
+    }
     Ok(())
 }
 pub(crate) struct Admission {
@@ -1131,6 +1134,7 @@ impl Store {
                 tx.execute("UPDATE pools SET enabled=0 WHERE name=?1", [name])?;
             }
         }
+
         tx.commit()?;
         Ok(())
     }
@@ -1179,12 +1183,48 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    pub(crate) fn admit(
+    /// Bind an operation's network identity before calculation; bindings are immutable.
+    pub fn bind_operation_recipient(&mut self, operation: &str, recipient: &str) -> Result<()> {
+        let address: alloy_primitives::Address = recipient.parse()?;
+        let recipient = address.to_string();
+        self.db.execute(
+            "INSERT OR IGNORE INTO operation_network(operation_id,recipient) VALUES (?1,?2)",
+            params![operation, recipient],
+        )?;
+        let saved: String = self.db.query_row(
+            "SELECT recipient FROM operation_network WHERE operation_id=?1",
+            [operation],
+            |r| r.get(0),
+        )?;
+        ensure!(saved == recipient, "network_identity_conflict");
+        Ok(())
+    }
+    pub fn operation_recipient(&self, operation: &str) -> Result<Option<String>> {
+        let rows = self.db.prepare("SELECT recipient FROM operation_network WHERE operation_id=?1 UNION SELECT w.address FROM funding_progress p JOIN funding_jobs j ON j.id=p.job_id JOIN wallets w ON w.id=j.wallet_id WHERE p.operation_id=?1 UNION SELECT w.address FROM funding_recovery p JOIN funding_jobs j ON j.id=p.job_id JOIN wallets w ON w.id=j.wallet_id WHERE p.operation_id=?1")?.query_map([operation], |r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut address = None;
+        for row in rows {
+            let parsed: alloy_primitives::Address = row.parse()?;
+            ensure!(
+                address.is_none_or(|previous| previous == parsed),
+                "network_identity_conflict"
+            );
+            address = Some(parsed);
+        }
+        Ok(address.map(|a| a.to_string()))
+    }
+    pub(crate) fn payment_candidate(
+        &self,
+        pool: &str,
+    ) -> Result<super::manager::PaymentCandidateHandle> {
+        self.db.query_row("SELECT w.id,w.address,p.generation FROM pools p JOIN wallets w ON w.pool_id=p.id WHERE p.id=?1 AND p.enabled=1 AND w.role IN ('ACTIVE','ALLOCATED') ORDER BY CASE w.role WHEN 'ACTIVE' THEN 0 ELSE 1 END,w.sequence LIMIT 1", [pool], |r| Ok(super::manager::PaymentCandidateHandle { wallet:r.get(0)?, address:r.get(1)?, generation:r.get(2)? })).map_err(|_| anyhow::anyhow!(AdmissionError::WalletNotReady("active wallet unavailable")))
+    }
+    pub(crate) fn admit_for(
         &mut self,
         pool: &str,
         cost: U256,
         requirements_hash: &str,
         view: super::base::ChainView,
+        expected: Option<&super::manager::PaymentCandidateHandle>,
     ) -> Result<Admission> {
         ensure!(cost > U256::ZERO, "invalid payment amount");
         let tx = self
@@ -1266,6 +1306,10 @@ impl Store {
                 params![generation, pool],
             )?;
             wallet = ready;
+        }
+        if expected.is_some_and(|e| e.wallet != wallet || e.generation != generation) {
+            tx.commit()?;
+            anyhow::bail!(AdmissionError::PayerChanged);
         }
         let id = Uuid::new_v4().to_string();
         tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES (?1,?2,?3,?4,?5,?6,'ADMITTED')",params![id,pool,wallet,generation,cost.to_string(),requirements_hash])?;

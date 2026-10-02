@@ -2,13 +2,15 @@
 use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use serde_json::Value;
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
     about = "Create a deterministic OpenAPI request fixture, omitting response documentation"
 )]
 struct Args {
+    #[arg(long)]
+    network_config: Option<std::path::PathBuf>,
     /// Local JSON path or HTTP(S) URL.
     source: String,
     /// Destination JSON file. Replaces an existing fixture after successful parsing.
@@ -60,11 +62,16 @@ fn snapshot(mut spec: Value) -> Result<Vec<u8>> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if let Some(path) = &args.network_config {
+        x402_mcp_prototype::network::install(x402_mcp_prototype::network::NetworkPolicy::load(
+            path,
+        )?)?;
+    }
     let raw = if args.source.starts_with("https://") || args.source.starts_with("http://") {
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .build()?;
+        let http = x402_mcp_prototype::network::discovery(
+            &args.source,
+            std::time::Duration::from_secs(120),
+        )?;
         http.get(&args.source)
             .send()
             .await?

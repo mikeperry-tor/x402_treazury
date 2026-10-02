@@ -68,14 +68,14 @@ impl TransactionPreparer for Treasury {
             .client
             .as_mut()
             .context("treasury client unavailable")?;
-        let uri = settings
-            .endpoint
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid indexer URI"))?;
-        tokio::time::timeout(Duration::from_secs(15), client.set_indexer_uri(uri))
-            .await
-            .map_err(|_| anyhow::anyhow!("indexer connection timed out"))?
-            .map_err(|_| anyhow::anyhow!("indexer connection failed"))?;
+        let identity = crate::network::IsolationId::treasury(&observed.treasury_id);
+        let indexer = tokio::time::timeout(
+            Duration::from_secs(30),
+            crate::network::global().grpc(&identity, &settings.endpoint),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
+        client.set_indexer(indexer);
         let info = tokio::time::timeout(Duration::from_secs(15), client.info())
             .await
             .map_err(|_| anyhow::anyhow!("indexer network check timed out"))?

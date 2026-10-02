@@ -1,7 +1,7 @@
 //! Read-only discovery before creating a new seed or any persistent state.
 use anyhow::{Context, Result, ensure};
 use std::time::Duration;
-use zingo_netutils::{GrpcIndexer, Indexer};
+use zingo_netutils::Indexer;
 
 /// Public mainnet endpoint used by the reference Zodl wallets.
 pub const DEFAULT_INDEXER: &str = "https://zec.rocks:443";
@@ -10,14 +10,14 @@ pub const BIRTHDAY_REWIND: u32 = 100;
 
 pub async fn discover(endpoint: &str) -> Result<u32> {
     crate::rotation::base::secure_endpoint(endpoint)?;
-    let uri = endpoint
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid birthday indexer URI"))?;
     tokio::time::timeout(Duration::from_secs(30), async {
-        let mut client = tokio::time::timeout(Duration::from_secs(15), GrpcIndexer::new(uri))
-            .await
-            .map_err(|_| anyhow::anyhow!("birthday indexer connection timed out"))?
-            .map_err(|_| anyhow::anyhow!("birthday indexer connection failed"))?;
+        let mut client = tokio::time::timeout(
+            Duration::from_secs(15),
+            crate::network::global().grpc(&crate::network::IsolationId::bootstrap(), endpoint),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("birthday indexer connection timed out"))?
+        .map_err(|_| anyhow::anyhow!("birthday indexer connection failed"))?;
         let info = client
             .get_lightd_info(Duration::from_secs(15))
             .await

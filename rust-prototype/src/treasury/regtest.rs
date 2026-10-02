@@ -344,6 +344,13 @@ async fn run() -> Result<()> {
             > 100_000
     );
     let op = uuid::Uuid::new_v4().to_string();
+    let identity_op = op.clone();
+    treasury
+        .store
+        .call(move |s| {
+            s.bind_operation_recipient(&identity_op, "0x0000000000000000000000000000000000000001")
+        })
+        .await?;
     let prepared = treasury
         .prepare(PrepareRequest {
             operation_id: op.clone(),
@@ -634,6 +641,13 @@ async fn expiry_run() -> Result<()> {
     let stop = CancellationToken::new();
     treasury.sync_once(&stop).await?;
     let op = uuid::Uuid::new_v4().to_string();
+    let identity_op = op.clone();
+    treasury
+        .store
+        .call(move |s| {
+            s.bind_operation_recipient(&identity_op, "0x0000000000000000000000000000000000000001")
+        })
+        .await?;
     let prepared = treasury
         .prepare(PrepareRequest {
             operation_id: op.clone(),
@@ -783,4 +797,39 @@ fn reject_missing_input<T: pepper_sync::wallet::OutputInterface>(
     current.wallet_transactions.insert(origin, removed);
     assert!(super::expiry::check_inputs::<T>(original, current, txid, height, 2)? > 0);
     Ok(true)
+}
+
+use crate::test_socks as socks;
+#[tokio::test]
+#[ignore = "requires Docker; run alone because it installs the process Tor policy"]
+async fn tor_consensus_lifecycle() -> Result<()> {
+    let proxy = socks::Socks::start(
+        std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse()?)]),
+        socks::Fault::None,
+    )
+    .await;
+    crate::network::install(crate::network::NetworkPolicy {
+        mode: crate::network::Mode::Tor,
+        socks_endpoint: Some(proxy.address),
+        ..Default::default()
+    })?;
+    run().await?;
+    refunds_run().await?;
+    expiry_run().await?;
+    let records = proxy.records.lock().unwrap();
+    ensure!(records.len() >= 6, "no proxied consensus activity");
+    ensure!(
+        records.iter().all(|r| r.user == "<torS0X>0"),
+        "missing SOCKS isolation"
+    );
+    ensure!(
+        records
+            .iter()
+            .map(|r| &r.password)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            > 3,
+        "identities were not separated"
+    );
+    Ok(())
 }

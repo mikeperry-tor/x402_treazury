@@ -89,9 +89,20 @@ impl Treasury {
         stop: &CancellationToken,
     ) -> Result<PreparedTransaction> {
         self.sync_once(stop).await?;
-        let address = self
+        let (address, recipient) = self
             .store
-            .call(move |s| s.refund_address(&job)?.context("unknown refund address"))
+            .call(move |s| {
+                let funding = s
+                    .status()?
+                    .funding_jobs
+                    .into_iter()
+                    .find(|j| j.id == job)
+                    .context("network_identity_missing: refund job")?;
+                Ok((
+                    s.refund_address(&job)?.context("unknown refund address")?,
+                    funding.recipient,
+                ))
+            })
             .await?;
         let status = self.status().await?;
         ensure!(
@@ -103,6 +114,7 @@ impl Treasury {
         let instant = now()?;
         self.store
             .call(move |s| {
+                s.bind_operation_recipient(&id, &recipient)?;
                 s.reserve(
                     &id,
                     None,

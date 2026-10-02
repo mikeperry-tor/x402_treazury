@@ -1,0 +1,9 @@
+# For standalone CLI/wallet commands: --network-config examples/network-tor.toml
+# For a deployment, put this table directly in its --meta-config file.
+# Tor Browser must already be running on the configured SOCKS port.
+[network]
+mode = "tor"
+socks_endpoint = "127.0.0.1:9150"
+isolation_namespace = "x402_treazury"
+socks_auth = "tor_extended"
+connect_timeout_seconds = 30
