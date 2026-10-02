@@ -16,7 +16,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
-use x402_mcp_prototype::{
+use x402_treazure::{
     catalog::RoutedRequest,
     payment::{PaidClient, SpendPolicy, USDC},
     rotation::{
@@ -393,7 +393,7 @@ async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
 #[cfg(feature = "zcash")]
 #[tokio::test]
 async fn managed_deployment_shares_pools_keeps_static_profiles_and_releases_ownership() {
-    use x402_mcp_prototype::{deployment::Deployment, treasury::Treasury};
+    use x402_treazure::{deployment::Deployment, treasury::Treasury};
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
     let dir = tempfile::tempdir().unwrap();
@@ -466,7 +466,7 @@ sources=["api"]
         .bind(&env)
         .await
         .unwrap();
-    let state = x402_mcp_prototype::rotation::store::status(&dir.path().join("state")).unwrap();
+    let state = x402_treazure::rotation::store::status(&dir.path().join("state")).unwrap();
     assert_eq!(state.pools.len(), 2);
     assert_eq!(state.pools[0].addresses.len(), 2);
     assert!(
@@ -497,7 +497,7 @@ sources=["api"]
     t.close().await.unwrap();
     // Exercise the opt-in owner's shutdown with all quote work deferred. This
     // must not contact NEAR, and must release every worker's store handle.
-    let mut state = x402_mcp_prototype::rotation::store::Store::open(
+    let mut state = x402_treazure::rotation::store::Store::open(
         &dir.path().join("state"),
         &dir.path().join("key"),
         &state.treasury_id,
@@ -755,7 +755,7 @@ async fn managed_payments_use_isolated_tor_connections() {
 #[test]
 #[ignore = "subprocess helper runs with its own immutable Tor policy"]
 fn tor_managed_child() {
-    use x402_mcp_prototype::network::{Mode, NetworkPolicy, install};
+    use x402_treazure::network::{Mode, NetworkPolicy, install};
     install(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(std::env::var("TOR_TEST_PROXY").unwrap().parse().unwrap()),

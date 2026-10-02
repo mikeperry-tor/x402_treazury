@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use x402_mcp_prototype::{
+use x402_treazure::{
     catalog::{Config, build_tools, build_tools_with_prices},
     pricing::PricingCache,
 };

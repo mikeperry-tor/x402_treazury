@@ -10,7 +10,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use tokio_util::sync::CancellationToken;
-use x402_mcp_prototype::{
+use x402_treazure::{
     rotation::store::SyncPhase,
     treasury::{SyncSettings, Treasury},
 };
@@ -289,18 +289,18 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         .as_object_mut()
         .unwrap()
         .remove("confirmed_pool_balances_zatoshis");
-    let legacy: x402_mcp_prototype::rotation::store::SyncObservation =
+    let legacy: x402_treazure::rotation::store::SyncObservation =
         serde_json::from_value(legacy).unwrap();
     assert!(legacy.confirmed_pool_balances_zatoshis.is_none());
     {
-        use x402_mcp_prototype::rotation::transaction::{PrepareRequest, TransactionPreparer};
+        use x402_treazure::rotation::transaction::{PrepareRequest, TransactionPreparer};
         let before = calls.lock().unwrap().len();
         let error = treasury
             .prepare(PrepareRequest {
                 operation_id: uuid::Uuid::new_v4().to_string(),
                 pool_id: None,
                 daily_limit_zatoshis: 1_000_000,
-                deadline: x402_mcp_prototype::rotation::base::now().unwrap() + 600,
+                deadline: x402_treazure::rotation::base::now().unwrap() + 600,
                 recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
                 amount_zatoshis: 50_000,
                 max_fee_zatoshis: 20_000,
@@ -372,7 +372,7 @@ spec="nonexistent.json"
     )
     .unwrap();
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
             .env_clear()
             .env("INDEXER", endpoint)
             .args(["wallet", "sync", "--meta-config"])
@@ -405,7 +405,7 @@ spec="nonexistent.json"
 
 #[tokio::test]
 async fn interrupted_sync_checkpoints_can_resume_and_stop_network_tasks() {
-    use x402_mcp_prototype::rotation::store::status;
+    use x402_treazure::rotation::store::status;
     let dir = tempfile::tempdir().unwrap();
     let (endpoint, calls, server, stalled) = mock("main").await;
     stalled.store(true, Ordering::SeqCst);
@@ -465,7 +465,7 @@ async fn interrupted_sync_checkpoints_can_resume_and_stop_network_tasks() {
 
 #[tokio::test]
 async fn treasury_command_owner_serializes_and_releases_exclusive_lock() {
-    use x402_mcp_prototype::treasury::{actor, submission::GrpcSubmission};
+    use x402_treazure::treasury::{actor, submission::GrpcSubmission};
     let dir = tempfile::tempdir().unwrap();
     let (endpoint, calls, server, _) = mock("main").await;
     let mut treasury = wallet(dir.path()).await;
@@ -502,7 +502,7 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     let id = treasury.status().await.unwrap().treasury_id;
     treasury.close().await.unwrap();
     // Materialize journal jobs without network or a funding worker.
-    let mut store = x402_mcp_prototype::rotation::store::Store::open(
+    let mut store = x402_treazure::rotation::store::Store::open(
         &dir.path().join("state"),
         &dir.path().join("key"),
         &id,
@@ -538,7 +538,7 @@ async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
     let state = dir.path().join("state");
     let key = dir.path().join("key");
     let run = |extra: Vec<&str>| {
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"));
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"));
         command
             .env_clear()
             .env("ZCASH_INDEXER_URL", &endpoint)
@@ -578,7 +578,7 @@ async fn birthday_discovery_rejects_wrong_network_without_creating_state() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
         .env("TEST_INDEXER", endpoint)
         .args([
@@ -603,8 +603,8 @@ async fn birthday_discovery_rejects_wrong_network_without_creating_state() {
 #[tokio::test]
 #[ignore = "read-only public mainnet endpoint qualification; requires network"]
 async fn public_birthday_lookup() {
-    let height = x402_mcp_prototype::treasury::birthday::discover(
-        x402_mcp_prototype::treasury::birthday::DEFAULT_INDEXER,
+    let height = x402_treazure::treasury::birthday::discover(
+        x402_treazure::treasury::birthday::DEFAULT_INDEXER,
     )
     .await
     .unwrap();
@@ -616,7 +616,7 @@ async fn post_activation_indexer_must_supply_ironwood_before_sync_or_init() {
     const POST_ACTIVATION: u64 = 3_500_000;
     for tree in [b"".as_slice(), b"000000".as_slice()] {
         let (endpoint, calls, server, _) = mock_with_tree("main", POST_ACTIVATION, tree).await;
-        let result = x402_mcp_prototype::treasury::birthday::discover(&endpoint).await;
+        let result = x402_treazure::treasury::birthday::discover(&endpoint).await;
         if tree.is_empty() {
             assert!(result.unwrap_err().to_string().contains("missing Ironwood"));
             let dir = tempfile::tempdir().unwrap();
@@ -643,7 +643,7 @@ async fn post_activation_indexer_must_supply_ironwood_before_sync_or_init() {
 #[tokio::test]
 async fn ironwood_capability_rejects_tree_from_a_different_height() {
     let (endpoint, _, server, _) = mock_with_tree("main", 3_500_000, b"wrong-height").await;
-    let error = x402_mcp_prototype::treasury::birthday::discover(&endpoint)
+    let error = x402_treazure::treasury::birthday::discover(&endpoint)
         .await
         .unwrap_err();
     assert!(error.to_string().contains("wrong Ironwood tree height"));

@@ -17,7 +17,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     assert_eq!(cases.len(), 14);
     let mut total = 0;
     for case in cases {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
         command
             .env_clear()
             .current_dir(repo)

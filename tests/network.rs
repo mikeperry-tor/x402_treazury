@@ -2,7 +2,7 @@
 mod socks;
 use socks::{Fault, Socks};
 use std::{collections::BTreeMap, time::Duration};
-use x402_mcp_prototype::network::{IsolationId, Mode, NetworkContext, NetworkPolicy, SocksAuth};
+use x402_treazure::network::{IsolationId, Mode, NetworkContext, NetworkPolicy, SocksAuth};
 fn policy(proxy: &Socks) -> NetworkPolicy {
     NetworkPolicy {
         mode: Mode::Tor,
@@ -249,7 +249,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
         "spec = 'http://unreachable.invalid/openapi.json'\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .args(["--show-config", "--config"])
         .arg(&source)
         .output()
@@ -263,7 +263,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
         "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .args(["--show-config", "--config"])
         .arg(&source)
         .arg("--network-config")
@@ -279,7 +279,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert_eq!(value["network"]["mode"], "tor");
     assert_eq!(value["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(value["network"]["socks_auth"], "tor_extended");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .args(["--meta-config", "missing.toml", "--network-config"])
         .arg(policy)
         .output()

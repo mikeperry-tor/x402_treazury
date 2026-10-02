@@ -1,9 +1,14 @@
 [package]
-name = "x402-mcp-prototype"
+name = "x402-treazure"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 publish = false
+default-run = "treazure"
+
+[[bin]]
+name = "treazure"
+path = "src/main.rs"
 
 [features]
 default = []

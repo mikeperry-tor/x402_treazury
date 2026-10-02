@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser};
 use rmcp::ServiceExt;
 use std::{collections::BTreeMap, time::Duration};
-use x402_mcp_prototype::{
+use x402_treazure::{
     catalog::{self, Config},
     payment::{PaidClient, Payer, SpendPolicy},
     server::{Server, http_app},
@@ -10,7 +10,9 @@ use x402_mcp_prototype::{
 
 #[derive(Parser)]
 #[command(
-    about = "Experimental Rust generic x402 MCP server",
+    name = "treazure",
+    version,
+    about = "x402-treazure: paid API tools with managed wallets and optional Tor isolation",
     after_help = "Treasury commands: wallet --help (init/addresses/address/pool require the zcash feature)"
 )]
 struct Args {
@@ -76,7 +78,7 @@ async fn main() -> std::process::ExitCode {
 }
 async fn run() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("wallet") {
-        return x402_mcp_prototype::wallet_cli::run().await;
+        return x402_treazure::wallet_cli::run().await;
     }
     let matches = Args::command().get_matches();
     let args = Args::from_arg_matches(&matches)?;
@@ -117,21 +119,19 @@ async fn run() -> Result<()> {
             }
         }
         let mut value = if let Some(path) = &args.meta_config {
-            x402_mcp_prototype::deployment::Deployment::show_config(path).await?
+            x402_treazure::deployment::Deployment::show_config(path).await?
         } else {
             let path = args
                 .config
                 .as_ref()
                 .context("--show-config requires --config or --meta-config")?;
-            serde_json::to_value(
-                x402_mcp_prototype::config::load(std::path::Path::new(path)).await?,
-            )?
+            serde_json::to_value(x402_treazure::config::load(std::path::Path::new(path)).await?)?
         };
         if args.meta_config.is_none() {
             let policy = args
                 .network_config
                 .as_ref()
-                .map(|path| x402_mcp_prototype::network::NetworkPolicy::load(path))
+                .map(|path| x402_treazure::network::NetworkPolicy::load(path))
                 .transpose()?
                 .unwrap_or_default();
             value["network"] = policy.inspection();
@@ -140,9 +140,7 @@ async fn run() -> Result<()> {
         return Ok(());
     }
     if let Some(path) = &args.network_config {
-        x402_mcp_prototype::network::install(x402_mcp_prototype::network::NetworkPolicy::load(
-            path,
-        )?)?;
+        x402_treazure::network::install(x402_treazure::network::NetworkPolicy::load(path)?)?;
     }
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if let Some(path) = &args.env_file {
@@ -152,7 +150,7 @@ async fn run() -> Result<()> {
         }
     }
     if let Some(path) = &args.meta_config {
-        let deployment = x402_mcp_prototype::deployment::Deployment::load(path).await?;
+        let deployment = x402_treazure::deployment::Deployment::load(path).await?;
         if args.list_tags {
             println!(
                 "{}",
@@ -204,7 +202,7 @@ async fn run() -> Result<()> {
         return result;
     }
     let mut cfg: Config = if let Some(path) = &args.config {
-        let resolved = x402_mcp_prototype::config::load(std::path::Path::new(path)).await?;
+        let resolved = x402_treazure::config::load(std::path::Path::new(path)).await?;
         resolved.settings
     } else {
         Config::default()
@@ -265,8 +263,8 @@ async fn run() -> Result<()> {
     if let Some(timeout) = args.timeout {
         cfg.timeout = timeout;
     }
-    x402_mcp_prototype::config::validate(&cfg)?;
-    let http = x402_mcp_prototype::network::discovery(
+    x402_treazure::config::validate(&cfg)?;
+    let http = x402_treazure::network::discovery(
         if cfg.spec.starts_with("http") {
             &cfg.spec
         } else {
@@ -295,7 +293,7 @@ async fn run() -> Result<()> {
         .prefix
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
-    x402_mcp_prototype::pricing::validate(&cfg)?;
+    x402_treazure::pricing::validate(&cfg)?;
     let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
     if args.list_tools {
         println!("{}", serde_json::to_string_pretty(&tools)?);
@@ -323,7 +321,7 @@ async fn run() -> Result<()> {
             .context("EVM_PRIVATE_KEY required")?,
         policy,
     )?;
-    let prices = x402_mcp_prototype::pricing::process_cache()
+    let prices = x402_treazure::pricing::process_cache()
         .discover(&cfg, &root, &tools, &base)
         .await?;
     tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;

@@ -15,7 +15,7 @@ use std::{
     },
 };
 use tokio::sync::Notify;
-use x402_mcp_prototype::{
+use x402_treazure::{
     catalog::RoutedRequest,
     payment::{PaidClient, Payer, SpendPolicy, USDC},
 };

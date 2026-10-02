@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use x402_mcp_prototype::deployment::Deployment;
+use x402_treazure::deployment::Deployment;
 fn config(scope: &str) -> String {
     format!(
         r#"version=1
@@ -86,7 +86,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     // --show-config runs without credentials or even a spec file; --check loads
     // the catalog but still creates no pool. Inventory carries template provenance.
     let path = dir.path().join("servers.toml");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
         .args(["--meta-config", path.to_str().unwrap(), "--show-config"])
         .output()
@@ -104,7 +104,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let deployment = Deployment::load(&path).await.unwrap();
     let inv = serde_json::to_value(deployment.inventory()).unwrap();
     assert_eq!(inv[0]["wallet_bindings"]["a"]["scope"], "binding");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
         .args(["--meta-config", path.to_str().unwrap(), "--check"])
         .output()
@@ -239,7 +239,7 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
 #[cfg(feature = "zcash")]
 #[tokio::test]
 async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
-    use x402_mcp_prototype::{rotation::store::status, treasury::Treasury};
+    use x402_treazure::{rotation::store::status, treasury::Treasury};
     let dir = tempfile::tempdir().unwrap();
     let owner=Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
     let id = owner.status().await.unwrap().treasury_id;

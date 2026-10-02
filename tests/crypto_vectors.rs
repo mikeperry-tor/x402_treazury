@@ -38,7 +38,7 @@ fn eip3009_hash_and_signature_match_python() {
         nonce: msg["nonce"].as_str().unwrap().parse().unwrap(),
     };
     let domain = eip712_domain! { name: "USD Coin", version: "2", chain_id: 8453,
-    verifying_contract: x402_mcp_prototype::payment::USDC.parse::<Address>().unwrap(), };
+    verifying_contract: x402_treazure::payment::USDC.parse::<Address>().unwrap(), };
     let hash = auth.eip712_signing_hash(&domain);
     assert_eq!(
         hash,

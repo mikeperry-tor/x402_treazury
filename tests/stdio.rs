@@ -47,7 +47,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         ),
     )
     .unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
         .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
         .arg("--config")

@@ -51,7 +51,7 @@ impl Server {
         );
         Self {
             tools: Arc::new(tools.into_iter().map(|(t, _, _)| t).collect()),
-            name: "x402-mcp-prototype".into(),
+            name: "x402-treazure".into(),
             bindings,
             instructions,
             max_response_chars,

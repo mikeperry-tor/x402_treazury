@@ -6,7 +6,7 @@ edition = "2024"
 publish = false
 [workspace]
 [dependencies]
-x402-mcp-prototype = { path = "../.." }
+x402-treazure = { path = "../.." }
 zingolib = { path = "../../vendor/zingolib", default-features = false }
 
 # Experimental compatibility patch: see vendor/README.md.

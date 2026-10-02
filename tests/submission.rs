@@ -9,7 +9,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU8, AtomicUsize, Ordering},
 };
-use x402_mcp_prototype::{
+use x402_treazure::{
     rotation::{
         base::now,
         store::Store,

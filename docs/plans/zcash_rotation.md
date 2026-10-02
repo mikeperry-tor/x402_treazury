@@ -66,11 +66,9 @@ The first managed release supports **x402 v2 exact EIP-3009 payments in canonica
 Base USDC only**. Static Rust mode retains its tested Base EVM v1/v2 exact and
 v2 upto paths. SVM rotation, shared wallets across processes, gas/approval
 funding, automatic dust sweeping, and arbitrary treasury accounts are outside
-this release. The Python launchers remain runnable as compatibility references;
-implement this feature in Rust without introducing a parallel Python manager.
-Full replacement of Python launchers additionally requires the catalog/static
-payment parity checks below; do not claim SVM or custom-handler parity that has
-not been implemented.
+this release. The Rust application is the supported implementation. Preserve the
+pinned provider contracts and static-payment coverage alongside managed-wallet work;
+do not claim SVM or legacy custom-launcher support.
 
 ## Implementation base and build contract
 
@@ -83,7 +81,7 @@ starting points:
 | [payment.rs](../../src/payment.rs) | Static/managed dispatch, SDK signing, Base USDC cap, description sanitization and one paid retry; extend structured receipt capture |
 | [server.rs](../../src/server.rs), [main.rs](../../src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; extend shutdown to persist wallet outcomes |
 | [deployment.rs](../../src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static/managed profiles, singleton treasury ownership, atomic binding and bounded shutdown |
-| [tests](../../tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
+| [tests](../../tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; pinned provider contract fixtures |
 | [store.rs](../../src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives, atomic admission/promotion and durable authorizations; add full funding phases and funding-policy hashes |
 | [treasury adapter](../../src/treasury/mod.rs), [wallet CLI](../../src/wallet_cli.rs) | Upstream-pinned init/restore, encrypted sync, calculate-only preparation, explicit submission/reconciliation and pool allocation; add serialized funding-worker commands and backup |
 | [managed admission](../../src/rotation/manager.rs), [Base adapter](../../src/rotation/base.rs), [settings](../../src/rotation/config.rs) | Strict TOML profiles, immutable leases, per-pool deadlines, on-demand canonical balance/nonce reconciliation; add background reconciliation and reorg recovery |
@@ -154,7 +152,7 @@ fields. `telemetry` is required to compile this EVM client's upto implementation
 
 Commit the final integrated `Cargo.lock`. Start from the combined experiment's
 working versions: Alloy upper stack 2.5.0, Alloy core 1.7.3 and Zcash primitives
-0.30.1. The standalone prototype lock has Alloy upper stack 2.1.1; do not mix
+0.30.1. The application lock has Alloy upper stack 2.1.1; do not mix
 lockfile entries by hand. Resolve and test the final graph as one unit. Review
 any additional cryptographic dependency changes explicitly.
 
@@ -658,7 +656,7 @@ For a managed request:
    pool later promotes. The payment gate serializes managed handshakes initially;
    cancellation leaves durable uncertainty after the submission boundary.
 
-The prototype captures a payer before the unpaid request in static mode. Managed
+The application captures a payer before the unpaid request in static mode. Managed
 mode must choose its lease at admission, after seeing the price and current
 pool generation. A bare `replace_payer` call is not a rotation transaction and
 cannot replace persistence/reservation logic.
@@ -755,7 +753,7 @@ max_input_zec = "0.04"
 max_fee_bps = 500
 
 [sources.socialfetch]
-extends = "../../providers/socialfetch.toml"
+extends = "../providers/socialfetch.toml"
 timeout = 90
 
 [servers.research]
@@ -945,7 +943,8 @@ No implicit description or response truncation is permitted. Preserve the
 implemented pricing cache behavior and qualify any remaining custom handlers
 before claiming full launcher parity;
 unimplemented config behavior must be explicit rather than silently ignored.
-Python compatibility tests remain useful even though runtime coordination is Rust.
+Reviewed golden catalog fixtures preserve independent comparison coverage without
+a Python application dependency.
 
 ## Privacy and availability constraints
 
@@ -1019,7 +1018,7 @@ injected transports. Tests must never load a developer's `.env`, wallet key
 files, real seed or mainnet RPC by default. Build-time proving-parameter downloads
 are separate from runtime tests. Regtest-only tests are separately gated and use
 local node/indexer infrastructure, with exact setup/invocation documented in
-`docs/usage.md`.
+`tests/REGTEST.md`.
 
 | Scenario | Required assertion |
 | --- | --- |
@@ -1061,9 +1060,8 @@ cargo test --locked --manifest-path Cargo.toml
 cargo clippy --locked --manifest-path Cargo.toml --all-targets -- -D warnings
 cargo fmt --manifest-path Cargo.toml --check
 python3 compat/check.py
-uv sync
-.venv/bin/python tests/compatibility.py
-uv run pytest tests/ -q
+cargo test --locked --test provider_catalogs
+scripts/zcash.sh test --all-targets
 ```
 
 Once zingolib is in the executable graph, route Cargo build/test/clippy commands

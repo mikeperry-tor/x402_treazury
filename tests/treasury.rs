@@ -1,5 +1,5 @@
 #![cfg(feature = "zcash")]
-use x402_mcp_prototype::treasury::Treasury;
+use x402_treazure::treasury::Treasury;
 use zeroize::Zeroizing;
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -64,7 +64,7 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     let state = dir.path().join("state");
     let key = dir.path().join("key");
     let run = |args: Vec<&str>| {
-        std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
             .env_clear()
             .env("RUST_BACKTRACE", "1")
             .env("RUST_LIB_BACKTRACE", "1")

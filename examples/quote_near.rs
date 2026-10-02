@@ -1,6 +1,6 @@
 //! Read-only route demo: public test addresses, dry=true, no credentials or wallet.
 use anyhow::Result;
-use x402_mcp_prototype::rotation::{
+use x402_treazure::rotation::{
     base::now,
     near::{Limits, NearClient, request},
 };
@@ -13,9 +13,7 @@ async fn main() -> Result<()> {
     }
     let args = <Args as clap::Parser>::parse();
     if let Some(path) = &args.network_config {
-        x402_mcp_prototype::network::install(x402_mcp_prototype::network::NetworkPolicy::load(
-            path,
-        )?)?;
+        x402_treazure::network::install(x402_treazure::network::NetworkPolicy::load(path)?)?;
     }
     let client = NearClient::new(None)?;
     let assets = client.assets().await?;

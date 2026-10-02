@@ -1,5 +1,5 @@
 use std::num::NonZeroU32;
-use x402_mcp_prototype::payment::{Payer, SpendPolicy};
+use x402_treazure::payment::{Payer, SpendPolicy};
 use zingolib::{
     config::{ClientConfig, WalletConfig},
     lightclient::LightClient,

@@ -7,7 +7,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
-use x402_mcp_prototype::{
+use x402_treazure::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
     server::{Server, http_app},
