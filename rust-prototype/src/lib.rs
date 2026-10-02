@@ -3,4 +3,8 @@ pub mod config;
 pub mod deployment;
 pub mod payment;
 pub mod pricing;
+pub mod rotation;
 pub mod server;
+#[cfg(feature = "zcash")]
+pub mod treasury;
+pub mod wallet_cli;

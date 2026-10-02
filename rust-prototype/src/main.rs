@@ -9,7 +9,10 @@ use x402_mcp_prototype::{
 };
 
 #[derive(Parser)]
-#[command(about = "Experimental Rust generic x402 MCP server")]
+#[command(
+    about = "Experimental Rust generic x402 MCP server",
+    after_help = "Offline treasury commands: wallet --help (init/address/pool require the zcash feature)"
+)]
 struct Args {
     #[arg(long)]
     meta_config: Option<std::path::PathBuf>,
@@ -60,6 +63,9 @@ struct Args {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("wallet") {
+        return x402_mcp_prototype::wallet_cli::run().await;
+    }
     let matches = Args::command().get_matches();
     let args = Args::from_arg_matches(&matches)?;
     if args.meta_config.is_some() {

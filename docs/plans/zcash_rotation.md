@@ -80,21 +80,26 @@ starting points:
 | [server.rs](../../rust-prototype/src/server.rs), [main.rs](../../rust-prototype/src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; extend shutdown to persist wallet outcomes |
 | [deployment.rs](../../rust-prototype/src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static payer profiles, atomic binding and bounded shutdown; add managed wallet profiles |
 | [tests](../../rust-prototype/tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
+| [store.rs](../../rust-prototype/src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives; add managed admission, full funding phases, policy hashes and verified reconciliation |
+| [treasury adapter](../../rust-prototype/src/treasury/mod.rs), [wallet CLI](../../rust-prototype/src/wallet_cli.rs) | Runnable upstream-pinned offline init/restore, address derivation and pool allocation; extend to managed TOML runtime, sync, transaction preparation and backup |
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 26 tests. The combined suite runs 12 shared
+The standalone Rust suite has 33 tests, with two additional offline treasury
+tests under `--features zcash` and two fixture utility tests. The combined suite runs 12 shared
 payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
 Zcash dependency graph. The catalog comparison covers 726 tool definitions
 across 14 committed configs/fixtures. These establish a buildable starting
-point, not an implementation of funding, durable send recovery, or rotation.
+point. Prepared-byte/snapshot recovery and pool transitions are tested storage
+primitives; live funding, transaction construction and payment-triggered rotation
+are not implemented.
 Zcash transaction construction with spendable notes, proving, broadcast, chain
 sync, and the live NEAR route require the tests specified later.
 
 ### Dependency pins and patch ownership
 
-Use Rust 1.98.1, pinned in `rust-prototype/rust-toolchain.toml`. Pin zingolib to
+Use Rust 1.98.1, the toolchain used to validate the pinned graph. Pin zingolib to
 `zingolib_v6.0.0`, commit `c6381534f802b1022041beda4b01c106ad132329`, with
 `default-features = false`. Use upstream zingolib directly, not extracted Zimppy
 wallet code. The release's recovery/send APIs are the integration target.

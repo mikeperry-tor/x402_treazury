@@ -16,3 +16,7 @@ target/
 .ruff_cache/
 *.swp
 *.swo
+
+# Local managed-wallet state and encryption material
+/state/
+/secrets/

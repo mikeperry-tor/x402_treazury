@@ -5,7 +5,19 @@ edition = "2024"
 rust-version = "1.93"
 publish = false
 
+[features]
+default = []
+zcash = ["dep:zingolib", "dep:zip32"]
+
 [dependencies]
+tempfile = "3"
+rusqlite = { version = "0.38", features = ["bundled"] }
+chacha20poly1305 = "0.10"
+zeroize = "1"
+uuid = { version = "1", features = ["v4"] }
+fs2 = "0.4"
+zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
+zip32 = { version = "0.2.1", optional = true }
 alloy-primitives = "1.5"
 alloy-signer-local = "2.0"
 anyhow = "1"
@@ -31,9 +43,9 @@ x402-types = "=2.0.2"
 
 [dev-dependencies]
 alloy-sol-types = "1.5"
-tempfile = "3"
 
 # Experimental compatibility patch: see vendor/README.md.
 [patch.crates-io]
+lightwallet-protocol = { git = "https://github.com/zingolabs/lightwallet-protocol-rust", rev = "9bdfdc77eb283f2a3d26c27100cc2ac90148cd93" }
 alloy-primitives = { path = "vendor/alloy-primitives" }
 alloy-sol-macro-expander = { path = "vendor/alloy-sol-macro-expander" }
