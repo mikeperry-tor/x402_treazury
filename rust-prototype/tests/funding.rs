@@ -145,3 +145,62 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     drop(store);
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"seed",
+    )
+    .unwrap();
+    let pool = s.ensure_pool("a", "5").unwrap();
+    let jobs = s.funding_jobs().unwrap();
+    let job = &jobs[0];
+    s.save_funding_quote(&job.id, b"quote").unwrap();
+    s.advance_funding(
+        &job.id,
+        x402_mcp_prototype::rotation::store::funding::FundingPhase::Quoted,
+        x402_mcp_prototype::rotation::store::funding::FundingPhase::Preparing,
+    )
+    .unwrap();
+    s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
+        .unwrap();
+    s.prepare_with_facts(
+        &job.operation_id,
+        1,
+        b"next",
+        b"signed",
+        Some(TransactionFacts {
+            txid: "test".into(),
+            expiry_height: 100,
+            amount_zatoshis: 50,
+            fee_zatoshis: 10,
+            deadline: u64::MAX,
+        }),
+    )
+    .unwrap();
+    s.request_broadcast(&job.operation_id, 1, 1, false).unwrap();
+    s.record_credit(&job.wallet_id, "5000000", "base-block", 1)
+        .unwrap();
+    s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
+        .unwrap();
+    let (store, task) = StoreHandle::spawn(s);
+    let mut worker = FundingWorker {
+        store: store.clone(),
+        backend: Fake {
+            store: store.clone(),
+            sends: 0,
+            chain_credit: true,
+        },
+        poll_seconds: 1,
+    };
+    worker.tick(1).await.unwrap();
+    assert!(!store.call(|s| s.status()).await.unwrap().outgoing_pending);
+    assert_eq!(worker.backend.sends, 0);
+    drop(worker);
+    drop(store);
+    task.await.unwrap();
+}

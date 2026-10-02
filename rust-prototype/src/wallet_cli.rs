@@ -12,6 +12,17 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Retry an unprepared funding job; refuses every operation with signed bytes.
+    RecoverUnprepared {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        treasury_id: String,
+        #[arg(long)]
+        job_id: String,
+    },
     /// Back up encrypted wallet, EVM keys, journals and encryption key offline.
     Backup {
         #[arg(long)]
@@ -103,6 +114,22 @@ pub async fn run() -> Result<()> {
         })
         .await??;
         println!("{}", serde_json::json!({"backup_complete":true}));
+        return Ok(());
+    }
+    if let Command::RecoverUnprepared {
+        state_dir,
+        key_file,
+        treasury_id,
+        job_id,
+    } = args.command
+    {
+        tokio::task::spawn_blocking(move || {
+            let mut store =
+                crate::rotation::store::Store::open(&state_dir, &key_file, &treasury_id)?;
+            store.recover_unprepared_funding(&job_id)
+        })
+        .await??;
+        println!("{}", serde_json::json!({"funding_job_reset":true}));
         return Ok(());
     }
     #[cfg(not(feature = "zcash"))]
@@ -235,7 +262,9 @@ pub async fn run() -> Result<()> {
                 treasury.ensure_pool(name, deposit_size).await?;
                 treasury
             }
-            Command::Status { .. } | Command::Backup { .. } => unreachable!(),
+            Command::Status { .. } | Command::Backup { .. } | Command::RecoverUnprepared { .. } => {
+                unreachable!()
+            }
         };
         println!(
             "{}",

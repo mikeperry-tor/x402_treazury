@@ -521,3 +521,32 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
     );
     assert!(backup.join("backup.json").is_file());
 }
+
+#[test]
+fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
+    use x402_mcp_prototype::rotation::store::funding::FundingPhase;
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let pool = s.ensure_pool("a", "5").unwrap();
+    let job = s.funding_jobs().unwrap().remove(0);
+    s.save_funding_quote(&job.id, b"old-quote").unwrap();
+    s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
+        .unwrap();
+    s.reserve(&job.operation_id, Some(&pool), 1, 100, 100)
+        .unwrap();
+    s.recover_unprepared_funding(&job.id).unwrap();
+    let next = s.funding_jobs().unwrap().remove(0);
+    assert_ne!(next.operation_id, job.operation_id);
+    assert_eq!(next.recipient, job.recipient);
+    assert_eq!(next.phase, FundingPhase::Allocated);
+    assert!(s.funding_quote(&job.id).is_err());
+    s.save_funding_quote(&job.id, b"new-quote").unwrap();
+    s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
+        .unwrap();
+    s.reserve(&next.operation_id, Some(&pool), 1, 100, 100)
+        .unwrap();
+    s.prepare(&next.operation_id, 1, b"next-snapshot", b"signed")
+        .unwrap();
+    assert!(s.recover_unprepared_funding(&job.id).is_err());
+    assert!(s.operation_pending(&next.operation_id).unwrap());
+}

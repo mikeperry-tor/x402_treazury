@@ -105,8 +105,9 @@ The embedded treasury implements sync, calculate-only Zcash transaction preparat
 explicit saved-byte submission and confirmation reconciliation. Payment
 reconciliation runs on demand and every five seconds in the background. A changed
 confirmed anchor blocks admission until explicit recovery. Consistent offline
-backups include the database, encryption key and completion manifest. Explicit
-reorg recovery remains required.
+backups include the database, encryption key and completion manifest. Guarded unprepared-job recovery archives old quote/refund bindings and allocates
+a new operation ID, refusing all signed operations. Explicit reorg, refund and
+expired-source recovery remain required.
 The opt-in `zcash-testutils` suite prepares a deposit from synthetic Orchard notes,
 verifies its proof, and checks exact-byte encrypted restart recovery using public
 test keys. Local gRPC fixtures cover sync and submission, including changing-block
@@ -955,7 +956,7 @@ spend; none is authorized by this plan alone.
    deposit/reorg regressions documented in `rust-prototype/tests/REGTEST.md`.
    Extend regtest coverage to refund discovery/shielding, expiry recovery and
    explicit repair of spends invalidated after accounting confirmation. Wire the serialized
-   owner into the funding worker, including abandoned-unprepared reservation recovery. The serialized owner and
+   owner into the funding worker, including the guarded offline `wallet recover-unprepared` command. The serialized owner and
 opt-in funding coordinator are implemented; refund derivation is atomically persisted,
 while high-index discovery and shielding still require regtest coverage.
    Exercise shielded-to-transparent deposits,

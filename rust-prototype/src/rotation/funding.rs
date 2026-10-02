@@ -41,6 +41,20 @@ impl<B: FundingBackend> FundingWorker<B> {
         Ok(())
     }
     pub async fn tick(&mut self, instant: u64) -> Result<()> {
+        // Base credit can arrive before Zcash reaches its configured depth.
+        // Completed/quarantined jobs must still settle their source outbox, even
+        // though the ordinary funding scheduler no longer selects them.
+        let status = self.store.call(|s| s.status()).await?;
+        for job in &status.funding_jobs {
+            if matches!(
+                job.phase,
+                FundingPhase::Complete | FundingPhase::RecoveryRequired
+            ) && status.treasury_operations.iter().any(|o| {
+                o.operation_id == job.operation_id && o.attempts > 0 && o.submission != "CONFIRMED"
+            }) {
+                let _ = self.backend.reconcile(job).await;
+            }
+        }
         let Some(job) = self
             .store
             .call(move |s| s.next_funding_job(instant))
@@ -261,6 +275,19 @@ impl FundingBackend for Backend {
         Ok(())
     }
     async fn submit(&mut self, job: &FundingJob) -> Result<()> {
+        let (limits, _) = self.policy(job)?;
+        let id = job.operation_id.clone();
+        let facts = self
+            .store
+            .call(move |s| Ok(s.operation(&id)?.facts))
+            .await?;
+        ensure!(
+            facts
+                .amount_zatoshis
+                .checked_add(facts.fee_zatoshis)
+                .is_some_and(|n| n <= limits.max_input),
+            "prepared source exceeds current input cap"
+        );
         self.treasury
             .submit(job.operation_id.clone(), false)
             .await?;

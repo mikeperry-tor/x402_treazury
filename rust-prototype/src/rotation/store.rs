@@ -989,7 +989,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 5, "unsupported state schema");
+    ensure!(version <= 6, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1019,6 +1019,12 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS funding_refunds(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),address BLOB NOT NULL);
 PRAGMA user_version=5;
+COMMIT;")?;
+    }
+    if version < 6 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS funding_recovery(operation_id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES funding_jobs(id),phase TEXT NOT NULL,quote BLOB,refund BLOB);
+PRAGMA user_version=6;
 COMMIT;")?;
     }
     Ok(())
@@ -1284,6 +1290,13 @@ impl Store {
             "explicit_rebroadcast_required"
         );
         if operation.attempts == 0 {
+            let enabled: bool = self.db.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1", [id], |r| r.get(0))?;
+            ensure!(enabled, "pool disabled");
+            let candidate: Option<bool> = self.db.query_row("SELECT f.state!='COMPLETE' AND w.role='ALLOCATED' FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1", [id], |r| r.get(0)).optional()?;
+            ensure!(
+                candidate.unwrap_or(true),
+                "funding candidate no longer needs deposit"
+            );
             ensure!(
                 operation.facts.deadline - now >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
                 "funding_deadline_too_close"

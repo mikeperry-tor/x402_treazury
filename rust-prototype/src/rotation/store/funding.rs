@@ -57,6 +57,48 @@ pub struct FundingJob {
     pub last_error: Option<String>,
 }
 impl Store {
+    /// Operator-only reset. Any signed bytes (even resolved ones) forbid it.
+    /// Old encrypted bindings remain archived; the next attempt gets a new ID
+    /// and a freshly derived refund address, never another send of old intent.
+    pub fn recover_unprepared_funding(&mut self, job: &str) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let (operation, phase): (String, String) = tx.query_row("SELECT j.operation_id,j.phase FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.job_id=?1 AND f.state!='COMPLETE' AND w.role='ALLOCATED'", [job], |r| Ok((r.get(0)?,r.get(1)?)))?;
+        let parsed: FundingPhase = serde_json::from_str(&phase)?;
+        ensure!(
+            matches!(
+                parsed,
+                FundingPhase::Allocated
+                    | FundingPhase::Quoted
+                    | FundingPhase::Preparing
+                    | FundingPhase::RecoveryRequired
+            ),
+            "funding phase cannot be reset"
+        );
+        let signed: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1)",
+            [&operation],
+            |r| r.get(0),
+        )?;
+        ensure!(!signed, "recovery refused: operation has signed bytes");
+        let consumed: i64 = tx.query_row(
+            "SELECT COALESCE(SUM(consumed),0) FROM budget_entries WHERE id=?1",
+            [&operation],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            consumed == 0,
+            "recovery refused: operation has consumed budget"
+        );
+        tx.execute("INSERT INTO funding_recovery SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1", [job])?;
+        tx.execute("DELETE FROM budget_entries WHERE id=?1", [&operation])?;
+        tx.execute("DELETE FROM funding_refunds WHERE job_id=?1", [job])?;
+        tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=0,next_poll=0,last_error=NULL WHERE job_id=?1", params![job,Uuid::new_v4().to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn refund_address(&self, job: &str) -> Result<Option<String>> {
         let bytes: Option<Vec<u8>> = self
             .db
