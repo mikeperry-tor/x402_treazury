@@ -3983,6 +3983,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "portpicker"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
+dependencies = [
+ "rand 0.8.8",
+]
+
+[[package]]
 name = "postcard"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6558,6 +6567,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "fs2",
+ "orchard",
  "percent-encoding",
  "regex",
  "reqwest",
@@ -6645,6 +6655,18 @@ dependencies = [
  "quote",
  "syn 3.0.6",
  "synstructure",
+]
+
+[[package]]
+name = "zaino-proto"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "120e9bb92547921333d63d8dc96ca7489694d5a87dc6e805152468bdd435646b"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -7051,6 +7073,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "zingo_test_vectors"
+version = "0.0.1"
+source = "git+https://github.com/zingolabs/infrastructure.git?rev=89cf104a2416144d1bbbae30aca02bec062d1492#89cf104a2416144d1bbbae30aca02bec062d1492"
+
+[[package]]
 name = "zingolib"
 version = "6.0.0"
 source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
@@ -7075,6 +7102,7 @@ dependencies = [
  "nonempty",
  "orchard",
  "pepper-sync",
+ "portpicker",
  "prost",
  "rand 0.8.8",
  "rust-embed",
@@ -7084,9 +7112,12 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "shardtree",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-stream",
  "tracing",
+ "zaino-proto",
  "zcash_address",
  "zcash_client_backend",
  "zcash_encoding",
@@ -7102,6 +7133,7 @@ dependencies = [
  "zingo-price",
  "zingo-status",
  "zingo_common_components",
+ "zingo_test_vectors",
  "zip32",
 ]
 

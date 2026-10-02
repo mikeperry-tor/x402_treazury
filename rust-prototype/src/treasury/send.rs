@@ -1,4 +1,6 @@
 //! Serialized, calculate-only deposit preparation and durable submission control.
+#[cfg(all(test, feature = "zcash-testutils"))]
+mod proving_tests;
 use super::{Treasury, snapshot};
 use crate::rotation::{
     base::now,

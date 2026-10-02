@@ -542,10 +542,23 @@ async fn free_calls_do_not_touch_admission_and_bootstrap_requires_both_candidate
 #[tokio::test]
 async fn unused_expired_authorization_requires_fresh_chain_evidence_to_release() {
     let h = Harness::new().await;
-    h.f.challenge.lock().unwrap()["accepts"][0]["maxTimeoutSeconds"] = json!(1);
+    // Leave more time than the client's three-second request timeout for signing.
+    // A one-second lifetime can expire at a wall-clock boundary before submission.
+    h.f.challenge.lock().unwrap()["accepts"][0]["maxTimeoutSeconds"] = json!(5);
     h.f.reject.store(true, Ordering::SeqCst);
     assert!(h.client.execute(h.route()).await.is_err());
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let expiry = {
+        let signed = h.f.signed.lock().unwrap();
+        assert_eq!(signed.len(), 1, "test must reach signed submission");
+        signed[0]["payload"]["authorization"]["validBefore"]
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+    };
+    while now().unwrap() <= expiry {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     h.f.stale.store(true, Ordering::SeqCst);
     assert!(h.client.execute(h.route()).await.is_err());
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);

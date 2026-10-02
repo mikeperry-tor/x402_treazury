@@ -7,7 +7,7 @@ use axum::{
 };
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU8, Ordering},
+    atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 use x402_mcp_prototype::{
     rotation::{
@@ -53,6 +53,7 @@ fn raw() -> Vec<u8> {
 #[derive(Clone)]
 struct Mock {
     mode: Arc<AtomicU8>,
+    blocks: Arc<AtomicUsize>,
     sends: Arc<Mutex<Vec<Vec<u8>>>>,
     raw: Vec<u8>,
     txid: String,
@@ -90,17 +91,43 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
             } else {
                 [
                     bytes(1, if mode == 7 { b"conflicting" } else { &s.raw }),
-                    number(2, if mode == 8 { 490 } else { 0 }),
+                    number(
+                        2,
+                        if mode == 14 {
+                            u64::MAX
+                        } else if mode >= 8 {
+                            490
+                        } else {
+                            0
+                        },
+                    ),
                 ]
                 .concat()
             }
         }
-        "GetBlock" => [
-            number(2, 490),
-            bytes(3, &[1; 32]),
-            bytes(7, &bytes(2, &s.hash)),
-        ]
-        .concat(),
+        "GetBlock" => {
+            let call = s.blocks.fetch_add(1, Ordering::SeqCst);
+            // Fork during lookup, absent tx, wrong height, malformed hash,
+            // and a failed canonical recheck must all remain unresolved.
+            if mode == 13 && call > 0 {
+                status = "14";
+            }
+            [
+                number(2, if mode == 11 { 489 } else { 490 }),
+                bytes(
+                    3,
+                    if mode == 12 {
+                        &[1; 31]
+                    } else if mode == 9 && call > 0 {
+                        &[2; 32]
+                    } else {
+                        &[1; 32]
+                    },
+                ),
+                bytes(7, &bytes(2, if mode == 10 { &[0; 32] } else { &s.hash })),
+            ]
+            .concat()
+        }
         _ => {
             status = "12";
             vec![]
@@ -124,6 +151,7 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
     let tx = Transaction::read(raw.as_slice(), BranchId::Nu5).unwrap();
     let state = Mock {
         mode: Arc::new(AtomicU8::new(0)),
+        blocks: Arc::new(AtomicUsize::new(0)),
         sends: Arc::new(Mutex::new(vec![])),
         raw: raw.clone(),
         txid: tx.txid().to_string(),
@@ -200,9 +228,20 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
         (6, TransactionPresence::Absent),
         (7, TransactionPresence::Unknown),
         (8, TransactionPresence::Confirmed { height: 490 }),
+        (9, TransactionPresence::Unknown),
+        (10, TransactionPresence::Unknown),
+        (11, TransactionPresence::Unknown),
+        (12, TransactionPresence::Unknown),
+        (13, TransactionPresence::Unknown),
+        (14, TransactionPresence::Unknown),
     ] {
         state.mode.store(mode, Ordering::SeqCst);
+        state.blocks.store(0, Ordering::SeqCst);
         assert_eq!(sender.lookup(&prepared).await.unwrap(), want);
+        assert!(
+            store.operation_pending("op").unwrap(),
+            "lookup alone never settles accounting"
+        );
     }
     state.mode.store(3, Ordering::SeqCst);
     let intent =

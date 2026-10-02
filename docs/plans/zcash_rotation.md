@@ -84,25 +84,30 @@ starting points:
 | [deployment.rs](../../rust-prototype/src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static/managed profiles, singleton treasury ownership, atomic binding and bounded shutdown |
 | [tests](../../rust-prototype/tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
 | [store.rs](../../rust-prototype/src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives, atomic admission/promotion and durable authorizations; add full funding phases and funding-policy hashes |
-| [treasury adapter](../../rust-prototype/src/treasury/mod.rs), [wallet CLI](../../rust-prototype/src/wallet_cli.rs) | Runnable upstream-pinned offline init/restore, address derivation and pool allocation; managed serving restores this owner; add sync, transaction preparation and backup |
+| [treasury adapter](../../rust-prototype/src/treasury/mod.rs), [wallet CLI](../../rust-prototype/src/wallet_cli.rs) | Upstream-pinned init/restore, encrypted sync, calculate-only preparation, explicit submission/reconciliation and pool allocation; add serialized funding-worker commands and backup |
 | [managed admission](../../rust-prototype/src/rotation/manager.rs), [Base adapter](../../rust-prototype/src/rotation/base.rs), [settings](../../rust-prototype/src/rotation/config.rs) | Strict TOML profiles, immutable leases, per-pool deadlines, on-demand canonical balance/nonce reconciliation; add background reconciliation and reorg recovery |
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 52 tests, with two offline treasury tests and two
-managed deployment tests under `--features zcash`, plus two fixture utility tests. The combined suite runs 12 shared
+The standalone Rust suite covers configuration, catalog, payment and durable
+rotation behavior; `--features zcash` adds treasury, sync, submission and managed
+deployment tests. `--all-targets` includes fixture utility tests. The combined suite runs 12 shared
 payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
 Zcash dependency graph. The catalog comparison covers 726 tool definitions
 across 14 committed configs/fixtures. These establish a buildable starting
 point. Prepared-byte/snapshot recovery, managed TOML serving, journal-before-send
 admission and payment-triggered promotion are implemented and exercised against
-local fake Base RPC and seller services. Funding jobs are queued but not executed;
-live funding and Zcash transaction construction are not implemented. Payment
+local fake Base RPC and seller services. Funding jobs are queued but not executed.
+The embedded treasury implements sync, calculate-only Zcash transaction preparation,
+explicit saved-byte submission and confirmation reconciliation. Payment
 reconciliation is on demand and a changed confirmed anchor blocks admission
 until explicit recovery; add background reconciliation and reorg recovery.
-Zcash transaction construction with spendable notes, proving, broadcast, chain
-sync, and the live NEAR route require the tests specified later.
+The opt-in `zcash-testutils` suite prepares a deposit from synthetic Orchard notes,
+verifies its proof, and checks exact-byte encrypted restart recovery using public
+test keys. Local gRPC fixtures cover sync and submission, including changing-block
+and malformed-inclusion rejection. Consensus settlement/reorg recovery and the live
+NEAR route still require the qualification specified later.
 
 ### Dependency pins and patch ownership
 
@@ -422,8 +427,10 @@ unresolved outgoing record. Submission consumes a single-use `BroadcastTransacti
 created only after a durable BROADCAST_REQUESTED intent. Concrete deposit preparation
 and submission/reconciliation live in `treasury/send.rs` and `treasury/submission.rs`.
 The future funding worker must serialize those APIs with sync on the same owner;
-managed startup does not submit queued work. Positive spendable-note proving,
-regtest settlement/reorg tests and refund shielding remain qualification work.
+managed startup does not submit queued work. Synthetic-note preparation and proof
+verification run under `zcash-testutils`; they do not demonstrate consensus
+acceptance. Regtest settlement/reorg tests and refund shielding remain qualification
+work.
 
 ### Prepare, persist, broadcast and recover
 
@@ -933,7 +940,9 @@ spend; none is authorized by this plan alone.
    admission, fair shared-treasury scheduling and aggregate budget concurrency.
 3. **Qualify the embedded treasury.** Exercise the encrypted sync, calculate-only
    deposit preparation, durable raw submission and confirmation adapters with
-   spendable-note proving and regtest settlement/reorg fixtures. Wire the serialized
+   regtest settlement/reorg fixtures in addition to the synthetic-note proving
+   suite (`scripts/zcash.sh test --features zcash-testutils --all-targets`, from
+   `rust-prototype/`). Wire the serialized
    owner into the funding worker, including abandoned-unprepared reservation recovery.
    Exercise shielded-to-transparent deposits,
    refunds and exact-byte recovery in isolated regtest.
