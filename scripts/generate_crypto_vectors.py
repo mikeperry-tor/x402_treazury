@@ -1,6 +1,10 @@
-"""Regenerate independent test vectors with the project's Python dependencies.
-Run from repo root: .venv/bin/python tests/generate_crypto_vectors.py
-The private key here is public test data, never a funded wallet.
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["eth-account==0.14.0", "pycryptodome==3.23.0"]
+# ///
+"""Regenerate independent Keccak/EIP-712 vectors, without the application.
+Run: uv run --script scripts/generate_crypto_vectors.py
+Only public test keys are used. Review the resulting fixture diff.
 """
 import json
 from pathlib import Path
@@ -35,4 +39,4 @@ vectors = {
     'eip3009': {'typed_data': message, 'hash': '0x' + signed.message_hash.hex(),
                 'signature': '0x' + signed.signature.hex()},
 }
-Path(__file__).with_name('fixtures').joinpath('crypto_vectors.json').write_text(json.dumps(vectors, indent=2) + '\n')
+Path(__file__).resolve().parents[1].joinpath('tests/fixtures/crypto_vectors.json').write_text(json.dumps(vectors, indent=2) + '\n')

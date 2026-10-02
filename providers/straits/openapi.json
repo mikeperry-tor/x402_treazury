@@ -940,5 +940,5 @@
       }
     }
   },
-  "x-catalog-source": "confs/straits/straits_digest.json"
+  "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/straits/straits_digest.json"
 }

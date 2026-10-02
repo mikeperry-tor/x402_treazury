@@ -82,6 +82,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         match index {
             0 => {
                 assert!(response["result"]["serverInfo"]["version"].is_string());
+                assert_eq!(response["result"]["serverInfo"]["name"], "x402-treazure");
                 input
                     .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
                     .await

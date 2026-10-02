@@ -1059,7 +1059,7 @@ python3 vendor/verify.py
 cargo test --locked --manifest-path Cargo.toml
 cargo clippy --locked --manifest-path Cargo.toml --all-targets -- -D warnings
 cargo fmt --manifest-path Cargo.toml --check
-python3 compat/check.py
+python3 scripts/check_compat.py
 cargo test --locked --test provider_catalogs
 scripts/zcash.sh test --all-targets
 ```
