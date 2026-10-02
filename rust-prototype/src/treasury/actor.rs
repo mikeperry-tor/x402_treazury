@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 enum Command {
+    Refund(String, oneshot::Sender<Result<String>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(PrepareRequest, oneshot::Sender<Result<PreparedTransaction>>),
     Submit(String, bool, oneshot::Sender<Result<SubmissionOutcome>>),
@@ -34,6 +35,9 @@ impl TreasuryHandle {
             .await
             .map_err(|_| anyhow::anyhow!("treasury owner stopped"))?;
         recv.await.context("treasury owner stopped")?
+    }
+    pub async fn refund_address(&self, job: String) -> Result<String> {
+        self.call(|reply| Command::Refund(job, reply)).await
     }
     pub async fn sync(&self) -> Result<()> {
         self.call(Command::Sync).await
@@ -71,6 +75,7 @@ impl Treasury {
                 command = commands.receiver.recv() => {
                     let Some(command) = command else { break };
                     match command {
+                        Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
                         Command::Prepare(request, reply) => {
                             let result = match self.sync_once(&stop).await {
@@ -91,6 +96,7 @@ impl Treasury {
                 }
             }
             if !self.healthy {
+                stop.cancel();
                 commands.receiver.close();
                 drop(commands);
                 self.close().await?;

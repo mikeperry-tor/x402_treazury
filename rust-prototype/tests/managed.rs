@@ -502,6 +502,40 @@ sources=["api"]
         .unwrap();
     assert_eq!(t.status().await.unwrap().pools[0].addresses.len(), 2);
     t.close().await.unwrap();
+    // Exercise the opt-in owner's shutdown with all quote work deferred. This
+    // must not contact NEAR, and must release every worker's store handle.
+    let mut state = x402_mcp_prototype::rotation::store::Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &state.treasury_id,
+    )
+    .unwrap();
+    for job in state.funding_jobs().unwrap() {
+        state
+            .defer_funding(&job.id, i64::MAX as u64, None, false)
+            .unwrap();
+    }
+    drop(state);
+    std::fs::write(
+        &path,
+        config.replace("[funding]", "[funding]\nauto_fund=true"),
+    )
+    .unwrap();
+    let running = Deployment::load(&path)
+        .await
+        .unwrap()
+        .bind(&env)
+        .await
+        .unwrap();
+    let stop = tokio_util::sync::CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    stop.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     let static_config = config.replace(
         "mode=\"zcash_rotation\"\nmax_input_zec=\"0.02\"\nmax_fee_bps=500",
         "mode=\"static\"\nprivate_key_env=\"KEY\"",

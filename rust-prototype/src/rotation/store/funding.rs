@@ -57,6 +57,36 @@ pub struct FundingJob {
     pub last_error: Option<String>,
 }
 impl Store {
+    pub fn refund_address(&self, job: &str) -> Result<Option<String>> {
+        let bytes: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT address FROM funding_refunds WHERE job_id=?1",
+                [job],
+                |r| r.get(0),
+            )
+            .optional()?;
+        bytes
+            .map(|bytes| {
+                let plain = unseal(
+                    &self.key,
+                    &format!("v1:{}:{}:refund:{job}", self.id, self.network.name()),
+                    &bytes,
+                )?;
+                Ok(std::str::from_utf8(&plain)?.to_owned())
+            })
+            .transpose()
+    }
+    pub fn save_refund_address(
+        &mut self,
+        job: &str,
+        address: &str,
+        revision: i64,
+        snapshot: &[u8],
+    ) -> Result<i64> {
+        self.save_wallet_snapshot(revision, snapshot, None, Some((job, address)))
+    }
+
     /// Materialize a journal row for every allocation, including databases created
     /// before the worker existed. Never discard jobs for disabled pools.
     pub fn funding_jobs(&mut self) -> Result<Vec<FundingJob>> {
@@ -119,7 +149,7 @@ impl Store {
     ) -> Result<()> {
         ensure!(expected.permits(&next), "invalid funding transition");
         let changed = self.db.execute(
-            "UPDATE funding_progress SET phase=?3,last_error=NULL WHERE job_id=?1 AND phase=?2",
+            "UPDATE funding_progress SET phase=?3,last_error=NULL WHERE job_id=?1 AND phase=?2 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",
             params![
                 id,
                 serde_json::to_string(&expected)?,

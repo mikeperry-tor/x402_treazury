@@ -8,3 +8,6 @@ pub mod transaction;
 
 #[cfg(feature = "zcash")]
 pub mod near;
+
+#[cfg(feature = "zcash")]
+pub mod funding;

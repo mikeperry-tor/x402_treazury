@@ -179,6 +179,10 @@ impl TreasuryConfig {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FundingConfig {
+    /// Explicit opt-in: starts source deposits, not merely chain reconciliation.
+    #[serde(default)]
+    pub auto_fund: bool,
+    pub near_user_session_env: Option<String>,
     pub base_rpc_url_env: String,
     #[serde(default = "base_confirmations")]
     pub base_confirmations: u64,
@@ -199,6 +203,9 @@ pub struct FundingConfig {
 impl FundingConfig {
     pub fn validate(&self) -> Result<()> {
         env_name(&self.base_rpc_url_env)?;
+        if let Some(s) = &self.near_user_session_env {
+            env_name(s)?;
+        }
         if let Some(s) = &self.near_api_key_env {
             env_name(s)?;
         }

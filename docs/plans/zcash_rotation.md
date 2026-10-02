@@ -98,7 +98,9 @@ Zcash dependency graph. The catalog comparison covers 726 tool definitions
 across 14 committed configs/fixtures. These establish a buildable starting
 point. Prepared-byte/snapshot recovery, managed TOML serving, journal-before-send
 admission and payment-triggered promotion are implemented and exercised against
-local fake Base RPC and seller services. Funding jobs are queued but not executed.
+local fake Base RPC and seller services. Funding jobs execute through `rotation/funding.rs` when `funding.auto_fund = true`
+(default false); they use the serialized treasury owner and independently verify Base
+credit. Refund/partial-deposit outcomes remain conservative recovery states.
 The embedded treasury implements sync, calculate-only Zcash transaction preparation,
 explicit saved-byte submission and confirmation reconciliation. Payment
 reconciliation is on demand and a changed confirmed anchor blocks admission
@@ -951,7 +953,9 @@ spend; none is authorized by this plan alone.
    deposit/reorg regressions documented in `rust-prototype/tests/REGTEST.md`.
    Extend regtest coverage to refund discovery/shielding, expiry recovery and
    explicit repair of spends invalidated after accounting confirmation. Wire the serialized
-   owner into the funding worker, including abandoned-unprepared reservation recovery.
+   owner into the funding worker, including abandoned-unprepared reservation recovery. The serialized owner and
+opt-in funding coordinator are implemented; refund derivation is atomically persisted,
+while high-index discovery and shielding still require regtest coverage.
    Exercise shielded-to-transparent deposits,
    refunds and exact-byte recovery in isolated regtest.
 4. **Implement NEAR funding and qualification.** Capture public token/quote/status

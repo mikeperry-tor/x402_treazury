@@ -447,6 +447,8 @@ impl Deployment {
         }
         #[cfg(feature = "zcash")]
         let mut treasury = None;
+        #[cfg(feature = "zcash")]
+        let mut funding_runtime = None;
         if self
             .wallet_resolution
             .wallets
@@ -531,6 +533,38 @@ impl Deployment {
                         );
                     }
                 }
+                if f.auto_fund {
+                    let (handle, commands) = crate::treasury::actor::channel();
+                    let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
+                    let session = f.near_user_session_env.as_deref().map(secret).transpose()?;
+                    let backend = crate::rotation::funding::Backend {
+                        treasury: handle,
+                        store: store.clone(),
+                        near: crate::rotation::near::NearClient::with_session(
+                            key.as_deref(),
+                            session.as_deref(),
+                        )?,
+                        base,
+                        wallets: self.wallet_resolution.wallets.clone(),
+                        funding: f.clone(),
+                        daily_limit: u64::try_from(crate::rotation::config::zatoshis(
+                            &t.daily_input_zec,
+                        )?)?,
+                    };
+                    let sender = crate::treasury::submission::GrpcSubmission::new(
+                        secret(&t.submission_url_env)?,
+                        secret(&t.indexer_url_env)?,
+                    )?;
+                    funding_runtime = Some((
+                        commands,
+                        sender,
+                        crate::rotation::funding::FundingWorker {
+                            store: store.clone(),
+                            backend,
+                            poll_seconds: f.poll_seconds,
+                        },
+                    ));
+                }
                 treasury = Some(owner);
             }
         }
@@ -613,10 +647,20 @@ impl Deployment {
             listeners,
             #[cfg(feature = "zcash")]
             treasury,
+            #[cfg(feature = "zcash")]
+            funding_runtime,
         })
     }
 }
+#[cfg(feature = "zcash")]
+type FundingRuntime = (
+    crate::treasury::actor::TreasuryCommands,
+    crate::treasury::submission::GrpcSubmission,
+    crate::rotation::funding::FundingWorker<crate::rotation::funding::Backend>,
+);
 pub struct RunningDeployment {
+    #[cfg(feature = "zcash")]
+    funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
     treasury: Option<crate::treasury::Treasury>,
     listeners: Vec<(String, TcpListener, axum::Router)>,
@@ -632,9 +676,25 @@ impl RunningDeployment {
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
         #[cfg(feature = "zcash")]
-        let treasury_task = self
-            .treasury
-            .map(|owner| tokio::spawn(owner.run_sync(stop.clone())));
+        let (treasury_task, funding_task) = match (self.treasury, self.funding_runtime) {
+            (Some(owner), Some((commands, sender, worker))) => (
+                Some(tokio::spawn(owner.run_commands(
+                    commands,
+                    sender,
+                    stop.clone(),
+                ))),
+                Some(tokio::spawn({
+                    let stopped = stop.clone();
+                    async move {
+                        let result = worker.run(stopped.clone()).await;
+                        stopped.cancel();
+                        result
+                    }
+                })),
+            ),
+            (Some(owner), None) => (Some(tokio::spawn(owner.run_sync(stop.clone()))), None),
+            (None, _) => (None, None),
+        };
         let mut tasks = JoinSet::new();
         for (name, listener, app) in self.listeners {
             let stopped = stop.clone();
@@ -647,6 +707,7 @@ impl RunningDeployment {
         }
         let mut result = tokio::select! {
             _ = shutdown.cancelled() => Ok(()),
+            _ = stop.cancelled() => Err(anyhow::anyhow!("treasury or funding worker stopped")),
             ended = tasks.join_next() => match ended {
                 Some(Ok(Err(e))) => Err(e),
                 Some(Err(e)) => Err(e.into()),
@@ -665,6 +726,11 @@ impl RunningDeployment {
             result = Err(anyhow::anyhow!(
                 "shutdown deadline exceeded; pending paid calls may have unknown outcomes"
             ));
+        }
+        #[cfg(feature = "zcash")]
+        if let Some(task) = funding_task {
+            // Drop the worker's StoreHandle before waiting for treasury close.
+            task.await.context("funding worker failed")??;
         }
         #[cfg(feature = "zcash")]
         if let Some(task) = treasury_task {

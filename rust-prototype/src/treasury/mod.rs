@@ -227,6 +227,35 @@ impl Treasury {
         self.healthy = true;
         self.addresses().await
     }
+    /// Persist the complete derivation range and its job binding before a quote
+    /// can expose this address to a remote service.
+    pub async fn refund_address(&mut self, job: String) -> Result<String> {
+        let lookup = job.clone();
+        if let Some(address) = self.store.call(move |s| s.refund_address(&lookup)).await? {
+            return Ok(address);
+        }
+        ensure!(self.healthy, "treasury requires reopen");
+        self.healthy = false;
+        let client = self
+            .client
+            .as_mut()
+            .context("treasury client unavailable")?;
+        let (_, address) = client
+            .generate_transparent_address(zip32::AccountId::ZERO, false)
+            .await
+            .map_err(|_| anyhow::anyhow!("refund derivation failed"))?;
+        let address =
+            zcash_keys::address::Address::Transparent(address).encode(&self.network.chain());
+        let bytes = snapshot(client).await?;
+        let expected = self.revision;
+        let saved = address.clone();
+        self.revision = self
+            .store
+            .call(move |s| s.save_refund_address(&job, &saved, expected, &bytes))
+            .await?;
+        self.healthy = true;
+        Ok(address)
+    }
     pub async fn ensure_pool(&self, name: String, deposit_size: String) -> Result<String> {
         ensure!(
             self.healthy,
@@ -337,6 +366,7 @@ impl Treasury {
                     if let Some(client) = &mut self.client {
                         client.go_offline().await;
                     }
+                    stop.cancel();
                     tracing::error!("treasury persistence failed; funding disabled until restart");
                     // Persistence failure is fatal to treasury ownership, not Base payments.
                     self.close().await?;

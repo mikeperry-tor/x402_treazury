@@ -432,3 +432,43 @@ async fn treasury_command_owner_serializes_and_releases_exclusive_lock() {
         .unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let treasury = wallet(dir.path()).await;
+    treasury
+        .ensure_pool("refunds".into(), "5".into())
+        .await
+        .unwrap();
+    let id = treasury.status().await.unwrap().treasury_id;
+    treasury.close().await.unwrap();
+    // Materialize journal jobs without network or a funding worker.
+    let mut store = x402_mcp_prototype::rotation::store::Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &id,
+    )
+    .unwrap();
+    let jobs = store.funding_jobs().unwrap();
+    drop(store);
+    let mut treasury = Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
+        .await
+        .unwrap();
+    let first = treasury.refund_address(jobs[0].id.clone()).await.unwrap();
+    assert_eq!(
+        first,
+        treasury.refund_address(jobs[0].id.clone()).await.unwrap()
+    );
+    treasury.close().await.unwrap();
+    let mut treasury = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+        .await
+        .unwrap();
+    assert_eq!(
+        first,
+        treasury.refund_address(jobs[0].id.clone()).await.unwrap()
+    );
+    let second = treasury.refund_address(jobs[1].id.clone()).await.unwrap();
+    assert_ne!(first, second);
+    treasury.close().await.unwrap();
+}

@@ -356,6 +356,15 @@ impl Store {
         bytes: &[u8],
         observation: Option<SyncObservation>,
     ) -> Result<i64> {
+        self.save_wallet_snapshot(expected, bytes, observation, None)
+    }
+    fn save_wallet_snapshot(
+        &mut self,
+        expected: i64,
+        bytes: &[u8],
+        observation: Option<SyncObservation>,
+        refund: Option<(&str, &str)>,
+    ) -> Result<i64> {
         ensure!(!bytes.is_empty(), "empty snapshot");
         let revision = expected
             .checked_add(1)
@@ -374,6 +383,17 @@ impl Store {
             "INSERT INTO snapshots VALUES (?1,?2)",
             params![revision, encrypted],
         )?;
+        if let Some((job, address)) = refund {
+            let encrypted = seal(
+                &self.key,
+                &format!("v1:{}:{}:refund:{job}", self.id, self.network.name()),
+                address.as_bytes(),
+            )?;
+            tx.execute(
+                "INSERT INTO funding_refunds VALUES (?1,?2)",
+                params![job, encrypted],
+            )?;
+        }
         tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing)", [revision])?;
         if let Some(mut observation) = observation {
             observation.snapshot_revision = revision;
@@ -690,6 +710,15 @@ impl Store {
         ensure!(reserved > 0, "operation has no reservation");
         let enabled:bool=tx.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1",[id],|r|r.get(0))?;
         ensure!(enabled, "pool disabled");
+        let funding: Option<(String, String)> = tx.query_row("SELECT j.phase,w.role FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1", [id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((phase, role)) = funding {
+            ensure!(
+                serde_json::from_str::<funding::FundingPhase>(&phase)?
+                    == funding::FundingPhase::Preparing
+                    && role == "ALLOCATED",
+                "funding candidate changed during preparation"
+            );
+        }
         tx.execute("INSERT INTO snapshots VALUES (?1,?2)", params![next, snap])?;
         tx.execute(
             "INSERT INTO outgoing VALUES (?1,'PREPARED',?2,?3)",
@@ -954,7 +983,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 4, "unsupported state schema");
+    ensure!(version <= 5, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -978,6 +1007,12 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS funding_progress(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),operation_id TEXT NOT NULL UNIQUE,phase TEXT NOT NULL,quote BLOB,attempts INTEGER NOT NULL DEFAULT 0,next_poll INTEGER NOT NULL DEFAULT 0,last_error TEXT,turn INTEGER NOT NULL DEFAULT 0);
 PRAGMA user_version=4;
+COMMIT;")?;
+    }
+    if version < 5 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS funding_refunds(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),address BLOB NOT NULL);
+PRAGMA user_version=5;
 COMMIT;")?;
     }
     Ok(())

@@ -43,15 +43,24 @@ pub struct NearClient {
 }
 impl NearClient {
     pub fn new(key: Option<&str>) -> Result<Self> {
-        Self::at(ORIGIN, key)
+        Self::with_session(key, None)
     }
-    fn at(origin: &str, key: Option<&str>) -> Result<Self> {
+    pub fn with_session(key: Option<&str>, session: Option<&str>) -> Result<Self> {
+        Self::at(ORIGIN, key, session)
+    }
+    fn at(origin: &str, key: Option<&str>, session: Option<&str>) -> Result<Self> {
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(key) = key {
             let mut value =
                 reqwest::header::HeaderValue::from_str(key).context("invalid NEAR API key")?;
             value.set_sensitive(true);
             headers.insert("X-API-Key", value);
+        }
+        if let Some(session) = session {
+            let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {session}"))
+                .context("invalid NEAR user session")?;
+            value.set_sensitive(true);
+            headers.insert(reqwest::header::AUTHORIZATION, value);
         }
         Ok(Self {
             origin: origin.into(),
@@ -426,6 +435,7 @@ mod tests {
         let client = NearClient::at(
             &format!("http://{}", listener.local_addr().unwrap()),
             Some("test-only-key"),
+            None,
         )
         .unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
