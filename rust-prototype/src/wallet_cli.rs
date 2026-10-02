@@ -86,7 +86,17 @@ enum Command {
         #[arg(long, requires = "birthday")]
         mnemonic_file: Option<PathBuf>,
     },
-    /// Derive and durably save a shielded receive address, offline.
+    /// Display existing receive addresses without deriving new ones or contacting the network.
+    Addresses {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        /// Optional identity check; defaults to the treasury UUID stored in this state.
+        #[arg(long)]
+        treasury_id: Option<String>,
+    },
+    /// Derive and durably save a NEW shielded receive address, offline. Use addresses to display existing ones.
     Address {
         #[arg(long)]
         state_dir: PathBuf,
@@ -118,6 +128,18 @@ pub async fn run() -> Result<()> {
             tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
                 .await??;
         println!("{}", serde_json::to_string_pretty(&status)?);
+        return Ok(());
+    }
+    #[cfg(feature = "zcash")]
+    if let Command::Addresses {
+        state_dir,
+        key_file,
+        treasury_id,
+    } = args.command
+    {
+        let output =
+            crate::treasury::Treasury::inspect_addresses(state_dir, key_file, treasury_id).await?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
     if let Command::Backup {
@@ -289,7 +311,7 @@ pub async fn run() -> Result<()> {
             } => {
                 anyhow::ensure!(
                     !state_dir.exists() && !key_file.exists(),
-                    "refusing to overwrite treasury state or key"
+                    "treasury state or key already exists; init only creates a new wallet. Use `wallet addresses --state-dir PATH --key-file PATH` to display existing receive addresses, or `wallet status --state-dir PATH` for its treasury ID"
                 );
                 // Imports must never infer a recent birthday and skip historical funds.
                 anyhow::ensure!(
@@ -358,7 +380,10 @@ pub async fn run() -> Result<()> {
                 treasury.ensure_pool(name, deposit_size).await?;
                 treasury
             }
-            Command::Status { .. } | Command::Backup { .. } | Command::RecoverUnprepared { .. } => {
+            Command::Addresses { .. }
+            | Command::Status { .. }
+            | Command::Backup { .. }
+            | Command::RecoverUnprepared { .. } => {
                 unreachable!()
             }
         };

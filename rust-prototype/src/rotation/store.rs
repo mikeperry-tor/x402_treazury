@@ -327,7 +327,11 @@ impl Store {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?;
         ensure!(
-            id == expected_id && version == 1 && network == expected_network.name() && account == 0,
+            id == expected_id,
+            "treasury ID does not match this wallet; use the treasury_id from `wallet status --state-dir PATH` (it is a UUID, not an account number)"
+        );
+        ensure!(
+            version == 1 && network == expected_network.name() && account == 0,
             "state identity/network/schema mismatch"
         );
         let store = Self {

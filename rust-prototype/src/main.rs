@@ -11,7 +11,7 @@ use x402_mcp_prototype::{
 #[derive(Parser)]
 #[command(
     about = "Experimental Rust generic x402 MCP server",
-    after_help = "Offline treasury commands: wallet --help (init/address/pool require the zcash feature)"
+    after_help = "Treasury commands: wallet --help (init/addresses/address/pool require the zcash feature)"
 )]
 struct Args {
     #[arg(long)]
@@ -62,7 +62,17 @@ struct Args {
     args: String,
 }
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            // Display the cause chain, never anyhow's Debug backtrace.
+            eprintln!("error: {error:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+async fn run() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("wallet") {
         return x402_mcp_prototype::wallet_cli::run().await;
     }

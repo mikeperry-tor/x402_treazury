@@ -66,6 +66,8 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     let run = |args: Vec<&str>| {
         std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
             .env_clear()
+            .env("RUST_BACKTRACE", "1")
+            .env("RUST_LIB_BACKTRACE", "1")
             .env("ZCASH_INDEXER_URL", "deliberately-invalid-offline-endpoint")
             .args(args)
             .output()
@@ -131,4 +133,47 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
         "2000000",
     ]);
     assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("already exists"));
+    assert!(error.contains("wallet addresses"));
+    assert!(!error.contains("Stack backtrace") && !error.contains("stack backtrace"));
+    let before_status = std::fs::read(state.join("state.sqlite")).unwrap();
+    for _ in 0..2 {
+        let output = run(vec![
+            "wallet",
+            "addresses",
+            "--state-dir",
+            state.to_str().unwrap(),
+            "--key-file",
+            key.to_str().unwrap(),
+        ]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let shown: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(shown["receive_addresses"], initial["receive_addresses"]);
+        assert_eq!(shown["state"]["treasury_id"], id);
+        assert_eq!(
+            std::fs::read(state.join("state.sqlite")).unwrap(),
+            before_status
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(SEED));
+    }
+    let output = run(vec![
+        "wallet",
+        "address",
+        "--state-dir",
+        state.to_str().unwrap(),
+        "--key-file",
+        key.to_str().unwrap(),
+        "--treasury-id",
+        "0",
+    ]);
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("UUID, not an account number"));
+    assert!(error.contains("wallet status"));
+    assert!(!error.contains("Stack backtrace") && !error.contains("stack backtrace"));
 }

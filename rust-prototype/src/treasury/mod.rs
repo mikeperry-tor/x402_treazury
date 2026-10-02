@@ -195,38 +195,39 @@ impl Treasury {
         self.store.call(|s| s.status()).await
     }
     pub async fn addresses(&self) -> Result<serde_json::Value> {
-        let mut addresses: serde_json::Value = serde_json::from_str(
-            &self
-                .client
+        address_info(
+            self.client
                 .as_ref()
-                .context("treasury sync interrupted; reopen required")?
-                .unified_addresses_json()
-                .await
-                .to_string(),
-        )?;
-        for address in addresses.as_array_mut().context("invalid address list")? {
-            let address = address.as_object_mut().context("invalid address record")?;
-            let orchard = address.remove("has_orchard").unwrap_or(false.into());
-            let sapling = address.remove("has_sapling").unwrap_or(false.into());
-            let transparent = address.remove("has_transparent").unwrap_or(false.into());
-            address.insert(
-                "receiver_capabilities".into(),
-                serde_json::json!({
-                    "orchard_protocol": orchard,
-                    "sapling": sapling,
-                    "transparent": transparent,
-                }),
-            );
-            address.insert(
-                "orchard_protocol_pools".into(),
-                if orchard.as_bool() == Some(true) {
-                    serde_json::json!(["orchard", "ironwood"])
-                } else {
-                    serde_json::json!([])
-                },
-            );
-        }
-        Ok(addresses)
+                .context("treasury sync interrupted; reopen required")?,
+        )
+        .await
+    }
+    /// Inspect an encrypted snapshot without changing its revision or sync readiness.
+    pub async fn inspect_addresses(
+        dir: PathBuf,
+        key: PathBuf,
+        expected_id: Option<String>,
+    ) -> Result<serde_json::Value> {
+        let (state, bytes) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let id = expected_id.unwrap_or(crate::rotation::store::status(&dir)?.treasury_id);
+            let store = Store::open(&dir, &key, &id)?;
+            let state = store.status()?;
+            let (_, bytes) = store.snapshot()?;
+            Ok((state, bytes))
+        })
+        .await??;
+        let scratch = tempfile::tempdir()?;
+        let client = LightClient::from_reader(
+            bytes.as_slice(),
+            config(scratch.path(), WalletConfig::Read, TreasuryNetwork::Mainnet)?,
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("corrupt or incompatible treasury snapshot"))?;
+        ensure!(
+            client.indexer_uri().is_none(),
+            "offline treasury must not connect to an indexer"
+        );
+        Ok(serde_json::json!({"state": state, "receive_addresses": address_info(&client).await?}))
     }
     pub async fn derive_address(&mut self) -> Result<serde_json::Value> {
         ensure!(
@@ -611,4 +612,32 @@ impl SyncSession {
         observation.height = Some(height);
         Ok(())
     }
+}
+
+async fn address_info(client: &LightClient) -> Result<serde_json::Value> {
+    let mut addresses: serde_json::Value =
+        serde_json::from_str(&client.unified_addresses_json().await.to_string())?;
+    for address in addresses.as_array_mut().context("invalid address list")? {
+        let address = address.as_object_mut().context("invalid address record")?;
+        let orchard = address.remove("has_orchard").unwrap_or(false.into());
+        let sapling = address.remove("has_sapling").unwrap_or(false.into());
+        let transparent = address.remove("has_transparent").unwrap_or(false.into());
+        address.insert(
+            "receiver_capabilities".into(),
+            serde_json::json!({
+                "orchard_protocol": orchard,
+                "sapling": sapling,
+                "transparent": transparent,
+            }),
+        );
+        address.insert(
+            "orchard_protocol_pools".into(),
+            if orchard.as_bool() == Some(true) {
+                serde_json::json!(["orchard", "ironwood"])
+            } else {
+                serde_json::json!([])
+            },
+        );
+    }
+    Ok(addresses)
 }
