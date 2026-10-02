@@ -437,3 +437,48 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
     assert_eq!(s.operation("op").unwrap().submission, "CONFIRMED");
     assert!(s.request_broadcast("op", 103, 499, true).is_err());
 }
+
+#[test]
+fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
+    use x402_mcp_prototype::rotation::store::funding::FundingPhase;
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let id = s.id().to_owned();
+    s.ensure_pool("a", "5").unwrap();
+    s.ensure_pool("b", "7").unwrap();
+    let mut picked = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        picked.insert(s.next_funding_job(0).unwrap().unwrap().id);
+    }
+    assert_eq!(picked.len(), 4);
+    let job = s.next_funding_job(0).unwrap().unwrap();
+    s.save_funding_quote(&job.id, b"sensitive-bound-quote")
+        .unwrap();
+    assert!(s.save_funding_quote(&job.id, b"other quote").is_err());
+    assert!(
+        s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Complete)
+            .is_err()
+    );
+    s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
+        .unwrap();
+    s.defer_funding(&job.id, 42, Some("pending"), false)
+        .unwrap();
+    drop(s);
+    let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    let restored = s
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .find(|j| j.id == job.id)
+        .unwrap();
+    assert_eq!(restored.operation_id, job.operation_id);
+    assert_eq!(restored.phase, FundingPhase::Preparing);
+    assert_eq!(
+        s.funding_quote(&job.id).unwrap().as_slice(),
+        b"sensitive-bound-quote"
+    );
+    for _ in 0..4 {
+        assert_ne!(s.next_funding_job(41).unwrap().unwrap().id, job.id);
+    }
+    assert_eq!(s.status().unwrap().funding_jobs.len(), 4);
+}

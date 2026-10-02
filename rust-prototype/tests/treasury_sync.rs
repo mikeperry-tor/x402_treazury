@@ -404,3 +404,31 @@ async fn interrupted_sync_checkpoints_can_resume_and_stop_network_tasks() {
     restored.close().await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn treasury_command_owner_serializes_and_releases_exclusive_lock() {
+    use x402_mcp_prototype::treasury::{actor, submission::GrpcSubmission};
+    let dir = tempfile::tempdir().unwrap();
+    let (endpoint, calls, server, _) = mock("main").await;
+    let mut treasury = wallet(dir.path()).await;
+    let id = treasury.status().await.unwrap().treasury_id;
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 300).unwrap());
+    let submission = GrpcSubmission::new(endpoint.clone(), endpoint).unwrap();
+    let (handle, commands) = actor::channel();
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(treasury.run_commands(commands, submission, stop.clone()));
+    let (a, b) = tokio::join!(handle.sync(), handle.sync());
+    a.unwrap();
+    b.unwrap();
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    assert!(handle.sync().await.is_err());
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+    server.abort();
+}

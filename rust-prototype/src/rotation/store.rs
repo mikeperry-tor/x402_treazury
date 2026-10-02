@@ -1,4 +1,5 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
+pub mod funding;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
 use alloy_primitives::U256;
@@ -40,6 +41,7 @@ pub struct Status {
     pub outgoing_pending: bool,
     pub sync_fresh: bool,
     pub treasury_operations: Vec<OperationStatus>,
+    pub funding_jobs: Vec<funding::FundingJob>,
 }
 /// Persisted observations, never an authorization to spend on their own.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -711,6 +713,7 @@ impl Store {
                 params![i64::try_from(cost)?, id],
             )?;
         }
+        tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
         tx.commit()?;
         Ok(next)
     }
@@ -899,6 +902,11 @@ fn read_status(db: &Connection) -> Result<Status> {
         vec![]
     };
     Ok(Status {
+        funding_jobs: if version >= 4 {
+            funding::read_jobs(db)?
+        } else {
+            vec![]
+        },
         treasury_operations,
         sync_fresh,
         sync,
@@ -946,7 +954,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 3, "unsupported state schema");
+    ensure!(version <= 4, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -964,6 +972,12 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE treasury_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),facts TEXT NOT NULL,submission TEXT NOT NULL CHECK(submission IN ('PREPARED','BROADCAST_REQUESTED','BROADCAST','UNKNOWN','CONFIRMED')),attempts INTEGER NOT NULL DEFAULT 0);
 PRAGMA user_version=3;
+COMMIT;")?;
+    }
+    if version < 4 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS funding_progress(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),operation_id TEXT NOT NULL UNIQUE,phase TEXT NOT NULL,quote BLOB,attempts INTEGER NOT NULL DEFAULT 0,next_poll INTEGER NOT NULL DEFAULT 0,last_error TEXT,turn INTEGER NOT NULL DEFAULT 0);
+PRAGMA user_version=4;
 COMMIT;")?;
     }
     Ok(())

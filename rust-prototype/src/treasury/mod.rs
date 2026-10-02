@@ -1,4 +1,5 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
+pub mod actor;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
 mod send;
