@@ -48,6 +48,7 @@ impl Store {
         if let Some(job) = job {
             tx.execute("INSERT INTO funding_recovery SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[&job])?;
             tx.execute("DELETE FROM funding_refunds WHERE job_id=?1", [&job])?;
+            tx.execute("DELETE FROM funding_health WHERE job_id=?1", [&job])?;
             tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=0,next_poll=0,last_error=NULL WHERE job_id=?1",params![job,Uuid::new_v4().to_string()])?;
         }
         tx.commit()?;

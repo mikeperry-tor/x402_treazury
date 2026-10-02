@@ -13,6 +13,16 @@ use std::future::Future;
 use tokio_util::sync::CancellationToken;
 
 pub trait FundingBackend {
+    fn swap_timeout_seconds(&self) -> u64 {
+        1800
+    }
+    fn ready(
+        &mut self,
+        _job: &FundingJob,
+        _quote: &Quote,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async { Ok(()) }
+    }
     fn quote(&mut self, job: &FundingJob) -> impl Future<Output = Result<Quote>> + Send;
     fn prepare(
         &mut self,
@@ -53,57 +63,72 @@ impl<B: FundingBackend> FundingWorker<B> {
                 o.operation_id == job.operation_id
                     && o.attempts > 0
                     && !matches!(o.submission.as_str(), "CONFIRMED" | "EXPIRED")
-            }) {
-                let _ = self.backend.reconcile(job).await;
+            }) && job.next_poll <= instant
+            {
+                let result = self
+                    .backend
+                    .reconcile(job)
+                    .await
+                    .map(|_| ())
+                    .context("source_reconciliation_failed");
+                self.finish_step(job, instant, result).await?;
             }
         }
-        let Some(job) = self
+        let Some(mut job) = self
             .store
             .call(move |s| s.next_funding_job(instant))
             .await?
         else {
             return Ok(());
         };
+        if job.started_at.is_some_and(|started| {
+            instant.saturating_sub(started) >= self.backend.swap_timeout_seconds()
+        }) && !job.timed_out
+        {
+            let id = job.id.clone();
+            self.store
+                .call(move |s| s.mark_funding_timeout(&id))
+                .await?;
+            job.timed_out = true;
+        }
         let result = self.step(&job, instant).await;
-        let attempt = job.phase == FundingPhase::Allocated;
-        let max_attempts = self.backend.max_attempts(&job);
-        let id = job.id.clone();
+        self.finish_step(&job, instant, result).await
+    }
+    async fn finish_step(&self, job: &FundingJob, instant: u64, result: Result<()>) -> Result<()> {
+        let error = result
+            .as_ref()
+            .err()
+            .map(|error| safe_error(error, &job.phase));
+        let streak = if error.is_some() {
+            job.error_streak.saturating_add(1)
+        } else {
+            0
+        };
         let delay = self
             .poll_seconds
-            .saturating_mul(1u64 << job.attempts.min(6))
-            .min(300);
-        // Stable per-job jitter avoids synchronized bursts without random secrets.
-        let jitter = id.bytes().map(u64::from).sum::<u64>() % (self.poll_seconds + 1);
+            .saturating_mul(1u64 << streak.min(6))
+            .min(300)
+            .max(if job.timed_out { 60 } else { 1 });
+        let jitter =
+            job.id.bytes().map(u64::from).sum::<u64>() % self.poll_seconds.saturating_add(1).max(1);
         let next = instant.saturating_add(delay).saturating_add(jitter);
-        match result {
-            Ok(()) => {
-                self.store
-                    .call(move |s| s.defer_funding(&id, next, None, false))
-                    .await?
-            }
-            Err(_) => {
-                // Never persist upstream bodies/URLs, deposit addresses, or credentials.
-                self.store
-                    .call(move |s| {
-                        s.defer_funding(
-                            &id,
-                            next,
-                            Some("funding_step_failed; inspect phase and treasury operation"),
-                            attempt,
-                        )?;
-                        if attempt && job.attempts.saturating_add(1) >= max_attempts {
-                            s.advance_funding(
-                                &id,
-                                FundingPhase::Allocated,
-                                FundingPhase::RecoveryRequired,
-                            )?;
-                        }
-                        Ok(())
-                    })
-                    .await?;
-            }
-        }
-        Ok(())
+        let quote_attempt = error.is_some() && job.phase == FundingPhase::Allocated;
+        let exhausted =
+            quote_attempt && job.attempts.saturating_add(1) >= self.backend.max_attempts(job);
+        let id = job.id.clone();
+        self.store
+            .call(move |s| {
+                if exhausted {
+                    s.advance_funding(
+                        &id,
+                        FundingPhase::Allocated,
+                        FundingPhase::RecoveryRequired,
+                    )?;
+                }
+                s.defer_funding(&id, next, error, quote_attempt)?;
+                Ok(())
+            })
+            .await
     }
     async fn transition(&self, job: &FundingJob, next: FundingPhase) -> Result<()> {
         let id = job.id.clone();
@@ -130,8 +155,17 @@ impl<B: FundingBackend> FundingWorker<B> {
                     return Ok(());
                 }
                 let quote = self.quote(job).await?;
+                self.backend.ready(job, &quote).await?;
                 if quote.deadline.saturating_sub(instant) < 300 {
-                    return self.transition(job, RecoveryRequired).await;
+                    if job.attempts.saturating_add(1) >= self.backend.max_attempts(job) {
+                        self.transition(job, RecoveryRequired).await?;
+                        anyhow::bail!("quote_refresh_exhausted");
+                    }
+                    let id = job.id.clone();
+                    return self
+                        .store
+                        .call(move |s| s.refresh_unprepared_quote(&id))
+                        .await;
                 }
                 self.transition(job, Preparing).await?;
                 // The adapter commits PREPARED with bytes+snapshot. A crash/error
@@ -163,12 +197,20 @@ impl<B: FundingBackend> FundingWorker<B> {
             }
             Swapping | VerifyingCredit | RefundPending => {
                 let quote = self.quote(job).await?;
-                match self.backend.status(&quote).await? {
+                match self
+                    .backend
+                    .status(&quote)
+                    .await
+                    .context("funding_status_unavailable")?
+                {
                     SwapStatus::Success if job.phase != RefundPending => {
                         if job.phase == Swapping {
                             self.transition(job, VerifyingCredit).await?;
                         }
-                        self.backend.credit(job).await?;
+                        self.backend
+                            .credit(job)
+                            .await
+                            .context("base_credit_unverified")?;
                     }
                     SwapStatus::Refunded | SwapStatus::Failed if job.phase != RefundPending => {
                         self.transition(job, RefundPending).await?
@@ -227,6 +269,16 @@ impl Backend {
     }
 }
 impl FundingBackend for Backend {
+    fn swap_timeout_seconds(&self) -> u64 {
+        self.funding.swap_timeout_seconds
+    }
+    async fn ready(&mut self, job: &FundingJob, _: &Quote) -> Result<()> {
+        let (limits, _) = self.policy(job)?;
+        let daily = self.daily_limit;
+        self.store
+            .call(move |s| s.check_funding_capacity(now()?, limits.max_input, daily))
+            .await
+    }
     async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
         let (limits, _) = self.policy(job)?;
         let refund = self.treasury.refund_address(job.id.clone()).await?;
@@ -345,5 +397,49 @@ impl FundingBackend for Backend {
     }
     fn max_attempts(&self, job: &FundingJob) -> u32 {
         self.policy(job).map(|(_, n)| n).unwrap_or(1)
+    }
+}
+
+/// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
+/// quote addresses or arbitrary error prose into the public journal.
+fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
+    for cause in error.chain() {
+        match cause.to_string().as_str() {
+            "near_http_401" | "near_http_403" => {
+                return "near_authentication_required; check selected mode and configured credentials";
+            }
+            "near_http_429" => return "near_rate_limited; backing off",
+            "treasury_budget_exceeded" => {
+                return "treasury_budget_exceeded; wait for budget or review daily_input_zec";
+            }
+            "treasury_insufficient_spendable_funds" => {
+                return "treasury_insufficient_spendable_funds; fund and sync the shielded treasury";
+            }
+            "quote_refresh_exhausted" => {
+                return "quote_refresh_exhausted; review deadlines and recover-unprepared explicitly";
+            }
+            "source_reconciliation_failed" => {
+                return "source_reconciliation_failed; retain reservation and inspect wallet status";
+            }
+            "base_credit_unverified" => {
+                return "base_credit_unverified; waiting for independent confirmed Base credit";
+            }
+            _ => {}
+        }
+    }
+    match phase {
+        FundingPhase::Allocated => {
+            "funding_quote_failed; check route, cost caps and NEAR availability"
+        }
+        FundingPhase::Quoted => {
+            "funding_prepare_waiting; check treasury sync, source limits and operation status"
+        }
+        FundingPhase::Preparing | FundingPhase::Prepared => {
+            "funding_submission_unresolved; inspect operation; never issue a replacement deposit"
+        }
+        FundingPhase::DepositPending => {
+            "source_confirmation_pending; inspect sync and reconcile the existing operation"
+        }
+        _ => "funding_status_unavailable; continuing bounded reconciliation of the existing swap",
     }
 }

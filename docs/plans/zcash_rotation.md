@@ -587,7 +587,13 @@ trigger another automatic send. A provider timeout or `FAILED` is not proof of
 a refund. Reconcile returned funds with the treasury before releasing exposure.
 [Status API](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status).
 
-Pre-deposit quote failures may retry within the attempt limit. After any possible
+Pre-deposit quote failures and expired QUOTED refreshes share the attempt limit.
+Refresh only while there are no signed bytes, preserving encrypted old bindings
+and assigning a new operation ID and refund address. Check available shielded funds
+and daily budget before PREPARING; insufficient funds must remain retryable.
+Persist status-error streaks independently from quote attempts. Start swap timeout
+at the first durable broadcast intent, mark the pool degraded on timeout, and keep
+slower reconciliation active. Persist only fixed actionable error categories. After any possible
 broadcast, only reconcile that transaction/swap until conclusively resolved.
 A swap timeout sets degraded status and slower polling, not a fresh deposit.
 No direct EVM funding fallback, target increase, or retired-address reuse is
@@ -777,7 +783,7 @@ Each `wallets.<name>` managed profile accepts:
 | `max_input_zec` | Required positive per-deposit input-plus-source-fee hard cap |
 | `max_fee_bps` | Required integer 0..10000 for quote-implied USD overhead |
 | `wait_seconds` | Default 30, range 1–3600; total admission/readiness deadline including this pool's payment-gate wait |
-| `max_attempts` | Default 3 reconciled funding attempts per candidate, not status polls |
+| `max_attempts` | Default 3 quote attempts/expired unprepared-quote refreshes per candidate; status polls do not consume this limit |
 
 The singleton treasury and shared funding fields are:
 
@@ -798,7 +804,7 @@ The singleton treasury and shared funding fields are:
 | `funding.confidentiality` | `public` for signup-free demos; `basic` (default) or `advanced` for confidential settlement; no fallback |
 | `funding.near_api_key_env` | Optional environment reference to a server-side partner credential |
 | `funding.slippage_bps` | Default 100; integer 0..1000 |
-| `funding.poll_seconds` | Default 5; backoff with jitter capped at 60 seconds |
+| `funding.poll_seconds` | Default 5; error backoff capped at 300 seconds plus stable per-job jitter; timed-out jobs poll no faster than 60 seconds |
 | `funding.swap_timeout_seconds` | Default 1800; mark the affected pool degraded and continue slower reconciliation on expiry |
 | `funding.quote_deadline_seconds` | Default 1800; require at least 300 seconds remaining before prepare and before first broadcast |
 

@@ -90,6 +90,7 @@ pub struct PoolStatus {
     pub generation: i64,
     pub enabled: bool,
     pub bootstrapped: bool,
+    pub funding_degraded: bool,
     pub addresses: Vec<AddressStatus>,
 }
 #[derive(Serialize)]
@@ -873,6 +874,7 @@ fn read_status(db: &Connection) -> Result<Status> {
             generation: r.get(3)?,
             enabled: r.get(4)?,
             bootstrapped: r.get(5)?,
+            funding_degraded: false,
             addresses: vec![],
         })
     })?;
@@ -949,17 +951,29 @@ fn read_status(db: &Connection) -> Result<Status> {
     } else {
         vec![]
     };
+    let funding_jobs = if version >= 4 {
+        funding::read_jobs(db)?
+    } else {
+        vec![]
+    };
+    for pool in &mut pools {
+        pool.funding_degraded = funding_jobs.iter().any(|j| {
+            j.pool_id == pool.id
+                && (j.timed_out
+                    || matches!(
+                        j.phase,
+                        funding::FundingPhase::RecoveryRequired
+                            | funding::FundingPhase::RefundPending
+                    ))
+        });
+    }
     Ok(Status {
         refunds: if version >= 7 {
             refunds::read_refunds(db)?
         } else {
             vec![]
         },
-        funding_jobs: if version >= 4 {
-            funding::read_jobs(db)?
-        } else {
-            vec![]
-        },
+        funding_jobs,
         treasury_operations,
         sync_fresh,
         sync,
@@ -1007,7 +1021,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 8, "unsupported state schema");
+    ensure!(version <= 9, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1055,6 +1069,13 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS expired_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),height INTEGER NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
 PRAGMA user_version=8;
+COMMIT;")?;
+    }
+    if version < 9 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS funding_health(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),started_at INTEGER,error_streak INTEGER NOT NULL DEFAULT 0,timed_out INTEGER NOT NULL DEFAULT 0);
+INSERT OR IGNORE INTO funding_health(job_id,started_at) SELECT j.job_id,unixepoch() FROM funding_progress j JOIN treasury_operations o ON o.id=j.operation_id WHERE o.attempts>0;
+PRAGMA user_version=9;
 COMMIT;")?;
     }
     Ok(())
@@ -1336,7 +1357,10 @@ impl Store {
             .attempts
             .checked_add(1)
             .context("attempt overflow")?;
-        self.db.execute("UPDATE treasury_operations SET submission='BROADCAST_REQUESTED',attempts=?1 WHERE id=?2", params![attempt,id])?;
+        let tx = self.db.transaction()?;
+        tx.execute("UPDATE treasury_operations SET submission='BROADCAST_REQUESTED',attempts=?1 WHERE id=?2", params![attempt,id])?;
+        tx.execute("INSERT INTO funding_health(job_id,started_at) SELECT job_id,?2 FROM funding_progress WHERE operation_id=?1 ON CONFLICT(job_id) DO UPDATE SET started_at=COALESCE(started_at,excluded.started_at)",params![id,i64::try_from(now)?])?;
+        tx.commit()?;
         Ok(attempt)
     }
     pub fn broadcast_result(&mut self, id: &str, attempt: i64, accepted: bool) -> Result<()> {

@@ -53,6 +53,9 @@ pub struct FundingJob {
     pub phase: FundingPhase,
     pub operation_id: String,
     pub attempts: u32,
+    pub started_at: Option<u64>,
+    pub error_streak: u32,
+    pub timed_out: bool,
     pub next_poll: u64,
     pub last_error: Option<String>,
 }
@@ -61,11 +64,26 @@ impl Store {
     /// Old encrypted bindings remain archived; the next attempt gets a new ID
     /// and a freshly derived refund address, never another send of old intent.
     pub fn recover_unprepared_funding(&mut self, job: &str) -> Result<()> {
+        self.reset_unprepared(job, false)
+    }
+    pub fn refresh_unprepared_quote(&mut self, job: &str) -> Result<()> {
+        self.reset_unprepared(job, true)
+    }
+    fn reset_unprepared(&mut self, job: &str, refresh: bool) -> Result<()> {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let (operation, phase): (String, String) = tx.query_row("SELECT j.operation_id,j.phase FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.job_id=?1 AND f.state!='COMPLETE' AND w.role='ALLOCATED'", [job], |r| Ok((r.get(0)?,r.get(1)?)))?;
         let parsed: FundingPhase = serde_json::from_str(&phase)?;
+        let attempts: u32 = tx.query_row(
+            "SELECT attempts FROM funding_progress WHERE job_id=?1",
+            [job],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            !refresh || parsed == FundingPhase::Quoted,
+            "only unprepared quotes can refresh"
+        );
         ensure!(
             matches!(
                 parsed,
@@ -94,7 +112,8 @@ impl Store {
         tx.execute("INSERT INTO funding_recovery SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1", [job])?;
         tx.execute("DELETE FROM budget_entries WHERE id=?1", [&operation])?;
         tx.execute("DELETE FROM funding_refunds WHERE job_id=?1", [job])?;
-        tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=0,next_poll=0,last_error=NULL WHERE job_id=?1", params![job,Uuid::new_v4().to_string()])?;
+        tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=?3,next_poll=0,last_error=NULL WHERE job_id=?1", params![job,Uuid::new_v4().to_string(),if refresh { attempts.saturating_add(1) } else {0}])?;
+        tx.execute("DELETE FROM funding_health WHERE job_id=?1", [job])?;
         tx.commit()?;
         Ok(())
     }
@@ -201,6 +220,22 @@ impl Store {
         ensure!(changed == 1, "funding phase conflict");
         Ok(())
     }
+    pub fn mark_funding_timeout(&mut self, id: &str) -> Result<()> {
+        self.db.execute("INSERT INTO funding_health(job_id,timed_out) VALUES (?1,1) ON CONFLICT(job_id) DO UPDATE SET timed_out=1",[id])?;
+        Ok(())
+    }
+    /// Check before advancing to PREPARING; the owner still rechecks at reserve.
+    pub fn check_funding_capacity(&self, instant: u64, input: u64, limit: u64) -> Result<()> {
+        self.require_spend_ready(instant, input)?;
+        let used: i64 = self.db.query_row("SELECT COALESCE(SUM(reserved),0)+COALESCE(SUM(CASE WHEN day=?1 THEN MAX(0,consumed-COALESCE((SELECT SUM(credited) FROM refund_outputs r WHERE r.operation_id=budget_entries.id),0)) ELSE 0 END),0) FROM budget_entries",[i64::try_from(instant/86400)?],|r|r.get(0))?;
+        ensure!(
+            u64::try_from(used)?
+                .checked_add(input)
+                .is_some_and(|n| n <= limit),
+            "treasury_budget_exceeded"
+        );
+        Ok(())
+    }
     /// Fair persistent ordering: every selected job moves behind all other jobs,
     /// including siblings in the same pool. Disabled pools may only be recovered.
     pub fn next_funding_job(&mut self, now: u64) -> Result<Option<FundingJob>> {
@@ -222,11 +257,16 @@ impl Store {
         error: Option<&str>,
         quote_attempt: bool,
     ) -> Result<()> {
-        ensure!(self.db.execute("UPDATE funding_progress SET next_poll=?2,last_error=?3,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
+        let tx = self.db.transaction()?;
+        ensure!(tx.execute("UPDATE funding_progress SET next_poll=?2,last_error=?3,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
+        tx.execute("INSERT INTO funding_health(job_id,error_streak) VALUES (?1,?2) ON CONFLICT(job_id) DO UPDATE SET error_streak=CASE WHEN excluded.error_streak=0 THEN 0 ELSE MIN(error_streak+1,32) END",params![id,u32::from(error.is_some())])?;
+        tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND f.state='COMPLETE' AND o.submission='CONFIRMED')",[id])?;
+        tx.commit()?;
         Ok(())
     }
 }
 pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let mut stmt = db.prepare("SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,CASE WHEN f.state='COMPLETE' THEN '\"COMPLETE\"' ELSE j.phase END,j.operation_id,j.attempts,j.next_poll,j.last_error FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id ORDER BY f.rowid")?;
     let rows = stmt.query_map([], |r| {
         Ok((
@@ -257,7 +297,14 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
             next_poll,
             last_error,
         ) = r?;
+        let (started_at,error_streak,timed_out): (Option<i64>,u32,bool) = if version >= 9 {
+            db.query_row("SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?.unwrap_or((None,0,false))
+        } else {(None,0,false)};
+        let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
+            started_at: started_at.map(u64::try_from).transpose()?,
+            error_streak,
+            timed_out,
             id,
             pool_id,
             pool_name,
