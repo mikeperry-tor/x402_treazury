@@ -61,8 +61,16 @@ pub struct SyncObservation {
     pub height: Option<u64>,
     pub confirmations: u32,
     pub max_age_seconds: u64,
+    #[serde(default)]
+    pub confirmed_pool_balances_zatoshis: Option<PoolBalances>,
     pub confirmed_shielded_zatoshis: u64,
     pub spendable_shielded_zatoshis: u64,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PoolBalances {
+    pub ironwood: Option<u64>,
+    pub orchard: Option<u64>,
+    pub sapling: Option<u64>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

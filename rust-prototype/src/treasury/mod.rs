@@ -6,6 +6,7 @@ mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
 mod send;
+mod server;
 use crate::rotation::store::TreasuryNetwork;
 impl TreasuryNetwork {
     fn chain(self) -> zingolib::config::ChainType {
@@ -194,7 +195,7 @@ impl Treasury {
         self.store.call(|s| s.status()).await
     }
     pub async fn addresses(&self) -> Result<serde_json::Value> {
-        Ok(serde_json::from_str(
+        let mut addresses: serde_json::Value = serde_json::from_str(
             &self
                 .client
                 .as_ref()
@@ -202,7 +203,30 @@ impl Treasury {
                 .unified_addresses_json()
                 .await
                 .to_string(),
-        )?)
+        )?;
+        for address in addresses.as_array_mut().context("invalid address list")? {
+            let address = address.as_object_mut().context("invalid address record")?;
+            let orchard = address.remove("has_orchard").unwrap_or(false.into());
+            let sapling = address.remove("has_sapling").unwrap_or(false.into());
+            let transparent = address.remove("has_transparent").unwrap_or(false.into());
+            address.insert(
+                "receiver_capabilities".into(),
+                serde_json::json!({
+                    "orchard_protocol": orchard,
+                    "sapling": sapling,
+                    "transparent": transparent,
+                }),
+            );
+            address.insert(
+                "orchard_protocol_pools".into(),
+                if orchard.as_bool() == Some(true) {
+                    serde_json::json!(["orchard", "ironwood"])
+                } else {
+                    serde_json::json!([])
+                },
+            );
+        }
+        Ok(addresses)
     }
     pub async fn derive_address(&mut self) -> Result<serde_json::Value> {
         ensure!(
@@ -316,6 +340,7 @@ impl Treasury {
             height: None,
             confirmations: settings.confirmations.get(),
             max_age_seconds: settings.max_age_seconds,
+            confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 0,
             spendable_shielded_zatoshis: 0,
         });
@@ -461,6 +486,12 @@ impl SyncSession {
             info.chain_name == self.network.rpc_name(),
             "indexer is not on mainnet"
         );
+        server::check_endpoint(
+            &settings.endpoint,
+            &self.network.chain(),
+            info.latest_block_height,
+        )
+        .await?;
         observation.target_height = Some(info.latest_block_height);
         self.client
             .sync()
@@ -495,6 +526,7 @@ impl SyncSession {
             self.network.name(),
             info.latest_block_height
         );
+        server::check_endpoint(&settings.endpoint, &self.network.chain(), height).await?;
         // A later fork can invalidate a spend whose source cost was already
         // accounted. Keep that cost consumed and fail closed until the same
         // transaction regains the required depth; never make it spendable again
@@ -554,6 +586,11 @@ impl SyncSession {
         let balance = wallet
             .account_balance(zip32::AccountId::ZERO)
             .map_err(|_| anyhow::anyhow!("treasury balance unavailable"))?;
+        observation.confirmed_pool_balances_zatoshis = Some(crate::rotation::store::PoolBalances {
+            ironwood: balance.confirmed_ironwood_balance.map(|z| z.into_u64()),
+            orchard: balance.confirmed_orchard_balance.map(|z| z.into_u64()),
+            sapling: balance.confirmed_sapling_balance.map(|z| z.into_u64()),
+        });
         observation.confirmed_shielded_zatoshis = [
             balance.confirmed_ironwood_balance,
             balance.confirmed_orchard_balance,

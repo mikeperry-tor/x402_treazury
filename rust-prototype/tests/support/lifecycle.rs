@@ -37,6 +37,7 @@ fn synced(s: &mut Store) -> Result<()> {
             height: Some(1),
             confirmations: 1,
             max_age_seconds: 3600,
+            confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 10000,
             spendable_shielded_zatoshis: 10000,
         }),

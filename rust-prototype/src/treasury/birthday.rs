@@ -39,6 +39,12 @@ pub async fn discover(endpoint: &str) -> Result<u32> {
             tip > BIRTHDAY_REWIND,
             "birthday indexer returned an invalid mainnet height"
         );
+        super::server::check(
+            &mut client,
+            &zingolib::config::ChainType::Mainnet,
+            u64::from(tip),
+        )
+        .await?;
         Ok(tip - BIRTHDAY_REWIND)
     })
     .await

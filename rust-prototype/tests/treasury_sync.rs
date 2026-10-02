@@ -94,6 +94,8 @@ fn framed(message: Vec<u8>) -> Vec<u8> {
 #[derive(Clone)]
 struct Mock {
     chain: &'static str,
+    tip: u64,
+    ironwood: &'static [u8],
     calls: Arc<Mutex<Vec<String>>>,
     stall_blocks: Arc<AtomicBool>,
 }
@@ -106,11 +108,11 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             [
                 bytes(4, mock.chain.as_bytes()),
                 number(5, 419_200),
-                number(7, TIP),
+                number(7, mock.tip),
             ]
             .concat(),
         ],
-        "GetLatestBlock" => vec![number(1, TIP)],
+        "GetLatestBlock" => vec![number(1, mock.tip)],
         "GetBlock" => vec![block(height(request))],
         "GetBlockRange" => {
             if mock.stall_blocks.load(Ordering::SeqCst) {
@@ -131,11 +133,18 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             vec![
                 [
                     bytes(1, b"main"),
-                    number(2, h),
+                    number(
+                        2,
+                        if mock.ironwood == b"wrong-height" {
+                            h + 1
+                        } else {
+                            h
+                        },
+                    ),
                     bytes(3, hash.as_bytes()),
                     bytes(5, b"000000"),
                     bytes(6, b"000000"),
-                    bytes(7, b"000000"),
+                    bytes(7, mock.ironwood),
                 ]
                 .concat(),
             ]
@@ -177,12 +186,26 @@ async fn mock(
     tokio::task::JoinHandle<()>,
     Arc<AtomicBool>,
 ) {
+    mock_with_tree(chain, TIP, b"000000").await
+}
+async fn mock_with_tree(
+    chain: &'static str,
+    tip: u64,
+    ironwood: &'static [u8],
+) -> (
+    String,
+    Arc<Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+    Arc<AtomicBool>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let calls = Arc::new(Mutex::new(vec![]));
     let stall_blocks = Arc::new(AtomicBool::new(false));
     let app = axum::Router::new().fallback(rpc).with_state(Mock {
         chain,
+        tip,
+        ironwood,
         calls: calls.clone(),
         stall_blocks: stall_blocks.clone(),
     });
@@ -252,6 +275,21 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
     assert_eq!(observation.height, Some(TIP));
     assert_eq!(observation.confirmations, 7);
     assert_eq!(observation.spendable_shielded_zatoshis, 0);
+    let pools = observation
+        .confirmed_pool_balances_zatoshis
+        .as_ref()
+        .unwrap();
+    assert_eq!(pools.ironwood, Some(0));
+    assert_eq!(pools.orchard, Some(0));
+    assert_eq!(pools.sapling, Some(0));
+    let mut legacy = serde_json::to_value(&observation).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("confirmed_pool_balances_zatoshis");
+    let legacy: x402_mcp_prototype::rotation::store::SyncObservation =
+        serde_json::from_value(legacy).unwrap();
+    assert!(legacy.confirmed_pool_balances_zatoshis.is_none());
     {
         use x402_mcp_prototype::rotation::transaction::{PrepareRequest, TransactionPreparer};
         let before = calls.lock().unwrap().len();
@@ -551,4 +589,43 @@ async fn public_birthday_lookup() {
     .await
     .unwrap();
     println!("Discovered new-wallet birthday: {height}");
+}
+
+#[tokio::test]
+async fn post_activation_indexer_must_supply_ironwood_before_sync_or_init() {
+    const POST_ACTIVATION: u64 = 3_500_000;
+    for tree in [b"".as_slice(), b"000000".as_slice()] {
+        let (endpoint, calls, server, _) = mock_with_tree("main", POST_ACTIVATION, tree).await;
+        let result = x402_mcp_prototype::treasury::birthday::discover(&endpoint).await;
+        if tree.is_empty() {
+            assert!(result.unwrap_err().to_string().contains("missing Ironwood"));
+            let dir = tempfile::tempdir().unwrap();
+            let mut treasury = wallet(dir.path()).await;
+            treasury.configure_sync(SyncSettings::new(endpoint, 7, 300).unwrap());
+            let error = treasury
+                .sync_once(&CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("missing Ironwood"), "{error}");
+            let status = treasury.status().await.unwrap();
+            assert_eq!(status.sync.unwrap().phase, SyncPhase::Failed);
+            assert!(!status.sync_fresh);
+            assert!(!calls.lock().unwrap().iter().any(|m| m == "GetBlockRange"));
+            treasury.close().await.unwrap();
+        } else {
+            assert_eq!(result.unwrap(), POST_ACTIVATION as u32 - 100);
+        }
+        assert!(calls.lock().unwrap().iter().any(|m| m == "GetTreeState"));
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn ironwood_capability_rejects_tree_from_a_different_height() {
+    let (endpoint, _, server, _) = mock_with_tree("main", 3_500_000, b"wrong-height").await;
+    let error = x402_mcp_prototype::treasury::birthday::discover(&endpoint)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("wrong Ironwood tree height"));
+    server.abort();
 }

@@ -73,6 +73,7 @@ async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
             height: Some(TIP.into()),
             confirmations: 1,
             max_age_seconds: 300,
+            confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 100_000,
             spendable_shielded_zatoshis: 100_000,
         })

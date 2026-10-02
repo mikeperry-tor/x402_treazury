@@ -357,6 +357,7 @@ mod tests {
                         height: Some(2_000_000),
                         confirmations: 3,
                         max_age_seconds: 300,
+                        confirmed_pool_balances_zatoshis: None,
                         confirmed_shielded_zatoshis: 1_000_000,
                         spendable_shielded_zatoshis: 1_000_000,
                     }),

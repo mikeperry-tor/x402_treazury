@@ -18,6 +18,12 @@ async fn encrypted_zingolib_treasury_restores_addresses_and_pool_keys_offline() 
     .unwrap();
     let id = wallet.status().await.unwrap().treasury_id;
     let before = wallet.derive_address().await.unwrap();
+    assert_eq!(before[0]["receiver_capabilities"]["orchard_protocol"], true);
+    assert_eq!(
+        before[0]["orchard_protocol_pools"],
+        serde_json::json!(["orchard", "ironwood"])
+    );
+    assert!(before[0].get("has_orchard").is_none());
     wallet
         .ensure_pool("research".into(), "5.00".into())
         .await

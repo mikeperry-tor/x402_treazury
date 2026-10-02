@@ -297,6 +297,7 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
         height: Some(2_000_000),
         confirmations: 3,
         max_age_seconds: 10,
+        confirmed_pool_balances_zatoshis: None,
         confirmed_shielded_zatoshis: 1_000,
         spendable_shielded_zatoshis: 500,
     };
