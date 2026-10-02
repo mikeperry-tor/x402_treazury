@@ -1,5 +1,5 @@
-//! A request snapshots its payer before the first HTTP attempt. Replacing the
-//! payer affects only later calls; ambiguous paid failures are never replayed.
+//! Static calls snapshot the payer before HTTP; managed calls lease a signer after
+//! challenge validation and durable admission. Paid failures are never replayed.
 use crate::catalog::{RoutedRequest, arg_text};
 use alloy_primitives::U256;
 use alloy_signer_local::PrivateKeySigner;
@@ -66,13 +66,25 @@ impl Payer {
 #[derive(Clone)]
 pub struct PaidClient {
     pub http: reqwest::Client,
-    payer: Arc<RwLock<Arc<Payer>>>,
+    payer: Option<Arc<RwLock<Arc<Payer>>>>,
+    managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
 }
 impl PaidClient {
     pub fn new(http: reqwest::Client, payer: Payer) -> Self {
         Self {
             http,
-            payer: Arc::new(RwLock::new(Arc::new(payer))),
+            payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
+            managed: None,
+        }
+    }
+    pub fn managed(
+        http: reqwest::Client,
+        pool: Arc<crate::rotation::manager::ManagedPool>,
+    ) -> Self {
+        Self {
+            http,
+            payer: None,
+            managed: Some(pool),
         }
     }
     /// Share the wallet identity/policy while using a source-specific transport.
@@ -80,13 +92,22 @@ impl PaidClient {
         Self {
             http,
             payer: self.payer.clone(),
+            managed: self.managed.clone(),
         }
     }
     pub fn replace_payer(&self, payer: Payer) {
-        *self.payer.write().expect("payer lock poisoned") = Arc::new(payer);
+        *self
+            .payer
+            .as_ref()
+            .expect("static payer replacement only")
+            .write()
+            .expect("payer lock poisoned") = Arc::new(payer);
     }
     pub async fn execute(&self, route: RoutedRequest) -> Result<String> {
-        let payer = self.payer.read().expect("payer lock poisoned").clone();
+        let payer = self
+            .payer
+            .as_ref()
+            .map(|p| p.read().expect("payer lock poisoned").clone());
         let mut request = self.http.request(route.method.parse()?, &route.url);
         let mut query = Vec::new();
         for (key, value) in route.query {
@@ -108,28 +129,34 @@ impl PaidClient {
             .context("request body cannot be retried")?;
         let mut response = self.http.execute(request).await?;
         if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
-            if let Some(header) = response.headers().get("payment-required") {
-                let mut challenge: Value =
-                    serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
-                if let Some(desc) = challenge.pointer_mut("/resource/description")
-                    && let Some(text) = desc.as_str()
-                {
-                    *desc = Value::String(text.chars().take(500).collect());
+            if let Some(pool) = &self.managed {
+                response = pool.pay(&self.http, retry, response).await?;
+            } else {
+                if let Some(header) = response.headers().get("payment-required") {
+                    let mut challenge: Value =
+                        serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
+                    if let Some(desc) = challenge.pointer_mut("/resource/description")
+                        && let Some(text) = desc.as_str()
+                    {
+                        *desc = Value::String(text.chars().take(500).collect());
+                    }
+                    response.headers_mut().insert(
+                        "payment-required",
+                        STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
+                    );
                 }
-                response.headers_mut().insert(
-                    "payment-required",
-                    STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
-                );
+                // Selection (asset/network/cap) happens inside the SDK before signing.
+                let headers = payer
+                    .as_ref()
+                    .expect("static payer")
+                    .client
+                    .make_payment_headers(response)
+                    .await
+                    .context("x402 challenge rejected or signing failed")?;
+                let mut retry = retry;
+                retry.headers_mut().extend(headers);
+                response = self.http.execute(retry).await?;
             }
-            // Selection (asset/network/cap) happens inside the SDK before signing.
-            let headers = payer
-                .client
-                .make_payment_headers(response)
-                .await
-                .context("x402 challenge rejected or signing failed")?;
-            let mut retry = retry;
-            retry.headers_mut().extend(headers);
-            response = self.http.execute(retry).await?;
         }
         let status = response.status();
         let detail = response

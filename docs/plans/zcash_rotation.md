@@ -76,24 +76,28 @@ starting points:
 | Existing source | Reuse and required extension |
 | --- | --- |
 | [catalog.rs](../../rust-prototype/src/catalog.rs) | JSON OpenAPI/digest loading, schema normalization, names, filters, descriptions and argument routing; retain explicit-only text limits |
-| [payment.rs](../../rust-prototype/src/payment.rs) | SDK signing, Base USDC cap, challenge description sanitization, one paid retry; extend with typed outcomes, admission and persistent authorizations |
+| [payment.rs](../../rust-prototype/src/payment.rs) | Static/managed dispatch, SDK signing, Base USDC cap, description sanitization and one paid retry; extend structured receipt capture |
 | [server.rs](../../rust-prototype/src/server.rs), [main.rs](../../rust-prototype/src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; extend shutdown to persist wallet outcomes |
-| [deployment.rs](../../rust-prototype/src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static payer profiles, atomic binding and bounded shutdown; add managed wallet profiles |
+| [deployment.rs](../../rust-prototype/src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static/managed profiles, singleton treasury ownership, atomic binding and bounded shutdown |
 | [tests](../../rust-prototype/tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
-| [store.rs](../../rust-prototype/src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives; add managed admission, full funding phases, policy hashes and verified reconciliation |
-| [treasury adapter](../../rust-prototype/src/treasury/mod.rs), [wallet CLI](../../rust-prototype/src/wallet_cli.rs) | Runnable upstream-pinned offline init/restore, address derivation and pool allocation; extend to managed TOML runtime, sync, transaction preparation and backup |
+| [store.rs](../../rust-prototype/src/rotation/store.rs) | Encrypted snapshot/key storage, ownership, atomic pool roles and funding jobs, budget/send-gate primitives, atomic admission/promotion and durable authorizations; add full funding phases and funding-policy hashes |
+| [treasury adapter](../../rust-prototype/src/treasury/mod.rs), [wallet CLI](../../rust-prototype/src/wallet_cli.rs) | Runnable upstream-pinned offline init/restore, address derivation and pool allocation; managed serving restores this owner; add sync, transaction preparation and backup |
+| [managed admission](../../rust-prototype/src/rotation/manager.rs), [Base adapter](../../rust-prototype/src/rotation/base.rs), [settings](../../rust-prototype/src/rotation/config.rs) | Strict TOML profiles, immutable leases, per-pool deadlines, on-demand canonical balance/nonce reconciliation; add background reconciliation and reorg recovery |
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 33 tests, with two additional offline treasury
-tests under `--features zcash` and two fixture utility tests. The combined suite runs 12 shared
+The standalone Rust suite has 46 tests, with two offline treasury tests and one
+managed deployment test under `--features zcash`, plus two fixture utility tests. The combined suite runs 12 shared
 payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
 Zcash dependency graph. The catalog comparison covers 726 tool definitions
 across 14 committed configs/fixtures. These establish a buildable starting
-point. Prepared-byte/snapshot recovery and pool transitions are tested storage
-primitives; live funding, transaction construction and payment-triggered rotation
-are not implemented.
+point. Prepared-byte/snapshot recovery, managed TOML serving, journal-before-send
+admission and payment-triggered promotion are implemented and exercised against
+local fake Base RPC and seller services. Funding jobs are queued but not executed;
+live funding and Zcash transaction construction are not implemented. Payment
+reconciliation is on demand and a changed confirmed anchor blocks admission
+until explicit recovery; add background reconciliation and reorg recovery.
 Zcash transaction construction with spendable notes, proving, broadcast, chain
 sync, and the live NEAR route require the tests specified later.
 
@@ -606,8 +610,9 @@ strings parsed directly to atomic integers. Secret/endpoint credentials use
 explicit environment-variable references, populated from the process environment
 or `--env-file`; meta-config fields retain their existing deterministic precedence.
 
-The following is the target schema to implement, not a currently supported
-runtime configuration. The example's ZEC limits are illustrative operator limits,
+The following schema is accepted by the managed TOML runtime. Funding-worker
+settings are validated but no Zcash/NEAR transfer is performed yet. The example's
+ZEC limits are illustrative operator limits,
 not an estimate of the ZEC needed for either deposit size:
 
 ```toml
@@ -669,7 +674,7 @@ Each `wallets.<name>` managed profile accepts:
 | `max_price_usd` | Independent per-payment cap; default `"1.00"`; retain static cap syntax but never bypass managed chain/asset/target checks |
 | `max_input_zec` | Required positive per-deposit input-plus-source-fee hard cap |
 | `max_fee_bps` | Required integer 0..10000 for quote-implied USD overhead |
-| `wait_seconds` | Default 30; total admission/readiness deadline including this pool's payment-gate wait |
+| `wait_seconds` | Default 30, range 1–3600; total admission/readiness deadline including this pool's payment-gate wait |
 | `max_attempts` | Default 3 reconciled funding attempts per candidate, not status polls |
 
 The singleton treasury and shared funding fields are:

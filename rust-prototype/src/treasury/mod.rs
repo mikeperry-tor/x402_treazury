@@ -118,6 +118,9 @@ impl Treasury {
             healthy: true,
         })
     }
+    pub(crate) fn store_handle(&self) -> StoreHandle {
+        self.store.clone()
+    }
     pub async fn status(&self) -> Result<Status> {
         self.store.call(|s| s.status()).await
     }

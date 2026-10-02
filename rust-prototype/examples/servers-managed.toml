@@ -1,0 +1,49 @@
+# Build with scripts/zcash.sh. Initialize the treasury explicitly before serving.
+# NEAR funding is not implemented; startup creates queued funding jobs only.
+version = 1
+
+[treasury]
+id = "11111111-1111-4111-8111-111111111111" # Replace with wallet init's treasury_id.
+state_dir = "../../state/treasury"
+key_file = "../../secrets/treasury.key"
+indexer_url_env = "ZCASH_INDEXER_URL"
+submission_url_env = "ZCASH_SUBMISSION_URL"
+daily_input_zec = "0.10"
+shield_max_fee_zec = "0.001"
+
+[funding]
+base_rpc_url_env = "BASE_RPC_URL"
+base_confirmations = 12
+base_max_block_age_seconds = 120
+confidentiality = "basic"
+
+[wallets.research]
+mode = "zcash_rotation"
+deposit_size = "5.00"
+max_price_usd = "1.00"
+max_input_zec = "0.02"
+max_fee_bps = 500
+wait_seconds = 30
+
+[wallets.social]
+mode = "zcash_rotation"
+deposit_size = "10.00"
+max_input_zec = "0.04"
+max_fee_bps = 500
+
+[sources.socialfetch]
+extends = "../../providers/socialfetch.toml"
+
+[servers.research]
+listen = "127.0.0.1:8000"
+bearer_token_env = "RESEARCH_MCP_TOKEN"
+wallet = "research"
+sources = ["socialfetch"]
+tags = ["LinkedIn"]
+
+[servers.social]
+listen = "127.0.0.1:8001"
+bearer_token_env = "SOCIAL_MCP_TOKEN"
+wallet = "social"
+sources = ["socialfetch"]
+tags = ["Twitter", "YouTube"]

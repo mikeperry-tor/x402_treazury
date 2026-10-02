@@ -29,6 +29,13 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
         }
     }
     drop(store);
+    // Simulate a database produced by the offline foundation, before admission tables.
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch(
+        "DROP TABLE payment_attempts; DROP TABLE payment_anchors; PRAGMA user_version=0;",
+    )
+    .unwrap();
+    drop(db);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), "wrong").is_err());
     let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(
@@ -82,6 +89,14 @@ fn pools_bootstrap_rotate_independently_and_keep_allocation_targets() {
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(s.ensure_pool("a", "7").unwrap(), a);
     assert_eq!(s.status().unwrap().pools[0].addresses.len(), 3);
+    let managed = std::collections::BTreeSet::from(["a".into()]);
+    let statics = std::collections::BTreeSet::from(["b".into()]);
+    assert!(s.configure_profiles(&managed, &statics).is_err());
+    assert!(s.status().unwrap().pools[1].enabled);
+    s.configure_profiles(&managed, &Default::default()).unwrap();
+    assert!(!s.status().unwrap().pools[1].enabled);
+    assert_eq!(s.ensure_pool("b", "10").unwrap(), b);
+    assert_eq!(s.status().unwrap().pools[1].addresses.len(), 2);
 }
 #[test]
 fn shared_budget_and_prepared_send_survive_restart_without_duplicate_work() {

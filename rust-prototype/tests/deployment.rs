@@ -334,7 +334,7 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
         ),
         (
             configuration().replace("mode = \"static\"", "mode = \"zcash_rotation\""),
-            "only static",
+            "unknown field `private_key_env`",
         ),
         (
             configuration().replace("127.0.0.1:0", "127.0.0.1:8173"),

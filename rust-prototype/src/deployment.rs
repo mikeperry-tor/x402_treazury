@@ -20,22 +20,15 @@ use tokio_util::sync::CancellationToken;
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     pub version: u32,
+    pub treasury: Option<TreasuryConfig>,
+    pub funding: Option<FundingConfig>,
     pub sources: BTreeMap<String, SourceConfig>,
     pub wallets: BTreeMap<String, WalletConfig>,
     pub servers: BTreeMap<String, ListenerConfig>,
 }
 pub type SourceConfig = toml::Table;
-fn default_cap() -> String {
-    "1.00".into()
-}
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct WalletConfig {
-    pub mode: String,
-    pub private_key_env: String,
-    #[serde(default = "default_cap")]
-    pub max_price_usd: String,
-}
+pub use crate::rotation::config::WalletConfig;
+use crate::rotation::config::{FundingConfig, TreasuryConfig};
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerConfig {
@@ -114,16 +107,26 @@ impl MetaConfig {
             );
         }
         for (name, wallet) in &self.wallets {
-            ensure!(
-                wallet.mode == "static",
-                "wallet {name}: only static mode is implemented"
-            );
-            ensure!(
-                !wallet.private_key_env.trim().is_empty(),
-                "wallet {name}: private_key_env is required"
-            );
-            SpendPolicy::dollars(&wallet.max_price_usd)
-                .with_context(|| format!("wallet {name}: invalid max_price_usd"))?;
+            wallet
+                .validate()
+                .with_context(|| format!("wallet {name}"))?;
+        }
+        if self.wallets.values().any(WalletConfig::managed) {
+            self.treasury
+                .as_ref()
+                .context("managed profiles require [treasury]")?
+                .validate()?;
+            self.funding
+                .as_ref()
+                .context("managed profiles require [funding]")?
+                .validate()?;
+        } else {
+            if let Some(t) = &self.treasury {
+                t.validate()?;
+            }
+            if let Some(f) = &self.funding {
+                f.validate()?;
+            }
         }
         let mut addresses = BTreeSet::new();
         for (name, server) in &self.servers {
@@ -173,8 +176,11 @@ impl MetaConfig {
 }
 impl Deployment {
     pub async fn show_config(path: &Path) -> Result<serde_json::Value> {
-        let config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+        let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
         config.validate()?;
+        if let Some(t) = &mut config.treasury {
+            t.resolve(path);
+        }
         let mut resolved = BTreeMap::new();
         for (id, source) in &config.sources {
             let mut provider = crate::config::resolve(source.clone(), path).await?;
@@ -187,13 +193,16 @@ impl Deployment {
             resolved.insert(id, provider);
         }
         Ok(
-            serde_json::json!({"version":config.version,"sources":resolved,"wallets":config.wallets,"servers":config.servers}),
+            serde_json::json!({"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
-        let config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
+        let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
         config.validate()?;
+        if let Some(t) = &mut config.treasury {
+            t.resolve(path);
+        }
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
             let mut cfg = crate::config::resolve(source.clone(), path)
@@ -355,19 +364,120 @@ impl Deployment {
         for (name, cfg) in &self.config.servers {
             tokens.insert(name.clone(), secret(&cfg.bearer_token_env)?);
         }
+        // Static-only serving does not unlock state, but must not reuse a known
+        // managed profile name as a different wallet identity.
+        if !self.config.wallets.values().any(WalletConfig::managed)
+            && let Some(t) = &self.config.treasury
+            && t.state_dir.exists()
+        {
+            let dir = t.state_dir.clone();
+            let state =
+                tokio::task::spawn_blocking(move || crate::rotation::store::status(&dir)).await??;
+            ensure!(state.treasury_id == t.id, "state identity mismatch");
+            for pool in state.pools {
+                ensure!(
+                    !self.config.wallets.contains_key(&pool.name),
+                    "managed pool {} cannot become static without explicit retirement",
+                    pool.name
+                );
+            }
+        }
         let mut wallets = BTreeMap::new();
         for cfg in self.config.servers.values() {
-            if !wallets.contains_key(&cfg.wallet) {
-                let w = &self.config.wallets[&cfg.wallet];
+            if !wallets.contains_key(&cfg.wallet)
+                && let WalletConfig::Static {
+                    private_key_env,
+                    max_price_usd,
+                } = &self.config.wallets[&cfg.wallet]
+            {
                 let payer = Payer::new(
-                    &secret(&w.private_key_env)?,
-                    SpendPolicy::dollars(&w.max_price_usd)?,
+                    &secret(private_key_env)?,
+                    SpendPolicy::dollars(max_price_usd)?,
                 )
                 .with_context(|| format!("wallet {}: invalid signing configuration", cfg.wallet))?;
                 wallets.insert(
                     cfg.wallet.clone(),
                     PaidClient::new(reqwest::Client::new(), payer),
                 );
+            }
+        }
+        #[cfg(feature = "zcash")]
+        let mut treasury = None;
+        if self.config.wallets.values().any(WalletConfig::managed) {
+            #[cfg(not(feature = "zcash"))]
+            bail!("managed serving requires a build with --features zcash");
+            #[cfg(feature = "zcash")]
+            {
+                use crate::rotation::{
+                    base::{BaseRpc, secure_endpoint},
+                    manager::ManagedPool,
+                };
+                let t = self.config.treasury.as_ref().unwrap();
+                let f = self.config.funding.as_ref().unwrap();
+                // Validate required endpoint references without contacting Zcash/NEAR.
+                secure_endpoint(&secret(&t.indexer_url_env)?)?;
+                secure_endpoint(&secret(&t.submission_url_env)?)?;
+                if let Some(key) = &f.near_api_key_env {
+                    secret(key)?;
+                }
+                let base = BaseRpc::new(
+                    &secret(&f.base_rpc_url_env)?,
+                    f.base_confirmations,
+                    f.base_max_block_age_seconds,
+                )?;
+                let owner = crate::treasury::Treasury::open(
+                    t.state_dir.clone(),
+                    t.key_file.clone(),
+                    t.id.clone(),
+                )
+                .await?;
+                let store = owner.store_handle();
+                let managed = self
+                    .config
+                    .wallets
+                    .iter()
+                    .filter(|(_, w)| w.managed())
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                let statics = self
+                    .config
+                    .wallets
+                    .iter()
+                    .filter(|(_, w)| !w.managed())
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                store
+                    .call(move |s| s.configure_profiles(&managed, &statics))
+                    .await?;
+                for (name, w) in &self.config.wallets {
+                    if let WalletConfig::ZcashRotation {
+                        deposit_size,
+                        max_price_usd,
+                        wait_seconds,
+                        ..
+                    } = w
+                    {
+                        let pool = owner
+                            .ensure_pool(name.clone(), deposit_size.clone())
+                            .await?;
+                        let manager = ManagedPool::new(
+                            store.clone(),
+                            pool,
+                            base.clone(),
+                            deposit_size,
+                            SpendPolicy::dollars(max_price_usd)?,
+                            *wait_seconds,
+                        )?;
+                        wallets.insert(
+                            name.clone(),
+                            PaidClient::managed(
+                                reqwest::Client::new(),
+                                std::sync::Arc::new(manager),
+                            ),
+                        );
+                    }
+                }
+                treasury = Some(owner);
             }
         }
         for (id, source) in &self.sources {
@@ -444,10 +554,16 @@ impl Deployment {
                 http_app(server, tokens.remove(name).unwrap()),
             ));
         }
-        Ok(RunningDeployment { listeners })
+        Ok(RunningDeployment {
+            listeners,
+            #[cfg(feature = "zcash")]
+            treasury,
+        })
     }
 }
 pub struct RunningDeployment {
+    #[cfg(feature = "zcash")]
+    treasury: Option<crate::treasury::Treasury>,
     listeners: Vec<(String, TcpListener, axum::Router)>,
 }
 impl RunningDeployment {
@@ -469,7 +585,7 @@ impl RunningDeployment {
                     .with_context(|| format!("server {name} stopped unexpectedly"))
             });
         }
-        let result = tokio::select! {
+        let mut result = tokio::select! {
             _ = shutdown.cancelled() => Ok(()),
             ended = tasks.join_next() => match ended {
                 Some(Ok(Err(e))) => Err(e),
@@ -486,7 +602,13 @@ impl RunningDeployment {
         {
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
-            bail!("shutdown deadline exceeded; pending paid calls may have unknown outcomes");
+            result = Err(anyhow::anyhow!(
+                "shutdown deadline exceeded; pending paid calls may have unknown outcomes"
+            ));
+        }
+        #[cfg(feature = "zcash")]
+        if let Some(treasury) = self.treasury {
+            treasury.close().await?;
         }
         result
     }

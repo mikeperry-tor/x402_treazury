@@ -1,4 +1,5 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
+use super::error::AdmissionError;
 use alloy_primitives::U256;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
@@ -187,6 +188,7 @@ impl Store {
         )?;
         tx.execute("INSERT INTO snapshots VALUES (1,?1)", [encrypted])?;
         tx.commit()?;
+        admission_schema(&db)?;
         File::open(dir)?.sync_all()?;
         if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
             File::open(parent)?.sync_all()?;
@@ -230,6 +232,7 @@ impl Store {
         };
         store.snapshot()?;
         configure(&store.db)?;
+        admission_schema(&store.db)?;
         Ok(store)
     }
     pub fn id(&self) -> &str {
@@ -365,8 +368,8 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    /// Atomic role transition only. Admission and reservation checks must precede
-    /// this call in a future payment manager; this is not wired to paid transport.
+    /// Offline role-transition primitive. Managed serving uses `admit` to commit
+    /// verified evidence, promotion and the payment reservation together.
     pub fn promote(&mut self, pool: &str, expected: i64) -> Result<i64> {
         let tx = self
             .db
@@ -705,4 +708,264 @@ impl StoreHandle {
             .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
         recv.await.context("store worker stopped")?
     }
+}
+
+// Additive admission schema, versioned independently of the encrypted record format.
+fn admission_schema(db: &Connection) -> Result<()> {
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    ensure!(version <= 1, "unsupported admission schema");
+    if version == 0 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
+CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY REFERENCES pools(id),height INTEGER NOT NULL,hash TEXT NOT NULL);
+PRAGMA user_version=1;
+COMMIT;")?;
+    }
+    Ok(())
+}
+pub(crate) struct Admission {
+    pub id: String,
+    pub wallet: String,
+    pub generation: i64,
+    pub address: String,
+    pub key: Zeroizing<Vec<u8>>,
+}
+pub(crate) struct Authorization {
+    pub payer: String,
+    pub payee: String,
+    pub nonce: String,
+    pub valid_after: u64,
+    pub valid_before: u64,
+}
+impl Store {
+    /// Check mode conflicts before changing any pool, then disable removed profiles.
+    pub fn configure_profiles(
+        &mut self,
+        managed: &std::collections::BTreeSet<String>,
+        statics: &std::collections::BTreeSet<String>,
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let names: Vec<String> = tx
+            .prepare("SELECT name FROM pools")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        for name in &names {
+            ensure!(
+                !statics.contains(name),
+                "managed pool {name} cannot become static without explicit retirement"
+            );
+        }
+        for name in names {
+            if !managed.contains(&name) {
+                tx.execute("UPDATE pools SET enabled=0 WHERE name=?1", [name])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+    /// Called while holding this pool's payment gate. ADMITTED rows cannot have escaped
+    /// the process: every send must first durably change state to POSSIBLY_SUBMITTED.
+    pub fn chain_query(&mut self, pool: &str) -> Result<super::base::ChainQuery> {
+        self.db.execute(
+            "DELETE FROM payment_attempts WHERE pool_id=?1 AND state='ADMITTED'",
+            [pool],
+        )?;
+        let wallets = self
+            .db
+            .prepare("SELECT id,address FROM wallets WHERE pool_id=?1 AND (role!='RETIRED' OR EXISTS (SELECT 1 FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED'))")?
+            .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let pending = self.db.prepare("SELECT a.id,a.wallet_id,a.payer,a.nonce,a.valid_before FROM payment_attempts a WHERE pool_id=?1 AND state='POSSIBLY_SUBMITTED'")?.query_map([pool], |r| Ok(super::base::PendingAuthorization { id:r.get(0)?,wallet:r.get(1)?,payer:r.get(2)?,nonce:r.get(3)?,valid_before:sql_u64(r,4)? }))?.collect::<rusqlite::Result<_>>()?;
+        let anchor = self
+            .db
+            .query_row(
+                "SELECT height,hash FROM payment_anchors WHERE pool_id=?1",
+                [pool],
+                |r| {
+                    Ok(super::base::Anchor {
+                        height: sql_u64(r, 0)?,
+                        hash: r.get(1)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(super::base::ChainQuery {
+            wallets,
+            pending,
+            anchor,
+        })
+    }
+    pub(crate) fn admit(
+        &mut self,
+        pool: &str,
+        cost: U256,
+        requirements_hash: &str,
+        view: super::base::ChainView,
+    ) -> Result<Admission> {
+        ensure!(cost > U256::ZERO, "invalid payment amount");
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let (mut generation, enabled, target, bootstrapped): (i64, bool, String, bool) = tx
+            .query_row(
+                "SELECT generation,enabled,target,bootstrapped FROM pools WHERE id=?1",
+                [pool],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+        ensure!(enabled, AdmissionError::WalletNotReady("pool disabled"));
+        ensure!(
+            cost <= amount(&target)?,
+            AdmissionError::PriceLimit("payment exceeds deposit_size")
+        );
+        for id in view.released {
+            tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
+        }
+        let rows: Vec<(String, String, String)> = tx
+            .prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
+            .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (id, role, target) in &rows {
+            let Some(balance) = view.balances.get(id) else {
+                ensure!(role == "RETIRED", "incomplete Base view");
+                continue;
+            };
+            tx.execute(
+                "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
+                params![
+                    balance.to_string(),
+                    view.anchor.hash,
+                    i64::try_from(view.anchor.height)?,
+                    id
+                ],
+            )?;
+            if role == "ALLOCATED" && *balance >= amount(target)? {
+                tx.execute(
+                    "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
+                    [id],
+                )?;
+                if bootstrapped {
+                    tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [id])?;
+                }
+            }
+        }
+        if !bootstrapped
+            && rows.len() == 2
+            && rows
+                .iter()
+                .all(|(id, _, target)| view.balances[id] >= amount(target).unwrap_or(U256::MAX))
+        {
+            tx.execute("UPDATE wallets SET role=CASE sequence WHEN 0 THEN 'ACTIVE' ELSE 'READY' END WHERE pool_id=?1",[pool])?;
+            tx.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [pool])?;
+        }
+        tx.execute("INSERT INTO payment_anchors VALUES (?1,?2,?3) ON CONFLICT(pool_id) DO UPDATE SET height=excluded.height,hash=excluded.hash",params![pool,i64::try_from(view.anchor.height)?,view.anchor.hash])?;
+        // Commit evidence even when not ready; payment failures must not lose reconciliation.
+        let active: Option<String> = tx
+            .query_row(
+                "SELECT id FROM wallets WHERE pool_id=?1 AND role='ACTIVE'",
+                [pool],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(mut wallet) = active else {
+            tx.commit()?;
+            anyhow::bail!(AdmissionError::WalletNotReady(
+                "both bootstrap addresses require confirmed funding"
+            ));
+        };
+        let reserved = |wallet: &str| -> Result<U256> {
+            let values: Vec<String> = tx
+                .prepare(
+                    "SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'",
+                )?
+                .query_map([wallet], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            values.iter().try_fold(U256::ZERO, |sum, v| {
+                sum.checked_add(amount(v)?).context("reservation overflow")
+            })
+        };
+        let balance = view.balances[&wallet];
+        let exposure = reserved(&wallet)?;
+        if balance.saturating_sub(exposure) < cost {
+            // A live authorization could explain depletion. Never churn a busy slot.
+            if exposure > U256::ZERO {
+                tx.commit()?;
+                anyhow::bail!(AdmissionError::PaymentPending("unresolved authorizations"));
+            }
+            let ready: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM wallets WHERE pool_id=?1 AND role='READY'",
+                    [pool],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(ready) = ready else {
+                tx.commit()?;
+                anyhow::bail!(AdmissionError::FundingUnavailable("standby not ready"));
+            };
+            if view.balances[&ready].saturating_sub(reserved(&ready)?) < cost {
+                tx.commit()?;
+                anyhow::bail!(AdmissionError::FundingUnavailable(
+                    "standby cannot cover payment"
+                ));
+            }
+            tx.execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])?;
+            tx.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [&ready])?;
+            let seq: i64 = tx.query_row(
+                "SELECT MAX(sequence)+1 FROM wallets WHERE pool_id=?1",
+                [pool],
+                |r| r.get(0),
+            )?;
+            allocate(&tx, &self.key, &self.id, pool, seq, &target)?;
+            generation = generation.checked_add(1).context("generation overflow")?;
+            tx.execute(
+                "UPDATE pools SET generation=?1 WHERE id=?2",
+                params![generation, pool],
+            )?;
+            wallet = ready;
+        }
+        let id = Uuid::new_v4().to_string();
+        tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES (?1,?2,?3,?4,?5,?6,'ADMITTED')",params![id,pool,wallet,generation,cost.to_string(),requirements_hash])?;
+        tx.commit()?;
+        let address =
+            self.db
+                .query_row("SELECT address FROM wallets WHERE id=?1", [&wallet], |r| {
+                    r.get(0)
+                })?;
+        let key = self.wallet_secret(pool, &wallet)?;
+        Ok(Admission {
+            id,
+            wallet,
+            generation,
+            address,
+            key,
+        })
+    }
+    pub(crate) fn journal_authorization(
+        &mut self,
+        id: &str,
+        wallet: &str,
+        generation: i64,
+        requirements_hash: &str,
+        auth: Authorization,
+    ) -> Result<()> {
+        ensure!(
+            auth.valid_before > auth.valid_after,
+            "invalid authorization interval"
+        );
+        let changed=self.db.execute("UPDATE payment_attempts SET state='POSSIBLY_SUBMITTED',payer=?1,payee=?2,nonce=?3,valid_after=?4,valid_before=?5 WHERE id=?6 AND wallet_id=?7 AND generation=?8 AND requirements_hash=?9 AND state='ADMITTED'",params![auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?,id,wallet,generation,requirements_hash])?;
+        ensure!(changed == 1, "payment_journal_conflict");
+        Ok(())
+    }
+}
+
+fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    row.get::<_, i64>(index)?.try_into().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Integer,
+            Box::new(e),
+        )
+    })
 }
