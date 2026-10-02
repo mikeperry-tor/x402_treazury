@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "87080853083c909b34f8c8cff3622570c114985d"
+  },
+  "path_in_vcs": "crates/sol-macro-expander"
+}

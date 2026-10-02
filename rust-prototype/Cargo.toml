@@ -1,0 +1,39 @@
+[package]
+name = "x402-mcp-prototype"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+
+[dependencies]
+alloy-primitives = "1.5"
+alloy-signer-local = "2.0"
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15"
+percent-encoding = "2"
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subtle = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+x402-chain-eip155 = { version = "=2.0.2", features = ["client", "telemetry"] }
+x402-reqwest = "=2.0.2"
+x402-types = "=2.0.2"
+
+[dev-dependencies]
+alloy-sol-types = "1.5"
+tempfile = "3"
+
+# Experimental compatibility patch: see vendor/README.md.
+[patch.crates-io]
+alloy-primitives = { path = "vendor/alloy-primitives" }
+alloy-sol-macro-expander = { path = "vendor/alloy-sol-macro-expander" }

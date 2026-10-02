@@ -67,12 +67,14 @@ starting points:
 | --- | --- |
 | [catalog.rs](../../rust-prototype/src/catalog.rs) | JSON OpenAPI/digest loading, schema normalization, names, filters, descriptions and argument routing; retain explicit-only text limits |
 | [payment.rs](../../rust-prototype/src/payment.rs) | SDK signing, Base USDC cap, challenge description sanitization, one paid retry; extend with typed outcomes, admission and persistent authorizations |
-| [server.rs](../../rust-prototype/src/server.rs), [main.rs](../../rust-prototype/src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; add runtime ownership and shutdown |
+| [server.rs](../../rust-prototype/src/server.rs), [main.rs](../../rust-prototype/src/main.rs) | `rmcp` stdio and bearer-gated stateless Streamable HTTP, lazy help, CLI/config loading; extend shutdown to persist wallet outcomes |
+| [deployment.rs](../../rust-prototype/src/deployment.rs) | TOML sources/wallets/servers, per-listener tool selection and authentication, shared static payer profiles, atomic binding and bounded shutdown; add managed wallet profiles |
 | [tests](../../rust-prototype/tests/) | Real SDK signatures against local fake sellers; independent Python-generated Keccak/EIP-712 vectors; catalog comparison with Python |
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 11 tests. The combined suite runs those tests and
+The standalone Rust suite has 16 tests. The combined suite runs 12 shared
+payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
 Zcash dependency graph. The catalog comparison covers 489 tool definitions
 across 13 committed configs/fixtures. These establish a buildable starting
@@ -145,14 +147,20 @@ state or making funding-network requests. A second process using it fails with
 state directories; do not restore the same treasury seed into multiple active
 owners. There is no cross-process treasury sharing in this design.
 
-Support repeated `--config` flags for mounting several existing generic configs
-into one MCP server and sharing one manager. Store base URL, timeout, help cache,
-and routing metadata per catalog/client rather than relying on a single global
-base URL. Keep config prefixes; reject duplicate tool names at boot. CLI global
-overrides apply to each selected config; each config's include/exclude/tags and
-overrides remain local. Assemble labeled per-config `instructions_text` without
-silent truncation. One MCP endpoint, bearer token, spend policy and pool serve
-all these catalogs. Preserve the existing one-config invocation.
+Use the existing `--meta-config` TOML model in `deployment.rs`: named sources,
+wallet profiles, and MCP listeners. Extend wallet profiles with managed rotation
+settings. Multiple listeners referencing the same managed profile share one
+manager, treasury, active/standby pool, and spend policy. Initially permit at
+most one managed profile per process; static profiles may coexist.
+
+Each source retains its base URL, timeout, routing and generic config filters
+and overrides. Each listener has its own bearer-token environment reference and
+include/exclude tool-name patterns, enforced both at listing and invocation.
+Keep source prefixes and reject duplicate tool names. Assemble labeled source
+instructions without silent truncation. Preserve secret-free validation and
+inventory, all-or-nothing listener binding, and coordinated shutdown. Extend
+the shutdown path to persist pending authorizations and funding outcomes before
+closing the encrypted store. Preserve the existing single-source invocation.
 
 | Proposed source under `rust-prototype/src/` | Responsibility |
 | --- | --- |
@@ -710,7 +718,7 @@ spend; none is authorized by this plan alone.
    Failure to quote 5 USDC is a reported route constraint, not a target change.
 5. **Wire challenge-aware admission and transports.** Implement leased signers,
    journal-before-send, confirmed authorization reconciliation, promotion and
-   error classification. Exercise stdio/HTTP and repeated-config routing with
+   error classification. Exercise stdio/HTTP and multi-listener/multi-source routing with
    the same runtime. Keep one signed retry and preserve static behavior.
 6. **Finish operation and release qualification.** Provide backup/recovery and
    status commands, configuration examples, multi-catalog setup, dependency-patch

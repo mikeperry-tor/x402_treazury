@@ -1,0 +1,100 @@
+{
+  "generator": "PyCryptodome keccak + eth-account encode_typed_data/sign_message",
+  "keccak": [
+    {
+      "length": 0,
+      "hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+    },
+    {
+      "length": 3,
+      "hash": "0xf84a97f1f0a956e738abd85c2e0a5026f8874e3ec09c8f012159dfeeaab2b156"
+    },
+    {
+      "length": 135,
+      "hash": "0xcbdfd9dee5faad3818d6b06f95a219fd290b0e1706f6a82e5a595b9ce9faca62"
+    },
+    {
+      "length": 136,
+      "hash": "0x7ce759f1ab7f9ce437719970c26b0a66ff11fe3e38e17df89cf5d29c7d7f807e"
+    },
+    {
+      "length": 137,
+      "hash": "0xac73d4fae68b8453f764007c1a20ce95994187861f0c3227a3a8e99a73a3b1db"
+    },
+    {
+      "length": 272,
+      "hash": "0xfdf2ec49e749960d3c8521a0219af8d03e30e2b3bf19bd16150ee0eaf133d66e"
+    },
+    {
+      "length": 4096,
+      "hash": "0x1c85a3e5666494583f321cd54285cc17276acf9aea34b207d43005bfa69d0a86"
+    }
+  ],
+  "eip3009": {
+    "typed_data": {
+      "types": {
+        "EIP712Domain": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "version",
+            "type": "string"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256"
+          },
+          {
+            "name": "verifyingContract",
+            "type": "address"
+          }
+        ],
+        "TransferWithAuthorization": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "validAfter",
+            "type": "uint256"
+          },
+          {
+            "name": "validBefore",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "bytes32"
+          }
+        ]
+      },
+      "primaryType": "TransferWithAuthorization",
+      "domain": {
+        "name": "USD Coin",
+        "version": "2",
+        "chainId": 8453,
+        "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      "message": {
+        "from": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+        "to": "0x0000000000000000000000000000000000000003",
+        "value": 14000,
+        "validAfter": 1700000000,
+        "validBefore": 1700000600,
+        "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242"
+      }
+    },
+    "hash": "0x3ebdead243753abdd7b1fade5c35b8de2e39de8ee8796d312a10224b307c6fb6",
+    "signature": "0xfce87ca4cdd65ea48722887e1856107a220abad6011c6c7329c3132db631e551496a7490913da7025b6204924943399bf53da909d67b37263df6f14c3bff84511c"
+  }
+}

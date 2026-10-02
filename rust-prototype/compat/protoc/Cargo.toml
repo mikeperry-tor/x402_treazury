@@ -1,0 +1,8 @@
+[package]
+name = "x402-protoc-path"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+protoc-bin-vendored = "3"

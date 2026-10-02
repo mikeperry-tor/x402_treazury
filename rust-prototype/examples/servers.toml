@@ -1,0 +1,31 @@
+# All local source/config/spec paths resolve from root, relative to this file.
+version = 1
+root = "../.."
+
+[sources.pdl]
+config = "confs/pdl.json"
+timeout = 30
+
+[sources.lonestar]
+config = "confs/lonestar.json"
+timeout = 90
+
+[wallets.default]
+mode = "static"
+private_key_env = "EVM_PRIVATE_KEY"
+max_price_usd = "1.00"
+
+[servers.research]
+listen = "127.0.0.1:8000"
+bearer_token_env = "RESEARCH_MCP_TOKEN"
+wallet = "default"
+sources = ["pdl", "lonestar"]
+include_tools = ["pdl_*", "lonestar_*"]
+exclude_tools = ["pdl_person_search"]
+
+[servers.companies]
+listen = "127.0.0.1:8001"
+bearer_token_env = "COMPANIES_MCP_TOKEN"
+wallet = "default"
+sources = ["pdl"]
+include_tools = ["pdl_company_*"]

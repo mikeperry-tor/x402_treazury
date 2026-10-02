@@ -4,3 +4,15 @@ __pycache__/
 *.egg-info/
 dist/
 .DS_Store
+
+# Rust build output (including compatibility workspaces)
+target/
+
+# Local reference checkouts
+/reference_repos/
+
+# Test/lint caches and editor swap files
+.pytest_cache/
+.ruff_cache/
+*.swp
+*.swo
