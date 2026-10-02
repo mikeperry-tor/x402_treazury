@@ -14,7 +14,9 @@ its own `deposit_size` in native Base USDC (decimal string, default **5.00**),
 per-payment cap, active address and fully funded standby. Managed funding uses
 confidential ZEC-to-USDC swaps. Each deployment source may select a virtual
 wallet by name using `wallet`, overriding the server's optional default `wallet`.
-Every server/source binding must resolve to a named profile; bindings selecting
+A template-backed `wallet_assignment` supplies any remaining binding, with
+`deployment`, `server`, `source` or `binding` scope. Every server/source binding
+must resolve to a named profile; bindings selecting
 the same name share that pool. Different virtual wallets never share EVM keys, balances or payment
 reservations, even though they draw from the same Zcash treasury.
 
@@ -87,8 +89,8 @@ starting points:
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 48 tests, with two offline treasury tests and one
-managed deployment test under `--features zcash`, plus two fixture utility tests. The combined suite runs 12 shared
+The standalone Rust suite has 52 tests, with two offline treasury tests and two
+managed deployment tests under `--features zcash`, plus two fixture utility tests. The combined suite runs 12 shared
 payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
 Zcash dependency graph. The catalog comparison covers 726 tool definitions
@@ -176,6 +178,24 @@ listener defaults; assignments belong in the deployment, never provider files.
 Bindings referencing the same profile share that pool, payment admission gate
 and spend policy. `--show-config`, `--check` and inventory expose the effective
 wallet and source/server field origin for every declared binding.
+
+Automatic assignment is a pure expansion into named managed profiles, implemented
+in `rotation/assignment.rs`. Templates use managed wallet settings; explicit
+source and server references win over `[wallet_assignment]`. Scope determines
+one pool per deployment, server, source, or server/source pair. Generate only
+fallbacks for declared bindings, independently of catalog filters. Templates and
+unreferenced sources never create pools by themselves. All resolved managed
+profiles participate in ownership, budget accounting and startup reconciliation.
+
+Keep generated identity stable within the treasury: `auto_v1_deployment`,
+`auto_v1_server_<server>`, `auto_v1_source_<source>`, or
+`auto_v1_binding_<server-name-length>_<server>_<source>`. Explicit profiles cannot
+use the reserved `auto_v1_` prefix. Do not include template name/settings, file
+paths or ordering in identity. Preserve existing allocations on template edits;
+scope/name changes may add pools while retaining old state for recovery.
+Inspection displays generated names, template/scope provenance, effective profile
+settings and distinct managed-pool counts with exact active-plus-standby USDC
+targets. These targets describe configuration, not current balances or swap quotes.
 Static profiles may coexist and do not use the treasury. Do not replicate the
 Zcash wallet or state directory per virtual wallet.
 

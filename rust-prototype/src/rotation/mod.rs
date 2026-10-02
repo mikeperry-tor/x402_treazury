@@ -1,3 +1,4 @@
+pub mod assignment;
 pub mod base;
 pub mod config;
 pub mod error;

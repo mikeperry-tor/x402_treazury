@@ -1,0 +1,47 @@
+# Initialize the treasury first; build the server with scripts/zcash.sh.
+# This example creates two pools, each targeting 5 USDC active + 5 USDC standby.
+# Funding jobs are queued; automatic NEAR funding is not yet implemented.
+version = 1
+
+[wallet_assignment]
+scope = "source" # deployment | server | source | binding
+template = "small"
+
+[wallet_templates.small]
+mode = "zcash_rotation"
+deposit_size = "5.00"
+max_price_usd = "1.00"
+max_input_zec = "0.02"
+max_fee_bps = 500
+
+[treasury]
+id = "11111111-1111-4111-8111-111111111111" # Replace with wallet init's treasury_id.
+state_dir = "../../state/treasury"
+key_file = "../../secrets/treasury.key"
+indexer_url_env = "ZCASH_INDEXER_URL"
+submission_url_env = "ZCASH_SUBMISSION_URL"
+daily_input_zec = "0.10"
+shield_max_fee_zec = "0.001"
+
+[funding]
+base_rpc_url_env = "BASE_RPC_URL"
+confidentiality = "basic"
+
+[sources.pdl]
+extends = "../../providers/pdl.toml"
+
+[sources.socialfetch]
+extends = "../../providers/socialfetch.toml"
+
+[servers.research]
+listen = "127.0.0.1:8000"
+bearer_token_env = "RESEARCH_MCP_TOKEN"
+sources = ["pdl", "socialfetch"]
+
+[servers.social]
+listen = "127.0.0.1:8001"
+bearer_token_env = "SOCIAL_MCP_TOKEN"
+sources = ["socialfetch"]
+# In source scope, this listener shares SocialFetch's pool with research.
+# To use an explicit exception, define a named profile under [wallets] and
+# reference it with wallet = "name" on a source (first priority) or server.

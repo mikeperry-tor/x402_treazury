@@ -23,7 +23,11 @@ pub struct MetaConfig {
     pub treasury: Option<TreasuryConfig>,
     pub funding: Option<FundingConfig>,
     pub sources: BTreeMap<String, SourceConfig>,
+    #[serde(default)]
     pub wallets: BTreeMap<String, WalletConfig>,
+    #[serde(default)]
+    pub wallet_templates: BTreeMap<String, WalletConfig>,
+    pub wallet_assignment: Option<Assignment>,
     pub servers: BTreeMap<String, ListenerConfig>,
 }
 #[derive(Deserialize, Serialize)]
@@ -32,12 +36,8 @@ pub struct SourceConfig {
     #[serde(flatten)]
     pub provider: toml::Table,
 }
-#[derive(Clone, Serialize)]
-pub struct WalletBinding {
-    pub wallet: String,
-    pub origin: String,
-}
-type WalletBindings = BTreeMap<String, BTreeMap<String, WalletBinding>>;
+pub use crate::rotation::assignment::WalletBinding;
+use crate::rotation::assignment::{self, Assignment, Resolution, WalletSummary};
 pub use crate::rotation::config::WalletConfig;
 use crate::rotation::config::{FundingConfig, TreasuryConfig};
 #[derive(Clone, Deserialize, Serialize)]
@@ -83,7 +83,7 @@ pub struct Deployment {
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
-    wallet_bindings: WalletBindings,
+    wallet_resolution: Resolution,
 }
 fn pattern(text: &str) -> Result<Regex> {
     ensure!(!text.is_empty(), "empty tool selector");
@@ -100,22 +100,7 @@ fn pattern(text: &str) -> Result<Regex> {
     Ok(Regex::new(&expression)?)
 }
 impl MetaConfig {
-    fn wallet_bindings(&self) -> Result<WalletBindings> {
-        self.servers.iter().map(|(server_name, server)| {
-            let bindings = server.sources.iter().map(|source_name| {
-                let source = self.sources.get(source_name).context("unknown source")?;
-                let (wallet, origin) = if let Some(wallet) = &source.wallet {
-                    (wallet, format!("sources.{source_name}.wallet"))
-                } else {
-                    (server.wallet.as_ref().with_context(|| format!("server {server_name}, source {source_name}: wallet required on source or server"))?, format!("servers.{server_name}.wallet"))
-                };
-                Ok((source_name.clone(), WalletBinding { wallet: wallet.clone(), origin }))
-            }).collect::<Result<_>>()?;
-            Ok((server_name.clone(), bindings))
-        }).collect()
-    }
-
-    fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<Resolution> {
         ensure!(
             self.version == 1,
             "unsupported meta-config version {}",
@@ -127,6 +112,7 @@ impl MetaConfig {
             .sources
             .keys()
             .chain(self.wallets.keys())
+            .chain(self.wallet_templates.keys())
             .chain(self.servers.keys())
         {
             ensure!(
@@ -138,23 +124,6 @@ impl MetaConfig {
             wallet
                 .validate()
                 .with_context(|| format!("wallet {name}"))?;
-        }
-        if self.wallets.values().any(WalletConfig::managed) {
-            self.treasury
-                .as_ref()
-                .context("managed profiles require [treasury]")?
-                .validate()?;
-            self.funding
-                .as_ref()
-                .context("managed profiles require [funding]")?
-                .validate()?;
-        } else {
-            if let Some(t) = &self.treasury {
-                t.validate()?;
-            }
-            if let Some(f) = &self.funding {
-                f.validate()?;
-            }
         }
         for (name, source) in &self.sources {
             if let Some(wallet) = &source.wallet {
@@ -208,14 +177,31 @@ impl MetaConfig {
                 pattern(selector)?;
             }
         }
-        self.wallet_bindings()?;
-        Ok(())
+        let resolution = assignment::resolve(self)?;
+        if resolution.wallets.values().any(WalletConfig::managed) {
+            self.treasury
+                .as_ref()
+                .context("managed profiles require [treasury]")?
+                .validate()?;
+            self.funding
+                .as_ref()
+                .context("managed profiles require [funding]")?
+                .validate()?;
+        } else {
+            if let Some(t) = &self.treasury {
+                t.validate()?;
+            }
+            if let Some(f) = &self.funding {
+                f.validate()?;
+            }
+        }
+        Ok(resolution)
     }
 }
 impl Deployment {
     pub async fn show_config(path: &Path) -> Result<serde_json::Value> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
-        config.validate()?;
+        let wallet_resolution = config.validate()?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
@@ -232,19 +218,17 @@ impl Deployment {
             resolved_source["wallet"] = serde_json::to_value(&source.wallet)?;
             resolved.insert(id, resolved_source);
         }
-        let wallet_bindings = config.wallet_bindings()?;
         Ok(
-            serde_json::json!({"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_bindings}),
+            serde_json::json!({"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
-        config.validate()?;
+        let wallet_resolution = config.validate()?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
-        let wallet_bindings = config.wallet_bindings()?;
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
             let mut cfg = crate::config::resolve(source.provider.clone(), path)
@@ -368,8 +352,11 @@ impl Deployment {
             config,
             sources,
             selected,
-            wallet_bindings,
+            wallet_resolution,
         })
+    }
+    pub fn wallet_summary(&self) -> &WalletSummary {
+        &self.wallet_resolution.summary
     }
     pub fn inventory(&self) -> Vec<Inventory> {
         self.config
@@ -379,7 +366,7 @@ impl Deployment {
                 server: name.clone(),
                 listen: s.listen,
                 default_wallet: s.wallet.clone(),
-                wallet_bindings: self.wallet_bindings[name].clone(),
+                wallet_bindings: self.wallet_resolution.bindings[name].clone(),
                 tools: self.selected[name]
                     .iter()
                     .map(|(source, tool)| InventoryTool {
@@ -410,7 +397,11 @@ impl Deployment {
         }
         // Static-only serving does not unlock state, but must not reuse a known
         // managed profile name as a different wallet identity.
-        if !self.config.wallets.values().any(WalletConfig::managed)
+        if !self
+            .wallet_resolution
+            .wallets
+            .values()
+            .any(WalletConfig::managed)
             && let Some(t) = &self.config.treasury
             && t.state_dir.exists()
         {
@@ -420,7 +411,7 @@ impl Deployment {
             ensure!(state.treasury_id == t.id, "state identity mismatch");
             for pool in state.pools {
                 ensure!(
-                    !self.config.wallets.contains_key(&pool.name),
+                    !self.wallet_resolution.wallets.contains_key(&pool.name),
                     "managed pool {} cannot become static without explicit retirement",
                     pool.name
                 );
@@ -433,16 +424,18 @@ impl Deployment {
             .selected
             .iter()
             .flat_map(|(server, tools)| {
-                tools
-                    .iter()
-                    .map(|(source, _)| self.wallet_bindings[server][source].wallet.clone())
+                tools.iter().map(|(source, _)| {
+                    self.wallet_resolution.bindings[server][source]
+                        .wallet
+                        .clone()
+                })
             })
             .collect();
         for name in used_wallets {
             if let WalletConfig::Static {
                 private_key_env,
                 max_price_usd,
-            } = &self.config.wallets[&name]
+            } = &self.wallet_resolution.wallets[&name]
             {
                 let payer = Payer::new(
                     &secret(private_key_env)?,
@@ -454,7 +447,12 @@ impl Deployment {
         }
         #[cfg(feature = "zcash")]
         let mut treasury = None;
-        if self.config.wallets.values().any(WalletConfig::managed) {
+        if self
+            .wallet_resolution
+            .wallets
+            .values()
+            .any(WalletConfig::managed)
+        {
             #[cfg(not(feature = "zcash"))]
             bail!("managed serving requires a build with --features zcash");
             #[cfg(feature = "zcash")]
@@ -484,14 +482,14 @@ impl Deployment {
                 .await?;
                 let store = owner.store_handle();
                 let managed = self
-                    .config
+                    .wallet_resolution
                     .wallets
                     .iter()
                     .filter(|(_, w)| w.managed())
                     .map(|(n, _)| n.clone())
                     .collect();
                 let statics = self
-                    .config
+                    .wallet_resolution
                     .wallets
                     .iter()
                     .filter(|(_, w)| !w.managed())
@@ -500,7 +498,7 @@ impl Deployment {
                 store
                     .call(move |s| s.configure_profiles(&managed, &statics))
                     .await?;
-                for (name, w) in &self.config.wallets {
+                for (name, w) in &self.wallet_resolution.wallets {
                     if let WalletConfig::ZcashRotation {
                         deposit_size,
                         max_price_usd,
@@ -574,7 +572,7 @@ impl Deployment {
                     let source = &self.sources[id];
                     (
                         t.clone(),
-                        wallets[&self.wallet_bindings[name][id].wallet]
+                        wallets[&self.wallet_resolution.bindings[name][id].wallet]
                             .with_http(source.http.clone()),
                         source.base_url.clone(),
                     )

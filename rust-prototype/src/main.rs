@@ -138,6 +138,13 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         if args.check {
+            let summary = deployment.wallet_summary();
+            println!(
+                "{} managed pools ({} automatic); active + standby target: {} USDC",
+                summary.managed_pool_count,
+                summary.generated_pool_count,
+                summary.active_and_standby_target_usdc
+            );
             for server in deployment.inventory() {
                 println!(
                     "{}: {} tools on {}",
