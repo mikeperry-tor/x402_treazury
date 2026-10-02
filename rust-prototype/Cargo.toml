@@ -13,6 +13,7 @@ zcash-regtest = ["zcash-testutils", "dep:zcash_local_net"]
 zcash = ["dep:zingolib", "dep:zip32", "dep:zcash_client_backend", "dep:zcash_primitives", "dep:zcash_protocol", "dep:zcash_keys", "dep:zingo-netutils", "dep:tonic"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 zcash_local_net = { git = "https://github.com/zingolabs/infrastructure.git", rev = "89cf104a2416144d1bbbae30aca02bec062d1492", optional = true }
 orchard = { version = "0.15.5", default-features = false, features = ["circuit"], optional = true }
 tempfile = "3"

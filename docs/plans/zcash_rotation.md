@@ -969,6 +969,12 @@ spend; none is authorized by this plan alone.
    small live swap only after regtest recovery passes. Document unverified live
    conditions; do not call a compile/test result a production funding validation.
 
+The NEAR HTTP adapter validates tokens, quote bindings and cost limits in
+`rotation/near.rs`. Public dry confidential requests currently return HTTP 401
+requiring user authentication. The committed token and rejection fixtures do not
+establish successful authenticated route qualification. Resolve the required user
+session flow independently from the partner API key before enabling live funding.
+
 Use fake time, deterministic throwaway EVM keys, temporary state directories and
 injected transports. Tests must never load a developer's `.env`, wallet key
 files, real seed or mainnet RPC by default. Build-time proving-parameter downloads

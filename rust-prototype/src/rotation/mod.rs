@@ -5,3 +5,6 @@ pub mod error;
 pub mod manager;
 pub mod store;
 pub mod transaction;
+
+#[cfg(feature = "zcash")]
+pub mod near;

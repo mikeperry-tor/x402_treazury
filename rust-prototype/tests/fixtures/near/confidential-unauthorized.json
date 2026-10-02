@@ -1,0 +1,6 @@
+{
+  "message": "User authentication is required for confidential intent quotes",
+  "error": "Unauthorized",
+  "statusCode": 401,
+  "path": "/v0/quote"
+}
