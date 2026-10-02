@@ -720,3 +720,7 @@ async fn background_reconciliation_releases_confirmed_payment_without_rotating_o
     drop(manager);
     h.close().await;
 }
+
+#[cfg(feature = "zcash")]
+#[path = "support/lifecycle.rs"]
+mod lifecycle;

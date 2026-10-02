@@ -682,7 +682,7 @@ async fn expiry_run() -> Result<()> {
     // An unresolved/missing original input must block recovery even when the
     // transaction itself has expired. Exercise the same production verifier.
     {
-        use pepper_sync::wallet::{OrchardNote, OutputInterface};
+        use pepper_sync::wallet::{IronwoodNote, OrchardNote, SaplingNote, TransparentCoin};
         let operation = op.clone();
         let bytes = treasury
             .store
@@ -699,25 +699,14 @@ async fn expiry_run() -> Result<()> {
         .await?;
         let original = original.wallet().read().await;
         let txid = submission::decode(prepared.bytes())?.txid();
-        let inputs =
-            OrchardNote::transaction_inputs(original.wallet_transactions.get(&txid).unwrap());
         let mut current = treasury.client.as_ref().unwrap().wallet().write().await;
-        let origin = current
-            .wallet_outputs::<OrchardNote>()
-            .into_iter()
-            .find(|n| n.spend_link().is_some_and(|link| inputs.contains(&&link)))
-            .unwrap()
-            .output_id()
-            .txid();
-        let removed = current.wallet_transactions.remove(&origin).unwrap();
-        assert!(
-            super::expiry::check_inputs::<OrchardNote>(&original, &current, &txid, target, 2)
-                .is_err()
-        );
-        current.wallet_transactions.insert(origin, removed);
-        assert!(
-            super::expiry::check_inputs::<OrchardNote>(&original, &current, &txid, target, 2)? > 0
-        );
+        let checked = [
+            reject_missing_input::<TransparentCoin>(&original, &mut current, &txid, target)?,
+            reject_missing_input::<SaplingNote>(&original, &mut current, &txid, target)?,
+            reject_missing_input::<OrchardNote>(&original, &mut current, &txid, target)?,
+            reject_missing_input::<IronwoodNote>(&original, &mut current, &txid, target)?,
+        ];
+        assert!(checked.into_iter().any(|checked| checked));
     }
     treasury
         .recover_expired(op.clone(), &mut sender, &stop)
@@ -772,4 +761,26 @@ async fn indexer_non_inclusion_response() -> Result<()> {
     );
     chain.passed = true;
     Ok(())
+}
+
+fn reject_missing_input<T: pepper_sync::wallet::OutputInterface>(
+    original: &zingolib::wallet::LightWallet,
+    current: &mut zingolib::wallet::LightWallet,
+    txid: &zcash_primitives::transaction::TxId,
+    height: u64,
+) -> Result<bool> {
+    let inputs = T::transaction_inputs(original.wallet_transactions.get(txid).unwrap());
+    let Some(origin) = current
+        .wallet_outputs::<T>()
+        .into_iter()
+        .find(|n| n.spend_link().is_some_and(|link| inputs.contains(&&link)))
+        .map(|n| n.output_id().txid())
+    else {
+        return Ok(false);
+    };
+    let removed = current.wallet_transactions.remove(&origin).unwrap();
+    assert!(super::expiry::check_inputs::<T>(original, current, txid, height, 2).is_err());
+    current.wallet_transactions.insert(origin, removed);
+    assert!(super::expiry::check_inputs::<T>(original, current, txid, height, 2)? > 0);
+    Ok(true)
 }
