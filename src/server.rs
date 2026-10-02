@@ -1,18 +1,17 @@
+use crate::catalog_state::{self, CatalogSnapshot, CatalogState};
 use crate::{catalog::ToolSpec, payment::PaidClient};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
 use serde_json::Map;
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::OnceCell;
 
 #[derive(Clone)]
 pub struct Server {
-    pub tools: Arc<Vec<ToolSpec>>,
+    pub catalog: Arc<CatalogState>,
+    pub catalog_server: String,
     pub name: String,
-    bindings: Arc<BTreeMap<String, (PaidClient, String)>>,
     pub instructions: Option<String>,
     pub max_response_chars: Option<usize>,
-    help: Arc<BTreeMap<String, OnceCell<String>>>,
 }
 impl Server {
     pub fn new(
@@ -36,26 +35,15 @@ impl Server {
         instructions: Option<String>,
         max_response_chars: Option<usize>,
     ) -> Self {
-        let help = Arc::new(
-            tools
-                .iter()
-                .filter_map(|(t, _, _)| t.help_url.clone())
-                .map(|u| (u, OnceCell::new()))
-                .collect(),
-        );
-        let bindings = Arc::new(
-            tools
-                .iter()
-                .map(|(t, c, b)| (t.name.clone(), (c.clone(), b.clone())))
-                .collect(),
-        );
         Self {
-            tools: Arc::new(tools.into_iter().map(|(t, _, _)| t).collect()),
+            catalog: Arc::new(CatalogState::new(CatalogSnapshot {
+                generation: 0,
+                views: BTreeMap::from([("default".into(), catalog_state::bind(tools))]),
+            })),
+            catalog_server: "default".into(),
             name: "x402-treazure".into(),
-            bindings,
             instructions,
             max_response_chars,
-            help,
         }
     }
     fn definition(t: &ToolSpec) -> Tool {
@@ -70,37 +58,20 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<String> {
-        let tool = self
-            .tools
-            .iter()
-            .find(|t| t.name == name)
-            .context("unknown tool")?;
-        let (client, base_url) = &self.bindings[name];
-        let text = if let Some(url) = &tool.help_url {
-            self.help[url]
-                .get_or_try_init(|| async {
-                    Ok::<_, anyhow::Error>(
-                        crate::network::discovery(url, client.timeout())?
-                            .get(url)
-                            .send()
-                            .await?
-                            .error_for_status()?
-                            .text()
-                            .await?,
-                    )
-                })
-                .await?
-                .clone()
-        } else {
-            client.execute(tool.route(base_url, args)?).await?
-        };
-        Ok(match self.max_response_chars {
+        let snapshot = self.catalog.read();
+        let text = catalog_state::find(&snapshot, &self.catalog_server, name)?
+            .invoke(args)
+            .await?;
+        Ok(self.limit(text))
+    }
+    fn limit(&self, text: String) -> String {
+        match self.max_response_chars {
             Some(max) if text.chars().count() > max => format!(
                 "{}\n[truncated by --max-response-chars]",
                 text.chars().take(max).collect::<String>()
             ),
             _ => text,
-        })
+        }
     }
 }
 impl ServerHandler for Server {
@@ -111,21 +82,29 @@ impl ServerHandler for Server {
         info
     }
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        self.tools
-            .iter()
-            .find(|t| t.name == name)
-            .map(Self::definition)
+        let snapshot = self.catalog.read();
+        catalog_state::find(&snapshot, &self.catalog_server, name)
+            .ok()
+            .map(|t| Self::definition(&t.tool))
     }
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        let snapshot = self.catalog.read();
         Ok(ListToolsResult {
-            tools: self.tools.iter().map(Self::definition).collect(),
+            tools: snapshot
+                .views
+                .get(&self.catalog_server)
+                .into_iter()
+                .flatten()
+                .map(|t| Self::definition(&t.tool))
+                .collect(),
             ..Default::default()
         })
     }
+
     async fn call_tool(
         &self,
         request: CallToolRequestParams,

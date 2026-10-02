@@ -142,3 +142,60 @@ fn schemas_filters_and_routes_handle_boundaries_collisions_and_refs() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
+    use x402_treazure::catalog_state::{self, CatalogSnapshot};
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (e, r) = (entered.clone(), release.clone());
+    let (url, task) = serve(
+        Router::new()
+            .route(
+                "/old",
+                get(move || {
+                    let (e, r) = (e.clone(), r.clone());
+                    async move {
+                        e.notify_one();
+                        r.notified().await;
+                        "old"
+                    }
+                }),
+            )
+            .route("/new", get(|| async { "new" })),
+    )
+    .await;
+    let client = PaidClient::new(
+        Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
+    );
+    let mut tool = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/old":{"get":{}}}}),
+        "t",
+    )
+    .unwrap()
+    .remove(0);
+    let server = Server::new(vec![tool.clone()], client.clone(), url.clone(), None, None);
+    let old = server.clone();
+    let name = tool.name.clone();
+    let pending =
+        tokio::spawn(async move { old.invoke(&name, &serde_json::Map::new()).await.unwrap() });
+    entered.notified().await;
+    tool.path = "/new".into();
+    let tools = catalog_state::bind(vec![(tool.clone(), client, url)]);
+    server.catalog.publish(CatalogSnapshot {
+        generation: 1,
+        views: BTreeMap::from([("default".into(), tools.clone()), ("other".into(), tools)]),
+    });
+    assert_eq!(
+        server
+            .invoke(&tool.name, &serde_json::Map::new())
+            .await
+            .unwrap(),
+        "new"
+    );
+    assert_eq!(server.catalog.read().views["other"][0].tool.path, "/new");
+    release.notify_one();
+    assert_eq!(pending.await.unwrap(), "old");
+    task.abort();
+}
