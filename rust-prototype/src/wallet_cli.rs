@@ -69,16 +69,21 @@ enum Command {
         #[arg(long)]
         state_dir: PathBuf,
     },
-    /// Initialize an encrypted offline treasury. Never overwrites state.
+    /// Initialize an encrypted treasury; discover a new wallet birthday unless supplied.
     Init {
         #[arg(long)]
         state_dir: PathBuf,
         #[arg(long)]
         key_file: PathBuf,
+        /// Required for imports; an explicit height keeps initialization offline.
         #[arg(long)]
-        birthday: u32,
+        birthday: Option<u32>,
+        /// Environment variable holding the birthday indexer URL. Defaults to
+        /// ZCASH_INDEXER_URL when set, otherwise https://zec.rocks:443.
+        #[arg(long, conflicts_with = "birthday")]
+        indexer_url_env: Option<String>,
         /// Owner-only mnemonic file; omit to generate a new seed inside zingolib.
-        #[arg(long)]
+        #[arg(long, requires = "birthday")]
         mnemonic_file: Option<PathBuf>,
     },
     /// Derive and durably save a shielded receive address, offline.
@@ -279,8 +284,38 @@ pub async fn run() -> Result<()> {
                 state_dir,
                 key_file,
                 birthday,
+                indexer_url_env,
                 mnemonic_file,
             } => {
+                anyhow::ensure!(
+                    !state_dir.exists() && !key_file.exists(),
+                    "refusing to overwrite treasury state or key"
+                );
+                // Imports must never infer a recent birthday and skip historical funds.
+                anyhow::ensure!(
+                    mnemonic_file.is_none() || birthday.is_some(),
+                    "seed import requires --birthday"
+                );
+                let birthday = match birthday {
+                    Some(height) => height,
+                    None => {
+                        let endpoint = if let Some(name) = indexer_url_env {
+                            std::env::var(name)
+                                .context("missing birthday indexer environment variable")?
+                        } else {
+                            match std::env::var("ZCASH_INDEXER_URL") {
+                                Ok(endpoint) => endpoint,
+                                Err(std::env::VarError::NotPresent) => {
+                                    crate::treasury::birthday::DEFAULT_INDEXER.into()
+                                }
+                                Err(_) => {
+                                    anyhow::bail!("invalid birthday indexer environment variable")
+                                }
+                            }
+                        };
+                        crate::treasury::birthday::discover(&endpoint).await?
+                    }
+                };
                 let seed = if let Some(path) = mnemonic_file {
                     let metadata = std::fs::symlink_metadata(&path)?;
                     anyhow::ensure!(

@@ -855,6 +855,11 @@ and existing journals, not listener selections, determine recovery scope:
 
 - `wallet init`: explicitly create/import a treasury into new state, recording
   birthday/network and generating an encrypted snapshot; refuse overwrite.
+  For new seeds, discover the mainnet tip from the selected indexer and rewind
+  100 blocks before creating any state. Use `ZCASH_INDEXER_URL`, defaulting to
+  `https://zec.rocks:443`, with `--indexer-url-env` for another variable. Require
+  successful network/tip validation within 30 seconds. Explicit `--birthday`
+  keeps initialization offline; imports must supply their original birthday.
   Return the treasury UUID and deposit address, never the seed. Take an import
   seed from a protected file or prompt. No swap is initiated by initialization.
 - `wallet sync --meta-config FILE`: sync the existing treasury, persist encrypted

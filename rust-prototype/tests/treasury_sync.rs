@@ -472,3 +472,83 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     assert_ne!(first, second);
     treasury.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
+    let (endpoint, calls, server, _) = mock("main").await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let run = |extra: Vec<&str>| {
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"));
+        command
+            .env_clear()
+            .env("ZCASH_INDEXER_URL", &endpoint)
+            .args(["wallet", "init", "--state-dir"])
+            .arg(&state)
+            .arg("--key-file")
+            .arg(&key)
+            .args(extra);
+        command
+    };
+    let rejected = run(vec!["--mnemonic-file", "missing-seed.txt"])
+        .output()
+        .await
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("--birthday"));
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(!state.exists() && !key.exists());
+    let output = run(vec![]).output().await.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["state"]["birthday"], TIP - 100);
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    let rejected = run(vec![]).output().await.unwrap();
+    assert!(!rejected.status.success());
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    server.abort();
+}
+
+#[tokio::test]
+async fn birthday_discovery_rejects_wrong_network_without_creating_state() {
+    let (endpoint, _, server, _) = mock("test").await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+        .env_clear()
+        .env("TEST_INDEXER", endpoint)
+        .args([
+            "wallet",
+            "init",
+            "--indexer-url-env",
+            "TEST_INDEXER",
+            "--state-dir",
+        ])
+        .arg(&state)
+        .arg("--key-file")
+        .arg(&key)
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mainnet"));
+    assert!(!state.exists() && !key.exists());
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "read-only public mainnet endpoint qualification; requires network"]
+async fn public_birthday_lookup() {
+    let height = x402_mcp_prototype::treasury::birthday::discover(
+        x402_mcp_prototype::treasury::birthday::DEFAULT_INDEXER,
+    )
+    .await
+    .unwrap();
+    println!("Discovered new-wallet birthday: {height}");
+}
