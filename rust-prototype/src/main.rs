@@ -197,7 +197,8 @@ async fn main() -> Result<()> {
         .prefix
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
-    let tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    x402_mcp_prototype::pricing::validate(&cfg)?;
+    let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
     if args.list_tools {
         println!("{}", serde_json::to_string_pretty(&tools)?);
         return Ok(());
@@ -213,9 +214,6 @@ async fn main() -> Result<()> {
         );
         return Ok(());
     }
-    if cfg.probe_pricing {
-        tracing::warn!("Rust prototype does not probe prices; descriptions use spec prices only");
-    }
     let policy = SpendPolicy::dollars(
         args.max_price_usd
             .as_deref()
@@ -227,6 +225,10 @@ async fn main() -> Result<()> {
             .context("EVM_PRIVATE_KEY required")?,
         policy,
     )?;
+    let prices = x402_mcp_prototype::pricing::process_cache()
+        .discover(&cfg, &root, &tools, &base)
+        .await?;
+    tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
     let mut server = Server::new(
         tools,
         PaidClient::new(http, payer),

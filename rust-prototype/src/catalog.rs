@@ -416,6 +416,15 @@ fn price(op: &Value) -> (String, bool) {
 }
 
 pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolSpec>> {
+    build_tools_with_prices(cfg, root, prefix, &BTreeMap::new())
+}
+
+pub fn build_tools_with_prices(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+    prices: &BTreeMap<(String, String), String>,
+) -> Result<Vec<ToolSpec>> {
     let mut ops = operations(root, cfg.pricing_key.as_deref())?;
     for op in &ops {
         ensure!(
@@ -545,7 +554,15 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
             .unwrap_or_else(|| {
                 format!("{} {}", method.to_uppercase(), op["path"].as_str().unwrap())
             });
-        let (price, vendor) = price(&op);
+        let (mut price, vendor) = price(&op);
+        if !vendor
+            && let Some(line) = prices.get(&(
+                method.to_uppercase(),
+                op["path"].as_str().unwrap().to_owned(),
+            ))
+        {
+            price = line.clone();
+        }
         let tokens: Vec<_> = re.find_iter(&price).map(|m| m.as_str()).collect();
         let mut description =
             if vendor && !tokens.is_empty() && tokens.iter().all(|s| text.contains(s)) {

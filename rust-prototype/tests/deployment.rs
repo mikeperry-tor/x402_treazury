@@ -21,6 +21,7 @@ use x402_mcp_prototype::{deployment::Deployment, payment::USDC};
 #[derive(Clone)]
 struct Vendor {
     name: &'static str,
+    unsigned: Arc<AtomicUsize>,
     signed: Arc<AtomicUsize>,
     hold: Arc<AtomicBool>,
     arrived: Arc<Notify>,
@@ -40,6 +41,7 @@ async fn endpoint(
         }
         return axum::Json(json!({"vendor":v.name,"query":uri.query(),"payer":p["payload"]["authorization"]["from"]})).into_response();
     }
+    v.unsigned.fetch_add(1, Ordering::SeqCst);
     let amount = if uri.path().ends_with("expensive") {
         "50000"
     } else {
@@ -60,6 +62,7 @@ async fn endpoint(
 async fn vendor(name: &'static str, prefix: &str) -> (String, Vendor, tokio::task::JoinHandle<()>) {
     let state = Vendor {
         name,
+        unsigned: Arc::default(),
         signed: Arc::default(),
         hold: Arc::default(),
         arrived: Arc::default(),
@@ -443,4 +446,60 @@ async fn imported_configs_keep_overrides_and_use_explicit_root() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn pricing_is_discovered_once_across_sources_and_listeners() {
+    let (base, state, vendor) = vendor("shared", "/api").await;
+    let dir = tempfile::tempdir().unwrap();
+    for file in ["alpha.json", "beta.json"] {
+        std::fs::write(dir.path().join(file), spec(&base).to_string()).unwrap();
+    }
+    let config = configuration()
+        .replace("spec = ", "probe_pricing = true\nspec = ")
+        .replace(
+            "include_tools = [\"alpha_*\", \"beta_pay\"]",
+            "include_tools = [\"alpha_pay\", \"beta_pay\"]",
+        );
+    let path = write_config(dir.path(), &config);
+    let deployment = Deployment::load(&path).await.unwrap();
+    let _ = deployment.inventory();
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402-mcp-prototype"))
+        .env_clear()
+        .args(["--meta-config", path.to_str().unwrap(), "--list-tools"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
+    let running = deployment.bind(&env()).await.unwrap();
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 1);
+    let addresses = running.addresses();
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let http = reqwest::Client::new();
+    for (name, address) in addresses {
+        for _ in 0..3 {
+            let result = rpc(
+                &http,
+                address,
+                if name == "research" {
+                    "research-secret"
+                } else {
+                    "beta-secret"
+                },
+                "tools/list",
+                json!({}),
+            )
+            .await;
+            for tool in result["result"]["tools"].as_array().unwrap() {
+                assert!(tool["description"].as_str().unwrap().contains("$0.014"));
+            }
+        }
+    }
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(state.signed.load(Ordering::SeqCst), 0);
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    vendor.abort();
 }

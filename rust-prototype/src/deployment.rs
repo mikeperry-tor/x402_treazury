@@ -29,6 +29,7 @@ pub struct MetaConfig {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceConfig {
+    pub probe_pricing: Option<bool>,
     pub config: Option<String>,
     pub spec: Option<String>,
     pub base_url: Option<String>,
@@ -63,6 +64,8 @@ pub struct ListenerConfig {
     pub max_response_chars: Option<usize>,
 }
 struct Source {
+    config: Config,
+    document: serde_json::Value,
     tools: Vec<ToolSpec>,
     base_url: String,
     http: reqwest::Client,
@@ -226,6 +229,10 @@ impl Deployment {
                     ..Default::default()
                 }
             };
+            if let Some(enabled) = source.probe_pricing {
+                cfg.probe_pricing = enabled;
+            }
+            crate::pricing::validate(&cfg)?;
             ensure!(!cfg.spec.trim().is_empty(), "source {id}: missing spec");
             ensure!(
                 cfg.max_description_chars != Some(0),
@@ -257,12 +264,6 @@ impl Deployment {
                 matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
                 "source {id}: base_url must be HTTP(S)"
             );
-            if cfg.probe_pricing {
-                tracing::warn!(
-                    source = id,
-                    "Pricing probes unavailable; using spec prices only"
-                );
-            }
             let tools = catalog::build_tools(&cfg, &document, id)
                 .with_context(|| format!("source {id}: catalog generation"))?;
             sources.insert(
@@ -271,7 +272,9 @@ impl Deployment {
                     tools,
                     base_url,
                     http,
-                    instructions: cfg.instructions_text,
+                    instructions: cfg.instructions_text.clone(),
+                    config: cfg,
+                    document,
                 },
             );
         }
@@ -346,7 +349,7 @@ impl Deployment {
             })
             .collect()
     }
-    pub async fn bind(self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
+    pub async fn bind(mut self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
         let secret = |key: &str| {
             env.get(key)
                 .filter(|s| !s.trim().is_empty())
@@ -371,6 +374,36 @@ impl Deployment {
                     cfg.wallet.clone(),
                     PaidClient::new(reqwest::Client::new(), payer),
                 );
+            }
+        }
+        for (id, source) in &self.sources {
+            let selected: Vec<_> = self
+                .selected
+                .values()
+                .flatten()
+                .filter(|(s, _)| s == id)
+                .map(|(_, t)| t.clone())
+                .collect();
+            if selected.is_empty() {
+                continue;
+            }
+            let prices = crate::pricing::process_cache()
+                .discover(
+                    &source.config,
+                    &source.document,
+                    &selected,
+                    &source.base_url,
+                )
+                .await?;
+            let tools: BTreeMap<_, _> =
+                catalog::build_tools_with_prices(&source.config, &source.document, id, &prices)?
+                    .into_iter()
+                    .map(|t| (t.name.clone(), t))
+                    .collect();
+            for (s, t) in self.selected.values_mut().flatten() {
+                if s == id {
+                    *t = tools[&t.name].clone();
+                }
             }
         }
         let mut listeners = Vec::new();
