@@ -12,7 +12,7 @@ use crate::rotation::{
 use anyhow::{Context, Result, ensure};
 use std::time::Duration;
 use zcash_keys::address::Address;
-use zcash_protocol::{consensus::MAIN_NETWORK, value::Zatoshis};
+use zcash_protocol::value::Zatoshis;
 
 impl TransactionPreparer for Treasury {
     async fn prepare(&mut self, request: PrepareRequest) -> Result<PreparedTransaction> {
@@ -21,7 +21,7 @@ impl TransactionPreparer for Treasury {
             "treasury requires reopen after failed preparation"
         );
         uuid::Uuid::parse_str(&request.operation_id).context("operation ID must be a UUID")?;
-        let recipient = Address::decode(&MAIN_NETWORK, &request.recipient)
+        let recipient = Address::decode(&self.network.chain(), &request.recipient)
             .context("invalid mainnet recipient")?;
         let Address::Transparent(receiver) = recipient else {
             anyhow::bail!(
@@ -80,7 +80,10 @@ impl TransactionPreparer for Treasury {
             .await
             .map_err(|_| anyhow::anyhow!("indexer network check timed out"))?
             .map_err(|_| anyhow::anyhow!("indexer network check failed"))?;
-        ensure!(info.chain_name == "main", "indexer is not on mainnet");
+        ensure!(
+            info.chain_name == self.network.rpc_name(),
+            "indexer is not on mainnet"
+        );
 
         ensure!(
             observed.sync.as_ref().is_some_and(|o| o

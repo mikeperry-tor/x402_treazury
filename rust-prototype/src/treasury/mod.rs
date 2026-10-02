@@ -1,5 +1,17 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
+#[cfg(all(test, feature = "zcash-regtest"))]
+mod regtest;
 mod send;
+use crate::rotation::store::TreasuryNetwork;
+impl TreasuryNetwork {
+    fn chain(self) -> zingolib::config::ChainType {
+        match self {
+            Self::Mainnet => zingolib::config::ChainType::Mainnet,
+            #[cfg(all(test, feature = "zcash-regtest"))]
+            Self::Regtest => zingolib::config::ChainType::Regtest(regtest::heights()),
+        }
+    }
+}
 pub mod submission;
 use crate::rotation::{
     base::now,
@@ -20,6 +32,7 @@ use zingolib::{
 };
 
 pub struct Treasury {
+    network: TreasuryNetwork,
     _scratch: tempfile::TempDir,
     client: Option<LightClient>,
     store: StoreHandle,
@@ -48,8 +61,9 @@ impl SyncSettings {
         })
     }
 }
-fn config(dir: &Path, wallet: WalletConfig) -> Result<ClientConfig> {
+fn config(dir: &Path, wallet: WalletConfig, network: TreasuryNetwork) -> Result<ClientConfig> {
     ClientConfig::builder()
+        .set_chain_type(network.chain())
         .set_wallet_dir(dir.to_path_buf())
         .set_wallet_config(wallet)
         .build()
@@ -72,6 +86,15 @@ impl Treasury {
         birthday: u32,
         mnemonic: Option<Zeroizing<String>>,
     ) -> Result<Self> {
+        Self::create_with_network(dir, key, birthday, mnemonic, TreasuryNetwork::Mainnet).await
+    }
+    async fn create_with_network(
+        dir: PathBuf,
+        key: PathBuf,
+        birthday: u32,
+        mnemonic: Option<Zeroizing<String>>,
+        network: TreasuryNetwork,
+    ) -> Result<Self> {
         ensure!(birthday > 0, "birthday must be positive");
         ensure!(
             !dir.exists() && !key.exists(),
@@ -91,7 +114,7 @@ impl Treasury {
             },
         };
         let scratch = tempfile::tempdir()?;
-        let mut client = LightClient::new(config(scratch.path(), wallet)?, false)
+        let mut client = LightClient::new(config(scratch.path(), wallet, network)?, false)
             .await
             .map_err(|_| anyhow::anyhow!("offline treasury initialization failed"))?;
         ensure!(
@@ -103,11 +126,13 @@ impl Treasury {
             .await
             .map_err(|_| anyhow::anyhow!("address derivation failed"))?;
         let bytes = snapshot(&client).await?;
-        let store =
-            tokio::task::spawn_blocking(move || Store::create(&dir, &key, birthday, &bytes))
-                .await??;
+        let store = tokio::task::spawn_blocking(move || {
+            Store::create_with_network(&dir, &key, birthday, &bytes, network)
+        })
+        .await??;
         let (store, worker) = StoreHandle::spawn(store);
         Ok(Self {
+            network,
             _scratch: scratch,
             client: Some(client),
             store,
@@ -118,9 +143,17 @@ impl Treasury {
         })
     }
     pub async fn open(dir: PathBuf, key: PathBuf, id: String) -> Result<Self> {
+        Self::open_with_network(dir, key, id, TreasuryNetwork::Mainnet).await
+    }
+    async fn open_with_network(
+        dir: PathBuf,
+        key: PathBuf,
+        id: String,
+        network: TreasuryNetwork,
+    ) -> Result<Self> {
         let path = dir.clone();
         let (store, revision, bytes) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let mut store = Store::open(&path, &key, &id)?;
+            let mut store = Store::open_with_network(&path, &key, &id, network)?;
             store.set_sync_phase(SyncPhase::Offline)?;
             let (revision, bytes) = store.snapshot()?;
             Ok((store, revision, bytes))
@@ -130,7 +163,7 @@ impl Treasury {
         // Borrow a zeroizing buffer instead of handing an unzeroized Vec to upstream.
         let client = LightClient::from_reader(
             bytes.as_slice(),
-            config(scratch.path(), WalletConfig::Read)?,
+            config(scratch.path(), WalletConfig::Read, network)?,
         )
         .await
         .map_err(|_| anyhow::anyhow!("corrupt or incompatible treasury snapshot"))?;
@@ -140,6 +173,7 @@ impl Treasury {
         );
         let (store, worker) = StoreHandle::spawn(store);
         Ok(Self {
+            network,
             _scratch: scratch,
             client: Some(client),
             store,
@@ -257,6 +291,7 @@ impl Treasury {
         observation.max_age_seconds = settings.max_age_seconds;
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
+            network: self.network,
             client: self
                 .client
                 .take()
@@ -332,6 +367,7 @@ impl Treasury {
 }
 
 struct SyncSession {
+    network: TreasuryNetwork,
     client: LightClient,
     store: StoreHandle,
     revision: i64,
@@ -387,7 +423,10 @@ impl SyncSession {
             .await
             .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
             .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
-        ensure!(info.chain_name == "main", "indexer is not on mainnet");
+        ensure!(
+            info.chain_name == self.network.rpc_name(),
+            "indexer is not on mainnet"
+        );
         observation.target_height = Some(info.latest_block_height);
         self.client
             .sync()
@@ -417,11 +456,43 @@ impl SyncSession {
             .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
         let height = u64::from(u32::from(result.sync_end_height));
         ensure!(
-            info.chain_name == "main" && info.latest_block_height == height,
-            "treasury requires another sync to the current mainnet tip"
+            info.chain_name == self.network.rpc_name() && info.latest_block_height == height,
+            "treasury requires another sync to the current {} tip (wallet={height}, indexer={})",
+            self.network.name(),
+            info.latest_block_height
         );
+        // A later fork can invalidate a spend whose source cost was already
+        // accounted. Keep that cost consumed and fail closed until the same
+        // transaction regains the required depth; never make it spendable again
+        // merely because its outgoing journal entry was resolved earlier.
+        let confirmed = self
+            .store
+            .call(|s| {
+                Ok(s.status()?
+                    .treasury_operations
+                    .into_iter()
+                    .filter(|op| op.submission == "CONFIRMED")
+                    .map(|op| op.facts.txid)
+                    .collect::<Vec<_>>())
+            })
+            .await?;
         let wallet = self.client.wallet();
         let wallet = wallet.read().await;
+        for txid in confirmed {
+            let txid = zcash_primitives::transaction::TxId::from_hex(&txid)
+                .context("invalid confirmed transaction identity")?;
+            let confirmed_height = wallet
+                .wallet_transactions
+                .get(&txid)
+                .and_then(|record| record.status().get_confirmed_height())
+                .map(|h| u64::from(u32::from(h)));
+            ensure!(
+                confirmed_height.is_some_and(|h| h > 0
+                    && height >= h
+                    && height - h + 1 >= u64::from(settings.confirmations.get())),
+                "treasury_confirmed_spend_reorg: source spend requires recovery"
+            );
+        }
         let balance = wallet
             .account_balance(zip32::AccountId::ZERO)
             .map_err(|_| anyhow::anyhow!("treasury balance unavailable"))?;

@@ -326,7 +326,7 @@ dependencies = [
  "lru",
  "parking_lot",
  "pin-project",
- "reqwest",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -370,7 +370,7 @@ dependencies = [
  "alloy-transport-http",
  "futures",
  "pin-project",
- "reqwest",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "tokio",
@@ -562,7 +562,7 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
  "itertools 0.14.0",
- "reqwest",
+ "reqwest 0.13.5",
  "serde_json",
  "tower",
  "tracing",
@@ -4488,6 +4488,38 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "reqwest"
+version = "0.12.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-core",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "js-sys",
+ "log",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "reqwest"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
@@ -4536,7 +4568,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http",
- "reqwest",
+ "reqwest 0.13.5",
  "thiserror 2.0.21",
  "tower-service",
 ]
@@ -6570,7 +6602,7 @@ dependencies = [
  "orchard",
  "percent-encoding",
  "regex",
- "reqwest",
+ "reqwest 0.13.5",
  "rmcp",
  "rusqlite",
  "serde",
@@ -6589,6 +6621,7 @@ dependencies = [
  "x402-types",
  "zcash_client_backend",
  "zcash_keys",
+ "zcash_local_net",
  "zcash_primitives",
  "zcash_protocol",
  "zeroize",
@@ -6605,7 +6638,7 @@ checksum = "c77a965e7346eb4e433a6023a609b2bf002be0f76fea20e0ceaa34d86c983a94"
 dependencies = [
  "async-trait",
  "http",
- "reqwest",
+ "reqwest 0.13.5",
  "reqwest-middleware",
  "serde_json",
  "x402-types",
@@ -6769,6 +6802,25 @@ dependencies = [
  "zcash_protocol",
  "zcash_transparent",
  "zip32",
+]
+
+[[package]]
+name = "zcash_local_net"
+version = "0.7.0"
+source = "git+https://github.com/zingolabs/infrastructure.git?rev=89cf104a2416144d1bbbae30aca02bec062d1492#89cf104a2416144d1bbbae30aca02bec062d1492"
+dependencies = [
+ "hex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "zingo-consensus",
+ "zingo_test_vectors",
 ]
 
 [[package]]
@@ -7009,6 +7061,11 @@ dependencies = [
  "quote",
  "syn 3.0.6",
 ]
+
+[[package]]
+name = "zingo-consensus"
+version = "0.1.0"
+source = "git+https://github.com/zingolabs/infrastructure.git?rev=89cf104a2416144d1bbbae30aca02bec062d1492#89cf104a2416144d1bbbae30aca02bec062d1492"
 
 [[package]]
 name = "zingo-memo"

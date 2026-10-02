@@ -17,19 +17,32 @@ use zingo_netutils::{
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct GrpcSubmission {
+    network: crate::rotation::store::TreasuryNetwork,
     submission: String,
     indexer: String,
 }
 impl GrpcSubmission {
     pub fn new(submission: String, indexer: String) -> Result<Self> {
+        Self::with_network(
+            submission,
+            indexer,
+            crate::rotation::store::TreasuryNetwork::Mainnet,
+        )
+    }
+    pub(crate) fn with_network(
+        submission: String,
+        indexer: String,
+        network: crate::rotation::store::TreasuryNetwork,
+    ) -> Result<Self> {
         secure_endpoint(&submission)?;
         secure_endpoint(&indexer)?;
         Ok(Self {
+            network,
             submission,
             indexer,
         })
     }
-    async fn connect(endpoint: &str) -> Result<GrpcIndexer> {
+    async fn connect(&self, endpoint: &str) -> Result<GrpcIndexer> {
         let uri = endpoint
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid treasury endpoint"))?;
@@ -42,7 +55,7 @@ impl GrpcSubmission {
             .await
             .map_err(|_| anyhow::anyhow!("treasury network check failed"))?;
         ensure!(
-            info.chain_name == "main",
+            info.chain_name == self.network.rpc_name(),
             "treasury endpoint is not on mainnet"
         );
         Ok(client)
@@ -73,7 +86,7 @@ impl TransactionSubmission for GrpcSubmission {
             "durable transaction identity mismatch"
         );
         let result = tokio::time::timeout(TIMEOUT, async {
-            let mut client = Self::connect(&self.submission).await?;
+            let mut client = self.connect(&self.submission).await?;
             let tip = client
                 .get_latest_block(TIMEOUT)
                 .await
@@ -115,7 +128,7 @@ impl TransactionSubmission for GrpcSubmission {
         let raw = decode(transaction.bytes())?;
         let hash = raw.txid().as_ref().to_vec();
         let result = tokio::time::timeout(TIMEOUT, async {
-            let mut client = Self::connect(&self.indexer).await?;
+            let mut client = self.connect(&self.indexer).await?;
             let found = match client
                 .get_transaction(
                     TxFilter {

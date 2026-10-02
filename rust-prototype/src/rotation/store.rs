@@ -93,7 +93,33 @@ pub struct AddressStatus {
     pub target: String,
     pub confirmed_balance: String,
 }
+/// Production builds have exactly one treasury network. Regtest is available
+/// only inside this crate's explicitly opted-in test binary.
+#[derive(Clone, Copy)]
+pub(crate) enum TreasuryNetwork {
+    Mainnet,
+    #[cfg(all(test, feature = "zcash-regtest"))]
+    Regtest,
+}
+impl TreasuryNetwork {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Mainnet => "mainnet",
+            #[cfg(all(test, feature = "zcash-regtest"))]
+            Self::Regtest => "regtest",
+        }
+    }
+    #[cfg(feature = "zcash")]
+    pub(crate) fn rpc_name(self) -> &'static str {
+        match self {
+            Self::Mainnet => "main",
+            #[cfg(all(test, feature = "zcash-regtest"))]
+            Self::Regtest => "test",
+        }
+    }
+}
 pub struct Store {
+    network: TreasuryNetwork,
     db: Connection,
     _lock: File,
     key: Zeroizing<[u8; 32]>,
@@ -194,6 +220,15 @@ fn unseal(key: &[u8; 32], aad: &str, bytes: &[u8]) -> Result<Zeroizing<Vec<u8>>>
 }
 impl Store {
     pub fn create(dir: &Path, key_file: &Path, birthday: u32, snapshot: &[u8]) -> Result<Self> {
+        Self::create_with_network(dir, key_file, birthday, snapshot, TreasuryNetwork::Mainnet)
+    }
+    pub(crate) fn create_with_network(
+        dir: &Path,
+        key_file: &Path,
+        birthday: u32,
+        snapshot: &[u8],
+        network: TreasuryNetwork,
+    ) -> Result<Self> {
         ensure!(!snapshot.is_empty(), "treasury snapshot cannot be empty");
         ensure!(!dir.exists(), "refusing to overwrite state directory");
         ensure!(!key_file.exists(), "refusing to overwrite encryption key");
@@ -218,12 +253,19 @@ impl Store {
         let mut db = Connection::open(dir.join("state.sqlite"))?;
         configure(&db)?;
         let id = Uuid::new_v4().to_string();
-        let encrypted = seal(&key, &format!("v1:{id}:mainnet:snapshot:1"), snapshot)?;
+        let encrypted = seal(
+            &key,
+            &format!("v1:{id}:{}:snapshot:1", network.name()),
+            snapshot,
+        )?;
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(SCHEMA)?;
+        tx.execute_batch(&SCHEMA.replace(
+            "network='mainnet'",
+            &format!("network='{}'", network.name()),
+        ))?;
         tx.execute(
-            "INSERT INTO instance VALUES (?1,1,?2,'mainnet',0)",
-            params![id, birthday],
+            "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
+            params![id, birthday, network.name()],
         )?;
         tx.execute("INSERT INTO snapshots VALUES (1,?1)", [encrypted])?;
         tx.commit()?;
@@ -237,9 +279,18 @@ impl Store {
             _lock: owner,
             key,
             id,
+            network,
         })
     }
     pub fn open(dir: &Path, key_file: &Path, expected_id: &str) -> Result<Self> {
+        Self::open_with_network(dir, key_file, expected_id, TreasuryNetwork::Mainnet)
+    }
+    pub(crate) fn open_with_network(
+        dir: &Path,
+        key_file: &Path,
+        expected_id: &str,
+        expected_network: TreasuryNetwork,
+    ) -> Result<Self> {
         let owner = lock(dir)?;
         private_file(&dir.join("state.sqlite"), false)?;
         let mut file = private_file(key_file, false)?;
@@ -260,7 +311,7 @@ impl Store {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?;
         ensure!(
-            id == expected_id && version == 1 && network == "mainnet" && account == 0,
+            id == expected_id && version == 1 && network == expected_network.name() && account == 0,
             "state identity/network/schema mismatch"
         );
         let store = Self {
@@ -268,6 +319,7 @@ impl Store {
             _lock: owner,
             key,
             id,
+            network: expected_network,
         };
         store.snapshot()?;
         configure(&store.db)?;
@@ -287,7 +339,7 @@ impl Store {
             revision,
             unseal(
                 &self.key,
-                &format!("v1:{}:mainnet:snapshot:{revision}", self.id),
+                &format!("v1:{}:{}:snapshot:{revision}", self.id, self.network.name()),
                 &bytes,
             )?,
         ))
@@ -308,7 +360,7 @@ impl Store {
             .context("snapshot revision overflow")?;
         let encrypted = seal(
             &self.key,
-            &format!("v1:{}:mainnet:snapshot:{revision}", self.id),
+            &format!("v1:{}:{}:snapshot:{revision}", self.id, self.network.name()),
             bytes,
         )?;
         let tx = self
@@ -387,7 +439,15 @@ impl Store {
             params![id, name, target.to_string()],
         )?;
         for seq in 0..2 {
-            allocate(&tx, &self.key, &self.id, &id, seq, &target.to_string())?;
+            allocate(
+                &tx,
+                &self.key,
+                &self.id,
+                self.network,
+                &id,
+                seq,
+                &target.to_string(),
+            )?;
         }
         tx.commit()?;
         Ok(id)
@@ -482,7 +542,7 @@ impl Store {
             [pool],
             |r| r.get(0),
         )?;
-        allocate(&tx, &self.key, &self.id, pool, seq, &target)?;
+        allocate(&tx, &self.key, &self.id, self.network, pool, seq, &target)?;
         let next = generation.checked_add(1).context("generation overflow")?;
         tx.execute(
             "UPDATE pools SET generation=?1 WHERE id=?2",
@@ -569,7 +629,7 @@ impl Store {
             ensure!(
                 unseal(
                     &self.key,
-                    &format!("v1:{}:mainnet:outgoing:{id}", self.id),
+                    &format!("v1:{}:{}:outgoing:{id}", self.id, self.network.name()),
                     &bytes
                 )?
                 .as_slice()
@@ -584,7 +644,7 @@ impl Store {
             ensure!(
                 unseal(
                     &self.key,
-                    &format!("v1:{}:mainnet:snapshot:{revision}", self.id),
+                    &format!("v1:{}:{}:snapshot:{revision}", self.id, self.network.name()),
                     &saved
                 )?
                 .as_slice()
@@ -601,12 +661,12 @@ impl Store {
             .context("snapshot revision overflow")?;
         let encrypted = seal(
             &self.key,
-            &format!("v1:{}:mainnet:outgoing:{id}", self.id),
+            &format!("v1:{}:{}:outgoing:{id}", self.id, self.network.name()),
             raw,
         )?;
         let snap = seal(
             &self.key,
-            &format!("v1:{}:mainnet:snapshot:{next}", self.id),
+            &format!("v1:{}:{}:snapshot:{next}", self.id, self.network.name()),
             snapshot,
         )?;
         let tx = self
@@ -667,7 +727,7 @@ impl Store {
                 .query_row("SELECT raw FROM outgoing WHERE id=?1", [id], |r| r.get(0))?;
         unseal(
             &self.key,
-            &format!("v1:{}:mainnet:outgoing:{id}", self.id),
+            &format!("v1:{}:{}:outgoing:{id}", self.id, self.network.name()),
             &bytes,
         )
     }
@@ -711,7 +771,7 @@ impl Store {
         )?;
         unseal(
             &self.key,
-            &format!("v1:{}:mainnet:{pool}:evm:{wallet}", self.id),
+            &format!("v1:{}:{}:{pool}:evm:{wallet}", self.id, self.network.name()),
             &bytes,
         )
     }
@@ -723,6 +783,7 @@ fn allocate(
     db: &Connection,
     key: &[u8; 32],
     treasury: &str,
+    network: TreasuryNetwork,
     pool: &str,
     seq: i64,
     target: &str,
@@ -732,7 +793,7 @@ fn allocate(
     let secret = Zeroizing::new(signer.to_bytes().to_vec());
     let encrypted = seal(
         key,
-        &format!("v1:{treasury}:mainnet:{pool}:evm:{id}"),
+        &format!("v1:{treasury}:{}:{pool}:evm:{id}", network.name()),
         &secret,
     )?;
     db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,?2,?3,?4,?5,?6,'ALLOCATED')",params![id,pool,seq,signer.address().to_string(),encrypted,target])?;
@@ -1101,7 +1162,7 @@ impl Store {
                 [pool],
                 |r| r.get(0),
             )?;
-            allocate(&tx, &self.key, &self.id, pool, seq, &target)?;
+            allocate(&tx, &self.key, &self.id, self.network, pool, seq, &target)?;
             generation = generation.checked_add(1).context("generation overflow")?;
             tx.execute(
                 "UPDATE pools SET generation=?1 WHERE id=?2",

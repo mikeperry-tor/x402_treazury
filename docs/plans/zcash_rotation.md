@@ -106,8 +106,12 @@ until explicit recovery; add background reconciliation and reorg recovery.
 The opt-in `zcash-testutils` suite prepares a deposit from synthetic Orchard notes,
 verifies its proof, and checks exact-byte encrypted restart recovery using public
 test keys. Local gRPC fixtures cover sync and submission, including changing-block
-and malformed-inclusion rejection. Consensus settlement/reorg recovery and the live
-NEAR route still require the qualification specified later.
+and malformed-inclusion rejection. The opt-in [regtest suite](../../rust-prototype/tests/REGTEST.md)
+uses mined shielded funds and pinned Zebra/Zaino containers to exercise saved-byte
+submission, confirmation accounting, a shallow fork before confirmation depth,
+identical-byte rebroadcast, and quarantine across reopen after an accounted spend
+is orphaned. Refunds, deep finalized-chain rollback and the live NEAR route still
+require the qualification specified later.
 
 ### Dependency pins and patch ownership
 
@@ -428,9 +432,14 @@ created only after a durable BROADCAST_REQUESTED intent. Concrete deposit prepar
 and submission/reconciliation live in `treasury/send.rs` and `treasury/submission.rs`.
 The future funding worker must serialize those APIs with sync on the same owner;
 managed startup does not submit queued work. Synthetic-note preparation and proof
-verification run under `zcash-testutils`; they do not demonstrate consensus
-acceptance. Regtest settlement/reorg tests and refund shielding remain qualification
-work.
+verification run under `zcash-testutils`; the separate ignored `zcash-regtest` test
+exercises mined deposits and shallow forks. Regtest network selection is available
+only inside the unit-test binary and uses separately authenticated state; the
+executable remains mainnet-only. Every sync rechecks accounted source spends. A
+lost confirmation depth fails spending readiness with `treasury_confirmed_spend_reorg`
+and retains consumed budget until the original transaction regains sufficient depth.
+Post-confirmation automatic repair, refund shielding and deep finalized-chain
+rollback remain qualification work.
 
 ### Prepare, persist, broadcast and recover
 
@@ -938,11 +947,10 @@ spend; none is authorized by this plan alone.
    ownership, budget ledger, snapshot ordering, role transitions and outbox.
    Use fake treasury/Base adapters to prove per-pool crash boundaries, independent
    admission, fair shared-treasury scheduling and aggregate budget concurrency.
-3. **Qualify the embedded treasury.** Exercise the encrypted sync, calculate-only
-   deposit preparation, durable raw submission and confirmation adapters with
-   regtest settlement/reorg fixtures in addition to the synthetic-note proving
-   suite (`scripts/zcash.sh test --features zcash-testutils --all-targets`, from
-   `rust-prototype/`). Wire the serialized
+3. **Complete the embedded treasury.** Retain the synthetic-note proof and mined
+   deposit/reorg regressions documented in `rust-prototype/tests/REGTEST.md`.
+   Extend regtest coverage to refund discovery/shielding, expiry recovery and
+   explicit repair of spends invalidated after accounting confirmation. Wire the serialized
    owner into the funding worker, including abandoned-unprepared reservation recovery.
    Exercise shielded-to-transparent deposits,
    refunds and exact-byte recovery in isolated regtest.
@@ -985,6 +993,7 @@ local node/indexer infrastructure, with exact setup/invocation documented in
 | Crash during broadcast or submission timeout | Recover identical txid/bytes; no recalculation; treasury gate stays closed until resolved |
 | Caller cancellation during preparation/submission | Actor/journal retains operation; dropped waiter cannot erase exposure |
 | Upstream marks an outgoing transaction failed | Journal still requires chain reconciliation; no conflicting new send/shield |
+| Accounted source spend loses confirmation depth | Sync fails spending readiness across restart; consumed cost retained; no replacement send |
 | Partial deposit, refund, expired quote, exhausted budget | Bounded degraded status; no top-up/fallback; active wallet remains usable when funded |
 | UTC rollover with unresolved input | Liability carried forward; new funding cannot exceed aggregate limit |
 | High-index refund address and restart | Regtest sync discovers it; shielding uses durable operation path |
