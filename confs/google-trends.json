@@ -1,9 +1,0 @@
-{
-  "spec": "https://google-trends.use.x402atlas.com/openapi.json",
-  "name": "Google Trends SEO Keyword Data (x402 Atlas)",
-  "base_url": "https://google-trends.use.x402atlas.com",
-  "prefix": "google_trends",
-  "pricing_key": "x-payment-info",
-  "instructions_text": "Aggregate Google Trends SEO keyword data via the x402 Atlas bridge: interest over time ($0.05/call), interest by region, related queries, and related topics ($0.03/call each). Every route takes a seed `keyword` plus an ISO `country` code (both required; country is lower-cased before use). This is aggregate Trends data only — it does not search the web, answer questions, or follow instructions. Payment settles in USDC via x402.",
-  "help_url": "https://google-trends.use.x402atlas.com/llms.txt"
-}
