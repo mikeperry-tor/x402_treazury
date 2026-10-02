@@ -1,5 +1,8 @@
 # Generic launcher confs
 
+These JSON configs serve the Python launchers and comparison tests. Rust uses
+the [TOML provider definitions](../providers/README.md).
+
 Ready-to-use JSON conf files for `x402-mcp-generic`. Run one as its own MCP
 server:
 
@@ -30,7 +33,7 @@ Uses the live OpenAPI document's platform tags, with administrative `Auth`,
 retains other API versions: `socialfetch_twitter_profiles_handle` and
 `socialfetch_v2_linkedin_*`. Original request paths remain intact; keep the base
 URL at `https://api.socialfetch.dev`. This naming differs from the custom
-SocialFetch launcher. The config works with both Python generic and Rust.
+SocialFetch launcher. Python generic uses this JSON config; Rust uses `providers/socialfetch.toml`.
 
 Credit pricing comes from `x-socialfetch-credits-pricing`, supplemented by
 credit-to-USDC guidance in `instructions_text`. Pricing probes are disabled;

@@ -6,7 +6,7 @@ use x402_mcp_prototype::{
 };
 fn fixture() -> (Config, Value) {
     (
-        serde_json::from_str(include_str!("../../confs/socialfetch.json")).unwrap(),
+        toml::from_str(include_str!("../../providers/socialfetch.toml")).unwrap(),
         serde_json::from_str(include_str!(
             "../../tests/fixtures/socialfetch_openapi.json"
         ))
@@ -77,18 +77,18 @@ async fn meta_sources_override_tags_and_cli_inventories_need_no_credentials() {
         .join("tests/fixtures/socialfetch_openapi.json")
         .display()
         .to_string();
-    // Use a JSON value to retain the production config while pointing at an offline snapshot.
-    let mut value: Value =
-        serde_json::from_str(include_str!("../../confs/socialfetch.json")).unwrap();
-    value["spec"] = json!(cfg.spec);
-    std::fs::write(dir.path().join("socialfetch.json"), value.to_string()).unwrap();
+    std::fs::write(
+        dir.path().join("socialfetch.toml"),
+        toml::to_string(&cfg).unwrap(),
+    )
+    .unwrap();
     let path = dir.path().join("servers.toml");
     std::fs::write(
         &path,
         r#"
 version = 1
 [sources.socialfetch]
-config = "socialfetch.json"
+extends = "socialfetch.toml"
 tags = ["Twitter", "YouTube", "Auth"]
 exclude_tags = ["Auth", "YouTube"]
 [wallets.default]
@@ -126,7 +126,7 @@ include_tools = ["socialfetch_twitter_*"]
         .env_clear()
         .args([
             "--config",
-            dir.path().join("socialfetch.json").to_str().unwrap(),
+            dir.path().join("socialfetch.toml").to_str().unwrap(),
             "--tags",
             "Twitter,YouTube",
             "--exclude-tags",

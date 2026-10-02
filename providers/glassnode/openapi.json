@@ -1,0 +1,425 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Glassnode x402",
+    "version": "1.0.0",
+    "description": "Locally curated request catalog for x402 MCP. Not a vendor-published OpenAPI document."
+  },
+  "servers": [
+    {
+      "url": "https://x402.glassnode.com"
+    }
+  ],
+  "paths": {
+    "/v1/metrics/{category}/{metric}": {
+      "get": {
+        "summary": "Glassnode metric time series",
+        "description": "Fetch any Glassnode metric time series ($0.05 USDC on Base per call). The x402 gateway mirrors api.glassnode.com metric paths one-to-one. Discover metric paths with glassnode_metadata_metrics (returned without the /v1/metrics prefix, e.g. /distribution/balance_exchanges), then pass category = the first path segment and metric = the second segment (two-segment paths; deeper sub-path variants are not addressable here). a (asset, e.g. BTC) is required. Check a metric's exact allowed parameters, intervals and defaults with glassnode_metadata_metric before paying.",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "path",
+            "required": true,
+            "description": "First segment of the metric path, e.g. 'market' for /market/price_usd_close or 'distribution' for /distribution/balance_exchanges.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "metric",
+            "in": "path",
+            "required": true,
+            "description": "Second segment of the metric path, e.g. 'price_usd_close' or 'balance_exchanges'.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "a",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol, e.g. BTC, ETH, USDT (supported assets via glassnode_metadata_assets).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "i",
+            "in": "query",
+            "required": false,
+            "description": "Frequency interval — metric-dependent subset of 10m, 1h, 24h, 1w, 1month (metadata_metric lists the allowed values).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "s",
+            "in": "query",
+            "required": false,
+            "description": "Start of the time window as a unix timestamp (seconds).",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "u",
+            "in": "query",
+            "required": false,
+            "description": "End of the time window as a unix timestamp (seconds).",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "f",
+            "in": "query",
+            "required": false,
+            "description": "Response format: json (default) or csv.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ]
+            }
+          },
+          {
+            "name": "c",
+            "in": "query",
+            "required": false,
+            "description": "Currency for values where supported, e.g. native or USD (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "e",
+            "in": "query",
+            "required": false,
+            "description": "Exchange filter for exchange-scoped metrics, e.g. binance, coinbase, aggregated (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "network",
+            "in": "query",
+            "required": false,
+            "description": "Network filter for network-scoped metrics, e.g. aggregated, arb, base, eth, opt (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "timestamp_format",
+            "in": "query",
+            "required": false,
+            "description": "Timestamp format: unix (default) or humanized (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unix",
+                "humanized"
+              ]
+            }
+          },
+          {
+            "name": "from_exchange",
+            "in": "query",
+            "required": false,
+            "description": "Source exchange for inter-exchange flow metrics (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to_exchange",
+            "in": "query",
+            "required": false,
+            "description": "Destination exchange for inter-exchange flow metrics (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "miner",
+            "in": "query",
+            "required": false,
+            "description": "Miner identifier for mining-related metrics (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maturity",
+            "in": "query",
+            "required": false,
+            "description": "Maturity period for derivatives metrics (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "description": "Aggregation period where supported (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quote_symbol",
+            "in": "query",
+            "required": false,
+            "description": "Quote currency symbol for trading-pair metrics (metric-dependent).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "amount": "0.05",
+          "currency": "USD"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/v1/metadata/assets": {
+      "get": {
+        "summary": "List all Glassnode assets and their metadata",
+        "description": "List all assets and their metadata ($0.01 USDC on Base per call): Glassnode id, symbol, name, asset_type (BLOCKCHAIN/TOKEN), blockchains with contract addresses and decimals, external ids (CoinMarketCap, Coingecko, CCData) and semantic tags. The optional CEL filter narrows the list, e.g. filter=asset.id=='USDT', filter=asset.blockchains.exists(b,b.blockchain=='ETH') or filter=asset.semantic_tags.exists(tag,tag=='stablecoin').",
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "description": "CEL (Common Expression Language) filter over asset fields, e.g. asset.id=='BTC'.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "amount": "0.01",
+          "currency": "USD"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/v1/metadata/metrics": {
+      "get": {
+        "summary": "List all available Glassnode metric paths",
+        "description": "List all available Glassnode metric paths ($0.01 USDC on Base per call), returned without the /v1/metrics prefix (e.g. /addresses/count). Feed a path to glassnode_metadata_metric for its allowed parameters and to glassnode_metrics_category_metric for the data. Optional filters narrow the list: a (asset, repeatable: a=BTC&a=ETH), c currency, e exchange, f format, i interval, from_exchange, to_exchange, miner, maturity, network, period, quote_symbol.",
+        "parameters": [
+          {
+            "name": "a",
+            "in": "query",
+            "required": false,
+            "description": "Filter by asset id, e.g. BTC (repeatable).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "c",
+            "in": "query",
+            "required": false,
+            "description": "Filter by currency for values, e.g. native, usd.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "e",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exchange name, e.g. binance, coinbase.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "f",
+            "in": "query",
+            "required": false,
+            "description": "Filter by response format, e.g. json, csv.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "i",
+            "in": "query",
+            "required": false,
+            "description": "Filter by time interval/resolution, e.g. 1h, 24h.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from_exchange",
+            "in": "query",
+            "required": false,
+            "description": "Filter by source exchange for inter-exchange metrics.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to_exchange",
+            "in": "query",
+            "required": false,
+            "description": "Filter by destination exchange for inter-exchange metrics.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "miner",
+            "in": "query",
+            "required": false,
+            "description": "Filter by miner identifier for mining-related metrics.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maturity",
+            "in": "query",
+            "required": false,
+            "description": "Filter by maturity period for derivatives metrics.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "network",
+            "in": "query",
+            "required": false,
+            "description": "Filter by network/blockchain identifier for cross-chain metrics.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "description": "Filter by aggregation period.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quote_symbol",
+            "in": "query",
+            "required": false,
+            "description": "Filter by quote currency symbol for trading pairs.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "amount": "0.01",
+          "currency": "USD"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/v1/metadata/metric": {
+      "get": {
+        "summary": "Metadata for a single Glassnode metric",
+        "description": "Metadata for a single Glassnode metric ($0.01 USDC on Base per call): the metric's allowed parameters and their values, defaults applied when parameters are omitted, the available timerange, descriptors (name, group, description, tags) and docs/studio links. path is required (e.g. /distribution/balance_exchanges); passing additional parameters (a, e, i, ...) narrows the returned parameter values to that drill-down.",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "description": "Metric path without the /v1/metrics prefix, e.g. /addresses/count or /distribution/balance_exchanges.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "a",
+            "in": "query",
+            "required": false,
+            "description": "Narrow the parameter drill-down to one asset, e.g. BTC.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "c",
+            "in": "query",
+            "required": false,
+            "description": "Narrow by currency, e.g. native, usd.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "e",
+            "in": "query",
+            "required": false,
+            "description": "Narrow by exchange name.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "f",
+            "in": "query",
+            "required": false,
+            "description": "Narrow by response format.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "i",
+            "in": "query",
+            "required": false,
+            "description": "Narrow by time interval/resolution.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "network",
+            "in": "query",
+            "required": false,
+            "description": "Narrow by network/blockchain identifier.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "amount": "0.01",
+          "currency": "USD"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    }
+  },
+  "x-catalog-source": "confs/glassnode/glassnode_digest.json"
+}

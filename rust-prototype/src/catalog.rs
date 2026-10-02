@@ -38,9 +38,10 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b'|')
     .add(b'}');
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    pub timeout: f64,
     pub spec: String,
     pub name: Option<String>,
     pub base_url: Option<String>,
@@ -66,6 +67,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            timeout: 30.0,
             spec: String::new(),
             name: None,
             base_url: None,
@@ -202,21 +204,20 @@ fn anchor<'a>(path: &str, prefixes: &'a [String]) -> Option<&'a str> {
 }
 
 pub async fn load_json(source: &str, http: &reqwest::Client) -> Result<Value> {
-    if source.starts_with("https://") || source.starts_with("http://") {
-        Ok(http
-            .get(source)
+    let bytes = if source.starts_with("https://") || source.starts_with("http://") {
+        http.get(source)
             .send()
             .await?
             .error_for_status()?
-            .json()
-            .await?)
+            .bytes()
+            .await?
+            .to_vec()
     } else {
-        Ok(serde_json::from_slice(
-            &tokio::fs::read(source)
-                .await
-                .with_context(|| format!("reading {source}"))?,
-        )?)
-    }
+        tokio::fs::read(source)
+            .await
+            .with_context(|| format!("reading {source}"))?
+    };
+    Ok(serde_json::from_slice(&bytes)?)
 }
 
 fn resolve(root: &Value, node: &Value, seen: &mut BTreeSet<String>) -> Value {

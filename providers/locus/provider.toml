@@ -1,0 +1,10 @@
+# Reusable Rust provider settings. Paths are relative to this file.
+spec = "openapi.json"
+name = "Locus — US property & public-records context"
+base_url = "https://api.locus.report"
+prefix = "locus"
+include = ["/api", "/tools"]
+probe_pricing = false
+help_url = "https://api.locus.report/llms.txt"
+instructions_text = "US property/public-record context: cited tax, zoning, flood, environmental, permit, rental-registration, development, transportation, representative, and policy data for a US place. Workflow: locus_list (free catalog of the 114 free tools; pass compact=true for a small response) then locus_call(name=..., arguments={...}) for free preflight — coverage_check, lane_availability, place_facts, suggest_workflow — then the paid locus_locus_* tools for cited reports and briefs (flat JSON body; every description states its $0.01-$2.49 price; unsupported places settle a free diagnostic instead of a charge). locus_list and locus_call are free. Slow calls: place-report can take tens of seconds and environmental-context 60-90s, so run this server with --timeout 120. Response headers (X-Locus-Report-*) are not surfaced over MCP; the pollable-job routes (place-report-batch, record-batch, property-update) are not mounted. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing, or safe/unsafe labels."
+pricing_key = "x-payment-info"

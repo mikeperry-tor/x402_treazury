@@ -15,6 +15,8 @@ struct Args {
     meta_config: Option<std::path::PathBuf>,
     #[arg(long, requires = "meta_config")]
     check: bool,
+    #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
+    show_config: bool,
     #[arg(long)]
     config: Option<String>,
     #[arg(long)]
@@ -37,8 +39,8 @@ struct Args {
     max_price_usd: Option<String>,
     #[arg(long)]
     max_response_chars: Option<usize>,
-    #[arg(long, default_value = "30")]
-    timeout: f64,
+    #[arg(long)]
+    timeout: Option<f64>,
     #[arg(long, default_value="stdio", value_parser=["stdio", "http"])]
     transport: String,
     #[arg(long, default_value = "127.0.0.1")]
@@ -68,6 +70,7 @@ async fn main() -> Result<()> {
                     [
                         "meta_config",
                         "check",
+                        "show_config",
                         "list_tools",
                         "list_tags",
                         "env_file"
@@ -83,6 +86,31 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .with_env_filter("warn")
         .init();
+    if args.show_config {
+        for argument in Args::command().get_arguments() {
+            let id = argument.get_id();
+            if matches.value_source(id.as_str()) == Some(clap::parser::ValueSource::CommandLine) {
+                ensure!(
+                    ["show_config", "config", "meta_config"].contains(&id.as_str()),
+                    "--show-config resolves configuration files only; omit --{}",
+                    id.as_str().replace('_', "-")
+                );
+            }
+        }
+        let value = if let Some(path) = &args.meta_config {
+            x402_mcp_prototype::deployment::Deployment::show_config(path).await?
+        } else {
+            let path = args
+                .config
+                .as_ref()
+                .context("--show-config requires --config or --meta-config")?;
+            serde_json::to_value(
+                x402_mcp_prototype::config::load(std::path::Path::new(path)).await?,
+            )?
+        };
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if let Some(path) = &args.env_file {
         for item in dotenvy::from_path_iter(path)? {
@@ -133,8 +161,9 @@ async fn main() -> Result<()> {
         };
         return result;
     }
-    let mut cfg: Config = if let Some(path) = args.config {
-        serde_json::from_slice(&tokio::fs::read(path).await?)?
+    let mut cfg: Config = if let Some(path) = &args.config {
+        let resolved = x402_mcp_prototype::config::load(std::path::Path::new(path)).await?;
+        resolved.settings
     } else {
         Config::default()
     };
@@ -191,12 +220,12 @@ async fn main() -> Result<()> {
         cfg.prefix = Some(prefix);
     }
     ensure!(!cfg.spec.is_empty(), "--spec or config spec is required");
-    ensure!(
-        args.timeout.is_finite() && args.timeout > 0.0,
-        "timeout must be positive"
-    );
+    if let Some(timeout) = args.timeout {
+        cfg.timeout = timeout;
+    }
+    x402_mcp_prototype::config::validate(&cfg)?;
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs_f64(args.timeout))
+        .timeout(Duration::from_secs_f64(cfg.timeout))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let root = catalog::load_json(&cfg.spec, &http).await?;

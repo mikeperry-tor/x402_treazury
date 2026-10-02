@@ -1,0 +1,10 @@
+# Reusable Rust provider settings. Paths are relative to this file.
+spec = "https://lonestaroracle.xyz/openapi.json"
+name = "LoneStarOracle"
+base_url = "https://lonestaroracle.xyz/api"
+prefix = "lonestar"
+pricing_key = "x-payment-info"
+additional_properties = false
+help_url = "https://lonestaroracle.xyz/llms.txt"
+instructions_text = "LoneStarOracle: 71 independent pay-per-call data services behind one catalog — macro/labor/energy, equities and smart-money flow, crypto due diligence, geopolitical/compliance risk, and contract audits. The unified spec's root server is the /api gateway, which proxies every service payment-gated (each op also names its canonical <service>.lonestaroracle.xyz host via x-direct-url). Tier markers: ops with authMode=free answer ungated (their descriptions say so); payment ops settle per call via x402 USDC on Base, $0.001-$2.00 per call, with the price in each description. Rate limit: 30 requests per 60 seconds shared across every route. Audit routes (rattler/cottonmouth/copperhead) can take minutes — raise --timeout. Demos, previews, per-service /feed pages, and subscription-management routes are deliberately not exposed."
+exclude = ["/agri/feed", "/agri/preview", "/chainscout/preview", "/content/preview", "/copperhead/preview", "/copperhead/targets", "/cottonmouth/preview", "/cottonmouth/targets", "/crownblock/feed", "/crownblock/preview", "/crownblock/refinery", "/doc/preview", "/govedge/preview", "/grid/preview", "/latam/feed", "/lease/auctions", "/lease/expiring", "/lease/portfolio", "/lease/preview", "/rattler/contests", "/rattler/demo", "/rattler/immunefi", "/rattler/preview", "/rattler/targets", "/read/demo", "/realestate/feed", "/realestate/preview", "/stake/preview", "/ta/preview", "/token/demo", "/token/report/text"]

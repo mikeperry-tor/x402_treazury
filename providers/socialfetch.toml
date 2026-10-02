@@ -1,0 +1,11 @@
+# Reusable Rust provider settings. Paths are relative to this file.
+spec = "https://www.socialfetch.dev/openapi.json"
+name = "SocialFetch"
+base_url = "https://api.socialfetch.dev"
+prefix = "socialfetch"
+include = ["/v1", ""]
+exclude = ["/v1/whoami", "/v1/balance", "/v1/ask", "/v1/monitors", "/v1/webhook-endpoints", "/v1/webhook-deliveries"]
+exclude_tags = ["Auth", "Monitors", "System"]
+pricing_key = "x-socialfetch-credits-pricing"
+probe_pricing = false
+instructions_text = "SocialFetch social and web data via x402 USDC on Base. Select platforms using OpenAPI tags (for example Twitter, YouTube, LinkedIn). Prices are quoted in credits, approximately $0.014 USDC per credit; follow each tool description for base costs and usage-dependent surcharges. The payment challenge is authoritative. LinkedIn includes both API versions: tools with socialfetch_linkedin_ use v1, and socialfetch_v2_linkedin_ use v2. Parameter names and HTTP paths preserve their original casing. Slow transcript/search requests may need a 90-second timeout."

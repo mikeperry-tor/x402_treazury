@@ -399,7 +399,7 @@ async fn binding_is_atomic_and_missing_auth_opens_no_port() {
 }
 
 #[tokio::test]
-async fn imported_configs_keep_overrides_and_use_explicit_root() {
+async fn extended_providers_keep_overrides_and_resolve_declaring_paths() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("config")).unwrap();
     for name in ["alpha", "beta"] {
@@ -410,18 +410,20 @@ async fn imported_configs_keep_overrides_and_use_explicit_root() {
         .unwrap();
     }
     std::fs::write(
-        dir.path().join("vendor.json"),
-        json!({
-            "spec":"alpha.json","prefix":"alpha","instructions_text":"Use alpha_pay",
-            "overrides":{"alpha_pay":{"description":"Authored instructions"}},
-            "help_url":"http://127.0.0.1:1/llms.txt","probe_pricing":false
-        })
-        .to_string(),
+        dir.path().join("vendor.toml"),
+        r#"spec = "alpha.json"
+prefix = "alpha"
+instructions_text = "Use alpha_pay"
+help_url = "http://127.0.0.1:1/llms.txt"
+probe_pricing = false
+[overrides.alpha_pay]
+description = "Authored instructions"
+"#,
     )
     .unwrap();
     let text = configuration()
-        .replace("version = 1", "version = 1\nroot = \"..\"")
-        .replacen("spec = \"alpha.json\"", "config = \"vendor.json\"", 1);
+        .replacen("spec = \"alpha.json\"", "extends = \"../vendor.toml\"", 1)
+        .replace("spec = \"beta.json\"", "spec = \"../beta.json\"");
     let path = write_config(&dir.path().join("config"), &text);
     let deployment = Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
@@ -437,15 +439,12 @@ async fn imported_configs_keep_overrides_and_use_explicit_root() {
             .iter()
             .any(|t| t.tool.name == "alpha_help")
     );
-    let invalid = text.replace(
-        "config = \"vendor.json\"",
-        "config = \"vendor.json\"\nspec = \"alpha.json\"",
-    );
-    assert!(
-        Deployment::load(&write_config(&dir.path().join("config"), &invalid))
-            .await
-            .is_err()
-    );
+    std::fs::write(
+        dir.path().join("vendor.toml"),
+        "extends = \"other.toml\"\nspec = \"alpha.json\"\n",
+    )
+    .unwrap();
+    assert!(Deployment::load(&path).await.is_err());
 }
 
 #[tokio::test]

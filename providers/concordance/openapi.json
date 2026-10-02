@@ -1,0 +1,370 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Concordance",
+    "version": "1.0.0",
+    "description": "Locally curated request catalog for x402 MCP. Not a vendor-published OpenAPI document."
+  },
+  "servers": [
+    {
+      "url": "https://concordancehq.duckdns.org"
+    }
+  ],
+  "paths": {
+    "/tools/company-brief": {
+      "post": {
+        "summary": "Company Brief Endpoint",
+        "description": "The cross-source correlation endpoint: joins market quotes (3\nproviders), SEC filings, and general mentions (news/academic/legal/\ndev-community) for one company in a single call -- something no\nsingle-source competitor in this space can offer, since it requires\nowning all the underlying sources already. Partial results are\nnormal and expected here (e.g. market data present but no recent\nfilings) -- this endpoint aggregates across inherently-optional\nsources, unlike /tools/series which is about exactly one source and\nwhere \"not synced yet\" is a meaningful 503 signal.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "company": {
+                    "title": "Company",
+                    "type": "string"
+                  },
+                  "per_section_limit": {
+                    "default": 5,
+                    "maximum": 20.0,
+                    "minimum": 1.0,
+                    "title": "Per Section Limit",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "company"
+                ],
+                "title": "CompanyBriefRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0.05",
+            "currency": "USD"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/tools/corroboration": {
+      "post": {
+        "summary": "Corroboration Endpoint",
+        "description": "Is this claim independently corroborated across multiple unrelated\nsources, or does it trace back to a single origin? Groups matches by\nSOURCE (not category, unlike /tools/digest) so a caller can see exactly\nhow many independent outlets/agencies/publications back a claim, not\njust how many raw documents mention it -- the literal meaning of\n\"concordance\": where a claim is attested across a body of independently\nsourced texts.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "claim": {
+                    "title": "Claim",
+                    "type": "string"
+                  },
+                  "raw_pull_limit": {
+                    "default": 50,
+                    "maximum": 200.0,
+                    "minimum": 1.0,
+                    "title": "Raw Pull Limit",
+                    "type": "integer"
+                  },
+                  "since": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Since"
+                  }
+                },
+                "required": [
+                  "claim"
+                ],
+                "title": "CorroborationRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0.04",
+            "currency": "USD"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/tools/digest": {
+      "post": {
+        "summary": "Digest Endpoint",
+        "description": "The cross-category synthesis endpoint: one call replaces manually\ncalling /tools/search once per category and merging results\nyourself. Deliberately NOT an LLM-generated summary -- pure\nstructured aggregation of real search hits, keeping the same zero-\nmarginal-cost model as the rest of this service (an LLM call here\nwould need its own paid API key and per-call cost, undermining the\nwhole \"free sources, free to run\" design).",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "per_category_limit": {
+                    "default": 5,
+                    "maximum": 20.0,
+                    "minimum": 1.0,
+                    "title": "Per Category Limit",
+                    "type": "integer"
+                  },
+                  "since": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Since"
+                  },
+                  "topic": {
+                    "title": "Topic",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "topic"
+                ],
+                "title": "DigestRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0.03",
+            "currency": "USD"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/tools/search": {
+      "post": {
+        "summary": "Search Endpoint",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "category": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Category"
+                  },
+                  "limit": {
+                    "default": 20,
+                    "maximum": 100.0,
+                    "minimum": 1.0,
+                    "title": "Limit",
+                    "type": "integer"
+                  },
+                  "query": {
+                    "title": "Query",
+                    "type": "string"
+                  },
+                  "since": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Since"
+                  },
+                  "source": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Source"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "title": "SearchRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0.01",
+            "currency": "USD"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/tools/series": {
+      "post": {
+        "summary": "Series Endpoint",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "end": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "End"
+                  },
+                  "series_id": {
+                    "title": "Series Id",
+                    "type": "string"
+                  },
+                  "source": {
+                    "title": "Source",
+                    "type": "string"
+                  },
+                  "start": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Start"
+                  }
+                },
+                "required": [
+                  "source",
+                  "series_id"
+                ],
+                "title": "SeriesRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0.01",
+            "currency": "USD"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/tools/timeline": {
+      "post": {
+        "summary": "Timeline Endpoint",
+        "description": "How has coverage of this topic developed over time, across every\naggregated source? Chronologically ordered (oldest first), unlike\n/tools/search (relevance-ranked) or /tools/digest (grouped by\ncategory) -- for tracking a story's evolution or an emerging trend\nacross independently-sourced outlets.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "limit": {
+                    "default": 30,
+                    "maximum": 100.0,
+                    "minimum": 1.0,
+                    "title": "Limit",
+                    "type": "integer"
+                  },
+                  "since": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Since"
+                  },
+                  "topic": {
+                    "title": "Topic",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "topic"
+                ],
+                "title": "TimelineRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0.03",
+            "currency": "USD"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    }
+  },
+  "x-catalog-source": "confs/concordance/concordance_digest.json"
+}

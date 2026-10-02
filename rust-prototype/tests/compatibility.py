@@ -34,7 +34,15 @@ def main():
             if local:
                 item['help_url'] = cfg.help_url
             expected.append(item)
-        actual = json.loads(subprocess.check_output([str(BIN), '--config', conf, '--spec', fixture, '--list-tools'], cwd=ROOT,
+        name = Path(conf).stem
+        provider = ROOT / 'providers' / f'{name}.toml'
+        local_catalog = ROOT / 'providers' / name / 'provider.toml'
+        if local_catalog.exists():
+            provider = local_catalog
+        command = [str(BIN), '--config', str(provider), '--list-tools']
+        if not local_catalog.exists():
+            command += ['--spec', fixture]
+        actual = json.loads(subprocess.check_output(command, cwd=ROOT,
             env={k: v for k, v in os.environ.items() if not k.startswith(('X402_', 'EVM_', 'SVM_'))}))
         # Catalog order is not part of the MCP tool contract.
         expected.sort(key=lambda t: t['name'])

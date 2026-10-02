@@ -73,7 +73,7 @@ starting points:
 | [combined test crate](../../rust-prototype/compat/zingolib/Cargo.toml) | Working embedded-wallet dependency graph and offline wallet restore/address test |
 | [vendor directory](../../rust-prototype/vendor/README.md) | Two precisely bounded Alloy manifest patches, upstream source hashes and licenses |
 
-The standalone Rust suite has 21 tests. The combined suite runs 12 shared
+The standalone Rust suite has 26 tests. The combined suite runs 12 shared
 payment/MCP/crypto tests and
 an offline Zcash wallet creation/address derivation/save/restore test in the
 Zcash dependency graph. The catalog comparison covers 726 tool definitions
@@ -153,8 +153,10 @@ settings. Multiple listeners referencing the same managed profile share one
 manager, treasury, active/standby pool, and spend policy. Initially permit at
 most one managed profile per process; static profiles may coexist.
 
-Each source retains its base URL, timeout, routing and generic config filters
-and overrides. Each listener has its own bearer-token environment reference and
+Each source uses inline TOML settings or a one-level provider `extends` and
+retains its base URL, timeout, routing, filters and overrides. Paths resolve
+relative to the file declaring them. Providers live in `providers/`; locally
+curated catalogs remain OpenAPI JSON. Each listener has its own bearer-token environment reference and
 include/exclude tool-name patterns, enforced both at listing and invocation.
 Keep source prefixes and reject duplicate tool names. Assemble labeled source
 instructions without silent truncation. Preserve secret-free validation and

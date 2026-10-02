@@ -10,41 +10,25 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 use tokio::{net::TcpListener, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     pub version: u32,
-    #[serde(default)]
-    pub root: Option<PathBuf>,
     pub sources: BTreeMap<String, SourceConfig>,
     pub wallets: BTreeMap<String, WalletConfig>,
     pub servers: BTreeMap<String, ListenerConfig>,
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SourceConfig {
-    pub tags: Option<Vec<String>>,
-    pub exclude_tags: Option<Vec<String>>,
-    pub probe_pricing: Option<bool>,
-    pub config: Option<String>,
-    pub spec: Option<String>,
-    pub base_url: Option<String>,
-    #[serde(default = "default_timeout")]
-    pub timeout: f64,
-}
-fn default_timeout() -> f64 {
-    30.0
-}
+pub type SourceConfig = toml::Table;
 fn default_cap() -> String {
     "1.00".into()
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WalletConfig {
     pub mode: String,
@@ -52,7 +36,7 @@ pub struct WalletConfig {
     #[serde(default = "default_cap")]
     pub max_price_usd: String,
 }
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerConfig {
     pub listen: SocketAddr,
@@ -61,6 +45,10 @@ pub struct ListenerConfig {
     pub sources: Vec<String>,
     #[serde(default)]
     pub include_tools: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub exclude_tags: Vec<String>,
     #[serde(default)]
     pub exclude_tools: Vec<String>,
     pub max_response_chars: Option<usize>,
@@ -90,16 +78,6 @@ pub struct Deployment {
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
-}
-fn local_path(root: &Path, name: &str) -> String {
-    root.join(name).to_string_lossy().into_owned()
-}
-fn spec_path(root: &Path, name: &str) -> String {
-    if name.starts_with("https://") || name.starts_with("http://") {
-        name.into()
-    } else {
-        local_path(root, name)
-    }
 }
 fn pattern(text: &str) -> Result<Regex> {
     ensure!(!text.is_empty(), "empty tool selector");
@@ -133,16 +111,6 @@ impl MetaConfig {
             ensure!(
                 identifier.is_match(name),
                 "invalid identifier {name}: use lowercase letters, digits and underscores"
-            );
-        }
-        for (name, source) in &self.sources {
-            ensure!(
-                source.config.is_some() != source.spec.is_some(),
-                "source {name}: specify exactly one of config or spec"
-            );
-            ensure!(
-                source.timeout.is_finite() && source.timeout > 0.0 && source.timeout <= 86400.0,
-                "source {name}: timeout must be in (0, 86400]"
             );
         }
         for (name, wallet) in &self.wallets {
@@ -204,57 +172,42 @@ impl MetaConfig {
     }
 }
 impl Deployment {
+    pub async fn show_config(path: &Path) -> Result<serde_json::Value> {
+        let config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+        config.validate()?;
+        let mut resolved = BTreeMap::new();
+        for (id, source) in &config.sources {
+            let mut provider = crate::config::resolve(source.clone(), path).await?;
+            if provider.settings.prefix.is_none() {
+                provider.settings.prefix = Some(id.clone());
+                provider
+                    .origins
+                    .insert("prefix".into(), "source identifier".into());
+            }
+            resolved.insert(id, provider);
+        }
+        Ok(
+            serde_json::json!({"version":config.version,"sources":resolved,"wallets":config.wallets,"servers":config.servers}),
+        )
+    }
     pub async fn load(path: &Path) -> Result<Self> {
         let config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
         config.validate()?;
-        let root = path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(config.root.as_deref().unwrap_or(Path::new(".")));
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
+            let mut cfg = crate::config::resolve(source.clone(), path)
+                .await
+                .with_context(|| format!("source {id}"))?
+                .settings;
+            if cfg.prefix.is_none() {
+                cfg.prefix = Some(id.clone());
+            }
             let http = reqwest::Client::builder()
-                .timeout(Duration::from_secs_f64(source.timeout))
+                .timeout(Duration::from_secs_f64(cfg.timeout))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?;
-            let mut cfg = if let Some(file) = &source.config {
-                serde_json::from_slice::<Config>(
-                    &tokio::fs::read(root.join(file))
-                        .await
-                        .with_context(|| format!("source {id}: reading config {file}"))?,
-                )?
-            } else {
-                Config {
-                    spec: source.spec.clone().unwrap(),
-                    probe_pricing: false,
-                    ..Default::default()
-                }
-            };
-            if let Some(enabled) = source.probe_pricing {
-                cfg.probe_pricing = enabled;
-            }
-            if let Some(tags) = &source.tags {
-                cfg.tags = tags.clone();
-            }
-            if let Some(tags) = &source.exclude_tags {
-                cfg.exclude_tags = tags.clone();
-            }
-            crate::pricing::validate(&cfg)?;
-            ensure!(!cfg.spec.trim().is_empty(), "source {id}: missing spec");
-            ensure!(
-                cfg.max_description_chars != Some(0),
-                "source {id}: max_description_chars must be positive"
-            );
-            ensure!(
-                cfg.prefix.as_deref().is_none_or(|p| p == id),
-                "source {id}: imported prefix must match source ID (preserves authored tool references and overrides)"
-            );
-            cfg.prefix = Some(id.clone());
-            if let Some(base) = &source.base_url {
-                cfg.base_url = Some(base.clone());
-            }
-            let document = catalog::load_json(&spec_path(&root, &cfg.spec), &http)
+            let document = catalog::load_json(&cfg.spec, &http)
                 .await
                 .with_context(|| format!("source {id}: loading spec"))?;
             let base_url = cfg
@@ -272,7 +225,7 @@ impl Deployment {
                 matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
                 "source {id}: base_url must be HTTP(S)"
             );
-            let tools = catalog::build_tools(&cfg, &document, id)
+            let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
                 .with_context(|| format!("source {id}: catalog generation"))?;
             sources.insert(
                 id.clone(),
@@ -290,7 +243,34 @@ impl Deployment {
         for (name, server) in &config.servers {
             let mut available = BTreeMap::new();
             for source in &server.sources {
+                let operations = catalog::operations(&sources[source].document, None)?;
                 for tool in &sources[source].tools {
+                    let tags: BTreeSet<_> = operations
+                        .iter()
+                        .filter(|op| {
+                            op["path"] == tool.path
+                                && op["method"]
+                                    .as_str()
+                                    .is_some_and(|m| m.eq_ignore_ascii_case(&tool.method))
+                        })
+                        .flat_map(|op| {
+                            op["tags"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(serde_json::Value::as_str)
+                        })
+                        .collect();
+                    if (!server.tags.is_empty()
+                        && !server.tags.iter().any(|t| tags.contains(t.as_str())))
+                        || server
+                            .exclude_tags
+                            .iter()
+                            .any(|t| tags.contains(t.as_str()))
+                    {
+                        continue;
+                    }
+
                     ensure!(
                         available
                             .insert(tool.name.clone(), (source.clone(), tool.clone()))
@@ -409,11 +389,15 @@ impl Deployment {
                     &source.base_url,
                 )
                 .await?;
-            let tools: BTreeMap<_, _> =
-                catalog::build_tools_with_prices(&source.config, &source.document, id, &prices)?
-                    .into_iter()
-                    .map(|t| (t.name.clone(), t))
-                    .collect();
+            let tools: BTreeMap<_, _> = catalog::build_tools_with_prices(
+                &source.config,
+                &source.document,
+                source.config.prefix.as_deref().unwrap(),
+                &prices,
+            )?
+            .into_iter()
+            .map(|t| (t.name.clone(), t))
+            .collect();
             for (s, t) in self.selected.values_mut().flatten() {
                 if s == id {
                     *t = tools[&t.name].clone();

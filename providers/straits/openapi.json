@@ -1,0 +1,944 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Straits.live Hormuz monitor",
+    "version": "1.0.0",
+    "description": "Locally curated request catalog for x402 MCP. Not a vendor-published OpenAPI document."
+  },
+  "servers": [
+    {
+      "url": "https://straits.live"
+    }
+  ],
+  "paths": {
+    "/api/premium/brief": {
+      "get": {
+        "summary": "AI-assisted daily situation brief as structured JSON, by date or latest",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [
+          {
+            "description": "YYYY-MM-DD; omit for the latest brief",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.010000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/bunker": {
+      "get": {
+        "summary": "Bunker & marine-fuel prices ($/tonne): current VLSFO/IFO380/MGO for Fujairah, Singapore, Rotterdam, plus the derived Fujairah premium over each benchmark hub",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.020000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/export": {
+      "get": {
+        "summary": "Bulk history export: index-5min, stranded, and ais-gaps cap at 365 days of retained history; transits returns its full retained history instead",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [
+          {
+            "description": "Comma-separated subset of index-5min, stranded, ais-gaps, transits; omit for all",
+            "in": "query",
+            "name": "feeds",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "json (default) or csv for a multi-section download",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.250000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/history/{feed}": {
+      "get": {
+        "summary": "Historical series: stranded and AIS-gap counts (hourly, capped at one year, growing), 5-min index, daily transits",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [
+          {
+            "description": "index-5min: both Hormuz indices at 5-minute cadence. transits: complete daily IMF PortWatch history, enriched per day with the 7-day moving average, pre-crisis-baseline deviation, and reopening-threshold headroom. stranded: hourly stranded-vessel counts, up to a year. ais-gaps: hourly AIS-dark counts, up to a year.",
+            "in": "path",
+            "name": "feed",
+            "required": true,
+            "schema": {
+              "enum": [
+                "index-5min",
+                "transits",
+                "stranded",
+                "ais-gaps"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "index-5min only: window in days, 1-30 (default 7)",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "maximum": 30,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.010000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/hormuz/flags": {
+      "get": {
+        "summary": "Hormuz flag rollup: live-AIS vessel population by flag state, with per-flag sanctioned tallies",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.010000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/hormuz/risk-screen": {
+      "get": {
+        "summary": "Shadow-fleet risk screen: the live-AIS vessel population ranked worst-first, each hull with its risk band, typed reasons, and sanctions-body matches (flagged hulls by default; ?all=1 for every screened hull)",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [
+          {
+            "description": "Set to 1 to include the cleared low-band hulls; default returns only the flagged hulls (high + moderate). counts always cover the screened population, that is every hull seen on AIS inside the active window.",
+            "in": "query",
+            "name": "all",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.020000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/risk-premium": {
+      "get": {
+        "summary": "War-risk transit premium nowcast: a live modeled war-risk insurance multiple (Nx over the peace baseline, 1x-80x scale) for the strait, recomputed every 5 minutes from throughput, escalation, OVX, and event signals, with the standing straits.live insurance-estimate multiple carried as a static reference",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.050000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/snapshot": {
+      "get": {
+        "summary": "One-call snapshot: everything the Strait of Hormuz crisis monitor knows",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.020000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/vessel/{imo}": {
+      "get": {
+        "summary": "Single-vessel sanctions + risk dossier by IMO: unified multi-body (OFAC + UK) sanctions, identity, risk band, dark-activity",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [
+          {
+            "description": "7-digit IMO number of the vessel",
+            "in": "path",
+            "name": "imo",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{7}$",
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.020000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/premium/vessels": {
+      "get": {
+        "summary": "Per-vessel intelligence: live-AIS manifest, sanctioned-in-strait, risk bands, raw AIS positions",
+        "tags": [
+          "Premium"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.020000",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/index": {
+      "get": {
+        "summary": "Hormuz Index: Crisis Pressure and Escalation Forecast composites",
+        "description": "The two 0-100 Hormuz Index composites - Crisis Pressure (current state) and Escalation Forecast (30-day outlook) - with bands and per-component breakdowns. Recomputed every 5 minutes.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Opt-in time series nested at indices.<name>.history (30d resolves to daily points from the historical rollup, the rest to the raw 5-minute series).",
+            "in": "query",
+            "name": "history",
+            "required": false,
+            "schema": {
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/oil": {
+      "get": {
+        "summary": "Brent and WTI time-series",
+        "description": "Rolling Brent and WTI prices from intraday front-month futures contracts (Yahoo Finance chart data, continuous quotes as fallback, EIA daily backstop). Underlying feed every 10 minutes; not edge-cached.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Point count (default 168 = about 7 days hourly, max 2000).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 168,
+              "maximum": 2000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only points at or after this ISO timestamp.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "ISO 8601 timestamp",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/ais-gaps": {
+      "get": {
+        "summary": "Tankers gone dark (count)",
+        "description": "Count of tankers that were broadcasting in the chokepoint core and went silent for 3-24 hours, plus the 7-day baseline. Computed every 30 minutes. Per-vessel dark-fleet identities are premium data.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "summary": "War and diplomacy timeline",
+        "description": "Indexed strikes, ship incidents, closures, and negotiations with source attribution - GDELT auto-pull every 15 minutes plus hand-curated events.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Only events at or after this ISO timestamp.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "ISO 8601 timestamp",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to one event type.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "strike",
+                "ship_incident",
+                "closure",
+                "negotiation"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max events returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/markets": {
+      "get": {
+        "summary": "Prediction-market odds",
+        "description": "Top Hormuz / Iran-conflict / oil-shock contracts from Kalshi and Polymarket, strict keyword-filtered. Underlying feed every 15 minutes.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Max markets returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter to one venue.",
+            "in": "query",
+            "name": "venue",
+            "required": false,
+            "schema": {
+              "enum": [
+                "kalshi",
+                "polymarket"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/gas": {
+      "get": {
+        "summary": "US gas prices",
+        "description": "Per-state regular-grade averages plus a national mean across the 50 states plus DC (AAA). Refreshed hourly; upstream publishes daily.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Set to 1 to include the per-state list (default omitted for payload size).",
+            "in": "query",
+            "name": "states",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1",
+                "true"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/transits": {
+      "get": {
+        "summary": "IMF PortWatch daily transits",
+        "description": "The dashboard's authoritative daily transit count with per-type breakdown (tanker, cargo, container, dry bulk, general cargo, Ro-Ro), capacity in DWT, trailing 30-day baseline median, and the fixed pre-crisis baseline (2025-02-28 to 2026-02-27). nCargo is nContainer plus nDryBulk plus nGeneralCargo plus nRoro - summing all seven fields double-counts.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Set to 1 to include chokepointTransitsHistory rows.",
+            "in": "query",
+            "name": "history",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1",
+                "true"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "History rows to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "maximum": 365,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/chokepoints": {
+      "get": {
+        "summary": "Five-chokepoint comparison",
+        "description": "Side-by-side daily counts for Hormuz, Bab el-Mandeb, Suez, the Cape of Good Hope, and Malacca (IMF PortWatch), sorted Hormuz first then by nTotal descending.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Set to 1 to include per-chokepoint daily history[].",
+            "in": "query",
+            "name": "history",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1",
+                "true"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/ports": {
+      "get": {
+        "summary": "Port congestion",
+        "description": "Live vessel counts at Fujairah, Sohar, Bandar Abbas, and Jebel Ali from AIS positions inside a 10-18 km radius per port, by status (anchored, transiting) and vessel type. Computed every 30 minutes.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/stranded": {
+      "get": {
+        "summary": "Stranded-vessel time-series",
+        "description": "Anchored-vessel count inside the Persian Gulf bounding box, hourly buckets written every 30 minutes. Powers the homepage sparkline.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Hourly buckets (default 168 = 7 days, max 720).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 168,
+              "maximum": 720,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only buckets at or after this ISO timestamp.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "ISO 8601 timestamp",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/transits-by-type": {
+      "get": {
+        "summary": "Transits by vessel type",
+        "description": "Hourly cross-tab of vessels in transit by type (tanker, cargo, military, other); the military count is a floor - the response's methodology field explains how type is resolved.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Hourly buckets (default 168 = 7 days, max 720).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 168,
+              "maximum": 720,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only buckets at or after this ISO timestamp.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "ISO 8601 timestamp",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/sanctioned-vessels": {
+      "get": {
+        "summary": "OFAC SDN cross-join (count)",
+        "description": "Count of vessels visible on AIS in the Persian Gulf window whose identity matches an OFAC SDN entry (IMO / normalised-name join; false positives possible). Cross-join every 15 minutes; per-vessel detail is premium data.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/insurance": {
+      "get": {
+        "summary": "War-risk insurance index",
+        "description": "Multiple over the peace-baseline VLCC premium, per-voyage cost in USD from peacetime baseline to current crisis high, and the P&I clubs / war-risk underwriters that have withdrawn cover, imposed quotas, or refused renewals. Hand-curated; timestamp refreshed weekly.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/trade-impact": {
+      "get": {
+        "summary": "World oil & LNG at risk",
+        "description": "EIA/IEA shares of global seaborne oil and LNG transiting the strait, a curated daily economic-cost estimate, the most-affected importing economies, and extra Cape-reroute voyage days. Hand-curated; refreshed weekly.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/jwc": {
+      "get": {
+        "summary": "JWC Listed Areas",
+        "description": "Marine war-risk high-risk areas from the Lloyd's Joint War Committee circular, plus a flag for whether the latest revision mentions the Arabian Gulf. Drives war-risk premium loads at most London-market underwriters. Re-checked every 6 hours.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/carriers": {
+      "get": {
+        "summary": "Carrier suspensions",
+        "description": "Top container carriers by TEU capacity and their Hormuz posture (suspended, rerouting, limited, transiting), vessels-trapped count, trapped TEU, and per-carrier surcharge in USD per TEU. hormuzPosture is the operative field: 5+ carriers stopped within 60-day advisories drives the 'effectively closed' verdict. Hand-curated; refreshed weekly.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines": {
+      "get": {
+        "summary": "Pipeline bypass",
+        "description": "Petroline (Saudi Arabia to Yanbu) and Habshan-Fujairah (UAE to Gulf of Oman) - the main crude routes out of the Gulf without transiting Hormuz - with nameplate capacity in BPD and current utilisation. Hand-curated.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/iran-rate": {
+      "get": {
+        "summary": "Tehran open-market USD/IRR",
+        "description": "Open-market USD/IRR sell/buy rates in Toman (1 Toman = 10 Rial) and Rial, plus 24-hour and 7-day percentage deltas off the midRial - a proxy for civilian-side financial stress inside Iran. Refreshed hourly.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/briefs": {
+      "get": {
+        "summary": "Daily briefs archive",
+        "description": "JSON archive of every daily brief: 3-6 bullets, a short summary, the day's Brent price plus 24-hour delta, and the day's transit count, keyed by UTC date. Rewritten every few hours.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "A single UTC-dated brief (YYYY-MM-DD); 404 if missing.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max briefs returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 120,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/tick": {
+      "get": {
+        "summary": "Lightweight tick",
+        "description": "Bare-minimum payload for polling: Brent price, 24-hour change, transit and stranded counts, plus a verifiedAt anchor. 30-second edge cache.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/since": {
+      "get": {
+        "summary": "'While you were away' deltas",
+        "description": "Compares current state to a caller-provided anchor timestamp and raises a material flag once any of: 24h+ elapsed, Brent moved 1%+, any new event, any carrier posture change, transit delta 3+, or stranded delta 5+. 60-second edge cache.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "description": "Anchor ISO timestamp (required).",
+            "in": "query",
+            "name": "at",
+            "required": true,
+            "schema": {
+              "description": "ISO 8601 timestamp",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/spr": {
+      "get": {
+        "summary": "US Strategic Petroleum Reserve",
+        "description": "SPR stocks from the EIA Weekly Petroleum Status Report with the 4-week change so spike-vs-baseline reads correctly. Re-fetched daily 11:00 ET.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/cushing": {
+      "get": {
+        "summary": "Cushing crude stocks",
+        "description": "Cushing, Oklahoma WTI-delivery-hub inventories from the EIA weekly report - tracks the North-American crude balance independently of the Gulf-Coast / SPR picture; pairs with the Brent-WTI spread. Re-fetched daily 11:30 ET.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    }
+  },
+  "x-catalog-source": "confs/straits/straits_digest.json"
+}

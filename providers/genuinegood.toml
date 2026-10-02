@@ -1,0 +1,11 @@
+# Reusable Rust provider settings. Paths are relative to this file.
+spec = "https://genuinegood.online/openapi.json"
+name = "Genuine Good Grants"
+base_url = "https://genuinegood.online"
+prefix = "genuinegood"
+include = ["/v1/grants"]
+exclude = ["/v1/grants/pass"]
+pricing_key = "x-payment-info"
+additional_properties = false
+help_url = "https://genuinegood.online/llms.txt"
+instructions_text = "US federal grant discovery over Grants.gov public records, paid per call in USDC on Base via x402; this server performs the 402/sign/retry payment handshake automatically, so just call the tools. Prices: search $0.05, detail $0.08, fit $0.20, brief $0.50 per call, preflight $5.00 - preflight exceeds the default X402_MAX_PRICE_USD=1.00 spend cap, so raise the cap if you need it. Prefer the *_post tools; the *_get twins accept the same input as query parameters (the vendor documents comma-separated array values there). Typical flow: search for opportunities, then detail with an opportunityId for the official notice. fit/brief/preflight are research aids only - verify every decision against the linked official Grants.gov notice. genuinegood_help() serves the vendor llms.txt (pricing, payment contract, free preflight sample)."

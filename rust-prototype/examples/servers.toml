@@ -1,15 +1,14 @@
-# All local source/config/spec paths resolve from root, relative to this file.
+# Paths resolve relative to the file declaring them.
 version = 1
-root = "../.."
 
-# Imported configs control startup pricing discovery; set probe_pricing = false
+# Provider definitions control startup pricing discovery; set probe_pricing = false
 # on a source to disable it. Results and failures are shared for the process lifetime.
 [sources.pdl]
-config = "confs/pdl.json"
+extends = "../../providers/pdl.toml"
 timeout = 30
 
 [sources.lonestar]
-config = "confs/lonestar.json"
+extends = "../../providers/lonestar.toml"
 timeout = 90
 
 [wallets.default]

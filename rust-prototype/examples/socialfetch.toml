@@ -1,8 +1,7 @@
 version = 1
-root = "../.."
 
 [sources.socialfetch]
-config = "confs/socialfetch.json"
+extends = "../../providers/socialfetch.toml"
 tags = ["Twitter", "YouTube", "LinkedIn"]
 timeout = 90
 

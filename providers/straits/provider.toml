@@ -1,0 +1,81 @@
+# Reusable Rust provider settings. Paths are relative to this file.
+spec = "openapi.json"
+name = "Straits.live Hormuz monitor"
+base_url = "https://straits.live"
+prefix = "straits"
+include = ["/api/premium", "/api/v1", "/api"]
+additional_properties = false
+instructions_text = "Straits.live monitors the Strait of Hormuz crisis: the free tier (tags: Free) carries summary counts, short windows, and hand-curated indicators with no payment; the premium tier (tags: Premium) adds the live-AIS per-vessel manifest, single-vessel OFAC+UK sanctions dossiers, a shadow-fleet risk screen, full-resolution history, bulk export, bunker prices, and a modeled war-risk premium, settled per request in USDC on Base via x402 ($0.01-$0.25 per call, no key, no account). Rate limit: 30 requests per 60 seconds shared across every route - prefer straits_snapshot or straits_index over polling many series. Feed enum for straits_history_feed: index-5min, transits, stranded, ais-gaps (days 1-30 applies to index-5min only). straits_vessel_imo takes a 7-digit IMO number; straits_export bundles series (feeds subset, json|csv). Every settled call returns a signed x402 receipt; the vendor's llms.txt (straits_help()) carries the free-vs-premium comparison."
+help_url = "https://straits.live/llms.txt"
+pricing_key = "x-payment-info"
+
+[overrides]
+
+[overrides.straits_index]
+description = "Free — no payment required. The two 0-100 Hormuz Index composites - Crisis Pressure (current state) and Escalation Forecast (30-day outlook) - with bands and per-component breakdowns. Recomputed every 5 minutes."
+
+[overrides.straits_ais_gaps]
+description = "Free — no payment required. Count of tankers that were broadcasting in the chokepoint core and went silent for 3-24 hours, plus the 7-day baseline. Computed every 30 minutes. Per-vessel dark-fleet identities are premium data."
+
+[overrides.straits_briefs]
+description = "Free — no payment required. JSON archive of every daily brief: 3-6 bullets, a short summary, the day's Brent price plus 24-hour delta, and the day's transit count, keyed by UTC date. Rewritten every few hours."
+
+[overrides.straits_carriers]
+description = "Free — no payment required. Top container carriers by TEU capacity and their Hormuz posture (suspended, rerouting, limited, transiting), vessels-trapped count, trapped TEU, and per-carrier surcharge in USD per TEU. hormuzPosture is the operative field: 5+ carriers stopped within 60-day advisories drives the 'effectively closed' verdict. Hand-curated; refreshed weekly."
+
+[overrides.straits_chokepoints]
+description = "Free — no payment required. Side-by-side daily counts for Hormuz, Bab el-Mandeb, Suez, the Cape of Good Hope, and Malacca (IMF PortWatch), sorted Hormuz first then by nTotal descending."
+
+[overrides.straits_cushing]
+description = "Free — no payment required. Cushing, Oklahoma WTI-delivery-hub inventories from the EIA weekly report - tracks the North-American crude balance independently of the Gulf-Coast / SPR picture; pairs with the Brent-WTI spread. Re-fetched daily 11:30 ET."
+
+[overrides.straits_events]
+description = "Free — no payment required. Indexed strikes, ship incidents, closures, and negotiations with source attribution - GDELT auto-pull every 15 minutes plus hand-curated events."
+
+[overrides.straits_gas]
+description = "Free — no payment required. Per-state regular-grade averages plus a national mean across the 50 states plus DC (AAA). Refreshed hourly; upstream publishes daily."
+
+[overrides.straits_insurance]
+description = "Free — no payment required. Multiple over the peace-baseline VLCC premium, per-voyage cost in USD from peacetime baseline to current crisis high, and the P&I clubs / war-risk underwriters that have withdrawn cover, imposed quotas, or refused renewals. Hand-curated; timestamp refreshed weekly."
+
+[overrides.straits_iran_rate]
+description = "Free — no payment required. Open-market USD/IRR sell/buy rates in Toman (1 Toman = 10 Rial) and Rial, plus 24-hour and 7-day percentage deltas off the midRial - a proxy for civilian-side financial stress inside Iran. Refreshed hourly."
+
+[overrides.straits_jwc]
+description = "Free — no payment required. Marine war-risk high-risk areas from the Lloyd's Joint War Committee circular, plus a flag for whether the latest revision mentions the Arabian Gulf. Drives war-risk premium loads at most London-market underwriters. Re-checked every 6 hours."
+
+[overrides.straits_markets]
+description = "Free — no payment required. Top Hormuz / Iran-conflict / oil-shock contracts from Kalshi and Polymarket, strict keyword-filtered. Underlying feed every 15 minutes."
+
+[overrides.straits_oil]
+description = "Free — no payment required. Rolling Brent and WTI prices from intraday front-month futures contracts (Yahoo Finance chart data, continuous quotes as fallback, EIA daily backstop). Underlying feed every 10 minutes; not edge-cached."
+
+[overrides.straits_pipelines]
+description = "Free — no payment required. Petroline (Saudi Arabia to Yanbu) and Habshan-Fujairah (UAE to Gulf of Oman) - the main crude routes out of the Gulf without transiting Hormuz - with nameplate capacity in BPD and current utilisation. Hand-curated."
+
+[overrides.straits_ports]
+description = "Free — no payment required. Live vessel counts at Fujairah, Sohar, Bandar Abbas, and Jebel Ali from AIS positions inside a 10-18 km radius per port, by status (anchored, transiting) and vessel type. Computed every 30 minutes."
+
+[overrides.straits_sanctioned_vessels]
+description = "Free — no payment required. Count of vessels visible on AIS in the Persian Gulf window whose identity matches an OFAC SDN entry (IMO / normalised-name join; false positives possible). Cross-join every 15 minutes; per-vessel detail is premium data."
+
+[overrides.straits_since]
+description = "Free — no payment required. Compares current state to a caller-provided anchor timestamp and raises a material flag once any of: 24h+ elapsed, Brent moved 1%+, any new event, any carrier posture change, transit delta 3+, or stranded delta 5+. 60-second edge cache."
+
+[overrides.straits_spr]
+description = "Free — no payment required. SPR stocks from the EIA Weekly Petroleum Status Report with the 4-week change so spike-vs-baseline reads correctly. Re-fetched daily 11:00 ET."
+
+[overrides.straits_stranded]
+description = "Free — no payment required. Anchored-vessel count inside the Persian Gulf bounding box, hourly buckets written every 30 minutes. Powers the homepage sparkline."
+
+[overrides.straits_tick]
+description = "Free — no payment required. Bare-minimum payload for polling: Brent price, 24-hour change, transit and stranded counts, plus a verifiedAt anchor. 30-second edge cache."
+
+[overrides.straits_trade_impact]
+description = "Free — no payment required. EIA/IEA shares of global seaborne oil and LNG transiting the strait, a curated daily economic-cost estimate, the most-affected importing economies, and extra Cape-reroute voyage days. Hand-curated; refreshed weekly."
+
+[overrides.straits_transits]
+description = "Free — no payment required. The dashboard's authoritative daily transit count with per-type breakdown (tanker, cargo, container, dry bulk, general cargo, Ro-Ro), capacity in DWT, trailing 30-day baseline median, and the fixed pre-crisis baseline (2025-02-28 to 2026-02-27). nCargo is nContainer plus nDryBulk plus nGeneralCargo plus nRoro - summing all seven fields double-counts."
+
+[overrides.straits_transits_by_type]
+description = "Free — no payment required. Hourly cross-tab of vessels in transit by type (tanker, cargo, military, other); the military count is a floor - the response's methodology field explains how type is resolved."
