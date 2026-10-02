@@ -1,0 +1,19 @@
+version = 1
+root = "../.."
+
+[sources.socialfetch]
+config = "confs/socialfetch.json"
+tags = ["Twitter", "YouTube", "LinkedIn"]
+timeout = 90
+
+[wallets.default]
+mode = "static"
+private_key_env = "EVM_PRIVATE_KEY"
+max_price_usd = "1.00"
+
+[servers.social]
+listen = "127.0.0.1:8002"
+bearer_token_env = "SOCIAL_MCP_TOKEN"
+wallet = "default"
+sources = ["socialfetch"]
+include_tools = ["socialfetch_*"]

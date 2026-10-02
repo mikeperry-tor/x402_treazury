@@ -359,6 +359,26 @@ pub fn operations(root: &Value, pricing_key: Option<&str>) -> Result<Vec<Value>>
     Ok(ops)
 }
 
+/// Counts from the source before selection, including tags on excluded operations.
+pub fn tag_counts(root: &Value) -> Result<BTreeMap<String, usize>> {
+    let mut counts = BTreeMap::new();
+    for op in operations(root, None)? {
+        let tags: BTreeSet<_> = op["tags"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if tags.is_empty() {
+            *counts.entry("(untagged)".into()).or_default() += 1;
+        }
+        for tag in tags {
+            *counts.entry(tag.to_owned()).or_default() += 1;
+        }
+    }
+    Ok(counts)
+}
+
 fn money(value: &Value) -> Option<String> {
     if !(value.is_string() || value.is_u64() || value.is_i64()) {
         return None;

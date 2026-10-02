@@ -49,6 +49,8 @@ struct Args {
     bearer_token: Option<String>,
     #[arg(long)]
     list_tools: bool,
+    #[arg(long, conflicts_with_all = ["list_tools", "check", "route_tool"])]
+    list_tags: bool,
     #[arg(long)]
     route_tool: Option<String>,
     #[arg(long, default_value = "{}")]
@@ -63,7 +65,14 @@ async fn main() -> Result<()> {
             let id = argument.get_id();
             if matches.value_source(id.as_str()) == Some(clap::parser::ValueSource::CommandLine) {
                 ensure!(
-                    ["meta_config", "check", "list_tools", "env_file"].contains(&id.as_str()),
+                    [
+                        "meta_config",
+                        "check",
+                        "list_tools",
+                        "list_tags",
+                        "env_file"
+                    ]
+                    .contains(&id.as_str()),
                     "--meta-config cannot be combined with --{}; configure it in the TOML file",
                     id.as_str().replace('_', "-")
                 );
@@ -83,6 +92,13 @@ async fn main() -> Result<()> {
     }
     if let Some(path) = &args.meta_config {
         let deployment = x402_mcp_prototype::deployment::Deployment::load(path).await?;
+        if args.list_tags {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&deployment.tag_inventory()?)?
+            );
+            return Ok(());
+        }
         if args.list_tools {
             println!("{}", serde_json::to_string_pretty(&deployment.inventory())?);
             return Ok(());
@@ -184,6 +200,13 @@ async fn main() -> Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let root = catalog::load_json(&cfg.spec, &http).await?;
+    if args.list_tags {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&catalog::tag_counts(&root)?)?
+        );
+        return Ok(());
+    }
     let base = cfg
         .base_url
         .clone()

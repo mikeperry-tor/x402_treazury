@@ -13,7 +13,7 @@ from x402_mcp.generic import GenericConfig, build_tools, default_prefix, load_so
 ROOT = Path(__file__).resolve().parents[2]
 BIN = ROOT / 'rust-prototype/target/debug/x402-mcp-prototype'
 CASES = [(f'confs/{name}.json', f'tests/fixtures/{fixture}_openapi.json') for name, fixture in [
-    ('pdl', 'pdl'), ('deepline', 'deepline'), ('kronos', 'kronos'),
+    ('socialfetch', 'socialfetch'), ('pdl', 'pdl'), ('deepline', 'deepline'), ('kronos', 'kronos'),
     ('regimeshift', 'regimeshift'), ('agentfund', 'agentfund'), ('otto', 'otto'),
     ('lonestar', 'lonestar_unified'), ('brazilayer', 'brazilayer'), ('genuinegood', 'genuinegood'),
 ]] + [(f'confs/{name}.json', f'confs/{name}/{name}_digest.json') for name in ['straits', 'concordance', 'locus']] + [('confs/glassnode/glassnode.json', 'confs/glassnode/glassnode_digest.json')]

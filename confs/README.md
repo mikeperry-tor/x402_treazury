@@ -11,13 +11,37 @@ uv run x402-mcp-generic --config confs/botsmith.json --list-tools   # inventory,
 Wallet/spend-cap setup is shared with every launcher (`EVM_PRIVATE_KEY`,
 `X402_MAX_PRICE_USD`, `--env-file`); see the repo README. Field semantics and
 the full key list are documented in the repo README ("Generic launcher").
-`tests/test_confs.py` pins the pdl, deepline, kronos, regimeshift, glassnode,
+`tests/test_confs.py` pins the socialfetch, pdl, deepline, kronos, regimeshift, glassnode,
 concordance, agentfund, otto, straits, brazilayer, locus, lonestar and
 genuinegood confs against committed spec snapshots (`tests/fixtures/`) and
 committed digests (`confs/glassnode/`, `confs/concordance/`,
 `confs/straits/`).
-LoneStarOracle is not a conf — it has its own launcher
-(`x402-mcp-lonestar`, digest + group selectors); see the repo README.
+LoneStarOracle is available through `lonestar.json` as well as its custom
+launcher with group selectors.
+
+## socialfetch.json — SocialFetch
+
+Uses the live OpenAPI document's platform tags, with administrative `Auth`,
+`Monitors` and `System` excluded. All platforms are included by default;
+`--tags Twitter,YouTube` selects a subset. `LinkedIn` spans v1 and v2; add
+`--include /v1` when only v1 is wanted. Tags are exact and case-sensitive.
+
+`include: ["/v1", ""]` strips `/v1` from tool names while the empty root fallback
+retains other API versions: `socialfetch_twitter_profiles_handle` and
+`socialfetch_v2_linkedin_*`. Original request paths remain intact; keep the base
+URL at `https://api.socialfetch.dev`. This naming differs from the custom
+SocialFetch launcher. The config works with both Python generic and Rust.
+
+Credit pricing comes from `x-socialfetch-credits-pricing`, supplemented by
+credit-to-USDC guidance in `instructions_text`. Pricing probes are disabled;
+no endpoint sweep is needed. Fetching the live spec still requires one startup
+request. Use a 90-second timeout for slow search/transcript calls.
+
+`tests/fixtures/socialfetch_openapi.json` pins the 2026-10-02 source: 259
+operations, 237 selected tools including Yelp. It retains tags, descriptions,
+request schemas and vendor extensions, omitting response documentation only.
+Regenerate it with `python scripts/build_socialfetch_fixture.py [local-spec-or-url]`.
+The custom launcher's committed digest is independent and unchanged.
 
 ## deepline.json — Deepline GTM (stable-deepline.dev)
 

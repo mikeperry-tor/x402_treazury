@@ -29,6 +29,8 @@ pub struct MetaConfig {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceConfig {
+    pub tags: Option<Vec<String>>,
+    pub exclude_tags: Option<Vec<String>>,
     pub probe_pricing: Option<bool>,
     pub config: Option<String>,
     pub spec: Option<String>,
@@ -232,6 +234,12 @@ impl Deployment {
             if let Some(enabled) = source.probe_pricing {
                 cfg.probe_pricing = enabled;
             }
+            if let Some(tags) = &source.tags {
+                cfg.tags = tags.clone();
+            }
+            if let Some(tags) = &source.exclude_tags {
+                cfg.exclude_tags = tags.clone();
+            }
             crate::pricing::validate(&cfg)?;
             ensure!(!cfg.spec.trim().is_empty(), "source {id}: missing spec");
             ensure!(
@@ -347,6 +355,12 @@ impl Deployment {
                     })
                     .collect(),
             })
+            .collect()
+    }
+    pub fn tag_inventory(&self) -> Result<BTreeMap<String, BTreeMap<String, usize>>> {
+        self.sources
+            .iter()
+            .map(|(id, source)| Ok((id.clone(), catalog::tag_counts(&source.document)?)))
             .collect()
     }
     pub async fn bind(mut self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {

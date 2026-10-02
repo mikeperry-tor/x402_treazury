@@ -817,3 +817,15 @@ def test_locus_digest_conf_pins_gateway_and_paid_tools():
     }.isdisjoint(by)
     assert "locus_locus_listing_claim_batch" in by
     assert "locus_help" in by  # help_url serves the vendor llms.txt
+
+
+def test_socialfetch_generic_tags_names_and_credit_pricing():
+    tools = _tools_from_conf("socialfetch")
+    by = {t.name: t for t in tools}
+    assert len(by) == 237
+    assert not any(name.startswith("socialfetch_v1_") for name in by)
+    assert sum(t.path.startswith("/v2/linkedin/") for t in tools) == 28
+    assert any(t.path == "/v1/web/ask" for t in tools)
+    assert not any(t.path.startswith("/v1/webhook") or t.path == "/v1/ask" for t in tools)
+    assert by["socialfetch_twitter_profiles_handle"].path == "/v1/twitter/profiles/{handle}"
+    assert "1 credit per successful request" in by["socialfetch_twitter_profiles_handle"].description
