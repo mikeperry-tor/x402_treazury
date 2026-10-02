@@ -1,4 +1,6 @@
-//! Embedded treasury with encrypted sync checkpoints. Never broadcasts or starts save_task.
+//! Embedded treasury with encrypted sync and explicit durable transaction operations.
+mod send;
+pub mod submission;
 use crate::rotation::{
     base::now,
     store::{Status, Store, StoreHandle, SyncObservation, SyncPhase},

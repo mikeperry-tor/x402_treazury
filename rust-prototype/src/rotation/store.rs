@@ -1,5 +1,6 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
 use super::error::AdmissionError;
+use super::transaction::{OperationStatus, TransactionFacts};
 use alloy_primitives::U256;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
@@ -38,6 +39,7 @@ pub struct Status {
     pub sync: Option<SyncObservation>,
     pub outgoing_pending: bool,
     pub sync_fresh: bool,
+    pub treasury_operations: Vec<OperationStatus>,
 }
 /// Persisted observations, never an authorization to spend on their own.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -59,6 +61,7 @@ pub struct SyncObservation {
 #[serde(rename_all = "snake_case")]
 pub enum SyncPhase {
     Syncing,
+    Preparing,
     Ready,
     Failed,
     Offline,
@@ -542,6 +545,16 @@ impl Store {
         snapshot: &[u8],
         raw: &[u8],
     ) -> Result<i64> {
+        self.prepare_with_facts(id, expected_revision, snapshot, raw, None)
+    }
+    pub fn prepare_with_facts(
+        &mut self,
+        id: &str,
+        expected_revision: i64,
+        snapshot: &[u8],
+        raw: &[u8],
+        facts: Option<TransactionFacts>,
+    ) -> Result<i64> {
         ensure!(
             !raw.is_empty() && !snapshot.is_empty(),
             "empty prepared operation"
@@ -578,6 +591,9 @@ impl Store {
                     == snapshot,
                 "operation_conflict"
             );
+            if let Some(facts) = facts {
+                ensure!(self.operation(id)?.facts == facts, "operation_conflict");
+            }
             return Ok(revision);
         }
         let next = expected_revision
@@ -617,6 +633,24 @@ impl Store {
             "INSERT INTO outgoing VALUES (?1,'PREPARED',?2,?3)",
             params![id, encrypted, next],
         )?;
+        if let Some(facts) = facts {
+            let cost = facts
+                .amount_zatoshis
+                .checked_add(facts.fee_zatoshis)
+                .context("source cost overflow")?;
+            ensure!(
+                cost > 0 && cost <= reserved as u64 && facts.expiry_height > 0,
+                "invalid source cost or expiry"
+            );
+            tx.execute(
+                "INSERT INTO treasury_operations VALUES (?1,?2,'PREPARED',0)",
+                params![id, serde_json::to_string(&facts)?],
+            )?;
+            tx.execute(
+                "UPDATE budget_entries SET reserved=?1 WHERE id=?2",
+                params![i64::try_from(cost)?, id],
+            )?;
+        }
         tx.commit()?;
         Ok(next)
     }
@@ -658,6 +692,10 @@ impl Store {
             "source cost exceeds reservation"
         );
         tx.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1", [id])?;
+        tx.execute(
+            "UPDATE treasury_operations SET submission='CONFIRMED' WHERE id=?1",
+            [id],
+        )?;
         tx.execute(
             "UPDATE budget_entries SET reserved=0,consumed=?1,day=MAX(day,?3) WHERE id=?2",
             params![actual, id, confirmation_day],
@@ -775,7 +813,32 @@ fn read_status(db: &Connection) -> Result<Status> {
     let sync_fresh = sync.as_ref().is_some_and(|observation| {
         crate::rotation::base::now().is_ok_and(|now| observation.fresh(now, revision))
     });
+    let treasury_operations = if version >= 3 {
+        let mut stmt =
+            db.prepare("SELECT id,facts,submission,attempts FROM treasury_operations ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?;
+        rows.map(|row| -> Result<OperationStatus> {
+            let (operation_id, facts, submission, attempts) = row?;
+            Ok(OperationStatus {
+                operation_id,
+                facts: serde_json::from_str(&facts)?,
+                submission,
+                attempts,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?
+    } else {
+        vec![]
+    };
     Ok(Status {
+        treasury_operations,
         sync_fresh,
         sync,
         outgoing_pending,
@@ -822,7 +885,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 2, "unsupported state schema");
+    ensure!(version <= 3, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -834,6 +897,12 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE treasury_sync(singleton INTEGER PRIMARY KEY CHECK(singleton=1),observation TEXT NOT NULL);
 PRAGMA user_version=2;
+COMMIT;")?;
+    }
+    if version < 3 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE treasury_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),facts TEXT NOT NULL,submission TEXT NOT NULL CHECK(submission IN ('PREPARED','BROADCAST_REQUESTED','BROADCAST','UNKNOWN','CONFIRMED')),attempts INTEGER NOT NULL DEFAULT 0);
+PRAGMA user_version=3;
 COMMIT;")?;
     }
     Ok(())
@@ -1083,4 +1152,63 @@ fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
             Box::new(e),
         )
     })
+}
+
+impl Store {
+    pub fn operation(&self, id: &str) -> Result<OperationStatus> {
+        self.status()?
+            .treasury_operations
+            .into_iter()
+            .find(|o| o.operation_id == id)
+            .context("operation metadata missing")
+    }
+    pub fn abandon_unprepared(&mut self, id: &str) -> Result<()> {
+        let exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1)",
+            [id],
+            |r| r.get(0),
+        )?;
+        ensure!(!exists, "cannot abandon prepared transaction");
+        self.db.execute(
+            "DELETE FROM budget_entries WHERE id=?1 AND consumed=0",
+            [id],
+        )?;
+        Ok(())
+    }
+    /// The network request may occur only after this returns successfully.
+    pub fn request_broadcast(
+        &mut self,
+        id: &str,
+        now: u64,
+        height: u64,
+        retry: bool,
+    ) -> Result<i64> {
+        ensure!(self.operation_pending(id)?, "transaction is not pending");
+        let operation = self.operation(id)?;
+        ensure!(now < operation.facts.deadline, "funding_deadline_expired");
+        ensure!(
+            height < u64::from(operation.facts.expiry_height),
+            "transaction_expired"
+        );
+        ensure!(
+            retry || operation.attempts == 0,
+            "explicit_rebroadcast_required"
+        );
+        if operation.attempts == 0 {
+            ensure!(
+                operation.facts.deadline - now >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
+                "funding_deadline_too_close"
+            );
+        }
+        let attempt = operation
+            .attempts
+            .checked_add(1)
+            .context("attempt overflow")?;
+        self.db.execute("UPDATE treasury_operations SET submission='BROADCAST_REQUESTED',attempts=?1 WHERE id=?2", params![attempt,id])?;
+        Ok(attempt)
+    }
+    pub fn broadcast_result(&mut self, id: &str, attempt: i64, accepted: bool) -> Result<()> {
+        ensure!(self.db.execute("UPDATE treasury_operations SET submission=?1 WHERE id=?2 AND attempts=?3 AND submission='BROADCAST_REQUESTED'", params![if accepted {"BROADCAST"} else {"UNKNOWN"},id,attempt])? == 1, "submission_attempt_conflict");
+        Ok(())
+    }
 }

@@ -1,4 +1,4 @@
-//! Wallet administration. Sync is explicit; no command submits or funds anything.
+//! Wallet administration. Only explicit reconcile --rebroadcast can submit saved bytes.
 #[cfg(feature = "zcash")]
 use anyhow::Context;
 use anyhow::Result;
@@ -12,6 +12,16 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Reconcile an existing durable transaction; never constructs a replacement.
+    Reconcile {
+        #[arg(long)]
+        meta_config: PathBuf,
+        #[arg(long)]
+        operation_id: String,
+        /// May submit the SAME saved bytes while quote deadline and expiry permit.
+        #[arg(long)]
+        rebroadcast: bool,
+    },
     /// Sync an existing treasury using its deployment settings; no API specs are loaded.
     Sync {
         #[arg(long)]
@@ -76,23 +86,60 @@ pub async fn run() -> Result<()> {
     {
         use crate::treasury::Treasury;
         let treasury = match args.command {
-            Command::Sync { meta_config } => {
-                let config: crate::deployment::MetaConfig =
-                    toml::from_str(&tokio::fs::read_to_string(&meta_config).await?)?;
-                anyhow::ensure!(config.version == 1, "unsupported deployment version");
-                let mut settings = config.treasury.context("missing [treasury]")?;
-                settings.validate()?;
-                settings.resolve(&meta_config);
-                let endpoint = std::env::var(&settings.indexer_url_env)
+            Command::Reconcile {
+                meta_config,
+                operation_id,
+                rebroadcast,
+            } => {
+                let (mut treasury, settings) = configured(&meta_config).await?;
+                let indexer = std::env::var(&settings.indexer_url_env)
                     .context("missing indexer endpoint environment variable")?;
-                let sync = crate::treasury::SyncSettings::new(
-                    endpoint,
-                    settings.confirmations,
-                    settings.max_sync_age_seconds,
-                )?;
-                let mut treasury =
-                    Treasury::open(settings.state_dir, settings.key_file, settings.id).await?;
-                treasury.configure_sync(sync);
+                // Read-only reconciliation needs no submission secret.
+                let submission = if rebroadcast {
+                    std::env::var(&settings.submission_url_env)
+                        .context("missing submission endpoint environment variable")?
+                } else {
+                    indexer.clone()
+                };
+                let mut sender =
+                    crate::treasury::submission::GrpcSubmission::new(submission, indexer)?;
+                let stop = tokio_util::sync::CancellationToken::new();
+                let result = {
+                    let work = async {
+                        let presence = treasury
+                            .reconcile_prepared(operation_id.clone(), &mut sender, &stop)
+                            .await?;
+                        if rebroadcast
+                            && !matches!(
+                                presence,
+                                crate::rotation::transaction::TransactionPresence::Confirmed { .. }
+                            )
+                        {
+                            treasury
+                                .submit_prepared(operation_id, &mut sender, true, &stop)
+                                .await?;
+                        }
+                        anyhow::Ok(())
+                    };
+                    tokio::pin!(work);
+                    tokio::select! {
+                        result = &mut work => result,
+                        signal = shutdown_signal() => {
+                            stop.cancel();
+                            let result = work.await;
+                            signal?;
+                            result
+                        }
+                    }
+                };
+                if let Err(error) = result {
+                    treasury.close().await?;
+                    return Err(error);
+                }
+                treasury
+            }
+            Command::Sync { meta_config } => {
+                let (mut treasury, _) = configured(&meta_config).await?;
                 let stop = tokio_util::sync::CancellationToken::new();
                 let result = {
                     let work = treasury.sync_once(&stop);
@@ -183,4 +230,34 @@ async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(not(unix))]
     tokio::signal::ctrl_c().await?;
     Ok(())
+}
+
+#[cfg(feature = "zcash")]
+async fn configured(
+    path: &std::path::Path,
+) -> Result<(
+    crate::treasury::Treasury,
+    crate::rotation::config::TreasuryConfig,
+)> {
+    let config: crate::deployment::MetaConfig =
+        toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+    anyhow::ensure!(config.version == 1, "unsupported deployment version");
+    let mut settings = config.treasury.context("missing [treasury]")?;
+    settings.validate()?;
+    settings.resolve(path);
+    let endpoint = std::env::var(&settings.indexer_url_env)
+        .context("missing indexer endpoint environment variable")?;
+    let sync = crate::treasury::SyncSettings::new(
+        endpoint,
+        settings.confirmations,
+        settings.max_sync_age_seconds,
+    )?;
+    let mut treasury = crate::treasury::Treasury::open(
+        settings.state_dir.clone(),
+        settings.key_file.clone(),
+        settings.id.clone(),
+    )
+    .await?;
+    treasury.configure_sync(sync);
+    Ok((treasury, settings))
 }

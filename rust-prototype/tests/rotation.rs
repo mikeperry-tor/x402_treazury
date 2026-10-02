@@ -32,7 +32,7 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     // Simulate a database produced by the offline foundation, before admission tables.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_sync; PRAGMA user_version=0;",
+        "DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=0;",
     )
     .unwrap();
     drop(db);
@@ -349,8 +349,10 @@ fn sync_schema_migrates_admission_state_without_changing_wallet() {
     let id = s.id().to_owned();
     drop(s);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    db.execute_batch("DROP TABLE treasury_sync; PRAGMA user_version=1;")
-        .unwrap();
+    db.execute_batch(
+        "DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=1;",
+    )
+    .unwrap();
     drop(db);
     assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
     let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
@@ -381,4 +383,57 @@ fn submission_contract_only_accepts_durable_pending_bytes() {
     assert_eq!(durable.bytes(), b"exact-bytes");
     s.confirm_spend("op", 100, 1).unwrap();
     assert!(PreparedTransaction::load(&s, "op").is_err());
+}
+
+#[test]
+fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
+    use x402_mcp_prototype::rotation::transaction::{PreparedTransaction, TransactionFacts};
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let facts = TransactionFacts {
+        txid: "a".repeat(64),
+        expiry_height: 500,
+        amount_zatoshis: 50,
+        fee_zatoshis: 10,
+        deadline: 1000,
+    };
+    s.reserve("op", None, 0, 100, 100).unwrap();
+    let mut too_large = facts.clone();
+    too_large.fee_zatoshis = 60;
+    assert!(
+        s.prepare_with_facts("op", 1, b"post-calculation", b"signed", Some(too_large))
+            .is_err()
+    );
+    assert_eq!(s.snapshot().unwrap().0, 1);
+    assert!(!s.operation_pending("op").unwrap());
+    s.prepare_with_facts("op", 1, b"post-calculation", b"signed", Some(facts.clone()))
+        .unwrap();
+    assert_eq!(s.operation("op").unwrap().facts, facts);
+    // Preparation shrinks the conservative reservation to actual input plus fee.
+    s.reserve("other", None, 0, 40, 100).unwrap();
+    assert!(s.abandon_unprepared("op").is_err());
+    s.abandon_unprepared("other").unwrap();
+    assert!(s.request_broadcast("op", 1000, 499, false).is_err());
+    assert!(s.request_broadcast("op", 701, 499, false).is_err());
+    assert!(s.request_broadcast("op", 100, 500, false).is_err());
+    assert_eq!(s.request_broadcast("op", 100, 499, false).unwrap(), 1);
+    let id = s.id().to_owned();
+    drop(s); // crash before a submission result
+    let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert_eq!(s.operation("op").unwrap().submission, "BROADCAST_REQUESTED");
+    assert!(s.request_broadcast("op", 101, 499, false).is_err());
+    let saved = PreparedTransaction::load(&s, "op").unwrap();
+    assert_eq!(saved.bytes(), b"signed");
+    assert_eq!(s.request_broadcast("op", 101, 499, true).unwrap(), 2);
+    assert!(s.broadcast_result("op", 1, true).is_err()); // stale response
+    s.broadcast_result("op", 2, false).unwrap();
+    assert_eq!(s.operation("op").unwrap().submission, "UNKNOWN");
+    assert!(s.operation_pending("op").unwrap());
+    let attempt = s.request_broadcast("op", 102, 499, true).unwrap();
+    s.broadcast_result("op", attempt, true).unwrap();
+    assert_eq!(s.operation("op").unwrap().submission, "BROADCAST");
+    assert!(s.operation_pending("op").unwrap()); // accepted is not confirmed
+    s.confirm_spend("op", 60, 0).unwrap();
+    assert_eq!(s.operation("op").unwrap().submission, "CONFIRMED");
+    assert!(s.request_broadcast("op", 103, 499, true).is_err());
 }

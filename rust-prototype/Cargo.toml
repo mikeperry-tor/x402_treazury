@@ -7,7 +7,7 @@ publish = false
 
 [features]
 default = []
-zcash = ["dep:zingolib", "dep:zip32"]
+zcash = ["dep:zingolib", "dep:zip32", "dep:zcash_client_backend", "dep:zcash_primitives", "dep:zcash_protocol", "dep:zcash_keys", "dep:zingo-netutils", "dep:tonic"]
 
 [dependencies]
 tempfile = "3"
@@ -18,6 +18,12 @@ uuid = { version = "1", features = ["v4"] }
 fs2 = "0.4"
 zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
 zip32 = { version = "0.2.1", optional = true }
+zcash_client_backend = { version = "0.24", default-features = false, optional = true }
+zcash_primitives = { version = "0.30.1", default-features = false, optional = true }
+zcash_protocol = { version = "0.10.6", optional = true }
+zcash_keys = { version = "0.16.1", default-features = false, optional = true }
+zingo-netutils = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
+tonic = { version = "0.14", default-features = false, optional = true }
 alloy-primitives = "1.5"
 alloy-signer-local = "2.0"
 anyhow = "1"

@@ -252,6 +252,41 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
     assert_eq!(observation.height, Some(TIP));
     assert_eq!(observation.confirmations, 7);
     assert_eq!(observation.spendable_shielded_zatoshis, 0);
+    {
+        use x402_mcp_prototype::rotation::transaction::{PrepareRequest, TransactionPreparer};
+        let before = calls.lock().unwrap().len();
+        let error = treasury
+            .prepare(PrepareRequest {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                pool_id: None,
+                daily_limit_zatoshis: 1_000_000,
+                deadline: x402_mcp_prototype::rotation::base::now().unwrap() + 600,
+                recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+                amount_zatoshis: 50_000,
+                max_fee_zatoshis: 20_000,
+                max_input_zatoshis: 70_000,
+            })
+            .await
+            .err()
+            .expect("empty wallet prepared a deposit");
+        assert!(
+            error.to_string().contains("insufficient_spendable"),
+            "{error}"
+        );
+        assert_eq!(calls.lock().unwrap().len(), before);
+        assert_eq!(
+            treasury.status().await.unwrap().snapshot_revision,
+            status.snapshot_revision
+        );
+        assert!(
+            treasury
+                .status()
+                .await
+                .unwrap()
+                .treasury_operations
+                .is_empty()
+        );
+    }
     treasury.close().await.unwrap();
     let mut restored = Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
         .await

@@ -355,7 +355,7 @@ These are APIs in the pinned tagged checkout, not Zimppy's dependency version:
 | Calculate | `calculate_stored_proposal()` returns `NonEmpty<TxId>`; records are stored in public `wallet_transactions` with `Calculated` status |
 | Exact bytes | `WalletTransaction::transaction()`, `status()` and the returned txid; use `zcash_primitives::transaction::Transaction::write` |
 | Persist | `LightWallet::mark_dirty()` / `save()` or `write()` under a wallet guard; restore with `from_bytes` |
-| Submit/lookup | `LightClient::transmit_calculated` for reviewed first-submit semantics; configured `zingo_netutils::Indexer::send_transaction` / `get_transaction` for explicit raw submission and reconciliation |
+| Submit/lookup | Configured `zingo_netutils::Indexer::send_transaction` / `get_transaction` for explicit raw submission and reconciliation; do not use upstream transmit helpers |
 | Shield refunds | `propose_shield(account_id)`, then the same calculation/journal/submission path |
 
 Check the corresponding [send](../../reference_repos/zingolib/zingolib/src/lightclient/send.rs),
@@ -405,7 +405,8 @@ snapshot revision CAS. The observation includes phase, checkpoint time, scan tar
 and scanned-block count, last successful height/tip-check time, confirmation policy,
 confirmed/spendable shielded zatoshis and last error. Retain the current snapshot and
 all revisions referenced by outgoing records, pruning other snapshots. `treasury_sync`
-is added through user_version 2; the encrypted record format stays version 1.
+is added through user_version 2, with transaction facts/attempts in
+`treasury_operations` at user_version 3; the encrypted record format stays version 1.
 Read-only status works with older schemas and never mutates or unlocks them.
 
 `sync_fresh` requires a ready observation for the current revision, non-future
@@ -417,8 +418,12 @@ call it inside the serialized treasury operation before reserving/calculating.
 Preparation and sync must share that owner; never run an independent send task that
 can overwrite a sync snapshot. `rotation/transaction.rs` defines the preparation
 and submission contracts; `PreparedTransaction` can only be loaded from a committed
-unresolved outgoing record. Concrete calculation, submission and confirmed
-reconciliation remain to be implemented using the sequence below.
+unresolved outgoing record. Submission consumes a single-use `BroadcastTransaction`
+created only after a durable BROADCAST_REQUESTED intent. Concrete deposit preparation
+and submission/reconciliation live in `treasury/send.rs` and `treasury/submission.rs`.
+The future funding worker must serialize those APIs with sync on the same owner;
+managed startup does not submit queued work. Positive spendable-note proving,
+regtest settlement/reorg tests and refund shielding remain qualification work.
 
 ### Prepare, persist, broadcast and recover
 
@@ -832,8 +837,11 @@ and existing journals, not listener selections, determine recovery scope:
   liabilities/funding operations before marking a pool retired; retains keys and
   audit history. Never sweeps dust or reallocates addresses implicitly.
 - `wallet reconcile --operation-id ...`: requires the serving process stopped
-  and exclusive ownership; unlock and reconcile/rebroadcast only the saved
-  operation. No replacement transfer is implicit.
+  and exclusive ownership; unlock and reconcile only the saved operation. The
+  implemented form is `wallet reconcile --meta-config FILE --operation-id UUID`.
+  It requires no submission secret unless `--rebroadcast` explicitly permits sending
+  the same bytes within the quote deadline/transaction expiry. No replacement
+  transfer is implicit. Absence, rejection or expiry never releases input exposure.
 - `wallet shield-refunds`: also requires exclusive ownership and uses the same
   durable send path and configured fee/budget limits.
 - `wallet backup` / `wallet restore`: operate under exclusive ownership on a
@@ -923,9 +931,11 @@ spend; none is authorized by this plan alone.
    ownership, budget ledger, snapshot ordering, role transitions and outbox.
    Use fake treasury/Base adapters to prove per-pool crash boundaries, independent
    admission, fair shared-treasury scheduling and aggregate budget concurrency.
-3. **Complete the embedded treasury.** Build on offline init/restore, encrypted
-   sync checkpoints and spend readiness to implement durable preparation/raw
-   extraction, endpoint-constrained submission and reconciliation. Exercise shielded-to-transparent deposits,
+3. **Qualify the embedded treasury.** Exercise the encrypted sync, calculate-only
+   deposit preparation, durable raw submission and confirmation adapters with
+   spendable-note proving and regtest settlement/reorg fixtures. Wire the serialized
+   owner into the funding worker, including abandoned-unprepared reservation recovery.
+   Exercise shielded-to-transparent deposits,
    refunds and exact-byte recovery in isolated regtest.
 4. **Implement NEAR funding and qualification.** Capture public token/quote/status
    fixtures and dry confidential exact-output quotes around the configured target.

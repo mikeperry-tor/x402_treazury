@@ -1,4 +1,4 @@
-//! Contracts for the next treasury milestone. There is no network implementation.
+//! Durable treasury operation contracts. The Zcash adapter lives in treasury/.
 //! Preparation must calculate, validate actual fees/input, and atomically journal
 //! the resulting wallet snapshot and exact transaction bytes before returning.
 use super::store::Store;
@@ -6,8 +6,13 @@ use anyhow::{Result, ensure};
 use std::future::Future;
 use zeroize::Zeroizing;
 
+pub const MIN_QUOTE_VALIDITY_SECONDS: u64 = 300;
+
 pub struct PrepareRequest {
     pub operation_id: String,
+    pub pool_id: Option<String>,
+    pub daily_limit_zatoshis: u64,
+    pub deadline: u64,
     pub recipient: String,
     pub amount_zatoshis: u64,
     pub max_fee_zatoshis: u64,
@@ -20,6 +25,7 @@ pub struct PrepareRequest {
 pub struct PreparedTransaction {
     operation_id: String,
     raw: Zeroizing<Vec<u8>>,
+    facts: Option<TransactionFacts>,
 }
 impl PreparedTransaction {
     pub fn load(store: &Store, operation_id: &str) -> Result<Self> {
@@ -30,13 +36,51 @@ impl PreparedTransaction {
         Ok(Self {
             operation_id: operation_id.into(),
             raw: store.prepared_bytes(operation_id)?,
+            facts: store
+                .status()?
+                .treasury_operations
+                .into_iter()
+                .find(|o| o.operation_id == operation_id)
+                .map(|o| o.facts),
         })
+    }
+    pub fn facts(&self) -> Option<&TransactionFacts> {
+        self.facts.as_ref()
     }
     pub fn operation_id(&self) -> &str {
         &self.operation_id
     }
     pub fn bytes(&self) -> &[u8] {
         &self.raw
+    }
+}
+
+/// Single-use submission capability, minted only after a committed send intent.
+/// No Clone/Deserialize implementation: callers must journal each retry.
+pub struct BroadcastTransaction {
+    transaction: PreparedTransaction,
+    attempt: i64,
+}
+impl BroadcastTransaction {
+    pub fn request(
+        store: &mut Store,
+        id: &str,
+        now: u64,
+        height: u64,
+        retry: bool,
+    ) -> Result<Self> {
+        let transaction = PreparedTransaction::load(store, id)?;
+        let attempt = store.request_broadcast(id, now, height, retry)?;
+        Ok(Self {
+            transaction,
+            attempt,
+        })
+    }
+    pub fn transaction(&self) -> &PreparedTransaction {
+        &self.transaction
+    }
+    pub fn attempt(&self) -> i64 {
+        self.attempt
     }
 }
 
@@ -67,7 +111,7 @@ pub trait TransactionSubmission {
     /// Timeout/cancellation is Unknown, never evidence that inputs can be reused.
     fn submit(
         &mut self,
-        transaction: &PreparedTransaction,
+        transaction: BroadcastTransaction,
     ) -> impl Future<Output = Result<SubmissionOutcome>> + Send;
     /// Derive/verify the txid from the durable bytes. Absent is not proof of expiry;
     /// only verified reconciliation may resolve an outgoing record or release input.
@@ -75,4 +119,21 @@ pub trait TransactionSubmission {
         &mut self,
         transaction: &PreparedTransaction,
     ) -> impl Future<Output = Result<TransactionPresence>> + Send;
+}
+
+/// Public operation facts; signed bytes remain encrypted separately.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TransactionFacts {
+    pub txid: String,
+    pub expiry_height: u32,
+    pub amount_zatoshis: u64,
+    pub fee_zatoshis: u64,
+    pub deadline: u64,
+}
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OperationStatus {
+    pub operation_id: String,
+    pub facts: TransactionFacts,
+    pub submission: String,
+    pub attempts: i64,
 }
