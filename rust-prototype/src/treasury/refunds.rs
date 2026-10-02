@@ -1,0 +1,269 @@
+//! Per-address shielding through the backend's public calculate-only API.
+use super::*;
+use crate::rotation::{
+    store::refunds::RefundStatus,
+    transaction::{PreparedTransaction, TransactionFacts},
+};
+use pepper_sync::wallet::OutputInterface;
+use zcash_client_backend::{
+    data_api::{
+        CoinbaseFilter,
+        wallet::{
+            ConfirmationsPolicy, SpendingKeys, create_proposed_transactions, propose_shielding,
+        },
+    },
+    fees::{DustAction, DustOutputPolicy},
+    wallet::OvkPolicy,
+};
+use zcash_protocol::{ShieldedPool, value::Zatoshis};
+
+impl SyncSession {
+    pub(super) async fn reconcile_refunds(&self, height: u64, confirmations: u32) -> Result<()> {
+        let (bindings, status) = self
+            .store
+            .call(|s| Ok((s.refund_bindings()?, s.status()?)))
+            .await?;
+        let wallet = self.client.wallet().read().await;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut refunds = vec![];
+        for record in wallet.wallet_transactions.values() {
+            let Some(h) = record
+                .status()
+                .get_confirmed_height()
+                .map(|h| u64::from(u32::from(h)))
+            else {
+                continue;
+            };
+            if h == 0 || height < h || height - h + 1 < u64::from(confirmations) {
+                continue;
+            }
+            for coin in record.transparent_coins() {
+                let txid = coin.output_id().txid().to_string();
+                let index = coin.output_id().output_index();
+                seen.insert((txid.clone(), index));
+                if let Some((operation, _)) = bindings
+                    .iter()
+                    .find(|(_, address)| address == coin.address())
+                    && status
+                        .treasury_operations
+                        .iter()
+                        .any(|o| &o.operation_id == operation && o.submission == "CONFIRMED")
+                {
+                    refunds.push(RefundStatus {
+                        txid,
+                        output_index: index,
+                        operation_id: operation.clone(),
+                        amount: i64::try_from(coin.value())?,
+                        height: i64::try_from(h)?,
+                    });
+                }
+            }
+        }
+        // A refunded input may already be shielded: its originating transaction
+        // must still be present and confirmed even when its coin is spent.
+        ensure!(
+            status
+                .refunds
+                .iter()
+                .all(|r| seen.contains(&(r.txid.clone(), r.output_index))),
+            "treasury_refund_reorg: credited refund requires recovery"
+        );
+        drop(wallet);
+        self.store
+            .call(move |s| {
+                for refund in refunds {
+                    s.record_refund(refund)?;
+                }
+                Ok(())
+            })
+            .await
+    }
+}
+impl Treasury {
+    /// Operator requested, one job/address per transaction. No broadcast here.
+    pub async fn shield_refund(
+        &mut self,
+        job: String,
+        daily_limit: u64,
+        max_fee: u64,
+        stop: &CancellationToken,
+    ) -> Result<PreparedTransaction> {
+        self.sync_once(stop).await?;
+        let address = self
+            .store
+            .call(move |s| s.refund_address(&job)?.context("unknown refund address"))
+            .await?;
+        let status = self.status().await?;
+        ensure!(
+            status.sync_fresh && !status.outgoing_pending,
+            "treasury not ready for shielding"
+        );
+        let operation = uuid::Uuid::new_v4().to_string();
+        let id = operation.clone();
+        let instant = now()?;
+        self.store
+            .call(move |s| {
+                s.reserve(
+                    &id,
+                    None,
+                    u32::try_from(instant / 86400)?,
+                    i64::try_from(max_fee)?,
+                    i64::try_from(daily_limit)?,
+                )
+            })
+            .await?;
+        self.healthy = false;
+        let client = self.client.as_mut().context("treasury unavailable")?;
+        let _pause = client
+            .pause_sync_scoped()
+            .map_err(|_| anyhow::anyhow!("cannot pause sync"))?;
+        let chain = self.network.chain();
+        let zcash_keys::address::Address::Transparent(receiver) =
+            zcash_keys::address::Address::decode(&chain, &address)
+                .context("invalid refund address")?
+        else {
+            anyhow::bail!("refund must be transparent")
+        };
+        let (raw, facts) = {
+            let mut wallet = client.wallet().write().await;
+            let selector =
+                zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::new();
+            let strategy = zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new(
+                zcash_primitives::transaction::fees::zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Orchard,
+                DustOutputPolicy::new(DustAction::AllowDustChange, None),
+            );
+            let confirmations = wallet.wallet_settings.min_confirmations;
+            let proposal = propose_shielding::<_, _, _, _, zingolib::wallet::error::WalletError>(
+                &mut *wallet,
+                &chain,
+                &selector,
+                &strategy,
+                Zatoshis::const_from_u64(10_000),
+                &[receiver],
+                zip32::AccountId::ZERO,
+                ConfirmationsPolicy::new_symmetrical(confirmations, false),
+                CoinbaseFilter::AllTransparentOutputs,
+                None,
+            )
+            .map_err(|_| anyhow::anyhow!("refund shielding proposal failed"))?;
+            ensure!(
+                proposal.steps().len() == 1,
+                "multi-step shielding unsupported"
+            );
+            let step = proposal.steps().first();
+            ensure!(
+                step.shielded_inputs().is_none() && !step.transparent_inputs().is_empty(),
+                "shielding input mismatch"
+            );
+            let fee = step.balance().fee_required().into_u64();
+            ensure!(fee > 0 && fee <= max_fee, "shielding fee cap exceeded");
+            let input: u64 = step
+                .transparent_inputs()
+                .iter()
+                .map(|i| i.txout().value().into_u64())
+                .sum();
+            ensure!(
+                step.transparent_inputs()
+                    .iter()
+                    .all(|i| *i.txout().script_pubkey() == receiver.script().into()),
+                "shielding would link refund addresses"
+            );
+            // Treasury initialization supports mnemonic-backed account zero only.
+            let phrase = Zeroizing::new(wallet.mnemonic_phrase().context("missing treasury seed")?);
+            let mnemonic = bip0039::Mnemonic::<bip0039::English>::from_phrase(&*phrase)
+                .map_err(|_| anyhow::anyhow!("invalid treasury seed"))?;
+            let seed = Zeroizing::new(mnemonic.to_seed(""));
+            let usk = zcash_keys::keys::UnifiedSpendingKey::from_seed(
+                &chain,
+                &*seed,
+                zip32::AccountId::ZERO,
+            )
+            .map_err(|_| anyhow::anyhow!("treasury key derivation failed"))?;
+            let prover = zcash_proofs::prover::LocalTxProver::with_default_location()
+                .context("Sapling parameters unavailable")?;
+            let ids = create_proposed_transactions::<
+                _,
+                _,
+                std::convert::Infallible,
+                _,
+                std::convert::Infallible,
+                _,
+            >(
+                &mut *wallet,
+                &chain,
+                &prover,
+                &prover,
+                &SpendingKeys::new(usk),
+                OvkPolicy::Sender,
+                &proposal,
+                None,
+            )
+            .map_err(|_| anyhow::anyhow!("refund shielding calculation failed"))?;
+            ensure!(ids.len() == 1, "multiple shielding transactions");
+            let transaction = wallet
+                .wallet_transactions
+                .get(ids.first())
+                .context("shield transaction missing")?
+                .transaction();
+            let transparent = transaction
+                .transparent_bundle()
+                .context("shield inputs missing")?;
+            ensure!(
+                transparent.vout.is_empty()
+                    && transparent.vin.len() == step.transparent_inputs().len(),
+                "unexpected shielding outputs/inputs"
+            );
+            ensure!(
+                transparent.vin.iter().all(|i| step
+                    .transparent_inputs()
+                    .iter()
+                    .any(|o| o.outpoint() == i.prevout())),
+                "shielding input mismatch"
+            );
+            let value: i64 = [
+                transaction
+                    .sapling_bundle()
+                    .map(|b| i64::from(*b.value_balance())),
+                transaction
+                    .orchard_bundle()
+                    .map(|b| i64::from(*b.value_balance())),
+                transaction
+                    .ironwood_bundle()
+                    .map(|b| i64::from(*b.value_balance())),
+            ]
+            .into_iter()
+            .flatten()
+            .sum();
+            ensure!(
+                i64::try_from(input)?.checked_add(value) == Some(i64::try_from(fee)?),
+                "shielding fee mismatch"
+            );
+            let mut raw = Zeroizing::new(vec![]);
+            transaction.write(&mut *raw)?;
+            // Shielding moves principal within the treasury; only its fee is cost.
+            let facts = TransactionFacts {
+                txid: transaction.txid().to_string(),
+                expiry_height: transaction.expiry_height().into(),
+                amount_zatoshis: 0,
+                fee_zatoshis: fee,
+                deadline: instant + 86400,
+            };
+            (raw, facts)
+        };
+        let bytes = snapshot(client).await?;
+        let revision = self.revision;
+        let (revision, prepared) = self
+            .store
+            .call(move |s| {
+                let revision =
+                    s.prepare_with_facts(&operation, revision, &bytes, &raw, Some(facts))?;
+                Ok((revision, PreparedTransaction::load(s, &operation)?))
+            })
+            .await?;
+        self.revision = revision;
+        self.healthy = true;
+        Ok(prepared)
+    }
+}

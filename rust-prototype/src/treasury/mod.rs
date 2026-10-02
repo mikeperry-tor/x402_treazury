@@ -1,5 +1,6 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
 pub mod actor;
+mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
 mod send;
@@ -540,6 +541,9 @@ impl SyncSession {
             .shielded_spendable_balance(zip32::AccountId::ZERO, false)
             .map_err(|_| anyhow::anyhow!("treasury spendable balance unavailable"))?
             .into_u64();
+        drop(wallet);
+        self.reconcile_refunds(height, settings.confirmations.get())
+            .await?;
         observation.checked_at = Some(checked_at);
         observation.height = Some(height);
         Ok(())

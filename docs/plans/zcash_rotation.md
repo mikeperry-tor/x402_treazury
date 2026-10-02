@@ -497,7 +497,13 @@ Prove in regtest that high-index outstanding refund addresses are discovered
 after restart. Respect the library's discovery-gap rules; fail explicitly if a
 fresh address cannot be tracked instead of silently reusing an address. Once a
 refund is confirmed, shield it through an operator-requested, journaled operation
-before it contributes to the shielded spendable treasury balance.
+before it contributes to the shielded spendable treasury balance. The implementation
+uses the backend's public `propose_shielding` with exactly one refund address and
+`create_proposed_transactions`, rather than zingolib's all-address shielding helper.
+`wallet shield-refunds --meta-config FILE --job-id UUID` only prepares; explicit
+`wallet reconcile --rebroadcast` submits the saved bytes. Persist confirmed refund
+outpoints idempotently, cap their budget credit at source principal, and retain fees
+as consumed expense. A credited-refund reorg fails treasury readiness closed.
 
 ## NEAR funding and privacy modes
 

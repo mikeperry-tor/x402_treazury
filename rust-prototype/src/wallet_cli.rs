@@ -12,6 +12,13 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Prepare shielding for one refund address; use reconcile --rebroadcast to submit.
+    ShieldRefunds {
+        #[arg(long)]
+        meta_config: PathBuf,
+        #[arg(long)]
+        job_id: String,
+    },
     /// Retry an unprepared funding job; refuses every operation with signed bytes.
     RecoverUnprepared {
         #[arg(long)]
@@ -140,6 +147,29 @@ pub async fn run() -> Result<()> {
     {
         use crate::treasury::Treasury;
         let treasury = match args.command {
+            Command::ShieldRefunds {
+                meta_config,
+                job_id,
+            } => {
+                let (mut treasury, settings) = configured(&meta_config).await?;
+                let result = treasury
+                    .shield_refund(
+                        job_id,
+                        u64::try_from(crate::rotation::config::zatoshis(
+                            &settings.daily_input_zec,
+                        )?)?,
+                        u64::try_from(crate::rotation::config::zatoshis(
+                            &settings.shield_max_fee_zec,
+                        )?)?,
+                        &tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await;
+                if let Err(error) = result {
+                    treasury.close().await?;
+                    return Err(error);
+                }
+                treasury
+            }
             Command::Reconcile {
                 meta_config,
                 operation_id,

@@ -460,3 +460,141 @@ async fn run() -> Result<()> {
     chain.passed = true;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Docker; isolated refund discovery and per-address shielding"]
+async fn high_index_refunds_and_separate_shielding() -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(900), refunds_run()).await?
+}
+async fn refunds_run() -> Result<()> {
+    use crate::rotation::store::funding::FundingPhase;
+    let dir = tempfile::tempdir()?;
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut treasury = Treasury::create_with_network(
+        state.clone(),
+        key.clone(),
+        1,
+        Some(Zeroizing::new(SEED.into())),
+        TreasuryNetwork::Regtest,
+    )
+    .await?;
+    let id = treasury.status().await?.treasury_id;
+    for n in 0..16 {
+        treasury
+            .ensure_pool(format!("refund_{n}"), "5.00".into())
+            .await?;
+    }
+    let jobs = treasury.store.call(|s| s.funding_jobs()).await?;
+    let mut addresses = vec![];
+    for job in &jobs {
+        addresses.push(treasury.refund_address(job.id.clone()).await?);
+    }
+    assert_eq!(
+        addresses
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        32
+    );
+    let miner = treasury
+        .client
+        .as_ref()
+        .unwrap()
+        .unified_addresses_json()
+        .await[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    treasury.close().await?;
+    let mut chain = Chain::launch(&miner).await?;
+    Chain::mine(&chain.rpc, 7).await?;
+    chain.indexer_ready(8).await?;
+    let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
+    let stop = CancellationToken::new();
+    let mut treasury = Treasury::open_with_network(
+        state.clone(),
+        key.clone(),
+        id.clone(),
+        TreasuryNetwork::Regtest,
+    )
+    .await?;
+    treasury.configure_sync(settings.clone());
+    let mut sender = submission::GrpcSubmission::with_network(
+        chain.endpoint.clone(),
+        chain.endpoint.clone(),
+        TreasuryNetwork::Regtest,
+    )?;
+    for n in [30usize, 31] {
+        treasury.sync_once(&stop).await?;
+        let job = jobs[n].clone();
+        let jid = job.id.clone();
+        treasury
+            .store
+            .call(move |s| {
+                s.save_funding_quote(&jid, b"test quote")?;
+                s.advance_funding(&jid, FundingPhase::Quoted, FundingPhase::Preparing)
+            })
+            .await?;
+        treasury
+            .prepare(PrepareRequest {
+                operation_id: job.operation_id.clone(),
+                pool_id: Some(job.pool_id),
+                daily_limit_zatoshis: 1_000_000,
+                deadline: now()? + 3600,
+                recipient: addresses[n].clone(),
+                amount_zatoshis: 50_000,
+                max_fee_zatoshis: 50_000,
+                max_input_zatoshis: 100_000,
+            })
+            .await?;
+        assert_eq!(
+            treasury
+                .submit_prepared(job.operation_id.clone(), &mut sender, false, &stop)
+                .await?,
+            SubmissionOutcome::Accepted
+        );
+        Chain::mine(&chain.rpc, 2).await?;
+        chain.indexer_ready(if n == 30 { 10 } else { 12 }).await?;
+        treasury
+            .reconcile_prepared(job.operation_id, &mut sender, &stop)
+            .await?;
+    }
+    treasury.close().await?;
+    let mut treasury =
+        Treasury::open_with_network(state.clone(), key, id, TreasuryNetwork::Regtest).await?;
+    treasury.configure_sync(settings);
+    treasury.sync_once(&stop).await?;
+    assert_eq!(treasury.status().await?.refunds.len(), 2);
+    // Both unrelated transparent addresses are funded. Each shield must consume
+    // exactly its selected address, even when the helper's default would combine.
+    for (n, height) in [(30usize, 14), (31usize, 16)] {
+        let prepared = treasury
+            .shield_refund(jobs[n].id.clone(), 1_000_000, 30_000, &stop)
+            .await?;
+        let tx = submission::decode(prepared.bytes())?;
+        assert_eq!(tx.transparent_bundle().unwrap().vin.len(), 1);
+        assert!(tx.transparent_bundle().unwrap().vout.is_empty());
+        assert_eq!(prepared.facts().unwrap().amount_zatoshis, 0);
+        let op = prepared.operation_id().to_owned();
+        assert_eq!(
+            treasury
+                .submit_prepared(op.clone(), &mut sender, false, &stop)
+                .await?,
+            SubmissionOutcome::Accepted
+        );
+        Chain::mine(&chain.rpc, 2).await?;
+        chain.indexer_ready(height).await?;
+        treasury
+            .reconcile_prepared(op.clone(), &mut sender, &stop)
+            .await?;
+        assert_eq!(
+            budget(&state, &op)?,
+            (0, i64::try_from(prepared.facts().unwrap().fee_zatoshis)?)
+        );
+        assert_eq!(treasury.status().await?.refunds.len(), 2);
+    }
+    treasury.close().await?;
+    chain.passed = true;
+    Ok(())
+}

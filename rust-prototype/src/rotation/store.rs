@@ -1,6 +1,7 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
 mod backup;
 pub mod funding;
+pub mod refunds;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
 use alloy_primitives::U256;
@@ -43,6 +44,7 @@ pub struct Status {
     pub sync_fresh: bool,
     pub treasury_operations: Vec<OperationStatus>,
     pub funding_jobs: Vec<funding::FundingJob>,
+    pub refunds: Vec<refunds::RefundStatus>,
 }
 /// Persisted observations, never an authorization to spend on their own.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -608,7 +610,7 @@ impl Store {
                 })?;
             ensure!(enabled, "pool disabled");
         }
-        let total:i64=tx.query_row("SELECT COALESCE(SUM(reserved),0)+COALESCE(SUM(CASE WHEN day=?1 THEN consumed ELSE 0 END),0) FROM budget_entries",[day],|r|r.get(0))?;
+        let total:i64=tx.query_row("SELECT COALESCE(SUM(reserved),0)+COALESCE(SUM(CASE WHEN day=?1 THEN MAX(0,consumed-COALESCE((SELECT SUM(credited) FROM refund_outputs r WHERE r.operation_id=budget_entries.id),0)) ELSE 0 END),0) FROM budget_entries",[day],|r|r.get(0))?;
         ensure!(
             total.checked_add(zatoshis).is_some_and(|n| n <= limit),
             "treasury_budget_exceeded"
@@ -937,6 +939,11 @@ fn read_status(db: &Connection) -> Result<Status> {
         vec![]
     };
     Ok(Status {
+        refunds: if version >= 7 {
+            refunds::read_refunds(db)?
+        } else {
+            vec![]
+        },
         funding_jobs: if version >= 4 {
             funding::read_jobs(db)?
         } else {
@@ -989,7 +996,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 6, "unsupported state schema");
+    ensure!(version <= 7, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1025,6 +1032,12 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS funding_recovery(operation_id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES funding_jobs(id),phase TEXT NOT NULL,quote BLOB,refund BLOB);
 PRAGMA user_version=6;
+COMMIT;")?;
+    }
+    if version < 7 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS refund_outputs(txid TEXT NOT NULL,output_index INTEGER NOT NULL,operation_id TEXT NOT NULL REFERENCES treasury_operations(id),amount INTEGER NOT NULL CHECK(amount>0),height INTEGER NOT NULL,credited INTEGER NOT NULL CHECK(credited>=0),PRIMARY KEY(txid,output_index));
+PRAGMA user_version=7;
 COMMIT;")?;
     }
     Ok(())
