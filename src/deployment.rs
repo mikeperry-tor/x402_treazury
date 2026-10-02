@@ -24,6 +24,8 @@ pub struct MetaConfig {
     pub network: crate::network::NetworkPolicy,
     pub treasury: Option<TreasuryConfig>,
     pub funding: Option<FundingConfig>,
+    pub source_management: Option<crate::discovery::policy::Policy>,
+    #[serde(default)]
     pub sources: BTreeMap<String, SourceConfig>,
     #[serde(default)]
     pub wallets: BTreeMap<String, WalletConfig>,
@@ -48,6 +50,8 @@ pub struct ListenerConfig {
     pub listen: SocketAddr,
     pub bearer_token_env: String,
     pub wallet: Option<String>,
+    pub source_management: Option<crate::discovery::policy::Grant>,
+    #[serde(default)]
     pub sources: Vec<String>,
     #[serde(default)]
     pub include_tools: Vec<String>,
@@ -73,6 +77,8 @@ pub struct Inventory {
     pub default_wallet: Option<String>,
     pub wallet_bindings: BTreeMap<String, WalletBinding>,
     pub tools: Vec<InventoryTool>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub management_tools: Vec<rmcp::model::Tool>,
 }
 #[derive(Serialize)]
 pub struct InventoryTool {
@@ -85,8 +91,9 @@ pub struct Deployment {
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
     wallet_resolution: Resolution,
+    config_path: std::path::PathBuf,
 }
-fn pattern(text: &str) -> Result<Regex> {
+pub(crate) fn pattern(text: &str) -> Result<Regex> {
     ensure!(!text.is_empty(), "empty tool selector");
     // Only '*' and '?' are special; brackets and regex metacharacters are literal.
     let mut expression = String::from("^");
@@ -103,6 +110,7 @@ fn pattern(text: &str) -> Result<Regex> {
 impl MetaConfig {
     fn validate(&self) -> Result<Resolution> {
         self.network.validate()?;
+        crate::discovery::policy::validate(self)?;
         ensure!(
             self.version == 1,
             "unsupported meta-config version {}",
@@ -157,7 +165,11 @@ impl MetaConfig {
                 );
             }
             ensure!(
-                !server.sources.is_empty(),
+                !server.sources.is_empty()
+                    || server
+                        .source_management
+                        .as_ref()
+                        .is_some_and(|g| g.accept_sources),
                 "server {name}: sources cannot be empty"
             );
             ensure!(
@@ -203,10 +215,14 @@ impl MetaConfig {
 impl Deployment {
     pub async fn show_config(path: &Path) -> Result<serde_json::Value> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+        if let Some(p) = &mut config.source_management {
+            p.resolve(path);
+        }
         let wallet_resolution = config.validate()?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
+        crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut resolved = BTreeMap::new();
         for (id, source) in &config.sources {
             let mut provider = crate::config::resolve(source.provider.clone(), path).await?;
@@ -221,17 +237,21 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
+        if let Some(p) = &mut config.source_management {
+            p.resolve(path);
+        }
         let wallet_resolution = config.validate()?;
         crate::network::install(config.network.clone())?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
+        crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
             let mut cfg = crate::config::resolve(source.provider.clone(), path)
@@ -351,7 +371,14 @@ impl Deployment {
                 })
                 .map(|(_, t)| t)
                 .collect();
-            ensure!(!tools.is_empty(), "server {name}: no tools selected");
+            ensure!(
+                !tools.is_empty()
+                    || server
+                        .source_management
+                        .as_ref()
+                        .is_some_and(|g| g.accept_sources),
+                "server {name}: no tools selected"
+            );
             selected.insert(name.clone(), tools);
         }
         Ok(Self {
@@ -359,6 +386,7 @@ impl Deployment {
             sources,
             selected,
             wallet_resolution,
+            config_path: path.to_owned(),
         })
     }
     pub fn wallet_summary(&self) -> &WalletSummary {
@@ -373,6 +401,10 @@ impl Deployment {
                 listen: s.listen,
                 default_wallet: s.wallet.clone(),
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
+                management_tools: {
+                    let g = crate::discovery::policy::grant(&self.config, name);
+                    crate::discovery::tools::definitions(g.enabled, g.accept_sources)
+                },
                 tools: self.selected[name]
                     .iter()
                     .map(|(source, tool)| InventoryTool {
@@ -426,7 +458,7 @@ impl Deployment {
         let mut wallets = BTreeMap::new();
         // Only effective static profiles for selected tools need keys. An overridden
         // default or a source removed by listener filters must not load a signer.
-        let used_wallets: BTreeSet<_> = self
+        let mut used_wallets: BTreeSet<_> = self
             .selected
             .iter()
             .flat_map(|(server, tools)| {
@@ -437,6 +469,7 @@ impl Deployment {
                 })
             })
             .collect();
+        used_wallets.extend(crate::discovery::policy::wallets(&self.config));
         for name in used_wallets {
             if let WalletConfig::Static {
                 private_key_env,
@@ -606,7 +639,7 @@ impl Deployment {
                 }
             }
         }
-        let mut listeners = Vec::new();
+        let mut servers = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
             let selected = &self.selected[name];
             let bindings = selected
@@ -639,6 +672,42 @@ impl Deployment {
                 cfg.max_response_chars,
             );
             server.name = name.clone();
+            servers.insert(name.clone(), server);
+        }
+        let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
+        for (name, server) in &servers {
+            let tools = server.catalog.read().views["default"].clone();
+            if self.config.source_management.is_some() {
+                ensure!(
+                    tools.iter().all(|t| !t.tool.name.starts_with("treazure_")
+                        && !t.tool.name.starts_with("dyn_")),
+                    "static tool uses reserved namespace"
+                );
+            }
+            snapshot.views.insert(name.clone(), tools);
+        }
+        let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
+        let protected = crate::discovery::policy::protected_paths(&self.config, &self.config_path);
+        let manager = if let Some(policy) = self.config.source_management.clone() {
+            Some(
+                crate::discovery::Manager::new(
+                    policy,
+                    self.config.servers.clone(),
+                    wallets,
+                    catalog.clone(),
+                    protected,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let mut listeners = Vec::new();
+        for (name, cfg) in &self.config.servers {
+            let mut server = servers.remove(name).unwrap();
+            server.catalog = catalog.clone();
+            server.catalog_server = name.clone();
+            server.discovery = manager.clone();
             let listener = TcpListener::bind(cfg.listen)
                 .await
                 .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;

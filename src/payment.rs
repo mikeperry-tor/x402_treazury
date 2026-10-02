@@ -95,6 +95,14 @@ impl PaidClient {
         self.public_only = true;
         self
     }
+    #[cfg(test)]
+    pub(crate) fn shares_profile_with(&self, other: &Self) -> bool {
+        match (&self.payer, &other.payer, &self.managed, &other.managed) {
+            (Some(a), Some(b), _, _) => Arc::ptr_eq(a, b),
+            (_, _, Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
     pub fn timeout(&self) -> std::time::Duration {
         self.timeout
     }

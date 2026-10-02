@@ -47,17 +47,30 @@ pub struct CatalogSnapshot {
     pub generation: u64,
     pub views: BTreeMap<String, Vec<BoundTool>>,
 }
-#[derive(Default)]
-pub struct CatalogState(RwLock<Arc<CatalogSnapshot>>);
+pub struct CatalogState {
+    snapshot: RwLock<Arc<CatalogSnapshot>>,
+    instance: String,
+}
+impl Default for CatalogState {
+    fn default() -> Self {
+        Self::new(CatalogSnapshot::default())
+    }
+}
 impl CatalogState {
     pub fn new(snapshot: CatalogSnapshot) -> Self {
-        Self(RwLock::new(Arc::new(snapshot)))
+        Self {
+            snapshot: RwLock::new(Arc::new(snapshot)),
+            instance: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+    pub fn instance(&self) -> &str {
+        &self.instance
     }
     pub fn read(&self) -> Arc<CatalogSnapshot> {
-        self.0.read().expect("catalog lock poisoned").clone()
+        self.snapshot.read().expect("catalog lock poisoned").clone()
     }
     pub fn publish(&self, snapshot: CatalogSnapshot) {
-        *self.0.write().expect("catalog lock poisoned") = Arc::new(snapshot);
+        *self.snapshot.write().expect("catalog lock poisoned") = Arc::new(snapshot);
     }
 }
 pub fn bind(tools: Vec<(ToolSpec, PaidClient, String)>) -> Vec<BoundTool> {

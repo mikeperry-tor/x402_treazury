@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone)]
 pub struct Server {
     pub catalog: Arc<CatalogState>,
+    pub discovery: Option<Arc<crate::discovery::Manager>>,
     pub catalog_server: String,
     pub name: String,
     pub instructions: Option<String>,
@@ -36,6 +37,7 @@ impl Server {
         max_response_chars: Option<usize>,
     ) -> Self {
         Self {
+            discovery: None,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
                 generation: 0,
                 views: BTreeMap::from([("default".into(), catalog_state::bind(tools))]),
@@ -58,11 +60,50 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<String> {
+        if let Some(manager) = &self.discovery
+            && name.starts_with("treazure_")
+        {
+            anyhow::ensure!(
+                self.management_tools().iter().any(|t| t.name == name),
+                "unknown tool"
+            );
+            if name != "treazure_tool_call" {
+                return Ok(serde_json::to_string(
+                    &manager
+                        .invoke(
+                            &self.catalog_server,
+                            name,
+                            serde_json::Value::Object(args.clone()),
+                        )
+                        .await?,
+                )?);
+            }
+            let call: crate::discovery::Call =
+                serde_json::from_value(serde_json::Value::Object(args.clone()))?;
+            let snapshot = self.catalog.read();
+            let bound = catalog_state::find(&snapshot, &self.catalog_server, &call.tool_id)?;
+            anyhow::ensure!(
+                bound.source.as_ref().map_or(0, |s| s.1) == call.expected_revision,
+                "source_revision_conflict"
+            );
+            return Ok(self.limit(bound.invoke(&call.arguments).await?));
+        }
         let snapshot = self.catalog.read();
         let text = catalog_state::find(&snapshot, &self.catalog_server, name)?
             .invoke(args)
             .await?;
         Ok(self.limit(text))
+    }
+    fn management_tools(&self) -> Vec<Tool> {
+        self.discovery
+            .as_ref()
+            .map(|m| {
+                crate::discovery::tools::definitions(
+                    m.enabled(&self.catalog_server),
+                    m.accepts(&self.catalog_server),
+                )
+            })
+            .unwrap_or_default()
     }
     fn limit(&self, text: String) -> String {
         match self.max_response_chars {
@@ -82,6 +123,9 @@ impl ServerHandler for Server {
         info
     }
     fn get_tool(&self, name: &str) -> Option<Tool> {
+        if let Some(tool) = self.management_tools().into_iter().find(|t| t.name == name) {
+            return Some(tool);
+        }
         let snapshot = self.catalog.read();
         catalog_state::find(&snapshot, &self.catalog_server, name)
             .ok()
@@ -89,18 +133,53 @@ impl ServerHandler for Server {
     }
     async fn list_tools(
         &self,
-        _: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let snapshot = self.catalog.read();
-        Ok(ListToolsResult {
-            tools: snapshot
+        let mut tools = self.management_tools();
+        tools.extend(
+            snapshot
                 .views
                 .get(&self.catalog_server)
                 .into_iter()
                 .flatten()
-                .map(|t| Self::definition(&t.tool))
-                .collect(),
+                .map(|t| Self::definition(&t.tool)),
+        );
+        let dynamic = self
+            .discovery
+            .as_ref()
+            .is_some_and(|m| m.accepts(&self.catalog_server));
+        let prefix = format!(
+            "{}:{}:{}:",
+            self.catalog.instance(),
+            self.catalog_server,
+            snapshot.generation
+        );
+        let offset = if let Some(cursor) = request.and_then(|r| r.cursor) {
+            match cursor
+                .strip_prefix(&prefix)
+                .and_then(|o| o.parse::<usize>().ok())
+            {
+                Some(o) if dynamic && o <= tools.len() => o,
+                _ => {
+                    return Err(McpError::invalid_params(
+                        "stale or invalid cursor: restart listing",
+                        None,
+                    ));
+                }
+            }
+        } else {
+            0
+        };
+        let end = if dynamic {
+            offset.saturating_add(100).min(tools.len())
+        } else {
+            tools.len()
+        };
+        Ok(ListToolsResult {
+            next_cursor: (end < tools.len()).then(|| format!("{prefix}{end}")),
+            tools: tools[offset..end].to_vec(),
             ..Default::default()
         })
     }
@@ -114,7 +193,13 @@ impl ServerHandler for Server {
             .invoke(&request.name, &request.arguments.unwrap_or_default())
             .await
         {
-            Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+            Ok(text) => {
+                let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())]);
+                if request.name.starts_with("treazure_") && request.name != "treazure_tool_call" {
+                    result.structured_content = serde_json::from_str(&text).ok();
+                }
+                result
+            }
             Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("{e:#}"))]),
         };
         Ok(result.into())

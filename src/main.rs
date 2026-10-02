@@ -80,6 +80,9 @@ async fn run() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("wallet") {
         return x402_treazure::wallet_cli::run().await;
     }
+    if std::env::args().nth(1).as_deref() == Some("sources") {
+        return x402_treazure::discovery::inspect_cli().await;
+    }
     let matches = Args::command().get_matches();
     let args = Args::from_arg_matches(&matches)?;
     if args.meta_config.is_some() {
@@ -177,6 +180,12 @@ async fn run() -> Result<()> {
                     server.tools.len(),
                     server.listen
                 );
+                if !server.management_tools.is_empty() {
+                    println!(
+                        "  {} source-management/fallback tools",
+                        server.management_tools.len()
+                    );
+                }
                 for (source, binding) in server.wallet_bindings {
                     println!("  {source}: wallet {} ({})", binding.wallet, binding.origin);
                 }
