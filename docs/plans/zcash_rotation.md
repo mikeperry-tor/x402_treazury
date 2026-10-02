@@ -3,14 +3,21 @@
 ## Intended behavior and scope
 
 Implement the service as one Rust process containing the MCP server, x402 paid
-HTTP client, EVM wallet pool, NEAR Intents funding worker, and an embedded
-zingolib Zcash treasury. Evolve `rust-prototype/` into this implementation.
+HTTP client, named virtual EVM wallet pools, NEAR Intents funding worker, and
+one embedded zingolib Zcash treasury. Evolve `rust-prototype/` into this implementation.
 The executable owns its wallet state directly; there is no separately running
 wallet daemon, Python payment coordinator, or wallet RPC protocol.
 
-Managed mode funds fresh EVM addresses with a configurable amount of native
-USDC on Base, default **5.00 USDC**, using confidential ZEC-to-USDC swaps.
-Maintain one active address and one fully funded standby. When the active
+A single Zcash treasury funds one or more named virtual EVM wallets. Each virtual
+wallet is a durable rotation pool, exposed as an entry in TOML `wallets`, with
+its own `deposit_size` in native Base USDC (decimal string, default **5.00**),
+per-payment cap, active address and fully funded standby. Managed funding uses
+confidential ZEC-to-USDC swaps. Servers select a virtual wallet by name using
+the existing `wallet` field; multiple servers selecting the same name share
+that pool. Different virtual wallets never share EVM keys, balances or payment
+reservations, even though they draw from the same Zcash treasury.
+
+For each pool, maintain one active address and one fully funded standby. When the active
 address cannot cover the next permitted payment, atomically promote the standby,
 retire the active address, and allocate/fund a new standby in the background.
 The MCP caller continues to see ordinary API tools; funding and signer selection
@@ -35,8 +42,11 @@ sequenceDiagram
 ```
 
 Bootstrap funds two distinct addresses before declaring the pool ready: roughly
-10 USDC worth of ZEC plus fees at the default target. Restart restores the same
-pool and reconciles its operations, rather than allocating another pair.
+10 USDC worth of ZEC plus fees per pool at the default deposit size. Across
+configured pools, initial funding is twice the sum of their deposit sizes plus
+fees; treasury balance and aggregate limits may delay some pools. Each pool
+becomes ready independently. Restart restores the same pools and reconciles
+their operations, rather than allocating new pairs.
 
 “Empty” means insufficient available funds for the next eligible payment, not
 necessarily zero. If A has 0.003 USDC and a call costs 0.014 USDC, B must sign
@@ -140,7 +150,7 @@ installed executable; Python is acceptable for development/build verification.
 
 ## Runtime architecture and process ownership
 
-One process owns one treasury, one active/standby pool, and one state directory.
+One process owns one treasury, all configured active/standby pools, and one state directory.
 Acquire an exclusive OS file lock for that directory before unlocking wallet
 state or making funding-network requests. A second process using it fails with
 `state_in_use`. Distinct processes require separately initialized treasuries and
@@ -149,9 +159,22 @@ owners. There is no cross-process treasury sharing in this design.
 
 Use the existing `--meta-config` TOML model in `deployment.rs`: named sources,
 wallet profiles, and MCP listeners. Extend wallet profiles with managed rotation
-settings. Multiple listeners referencing the same managed profile share one
-manager, treasury, active/standby pool, and spend policy. Initially permit at
-most one managed profile per process; static profiles may coexist.
+settings. Every `mode = "zcash_rotation"` profile is a separate virtual EVM
+wallet with its own pool manager and `deposit_size`; all managed profiles refer
+to the singleton process treasury implicitly. Multiple listeners referencing
+the same profile share that pool, payment admission gate and spend policy.
+Static profiles may coexist and do not use the treasury. Do not replicate the
+Zcash wallet or state directory per virtual wallet.
+
+Persist the profile-name-to-pool-UUID mapping before allocation. A profile name
+is a durable identifier, not a display label. Adding a name explicitly requests
+a new pool; renaming must be an offline operator migration that preserves the
+UUID and verifies no collision. Removing a profile disables new admission and
+allocations for that pool, but retains its encrypted keys, reservations and
+funding/refund reconciliation. Re-adding the same name resumes its saved pool.
+Changing a managed profile to static while durable managed state exists must
+fail until an explicit operator retirement resolves its liabilities. Never
+reassign an existing pool's addresses to another profile.
 
 Each source uses inline TOML settings or a one-level provider `extends` and
 retains its base URL, timeout, routing, filters and overrides. Paths resolve
@@ -168,12 +191,12 @@ closing the encrypted store. Preserve the existing single-source invocation.
 | --- | --- |
 | `runtime.rs` | Own task lifetimes, readiness, cancellation, and ordered shutdown |
 | `rotation/config.rs` | Strict managed-mode settings, integer/decimal validation |
-| `rotation/manager.rs` | Admission, immutable signer leases, promotion, bootstrap, readiness |
+| `rotation/manager.rs` | Registry of named pools; per-pool admission gates, immutable signer leases, promotion, bootstrap and readiness |
 | `rotation/store.rs` | SQLite migrations, ownership lock, encrypted records, budget ledger, atomic transitions |
 | `rotation/types.rs` | IDs, states, amounts, structured errors and outcomes |
 | `funding/near.rs` | Typed token/quote/status client and validation |
 | `funding/base.rs` | Chain identity, block-tagged balances, authorization use, receipt/log evidence |
-| `funding/worker.rs` | Persisted funding jobs, retry scheduling, refunds and reconciliation |
+| `funding/worker.rs` | Fair scheduling across pools, shared treasury budget reservations, persisted funding jobs, refunds and reconciliation |
 | `treasury/zingolib.rs` | Embedded `LightClient` owner, serialized wallet mutations and sync control |
 | `treasury/persistence.rs` | Encrypted snapshots, durable prepared transaction extraction and recovery |
 | `wallet_cli.rs` | Local init/status/reconcile/shield/backup operations |
@@ -191,10 +214,23 @@ Use typed in-process commands with a stable `OperationId`, such as
 `TreasuryStatus`, `DeriveRefundAddress`, `PrepareDeposit`, `BroadcastPrepared`,
 `ReconcileOperation` and `ShieldRefunds`. Mutation commands carry a canonical
 parameter hash covering operation kind, network/account, recipient, amount,
-limits and deadline. Repeating an ID/phase with identical parameters returns
+limits, pool UUID (or treasury-maintenance purpose) and deadline. Repeating an ID/phase with identical parameters returns
 its durable result. A conflicting reuse returns `operation_conflict`.
 A dropped oneshot receiver or cancelled MCP request never cancels a committed
 funding operation. There is no JSON-RPC wallet socket or exported raw-key API.
+
+The funding coordinator maintains a durable queue keyed by pool and candidate.
+Use round-robin scheduling among eligible pools, with at most one current
+replenishment candidate per pool and the two bounded bootstrap candidates.
+Choose the next pool before acquiring the treasury send gate; do not let one
+pool hold it while waiting for a quote, retry delay or Base credit. Obtain or
+refresh a quote only when its job is eligible for preparation, so time spent
+queued does not silently exhaust quote validity. A broadcast Zcash transaction
+holds the shared outgoing gate until safely reconciled; a NEAR swap may continue
+polling after its source transaction resolves, allowing another pool's deposit.
+Expired or failed jobs remain bound to their original pool. Aggregate budget
+reservations are atomic across all pools. Shared-treasury shortages degrade
+funding, while already funded pools can continue independently.
 
 Keep payment admission separate from treasury work: a background proof, sync or
 swap cannot hold the payment admission lock. Never hold a SQL transaction across
@@ -207,7 +243,7 @@ state and surface a sanitized error rather than silently restarting sends.
 
 ## Durable state, encryption and invariants
 
-Use **one SQLite database** for the pool, treasury snapshots, Zcash operations,
+Use **one SQLite database** for all pools, treasury snapshots, Zcash operations,
 payment authorizations and funding outbox. Enable foreign keys, WAL and
 `synchronous=FULL`; version migrations and run them only under exclusive
 ownership. Network calls occur outside transactions. One database makes a
@@ -216,13 +252,14 @@ atomic local commit; it does not make a blockchain submission atomic.
 
 | Table | Required fields and constraints |
 | --- | --- |
-| `instance` | Schema version, stable instance/treasury/pool UUIDs, networks, Base token, account, target, bootstrap flag, generation; reject changed identity/network/account |
-| `wallets` | UUID, UNIQUE generation and address, encrypted EVM key, immutable allocation target, role, balance block hash/height; partial UNIQUE indexes for ACTIVE and READY |
+| `instance` | Schema version, stable instance/treasury UUIDs, networks, Base token and Zcash account; reject changed identity/network/account |
+| `pools` | UUID, UNIQUE profile name, enabled/retired state, configured deposit size, bootstrap flag, current generation and readiness; retain rows when configuration removes a profile |
+| `wallets` | UUID, pool foreign key, per-pool allocation sequence, globally UNIQUE address, encrypted EVM key, immutable allocation target, role, balance block hash/height; UNIQUE `(pool_id, allocation_sequence)` and partial UNIQUE indexes on `pool_id` for ACTIVE and READY roles |
 | `treasury_snapshots` | Monotonic revision, encrypted wallet bytes, network/birthday/account metadata, committed sync anchor and derived refund-address range |
-| `treasury_operations` | UNIQUE operation ID, phase parameter hashes, purpose, encrypted raw transaction(s), txid, expiry, fee, state, last evidence; one unresolved outgoing operation at most |
-| `funding_jobs` | Candidate foreign key, attempt number, UNIQUE treasury operation ID, quote/deposit/refund binding, immutable target, status, deadline, next poll and bounded retry count; one current job per candidate |
-| `payment_attempts` | Logical call ID, catalog/route identity, generation, chosen requirements hash, reserved amount, nonce, payee, validity, phase, receipt/chain evidence; UNIQUE `(wallet_id, nonce)` |
-| `budget_entries` | Operation and purpose, UTC day, reserved/consumed/refunded zatoshis, fee evidence; no duplicate reservation, debit or release |
+| `treasury_operations` | UNIQUE operation ID, phase parameter hashes, pool foreign key (nullable only for treasury maintenance), purpose, encrypted raw transaction(s), txid, expiry, fee, state, last evidence; one unresolved outgoing operation at most |
+| `funding_jobs` | Pool and candidate foreign keys with enforced matching ownership, attempt number, UNIQUE treasury operation ID, quote/deposit/refund binding, immutable target and funding-policy snapshot, status, deadline, next poll and bounded retry count; one current job per candidate |
+| `payment_attempts` | Logical call ID, pool/wallet foreign keys, catalog/route identity, generation, chosen requirements hash, reserved amount, nonce, payee, validity, phase, receipt/chain evidence; UNIQUE `(wallet_id, nonce)` |
+| `budget_entries` | Operation, owning pool or treasury-maintenance purpose, UTC day, reserved/consumed/refunded zatoshis, fee evidence; no duplicate reservation, debit or release |
 
 Store USDC amounts as checked U256 decimal strings, and ZEC amounts as checked
 zatoshis compatible with zingolib's `Zatoshis`; never convert through floating
@@ -233,7 +270,8 @@ Create the state directory mode 0700 and database/key/backup files owner-only.
 Use a random 32-byte key in a separate mode-0600 key file. Encrypt EVM keys,
 wallet snapshots, signed Zcash transaction bytes and sensitive quote/receipt
 payloads with authenticated encryption and fresh nonces. Associated data binds
-schema version, record ID/type, network and treasury identity. Encrypt before
+schema version, record ID/type, network, treasury identity and pool identity for
+pool-owned records. Encrypt before
 SQLite insertion, so WAL and temporary database pages contain ciphertext for
 those fields. Metadata/addresses still reveal relationships; protect the entire
 directory and backups. Zeroize temporary secret buffers where practical and
@@ -247,17 +285,18 @@ ranges or signed-payment liabilities; refuse to treat it as a complete live-pool
 recovery. Wrong key, corrupt state or identity mismatch is a hard error, never a
 reason to initialize a new wallet.
 
+The following role and promotion invariants apply independently to each pool.
 Wallet roles are `ALLOCATED -> FUNDING -> READY -> ACTIVE -> RETIRED`.
 Failed/unknown funding retains the candidate and its keys. Healthy steady state
 has one ACTIVE and one READY; replenishment has one ACTIVE and one
 ALLOCATED/FUNDING candidate. Bootstrap allocates at most two candidates, funds
 them, then commits role assignment and readiness.
 
-Promotion uses `BEGIN IMMEDIATE` and compares the expected generation. In one
+Promotion uses `BEGIN IMMEDIATE` and compares `(pool_id, expected_generation)`. In one
 commit, retire A, activate B, insert C's encrypted key and fixed target, and
 insert C's funding outbox job. Generate C's key before that transaction and
 discard it if the generation check loses a race. The worker claims the existing
-job; polling timeout never allocates a fourth wallet. A crash after promotion
+job for that pool; polling timeout never allocates a fourth wallet in that pool. A crash after promotion
 must leave enough durable state to launch C's worker exactly once logically.
 
 ## Embedded Zcash treasury
@@ -300,7 +339,7 @@ background snapshot cannot overwrite a post-calculation snapshot.
 Require synced spendable confirmed funds and a recent successful tip check.
 Pending change is not available for the next deposit. Start with **one
 unconfirmed outgoing treasury operation**, including refund shielding. This
-serializes bootstrap deposits and replenishment but avoids reusing uncertain
+serializes bootstrap deposits and replenishment across all pools but avoids reusing uncertain
 inputs. No new treasury operation may proceed while an outgoing transaction's
 outcome is unknown. Payment calls using already funded EVM wallets remain usable.
 
@@ -552,47 +591,123 @@ allowance. Approval failures must never trigger managed wallet churn.
 
 ## Budgets, configuration and operator workflow
 
-`RotationConfig` is process-level payment configuration, separate from vendor
-OpenAPI confs. Load environment and explicit `--env-file`; preserve existing
-CLI > environment > config > default precedence for generic settings. New
-rotation settings below are environment options initially. Any CLI aliases
-must follow the same precedence and must not expose secret values in arguments.
+Managed configuration uses the existing deployment TOML composition. Add optional
+singleton `[treasury]` and `[funding]` tables and a tagged `WalletConfig` enum:
+`Static { private_key_env, max_price_usd }` or
+`ZcashRotation { deposit_size, max_price_usd, max_input_zec, max_fee_bps,
+wait_seconds, max_attempts }`. Do not put treasury settings in provider files or
+reintroduce global mode/target environment switches. Numeric money values are
+strings parsed directly to atomic integers. Secret/endpoint credentials use
+explicit environment-variable references, populated from the process environment
+or `--env-file`; meta-config fields retain their existing deterministic precedence.
 
-| Setting | Behavior |
+The following is the target schema to implement, not a currently supported
+runtime configuration. The example's ZEC limits are illustrative operator limits,
+not an estimate of the ZEC needed for either deposit size:
+
+```toml
+version = 1
+
+[treasury]
+id = "11111111-1111-4111-8111-111111111111" # Replace with wallet init's UUID.
+state_dir = "./state/treasury"
+key_file = "./secrets/treasury.key"
+indexer_url_env = "ZCASH_INDEXER_URL"
+submission_url_env = "ZCASH_SUBMISSION_URL"
+daily_input_zec = "0.10"
+shield_max_fee_zec = "0.001"
+
+[funding]
+base_rpc_url_env = "BASE_RPC_URL"
+confidentiality = "basic"
+# near_api_key_env = "NEAR_API_KEY"
+
+[wallets.research]
+mode = "zcash_rotation"
+deposit_size = "5.00"
+max_price_usd = "1.00"
+max_input_zec = "0.02"
+max_fee_bps = 500
+
+[wallets.social]
+mode = "zcash_rotation"
+deposit_size = "10.00"
+max_price_usd = "1.00"
+max_input_zec = "0.04"
+max_fee_bps = 500
+
+[sources.socialfetch]
+extends = "../../providers/socialfetch.toml"
+timeout = 90
+
+[servers.research]
+listen = "127.0.0.1:8000"
+bearer_token_env = "RESEARCH_MCP_TOKEN"
+wallet = "research"
+sources = ["socialfetch"]
+tags = ["LinkedIn"]
+
+[servers.social]
+listen = "127.0.0.1:8001"
+bearer_token_env = "SOCIAL_MCP_TOKEN"
+wallet = "social"
+sources = ["socialfetch"]
+tags = ["Twitter", "YouTube"]
+```
+
+Each `wallets.<name>` managed profile accepts:
+
+| Field | Behavior |
 | --- | --- |
-| `X402_WALLET_MODE` | `static` default, or `zcash_rotation` |
-| `X402_ROTATION_TARGET_USDC` | Positive decimal string; default `5.00`, at most 6 decimal places |
-| `X402_ROTATION_STATE_DIR` | Required persistent directory; one process/treasury/pool owner |
-| `X402_ROTATION_KEY_FILE` | Required protected 32-byte encryption key file; distinct from the database |
-| `X402_ZCASH_TREASURY_ID` | Required initialized UUID; serving rejects a different identity |
-| `X402_ZCASH_INDEXER_URL` | Required trusted TLS sync/lookup endpoint |
-| `X402_ZCASH_SUBMISSION_URL` | Required trusted TLS raw submission endpoint; may equal indexer |
-| `X402_ZCASH_CONFIRMATIONS` | Default 3, positive integer |
-| `X402_ZCASH_MAX_SYNC_AGE_SECONDS` | Default 300 since successful tip reconciliation |
-| `X402_ZCASH_SHIELD_MAX_FEE_ZEC` | Required positive fee cap for operator-requested refund shielding |
-| `X402_BASE_RPC_URL` | Required trusted Base RPC, checked against chain ID 8453 |
-| `X402_BASE_CONFIRMATIONS` | Default 12; positive depth, not a guarantee of L1 finality |
-| `X402_BASE_MAX_BLOCK_AGE_SECONDS` | Default 120; reject a latest RPC block older than this before admission/promotion |
-| `X402_NEAR_CONFIDENTIALITY` | `basic` default or `advanced`; public forbidden |
-| `X402_NEAR_API_KEY` | Optional server-side partner credential |
-| `X402_ROTATION_MAX_INPUT_ZEC` | Required per-deposit input-plus-source-fee hard cap |
-| `X402_ROTATION_DAILY_INPUT_ZEC` | Required aggregate input/fee budget for this process's treasury, across all catalogs and shielding |
-| `X402_ROTATION_MAX_FEE_BPS` | Required integer 0..10000 for quote-implied USD overhead |
-| `X402_NEAR_SLIPPAGE_BPS` | Default 100; integer 0..1000 |
-| `X402_ROTATION_WAIT_SECONDS` | Default 30; total readiness/admission deadline including payment-gate wait |
-| `X402_ROTATION_POLL_SECONDS` | Default 5; backoff with jitter capped at 60 seconds |
-| `X402_ROTATION_SWAP_TIMEOUT_SECONDS` | Default 1800; mark degraded and continue slow reconciliation on expiry |
-| `X402_NEAR_QUOTE_DEADLINE_SECONDS` | Default 1800; require at least 300 seconds remaining before prepare and before first broadcast |
-| `X402_ROTATION_MAX_ATTEMPTS` | Default 3 reconciled funding attempts per candidate, not status polls |
-| `X402_MAX_PRICE_USD` / `--max-price-usd` | Existing independent per-payment cap; default 1.00 |
+| `mode` | Required `zcash_rotation`; static profiles retain `mode = "static"` |
+| `deposit_size` | Positive USDC decimal string; default `"5.00"`, at most 6 decimal places; immutable target captured at each new address allocation |
+| `max_price_usd` | Independent per-payment cap; default `"1.00"`; retain static cap syntax but never bypass managed chain/asset/target checks |
+| `max_input_zec` | Required positive per-deposit input-plus-source-fee hard cap |
+| `max_fee_bps` | Required integer 0..10000 for quote-implied USD overhead |
+| `wait_seconds` | Default 30; total admission/readiness deadline including this pool's payment-gate wait |
+| `max_attempts` | Default 3 reconciled funding attempts per candidate, not status polls |
 
-Reject nonfinite, negative, zero where positive required, fractional atomic units,
-overprecision and arithmetic overflow. Require all risk limits in managed mode.
-Reject simultaneous managed mode and static `EVM_PRIVATE_KEY`/`SVM_PRIVATE_KEY`
-rather than silently choosing one. Static mode has no treasury initialization,
-unlock, funding or sync side effects. Fix production account 0, Zcash mainnet,
-Base 8453 and the canonical USDC contract. Regtest uses a separate explicit
-fixture configuration and separate state, never production network overrides.
+The singleton treasury and shared funding fields are:
+
+| Field | Behavior |
+| --- | --- |
+| `treasury.id` | Required initialized UUID; serving rejects a different identity |
+| `treasury.state_dir` | Required persistent directory for this treasury and all pools; one process owner |
+| `treasury.key_file` | Required protected 32-byte encryption key file; distinct from the database |
+| `treasury.indexer_url_env` | Required environment reference to a trusted TLS sync/lookup endpoint |
+| `treasury.submission_url_env` | Required environment reference to a trusted TLS raw submission endpoint; may name the indexer variable |
+| `treasury.confirmations` | Default 3, positive integer |
+| `treasury.max_sync_age_seconds` | Default 300 since successful tip reconciliation |
+| `treasury.shield_max_fee_zec` | Required positive fee cap for operator-requested refund shielding |
+| `treasury.daily_input_zec` | Required positive aggregate input/fee budget across every pool and treasury-maintenance operation |
+| `funding.base_rpc_url_env` | Required environment reference to trusted Base RPC; check chain ID 8453 |
+| `funding.base_confirmations` | Default 12, positive depth; not a guarantee of L1 finality |
+| `funding.base_max_block_age_seconds` | Default 120; reject an older latest RPC block before admission/promotion |
+| `funding.confidentiality` | Default `basic` or explicit `advanced`; public forbidden |
+| `funding.near_api_key_env` | Optional environment reference to a server-side partner credential |
+| `funding.slippage_bps` | Default 100; integer 0..1000 |
+| `funding.poll_seconds` | Default 5; backoff with jitter capped at 60 seconds |
+| `funding.swap_timeout_seconds` | Default 1800; mark the affected pool degraded and continue slower reconciliation on expiry |
+| `funding.quote_deadline_seconds` | Default 1800; require at least 300 seconds remaining before prepare and before first broadcast |
+
+Require `[treasury]` and `[funding]` whenever any managed pool is configured.
+Reject unknown fields, nonfinite amounts, negatives, zero where positive is
+required, fractional atomic units, overprecision and overflow. Require all risk
+limits for managed serving. Reject `private_key_env` on a managed profile and
+managed-only fields on a static profile; unrelated static profiles and their
+key environment variables remain valid. Only referenced static profiles load
+signers. All declared managed profiles explicitly request durable pools and
+bootstrap, even if no listener currently selects them. Inspection/discovery
+commands never create pools or initialize a treasury.
+
+Resolve state and key paths relative to the deployment file declaring them.
+`--show-config` displays profile settings, default/origin information and only
+environment reference names, never endpoint credentials or key contents.
+`--check` validates shape, references and amount syntax without unlocking wallet
+state or making funding requests. Static-only serving does not initialize,
+unlock, fund or sync a treasury. Fix production Zcash account 0/mainnet, Base
+8453 and canonical USDC. Regtest requires explicit separate fixture configuration
+and state; do not expose production network overrides.
 
 Compute quote overhead with exact decimal arithmetic:
 `max(0, (amountInUsd - target_usdc) / target_usdc) * 10000`.
@@ -605,7 +720,11 @@ exposure across UTC-day rollover. For a new reservation require today's consumed
 costs plus all outstanding reservations plus the new reservation to fit the
 budget. Do not reset unresolved liabilities at midnight. Only confirmed refunds
 reduce consumed exposure, once; never count expected refunds as available funds.
-Changing the target affects new allocations only, not existing wallet top-ups.
+Changing a profile's `deposit_size` affects only that pool's future allocations,
+never top-ups of existing addresses. Persist the target with the candidate and
+job so queued work retains its original amount. Other profiles are unaffected.
+A shared treasury budget is an aggregate bound, not a guarantee that every pool
+can fill: fair scheduling prevents queue starvation but cannot create funds.
 
 Bound network operations (initial connect timeout 15 seconds, request timeout
 30 seconds), honor `Retry-After`, and bound queues and worker concurrency. Route
@@ -613,7 +732,9 @@ calls retain their configured longer vendor timeouts. Treat deadline expiry or
 operator limits as recoverable degraded funding, not permission to spend more.
 
 Add `wallet` subcommands to the existing Rust executable, retaining root serve
-flags for ordinary use:
+flags for ordinary use. Commands accept `--meta-config` to locate the singleton
+treasury; pool-specific diagnostics use `--wallet <profile-name>`. State identity
+and existing journals, not listener selections, determine recovery scope:
 
 - `wallet init`: explicitly create/import a treasury into new state, recording
   birthday/network and generating an encrypted snapshot; refuse overwrite.
@@ -621,8 +742,15 @@ flags for ordinary use:
   seed from a protected file or prompt. No swap is initiated by initialization.
 - `wallet status`: read committed SQLite state without acquiring write ownership,
   unlocking keys or making network requests. Report its snapshot age, active/
-  standby readiness, balances, pending operations and budget. It may run while
+  standby readiness, balances, pending operations and budget for each pool, plus
+  the shared treasury balance, aggregate reservations and funding queue. It may run while
   serving and must label its data as the last persisted observation.
+- `wallet rename --wallet OLD --new-name NEW`: requires exclusive ownership and
+  collision checks; updates the durable profile mapping while preserving pool
+  UUID, keys and operations. Require matching deployment configuration before serving.
+- `wallet retire --wallet NAME`: requires exclusive ownership, resolves all
+  liabilities/funding operations before marking a pool retired; retains keys and
+  audit history. Never sweeps dust or reallocates addresses implicitly.
 - `wallet reconcile --operation-id ...`: requires the serving process stopped
   and exclusive ownership; unlock and reconcile/rebroadcast only the saved
   operation. No replacement transfer is implicit.
@@ -647,18 +775,22 @@ require the full managed configuration and funding limits.
 
 Parse configuration and validate HTTP bearer auth before starting wallet tasks.
 For managed serving: acquire state ownership, validate schema/identity, unlock
-state, restore the treasury, create the runtime and launch reconciliation.
+state, restore the single treasury, reconcile the named profile/pool mappings,
+create one manager per enabled pool, and launch shared funding reconciliation.
 Initialize/list-tools may respond while funding is not ready; paid admission
 waits only within its deadline. Local help tools do not wait for treasury funds.
 Discovery flags must skip all wallet/key/funding initialization and probing;
 a remote spec fetch is still needed if the operator explicitly selects one.
 
-Restart reconciles signed-payment liabilities and treasury operations before
+Restart reconciles every pool, including disabled pools with pending work, and
+shared treasury operations before
 allowing new sends, refreshes Base anchors, and resumes existing jobs. Recovery
 must find an already credited candidate and mark it ready, not fund it again.
 An unresolved treasury send blocks new treasury work but need not block calls
-using independently verified active USDC. Hard state corruption blocks managed
-payments until explicit recovery.
+using independently verified active USDC. A pool-local shortfall or ambiguous payment blocks only that pool's affected
+admissions; shared state corruption blocks all managed payments until explicit
+recovery. A bad treasury sync stops funding but need not stop independently
+verified Base spending. Static profiles remain independent of managed readiness.
 
 Both MCP transports own the same `Runtime` lifecycle. On shutdown, stop new
 admission and new funding preparation, drain bounded in-flight work, stop/await
@@ -670,13 +802,14 @@ HTTP JSON responses and stderr-only logging. Configure HTTP allowed hosts
 explicitly when supporting non-loopback deployment; do not silently disable
 host checks while adding transport integration.
 
-Keep existing generic configs/specs/digests usable. Extend differential fixtures
+Keep existing TOML provider composition and JSON API catalogs usable. Extend differential fixtures
 to cover all intended production catalogs, free/local help calls, absolute URLs,
 per-catalog bases/timeouts, duplicate names, body/query collisions, schema bounds,
 description overrides and tag selection. Preserve the Rust correction that
 renamed body arguments map back to original body keys and required fields.
-No implicit description or response truncation is permitted. Implement pricing
-probe/cache behavior and custom handlers before claiming full launcher parity;
+No implicit description or response truncation is permitted. Preserve the
+implemented pricing cache behavior and qualify any remaining custom handlers
+before claiming full launcher parity;
 unimplemented config behavior must be explicit rather than silently ignored.
 Python compatibility tests remain useful even though runtime coordination is Rust.
 
@@ -691,10 +824,10 @@ guarantee.
 
 Never directly transfer retired funds to another pool address. Persist a fresh
 supported refund address per attempt and keep operation records private.
-Randomized amounts/timing, shared pools, mixnet transport and embedded Intents
+Randomized amounts/timing, cross-profile EVM address sharing, mixnet transport and embedded Intents
 balances need separate designs; do not introduce them by changing the target or
 route silently. Publish measured replenishment latency and the capital required
-for two wallets plus outstanding deposits/refunds.
+for two addresses per pool plus all outstanding deposits/refunds.
 
 ## Implementation sequence and acceptance criteria
 
@@ -708,7 +841,8 @@ spend; none is authorized by this plan alone.
    Add config/types and static/managed dispatch without funding side effects.
 2. **Implement encrypted state and recovery.** Add migrations, exclusive
    ownership, budget ledger, snapshot ordering, role transitions and outbox.
-   Use fake treasury/Base adapters to prove crash boundaries and concurrency.
+   Use fake treasury/Base adapters to prove per-pool crash boundaries, independent
+   admission, fair shared-treasury scheduling and aggregate budget concurrency.
 3. **Implement the embedded treasury.** Add offline init/restore and status,
    controlled sync, durable preparation/raw extraction, endpoint-constrained
    submission and reconciliation. Exercise shielded-to-transparent deposits,
@@ -756,7 +890,13 @@ local node/indexer infrastructure, with exact setup/invocation documented in
 | UTC rollover with unresolved input | Liability carried forward; new funding cannot exceed aggregate limit |
 | High-index refund address and restart | Regtest sync discovers it; shielding uses durable operation path |
 | Wallet round-trip and wrong-key restore | Addresses/next derivation preserved; no plaintext snapshot; wrong key never creates replacement state |
-| Two owners / multiple catalogs | Second owner rejected before networking; one process's catalogs share one correctly routed pool |
+| Two owners / multiple catalogs | Second owner rejected before networking; servers sharing a profile use one pool; different profiles use distinct keys and admission gates |
+| Two pools with deposit sizes 5 and 10 | Four distinct bootstrap addresses; each gets its own immutable target; repeat restart creates no new pair |
+| Simultaneous depletion across pools | One promotion/job per pool; funded calls progress while shared treasury sends serialize; no duplicate Zcash input use |
+| Aggregate treasury budget race | Sum of both pools' reservations and maintenance fees stays within one limit, including across UTC rollover |
+| One pool degraded or repeatedly retrying | Other funded pool serves; eligible refill jobs get fair turns; shared outgoing ambiguity blocks new sends everywhere |
+| Profile removal, re-addition and rename | No key loss or fresh pool on re-add; pending work reconciles while disabled; explicit rename preserves UUID |
+| Change one pool's deposit_size | Only future allocations in that pool change; active/standby balances and queued jobs are never topped up or retargeted |
 | Listing/help/HTTP authentication | No funding during discovery; lazy help independent of funded readiness; unauthorized HTTP rejected before tool work |
 | Graceful shutdown and forced termination | Encrypted snapshot revision consistent; unknown operations survive restart |
 
