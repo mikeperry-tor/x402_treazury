@@ -84,7 +84,6 @@ Use a strict, reusable network policy structure. Example deployment TOML:
 [network]
 mode = "tor"
 socks_endpoint = "127.0.0.1:9150"
-isolation_secret_file = "../../secrets/tor-isolation.key"
 isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
 connect_timeout_seconds = 30
@@ -96,7 +95,7 @@ loopback IP and port for the initial implementation, including bracketed IPv6.
 This avoids DNS lookup of the proxy itself and exposing SOCKS credentials over a
 remote cleartext link. No automatic port scanning or launching Tor Browser.
 
-In Tor mode require `socks_endpoint` and `isolation_secret_file`. Namespace defaults
+In Tor mode require `socks_endpoint`. Namespace defaults
 to the exact string `x402_treazury`. Authentication choices are `tor_extended`
 (default) and `legacy`. Reject Tor-only fields with direct mode rather than leaving
 operators with an apparently configured but unused proxy. Validate all policies
@@ -114,23 +113,19 @@ cannot override transport mode, proxy or isolation identity. Agents cannot choos
 these settings through tool arguments. Resolve root parsing and wallet subcommand
 parsing so `wallet ... --network-config FILE` works consistently.
 
-Add `network init --network-config FILE` to explicitly create a random 32-byte
-isolation secret with exclusive creation, owner-only permissions, a preexisting
-parent directory and symlink rejection. Never overwrite it. The command works
-without the Zcash feature, prints no secret and performs no network requests.
-Document generating it before launching Tor mode; do not silently create it while
-loading catalogs or running inspection. Direct mode does not need this file.
+Tor mode requires no isolation key file, secret initialization command or additional
+persistent state. The identities used to derive SOCKS credentials are already
+available from wallet state, configuration or the destination origin.
 
-`--show-config` displays effective mode, endpoint, namespace, auth format, secret
-file path and identity-assignment rules, never secret bytes or derived tokens.
-It remains file-composition-only and does not unlock keys or contact the proxy.
-Local `--check`/inventory stays credential-free; a remote spec requires the network
-policy's isolation secret in Tor mode but never an EVM signing key. Explain that
-transport credentials and wallet credentials are different requirements.
+`--show-config` displays effective mode, endpoint, namespace, auth format and
+identity-assignment rules, never derived tokens. It remains file-composition-only
+and does not unlock keys or contact the proxy. Local `--check`/inventory stays
+credential-free; remote specs use the configured network policy and deterministic
+discovery credentials without requiring EVM keys or treasury state.
 Offline wallet status/backup/address inspection does not connect to Tor. New-wallet
 birthday lookup uses the policy before any treasury state is created. Explicit
-birthday initialization remains offline. A missing secret in an operation that
-needs Tor is a clear actionable error, never permission to use direct mode.
+birthday initialization remains offline. Invalid Tor configuration is a clear
+error, never permission to use direct mode.
 
 ## Isolation identities and credentials
 
@@ -157,14 +152,17 @@ without a treasury. Shared sync remains treasury-scoped even when collecting not
 or transparent refunds associated with individual jobs; do not claim all observations
 of those transactions are exclusively EVM-scoped.
 
-Derive tokens with HMAC-SHA-256 using the independent persisted isolation secret,
-a versioned domain separator, namespace and a length-delimited identity encoding.
-Normalize EVM addresses to 20 bytes and include the chain ID; checksum spelling
-must not change identity. Encode the result as bounded ASCII hex. Never use wallet
-private keys, mnemonic material or the encryption key as the HMAC key. A plain
-address hash permits address guessing; a keyed hash avoids directly revealing the
-address to the SOCKS service. Tokens are local transport identifiers, not Tor
-account credentials and not HTTP authentication headers.
+Derive tokens with SHA-256 over a versioned domain separator, namespace and a
+canonical length-delimited identity encoding. Include the identity kind so EVM,
+treasury, discovery and bootstrap identities occupy separate domains. Normalize
+EVM addresses to 20 bytes and include the chain ID; checksum spelling must not
+change identity. Encode the result as bounded ASCII hex. Specify the exact byte
+encoding and pin it with test vectors before implementation consumers depend on it.
+No private keys, mnemonic material, encryption keys or independent secrets participate
+in token derivation. A plain hash does not conceal an address from someone who knows
+candidate addresses; its purpose here is consistent circuit isolation, not secrecy
+from the local SOCKS service. Tokens are local transport identifiers, not Tor account
+credentials and not HTTP authentication headers.
 
 For `tor_extended`, use username `<torS0X>0` and password
 `x402_treazury:v1:<token>` (substitute the validated namespace). For `legacy`, use
@@ -176,11 +174,15 @@ using legacy must enable `IsolateSOCKSAuth` on the listener. Document and test t
 configuration needed for the chosen Tor Browser/daemon; do not infer isolation
 support merely from a successful TCP connection.
 
-Changing the secret/namespace creates new isolation identities. Require restart
-for such changes, including switching direct/Tor mode; do not migrate live handles.
-Back up the secret separately for stable identity across restart. Loss does not
-lose funds but prevents reproducing previous transport identities; replacement is
-an explicit operator action. Never log tokens, proxy credential URLs or secret data.
+Existing EVM addresses, treasury UUIDs and canonical origins reproduce their tokens
+across restart without storing tokens separately. Bootstrap identities are random
+per invocation and need not persist. Persistence is not required for isolation
+itself; deterministic derivation preserves a consistent identity assignment.
+Different deployments with the same namespace and semantic identity intentionally
+produce the same token; operators wanting deployment separation choose distinct
+namespaces. Changing namespace or auth format, or switching direct/Tor mode,
+requires restart; do not migrate live handles. Never log tokens, proxy credential
+URLs or wallet secret data.
 
 ## One transport architecture
 
@@ -339,11 +341,12 @@ real funded wallets or depend on a running Tor instance.
 Required coverage:
 
 1. Default/direct behavior uses the same factory and caller paths. Config validation,
-   relative paths, explicit secret initialization, missing/unsafe secret files,
-   CLI policy propagation and secret-free `--show-config` work without Zcash.
+   relative policy-file paths, missing/invalid proxy settings, CLI policy propagation
+   and secret-free `--show-config` work without Zcash or an isolation key file.
 2. HTTP and gRPC negotiate the expected credentials; different address spellings
    normalize identically, different addresses differ, and independent domains
-   (treasury/discovery/EVM) never collide. Token derivation is pinned by vectors.
+   (treasury/discovery/EVM/bootstrap) remain distinct. Token derivation is pinned
+   by vectors and is reproducible after restart without additional persisted state.
 3. Same-identity requests can reuse connections; different identities cannot.
    Source-specific settings, auth scopes, redirects, concurrent use, retirement,
    cache eviction and restart retain the intended boundaries.
@@ -382,7 +385,7 @@ work as an automatic test of networking configuration.
 
 Implement as reviewable commits, with each stage compiling and testing:
 
-1. Add strict configuration, identity types, secret initialization and transport
+1. Add strict configuration, identity types, deterministic token derivation and transport
    factory. Refactor direct mode to use the factory everywhere; retain behavior
    except documented identity-bound admission semantics introduced in stage 3.
 2. Add authenticated SOCKS HTTP connector and deterministic proxy fixtures. Cover
@@ -395,7 +398,7 @@ Implement as reviewable commits, with each stage compiling and testing:
    our treasury commands, including runtime-fetch audit and compatibility builds.
 5. Carry immutable funding identities through all recovery paths, finish end-to-end
    fail-closed and consensus tests, and remove temporary Tor startup restrictions.
-6. Document direct/Tor configuration, Tor Browser/daemon requirements, setup/backup,
+6. Document direct/Tor configuration, Tor Browser/daemon requirements, setup,
    JSON diagnostics, privacy limits and optional OS enforcement in README/AGENTS.
    Complete the constructor audit and opt-in unfunded Tor smoke qualification.
 
