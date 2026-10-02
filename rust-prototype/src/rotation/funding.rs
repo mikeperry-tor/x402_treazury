@@ -50,7 +50,9 @@ impl<B: FundingBackend> FundingWorker<B> {
                 job.phase,
                 FundingPhase::Complete | FundingPhase::RecoveryRequired
             ) && status.treasury_operations.iter().any(|o| {
-                o.operation_id == job.operation_id && o.attempts > 0 && o.submission != "CONFIRMED"
+                o.operation_id == job.operation_id
+                    && o.attempts > 0
+                    && !matches!(o.submission.as_str(), "CONFIRMED" | "EXPIRED")
             }) {
                 let _ = self.backend.reconcile(job).await;
             }

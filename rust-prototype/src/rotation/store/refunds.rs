@@ -30,6 +30,7 @@ impl Store {
     /// Called only by the synchronized treasury owner after checking confirmation
     /// depth. Repeated observations cannot credit the same output twice. Excess
     /// payments cannot refund fees or unrelated operation exposure.
+    #[cfg(any(feature = "zcash", test))]
     pub(crate) fn record_refund(&mut self, refund: RefundStatus) -> Result<()> {
         let facts = self.operation(&refund.operation_id)?;
         ensure!(

@@ -598,3 +598,178 @@ async fn refunds_run() -> Result<()> {
     chain.passed = true;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Docker; isolated expiry recovery with unspent-input proof"]
+async fn expired_ambiguous_deposit_releases_only_after_chain_proof() -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(900), expiry_run()).await?
+}
+async fn expiry_run() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut treasury = Treasury::create_with_network(
+        state.clone(),
+        key.clone(),
+        1,
+        Some(Zeroizing::new(SEED.into())),
+        TreasuryNetwork::Regtest,
+    )
+    .await?;
+    let id = treasury.status().await?.treasury_id;
+    let miner = treasury
+        .client
+        .as_ref()
+        .unwrap()
+        .unified_addresses_json()
+        .await[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut chain = Chain::launch(&miner).await?;
+    Chain::mine(&chain.rpc, 7).await?;
+    chain.indexer_ready(8).await?;
+    let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
+    treasury.configure_sync(settings.clone());
+    let stop = CancellationToken::new();
+    treasury.sync_once(&stop).await?;
+    let op = uuid::Uuid::new_v4().to_string();
+    let prepared = treasury
+        .prepare(PrepareRequest {
+            operation_id: op.clone(),
+            pool_id: None,
+            daily_limit_zatoshis: 1_000_000,
+            deadline: now()? + 3600,
+            recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
+            amount_zatoshis: 50_000,
+            max_fee_zatoshis: 50_000,
+            max_input_zatoshis: 100_000,
+        })
+        .await?;
+    // Simulate a crash after committing the send intent, before handing bytes to
+    // transport. Recovery must treat this exactly like a lost broadcast response.
+    let operation = op.clone();
+    treasury
+        .store
+        .call(move |s| {
+            s.request_broadcast(&operation, now()?, 8, false)?;
+            Ok(())
+        })
+        .await?;
+    let mut sender = submission::GrpcSubmission::with_network(
+        chain.endpoint.clone(),
+        chain.endpoint.clone(),
+        TreasuryNetwork::Regtest,
+    )?;
+    assert!(
+        treasury
+            .recover_expired(op.clone(), &mut sender, &stop)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("expiry not buried")
+    );
+    assert!(budget(&state, &op)?.0 > 0);
+    treasury.close().await?;
+    let target = u64::from(prepared.facts().unwrap().expiry_height) + 2;
+    ensure!(target < 200, "unexpected regtest expiry");
+    Chain::mine(&chain.rpc, usize::try_from(target - 8)?).await?;
+    chain.indexer_ready(target).await?;
+    let mut treasury =
+        Treasury::open_with_network(state.clone(), key, id, TreasuryNetwork::Regtest).await?;
+    treasury.configure_sync(settings);
+    treasury.sync_once(&stop).await?;
+    // An unresolved/missing original input must block recovery even when the
+    // transaction itself has expired. Exercise the same production verifier.
+    {
+        use pepper_sync::wallet::{OrchardNote, OutputInterface};
+        let operation = op.clone();
+        let bytes = treasury
+            .store
+            .call(move |s| s.prepared_snapshot(&operation))
+            .await?;
+        let original = LightClient::from_reader(
+            bytes.as_slice(),
+            config(
+                treasury._scratch.path(),
+                WalletConfig::Read,
+                TreasuryNetwork::Regtest,
+            )?,
+        )
+        .await?;
+        let original = original.wallet().read().await;
+        let txid = submission::decode(prepared.bytes())?.txid();
+        let inputs =
+            OrchardNote::transaction_inputs(original.wallet_transactions.get(&txid).unwrap());
+        let mut current = treasury.client.as_ref().unwrap().wallet().write().await;
+        let origin = current
+            .wallet_outputs::<OrchardNote>()
+            .into_iter()
+            .find(|n| n.spend_link().is_some_and(|link| inputs.contains(&&link)))
+            .unwrap()
+            .output_id()
+            .txid();
+        let removed = current.wallet_transactions.remove(&origin).unwrap();
+        assert!(
+            super::expiry::check_inputs::<OrchardNote>(&original, &current, &txid, target, 2)
+                .is_err()
+        );
+        current.wallet_transactions.insert(origin, removed);
+        assert!(
+            super::expiry::check_inputs::<OrchardNote>(&original, &current, &txid, target, 2)? > 0
+        );
+    }
+    treasury
+        .recover_expired(op.clone(), &mut sender, &stop)
+        .await?;
+    assert_eq!(budget(&state, &op)?, (0, 0));
+    assert_eq!(
+        treasury.status().await?.treasury_operations[0].submission,
+        "EXPIRED"
+    );
+    let operation = op.clone();
+    assert!(
+        treasury
+            .store
+            .call(move |s| crate::rotation::transaction::PreparedTransaction::load(s, &operation))
+            .await
+            .is_err()
+    );
+    assert!(
+        treasury
+            .submit_prepared(op, &mut sender, true, &stop)
+            .await
+            .is_err()
+    );
+    assert!(!treasury.status().await?.outgoing_pending);
+    treasury.close().await?;
+    chain.passed = true;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Docker; qualify indexer non-inclusion response"]
+async fn indexer_non_inclusion_response() -> Result<()> {
+    use zingo_netutils::{GrpcIndexer, Indexer, lightwallet_protocol::TxFilter};
+    let mut chain = Chain::launch("t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8").await?;
+    chain.indexer_ready(1).await?;
+    let mut client = GrpcIndexer::new(chain.endpoint.parse()?).await?;
+    client.get_lightd_info(Duration::from_secs(15)).await?;
+    let result = client
+        .get_transaction(
+            TxFilter {
+                hash: vec![42; 32],
+                ..Default::default()
+            },
+            Duration::from_secs(15),
+        )
+        .await;
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(
+        error.message(),
+        "InternalServerError: error receiving data from backing node"
+    );
+    chain.passed = true;
+    Ok(())
+}

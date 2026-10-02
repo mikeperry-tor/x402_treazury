@@ -1,5 +1,7 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
 mod backup;
+#[cfg(feature = "zcash")]
+mod expiry;
 pub mod funding;
 pub mod refunds;
 use super::error::AdmissionError;
@@ -397,7 +399,7 @@ impl Store {
                 params![job, encrypted],
             )?;
         }
-        tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing)", [revision])?;
+        tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing UNION SELECT revision FROM expired_operations)", [revision])?;
         if let Some(mut observation) = observation {
             observation.snapshot_revision = revision;
             observation.checkpoint_at = crate::rotation::base::now()?;
@@ -926,7 +928,16 @@ fn read_status(db: &Connection) -> Result<Status> {
             ))
         })?;
         rows.map(|row| -> Result<OperationStatus> {
-            let (operation_id, facts, submission, attempts) = row?;
+            let (operation_id, facts, mut submission, attempts) = row?;
+            if version >= 8
+                && db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
+                    [&operation_id],
+                    |r| r.get::<_, bool>(0),
+                )?
+            {
+                submission = "EXPIRED".into();
+            }
             Ok(OperationStatus {
                 operation_id,
                 facts: serde_json::from_str(&facts)?,
@@ -996,7 +1007,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 7, "unsupported state schema");
+    ensure!(version <= 8, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1038,6 +1049,12 @@ COMMIT;")?;
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS refund_outputs(txid TEXT NOT NULL,output_index INTEGER NOT NULL,operation_id TEXT NOT NULL REFERENCES treasury_operations(id),amount INTEGER NOT NULL CHECK(amount>0),height INTEGER NOT NULL,credited INTEGER NOT NULL CHECK(credited>=0),PRIMARY KEY(txid,output_index));
 PRAGMA user_version=7;
+COMMIT;")?;
+    }
+    if version < 8 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS expired_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),height INTEGER NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
+PRAGMA user_version=8;
 COMMIT;")?;
     }
     Ok(())

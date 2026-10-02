@@ -870,7 +870,13 @@ and existing journals, not listener selections, determine recovery scope:
   implemented form is `wallet reconcile --meta-config FILE --operation-id UUID`.
   It requires no submission secret unless `--rebroadcast` explicitly permits sending
   the same bytes within the quote deadline/transaction expiry. No replacement
-  transfer is implicit. Absence, rejection or expiry never releases input exposure.
+  transfer is implicit. Absence, rejection or expiry alone never releases input exposure.
+- `wallet recover-expired --meta-config FILE --operation-id UUID`: requires the
+  canonical tip beyond expiry by the confirmation count, no positive indexer inclusion,
+  local synced invalidation and confirmed unspent original inputs matched against
+  the encrypted preparation snapshot. Atomically release only unconsumed exposure,
+  preserve signed bytes/evidence, and reset an unfinished funding job with a new ID
+  and refund derivation. Never allow the expired operation to mint a broadcast.
 - `wallet shield-refunds`: also requires exclusive ownership and uses the same
   durable send path and configured fee/budget limits.
 - `wallet backup` / `wallet restore`: operate under exclusive ownership on a

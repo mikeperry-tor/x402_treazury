@@ -1,5 +1,6 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
 pub mod actor;
+mod expiry;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
@@ -523,6 +524,30 @@ impl SyncSession {
                     && height >= h
                     && height - h + 1 >= u64::from(settings.confirmations.get())),
                 "treasury_confirmed_spend_reorg: source spend requires recovery"
+            );
+        }
+        let expired = self
+            .store
+            .call(|s| {
+                Ok(s.status()?
+                    .treasury_operations
+                    .into_iter()
+                    .filter(|o| o.submission == "EXPIRED")
+                    .collect::<Vec<_>>())
+            })
+            .await?;
+        for operation in expired {
+            let txid = zcash_primitives::transaction::TxId::from_hex(&operation.facts.txid)
+                .context("invalid transaction identity")?;
+            ensure!(
+                height
+                    >= u64::from(operation.facts.expiry_height)
+                        + u64::from(settings.confirmations.get())
+                    && !wallet
+                        .wallet_transactions
+                        .get(&txid)
+                        .is_some_and(|r| r.status().is_confirmed()),
+                "treasury_expiry_reorg: recovered source requires review"
             );
         }
         let balance = wallet

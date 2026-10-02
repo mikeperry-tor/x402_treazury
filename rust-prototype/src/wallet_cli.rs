@@ -12,6 +12,13 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Release an expired operation only after proving canonical absence and unspent inputs.
+    RecoverExpired {
+        #[arg(long)]
+        meta_config: PathBuf,
+        #[arg(long)]
+        operation_id: String,
+    },
     /// Prepare shielding for one refund address; use reconcile --rebroadcast to submit.
     ShieldRefunds {
         #[arg(long)]
@@ -147,13 +154,36 @@ pub async fn run() -> Result<()> {
     {
         use crate::treasury::Treasury;
         let treasury = match args.command {
+            Command::RecoverExpired {
+                meta_config,
+                operation_id,
+            } => {
+                let (mut treasury, settings) = configured(&meta_config).await?;
+                let indexer =
+                    std::env::var(&settings.indexer_url_env).context("missing indexer endpoint")?;
+                let mut sender =
+                    crate::treasury::submission::GrpcSubmission::new(indexer.clone(), indexer)?;
+                let stop = tokio_util::sync::CancellationToken::new();
+                let result = finish_on_shutdown(
+                    &stop,
+                    treasury.recover_expired(operation_id, &mut sender, &stop),
+                )
+                .await;
+                if let Err(error) = result {
+                    treasury.close().await?;
+                    return Err(error);
+                }
+                treasury
+            }
             Command::ShieldRefunds {
                 meta_config,
                 job_id,
             } => {
                 let (mut treasury, settings) = configured(&meta_config).await?;
-                let result = treasury
-                    .shield_refund(
+                let stop = tokio_util::sync::CancellationToken::new();
+                let result = finish_on_shutdown(
+                    &stop,
+                    treasury.shield_refund(
                         job_id,
                         u64::try_from(crate::rotation::config::zatoshis(
                             &settings.daily_input_zec,
@@ -161,9 +191,10 @@ pub async fn run() -> Result<()> {
                         u64::try_from(crate::rotation::config::zatoshis(
                             &settings.shield_max_fee_zec,
                         )?)?,
-                        &tokio_util::sync::CancellationToken::new(),
-                    )
-                    .await;
+                        &stop,
+                    ),
+                )
+                .await;
                 if let Err(error) = result {
                     treasury.close().await?;
                     return Err(error);
@@ -346,4 +377,16 @@ async fn configured(
     .await?;
     treasury.configure_sync(sync);
     Ok((treasury, settings))
+}
+
+#[cfg(feature = "zcash")]
+async fn finish_on_shutdown<T>(
+    stop: &tokio_util::sync::CancellationToken,
+    work: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    tokio::pin!(work);
+    tokio::select! {
+        result = &mut work => result,
+        signal = shutdown_signal() => { stop.cancel(); let result = work.await; signal?; result }
+    }
 }
