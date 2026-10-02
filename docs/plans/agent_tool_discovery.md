@@ -19,7 +19,7 @@ registry and direct/Tor transport factory. Do not create an independent paid-cal
 stack or allow agents to write arbitrary deployment TOML. Disabled deployments
 retain their current configuration, catalog, authentication and payment behavior.
 
-This document specifies planned functionality, not existing CLI/config fields.
+Configuration and agent-facing usage are documented in [agent source management](../agent-sources.md).
 
 ## Scope and terminology
 
@@ -212,8 +212,7 @@ Do not expose arbitrary HTTP requests or wallet administration through these too
 Registration initially accepts OpenAPI JSON documents, not legacy operations digests,
 remote MCP servers, code, plugins, shell commands or arbitrary llms.txt-to-tool synthesis.
 An optional base URL must pass the same destination policy as spec-derived servers.
-External `$ref` fetching is unsupported; local references retain bounded cycle-safe
-resolution. Do not silently derive tool definitions from directory endpoint metadata.
+External `$ref` fetching is unsupported; local references use bounded traversal and reject cyclic schemas before generation. Do not silently derive tool definitions from directory endpoint metadata.
 
 A preview is not approval. Add may validate and commit in one call within the granted
 policy. If a preview ID is provided, it refers to a bounded process-local cache of

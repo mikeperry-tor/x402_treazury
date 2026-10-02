@@ -1,9 +1,10 @@
 # Provider contract fixtures
 
-The 14 tool catalogs were captured from the independent Python implementation
-before its retirement and verified against Rust. They pin 726 tool names, full
-descriptions, schemas, methods, paths, parameter routes and help URLs. Settings
-snapshots cover all 18 bundled providers, including those without offline specs.
+The 14 legacy tool catalogs were captured from the independent Python implementation
+before its retirement and verified against Rust. Together with the reviewed Rust
+x402-list catalog, the 15 fixtures pin 731 tool names, full descriptions, schemas,
+methods, paths, parameter routes and help URLs. Settings snapshots cover all 19
+bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
 
 Run `cargo test --test provider_catalogs --test config` from the Rust project.
