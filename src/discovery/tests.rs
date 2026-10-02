@@ -818,6 +818,7 @@ async fn process_exit_between_sqlite_commit_and_catalog_publication_recovers() {
     let file = tmp.path().join("registry.sqlite");
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("TREAZURE_TEST_REGISTRY", &file)
         .args([
             "--ignored",

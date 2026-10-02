@@ -290,6 +290,7 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .args(["--meta-config", path.to_str().unwrap(), "--list-tools"])
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .output()
         .unwrap();
     assert!(
@@ -466,6 +467,7 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
     assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--list-tools"])
         .output()
         .unwrap();

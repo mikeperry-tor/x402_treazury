@@ -374,6 +374,7 @@ spec="nonexistent.json"
     let output = tokio::task::spawn_blocking(move || {
         std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
             .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env("INDEXER", endpoint)
             .args(["wallet", "sync", "--meta-config"])
             .arg(config)
@@ -541,6 +542,7 @@ async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"));
         command
             .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env("ZCASH_INDEXER_URL", &endpoint)
             .args(["wallet", "init", "--state-dir"])
             .arg(&state)
@@ -580,6 +582,7 @@ async fn birthday_discovery_rejects_wrong_network_without_creating_state() {
     let key = dir.path().join("key");
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("TEST_INDEXER", endpoint)
         .args([
             "wallet",

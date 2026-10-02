@@ -11,7 +11,7 @@ name = "treazure"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["zcash"]
 # Explicit opt-in for synthetic-note proving tests; never needed by serving.
 zcash-testutils = ["zcash", "zingolib/testutils", "dep:orchard"]
 zcash-regtest = ["zcash-testutils", "dep:zcash_local_net"]

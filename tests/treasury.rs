@@ -66,6 +66,7 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     let run = |args: Vec<&str>| {
         std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
             .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env("RUST_BACKTRACE", "1")
             .env("RUST_LIB_BACKTRACE", "1")
             .env("ZCASH_INDEXER_URL", "deliberately-invalid-offline-endpoint")

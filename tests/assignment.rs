@@ -88,6 +88,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let path = dir.path().join("servers.toml");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--show-config"])
         .output()
         .unwrap();
@@ -106,6 +107,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     assert_eq!(inv[0]["wallet_bindings"]["a"]["scope"], "binding");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--check"])
         .output()
         .unwrap();

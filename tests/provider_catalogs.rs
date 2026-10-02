@@ -20,6 +20,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
         command
             .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .current_dir(repo)
             .arg("--config")
             .arg(&case.provider)

@@ -108,6 +108,7 @@ include_tools = ["socialfetch_twitter_*"]
     );
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--list-tags"])
         .output()
         .unwrap();
@@ -121,6 +122,7 @@ include_tools = ["socialfetch_twitter_*"]
     assert_eq!(counts["socialfetch"]["Twitter"], 29);
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
         .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args([
             "--config",
             dir.path().join("socialfetch.toml").to_str().unwrap(),

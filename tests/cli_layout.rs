@@ -8,6 +8,7 @@ fn executable_name_version_and_example_inspection_are_portable() {
     let run = |args: &[&str]| {
         Command::new(binary)
             .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .current_dir(dir.path())
             .args(args)
             .output()
