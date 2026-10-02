@@ -12,7 +12,8 @@ A single Zcash treasury funds one or more named virtual EVM wallets. Each virtua
 wallet is a durable rotation pool, exposed as an entry in TOML `wallets`, with
 its own `deposit_size` in native Base USDC (decimal string, default **5.00**),
 per-payment cap, active address and fully funded standby. Managed funding uses
-confidential ZEC-to-USDC swaps. Each deployment source may select a virtual
+explicitly configured public or confidential ZEC-to-USDC swaps. Public mode is
+the initial demo path, without NEAR signup or application commissions. Each deployment source may select a virtual
 wallet by name using `wallet`, overriding the server's optional default `wallet`.
 A template-backed `wallet_assignment` supplies any remaining binding, with
 `deployment`, `server`, `source` or `binding` scope. Every server/source binding
@@ -498,13 +499,14 @@ fresh address cannot be tracked instead of silently reusing an address. Once a
 refund is confirmed, shield it through an operator-requested, journaled operation
 before it contributes to the shielded spendable treasury balance.
 
-## NEAR confidential funding
+## NEAR funding and privacy modes
 
 Use NEAR 1Click's foreign-chain flow with `depositType=ORIGIN_CHAIN`,
-`recipientType=DESTINATION_CHAIN` and confidentiality `basic` or `advanced`.
-Do not silently switch to public execution or the embedded confidential-balance
-flow. Pin fixtures and validate the availability/guarantees of both configured
-modes for this route. [Confidential swap documentation](https://docs.near-intents.org/integration/distribution-channels/1click-api/quickstart/confidential-swaps).
+`recipientType=DESTINATION_CHAIN` and explicit confidentiality `public`, `basic`
+or `advanced`. Demo configurations use public settlement without credentials.
+Confidential options require separately qualified authentication. Omitted mode
+retains basic, and failures never switch modes. The embedded confidential-balance
+flow is outside scope. Pin fixtures and validate each selected mode for this route. [Confidential swap documentation](https://docs.near-intents.org/integration/distribution-channels/1click-api/quickstart/confidential-swaps).
 
 The bridge documents transparent Zcash addresses. Send from the shielded
 treasury to a validated transparent deposit and supply a supported wallet-owned
@@ -551,7 +553,7 @@ Use this request shape, with locally validated bindings:
   "amount": "5000000",
   "recipient": "<persisted candidate EVM address>",
   "refundTo": "<persisted treasury transparent address>",
-  "confidentiality": "basic",
+  "confidentiality": "public",
   "slippageTolerance": 100,
   "deadline": "<UTC quote deadline>"
 }
@@ -723,7 +725,7 @@ shield_max_fee_zec = "0.001"
 
 [funding]
 base_rpc_url_env = "BASE_RPC_URL"
-confidentiality = "basic"
+confidentiality = "public"
 # near_api_key_env = "NEAR_API_KEY"
 
 [wallets.research]
@@ -787,7 +789,7 @@ The singleton treasury and shared funding fields are:
 | `funding.base_rpc_url_env` | Required environment reference to trusted Base RPC; check chain ID 8453 |
 | `funding.base_confirmations` | Default 12, positive depth; not a guarantee of L1 finality |
 | `funding.base_max_block_age_seconds` | Default 120; reject an older latest RPC block before admission/promotion |
-| `funding.confidentiality` | Default `basic` or explicit `advanced`; public forbidden |
+| `funding.confidentiality` | `public` for signup-free demos; `basic` (default) or `advanced` for confidential settlement; no fallback |
 | `funding.near_api_key_env` | Optional environment reference to a server-side partner credential |
 | `funding.slippage_bps` | Default 100; integer 0..1000 |
 | `funding.poll_seconds` | Default 5; backoff with jitter capped at 60 seconds |
@@ -977,10 +979,15 @@ while high-index discovery and shielding still require regtest coverage.
    conditions; do not call a compile/test result a production funding validation.
 
 The NEAR HTTP adapter validates tokens, quote bindings and cost limits in
-`rotation/near.rs`. Public dry confidential requests currently return HTTP 401
-requiring user authentication. The committed token and rejection fixtures do not
-establish successful authenticated route qualification. Resolve the required user
-session flow independently from the partner API key before enabling live funding.
+`rotation/near.rs`. A live public 5-USDC quote and unfunded status lookup work
+without credentials; the read-only `quote_near` example validates public quotes.
+Captured responses normalize timestamps, insert a platform fee and extend deposit
+expiry. Compare timestamp instants, recognize only the captured platform collector
+within cost limits, and retain the earlier local send deadline. Confidential
+requests return HTTP 401 without authentication; resolve that authentication before
+offering confidential settlement. A future paid confidential tier may add explicitly
+configured application fees and a partner agreement; the current client requests
+no application commissions and does not assume partner keys grant user sessions.
 
 Use fake time, deterministic throwaway EVM keys, temporary state directories and
 injected transports. Tests must never load a developer's `.env`, wallet key

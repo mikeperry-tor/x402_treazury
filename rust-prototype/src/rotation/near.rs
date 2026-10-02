@@ -1,4 +1,4 @@
-//! Foreign-chain confidential EXACT_OUTPUT swaps. No signer or wallet keys enter
+//! Explicit public or confidential foreign-chain EXACT_OUTPUT swaps. No signer or wallet keys enter
 //! this client. Its credential cannot follow redirects or reach another origin.
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -192,7 +192,9 @@ pub fn request(
         .context("invalid EVM recipient")?;
     transparent(refund)?;
     ensure!(
-        atomic(amount)? > 0 && matches!(confidentiality, "basic" | "advanced") && slippage <= 1000,
+        atomic(amount)? > 0
+            && matches!(confidentiality, "public" | "basic" | "advanced")
+            && slippage <= 1000,
         "invalid quote policy"
     );
     let deadline = chrono::DateTime::from_timestamp(i64::try_from(deadline)?, 0)
@@ -226,13 +228,14 @@ fn timestamp(v: &Value) -> Result<u64> {
 }
 fn check_echo(request: &Value, echo: &Value) -> Result<()> {
     for (key, value) in request.as_object().context("invalid request")? {
-        ensure!(
-            echo.get(key) == Some(value),
-            "quote binding mismatch: {key}"
-        );
+        let matches = if key == "deadline" {
+            timestamp(value)? == timestamp(&echo[key])?
+        } else {
+            echo.get(key) == Some(value)
+        };
+        ensure!(matches, "quote binding mismatch: {key}");
     }
     for key in [
-        "appFees",
         "rebates",
         "virtualChainRecipient",
         "virtualChainRefundRecipient",
@@ -243,6 +246,21 @@ fn check_echo(request: &Value, echo: &Value) -> Result<()> {
                 .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty)),
             "unsupported quote routing or fees"
         );
+    }
+    // 1Click injects its own platform fee even when we request no app fees.
+    // Accept only the observed platform collector, not arbitrary commissions.
+    if let Some(fees) = echo.get("appFees").filter(|v| !v.is_null()) {
+        let fees = fees.as_array().context("invalid platform fees")?;
+        ensure!(fees.len() <= 1, "unsupported fee recipients");
+        for fee in fees {
+            ensure!(
+                fee["recipient"]
+                    == "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"
+                    && fee["fee"].as_u64().is_some_and(|n| n <= 10000)
+                    && fee.get("limitOrderId").is_none_or(Value::is_null),
+                "unsupported platform fee"
+            );
+        }
     }
     Ok(())
 }
@@ -323,11 +341,23 @@ pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64
     } else {
         timestamp(&q["deadline"])?
     };
+    // The provider can keep the deposit address active longer than requested.
+    // Our authority to send always expires at the earlier local/provider deadline.
+    let deadline = deadline.min(timestamp(&request["deadline"])?);
     ensure!(
-        deadline <= timestamp(&request["deadline"])?
-            && deadline.checked_sub(now).is_some_and(|s| s >= 300),
-        "quote deadline too close or extended"
+        deadline.checked_sub(now).is_some_and(|s| s >= 300),
+        "quote deadline too close"
     );
+    if let Some(fees) = response["quoteRequest"]["appFees"].as_array() {
+        let total: u64 = fees
+            .iter()
+            .map(|fee| fee["fee"].as_u64().unwrap_or(u64::MAX))
+            .sum();
+        ensure!(
+            total <= u64::from(limits.max_fee_bps),
+            "platform fee exceeds overhead cap"
+        );
+    }
     let deposit = if dry {
         ensure!(
             q.get("depositAddress").is_none_or(Value::is_null),
@@ -412,6 +442,58 @@ mod tests {
             assert!(validate_quote(request.clone(), bad, &limits, 2_000_000_000).is_err());
             assert!(validate_quote(request, response, &limits, 2_000_000_701).is_err());
         }
+    }
+    #[test]
+    fn captured_public_quote_accepts_normalization_but_preserves_policy() {
+        let response: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/near/public-quote.json"))
+                .unwrap();
+        let assets = Assets {
+            origin: ZEC.into(),
+            destination: USDC.into(),
+        };
+        let echo = &response["quoteRequest"];
+        let deadline = timestamp(&echo["deadline"]).unwrap();
+        let req = request(
+            &assets,
+            echo["recipient"].as_str().unwrap(),
+            echo["refundTo"].as_str().unwrap(),
+            "5000000",
+            "public",
+            100,
+            deadline,
+            false,
+        )
+        .unwrap();
+        assert!(req.get("appFees").is_none());
+        let limits = Limits {
+            max_input: 2_000_000,
+            max_fee: 100_000,
+            max_fee_bps: 500,
+        };
+        let quote =
+            validate_quote(req.clone(), response.clone(), &limits, deadline - 1800).unwrap();
+        assert_eq!(quote.deadline, deadline); // Provider deadline is three days later.
+        assert_eq!(quote.input, 369795);
+        for (pointer, value) in [
+            ("/quoteRequest/confidentiality", json!("basic")),
+            (
+                "/quoteRequest/appFees/0/recipient",
+                json!("arbitrary-commission.near"),
+            ),
+            ("/quoteRequest/appFees/0/fee", json!(501)),
+            ("/quoteRequest/deadline", json!("2099-01-01T00:00:00Z")),
+        ] {
+            let mut bad = response.clone();
+            *bad.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                validate_quote(req.clone(), bad, &limits, deadline - 1800).is_err(),
+                "{pointer}"
+            );
+        }
+        let mut confidential = req.clone();
+        confidential["confidentiality"] = json!("basic");
+        assert!(validate_quote(confidential, response, &limits, deadline - 1800).is_err());
     }
     #[tokio::test]
     async fn auth_errors_are_sanitized_and_redirects_are_not_followed() {

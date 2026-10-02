@@ -254,7 +254,8 @@ impl FundingBackend for Backend {
         )?;
         ensure!(
             checked.request["recipient"] == job.recipient
-                && checked.request["amount"] == job.target,
+                && checked.request["amount"] == job.target
+                && checked.request["confidentiality"] == self.funding.confidentiality,
             "persisted funding binding mismatch"
         );
         self.treasury
@@ -276,6 +277,15 @@ impl FundingBackend for Backend {
     }
     async fn submit(&mut self, job: &FundingJob) -> Result<()> {
         let (limits, _) = self.policy(job)?;
+        let job_id = job.id.clone();
+        let quote: Quote = self
+            .store
+            .call(move |s| Ok(serde_json::from_slice(&s.funding_quote(&job_id)?)?))
+            .await?;
+        ensure!(
+            quote.request["confidentiality"] == self.funding.confidentiality,
+            "funding mode changed; explicit recovery required"
+        );
         let id = job.operation_id.clone();
         let facts = self
             .store

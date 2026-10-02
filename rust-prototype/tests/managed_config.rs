@@ -77,7 +77,7 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
         ("[funding]", "[unknown]"),
         (
             "base_rpc_url_env = \"BASE_RPC\"",
-            "base_rpc_url_env = \"BASE_RPC\"\nconfidentiality = \"public\"",
+            "base_rpc_url_env = \"BASE_RPC\"\nconfidentiality = \"invalid\"",
         ),
         ("max_fee_bps = 500", "max_fee_bps = 500\nwait_seconds = 0"),
         (
@@ -108,4 +108,20 @@ fn money_is_exact_and_tagged_profiles_reject_cross_mode_fields() {
             .is_err()
     );
     assert!(toml::from_str::<WalletConfig>("mode='zcash_rotation'\nmax_fee_bps=500").is_err());
+}
+
+#[test]
+fn public_funding_is_explicit_and_needs_no_near_credentials() {
+    use x402_mcp_prototype::rotation::config::FundingConfig;
+    for mode in ["public", "basic", "advanced"] {
+        let f: FundingConfig = toml::from_str(&format!(
+            "base_rpc_url_env='BASE'\nconfidentiality='{mode}'"
+        ))
+        .unwrap();
+        f.validate().unwrap();
+        assert!(f.near_api_key_env.is_none());
+        assert!(f.near_user_session_env.is_none());
+    }
+    let f: FundingConfig = toml::from_str("base_rpc_url_env='BASE'").unwrap();
+    assert_eq!(f.confidentiality, "basic"); // Existing configs never silently lose confidentiality.
 }

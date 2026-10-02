@@ -61,3 +61,7 @@ alloy-sol-types = "1.5"
 lightwallet-protocol = { git = "https://github.com/zingolabs/lightwallet-protocol-rust", rev = "9bdfdc77eb283f2a3d26c27100cc2ac90148cd93" }
 alloy-primitives = { path = "vendor/alloy-primitives" }
 alloy-sol-macro-expander = { path = "vendor/alloy-sol-macro-expander" }
+
+[[example]]
+name = "quote_near"
+required-features = ["zcash"]

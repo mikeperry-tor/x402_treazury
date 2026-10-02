@@ -1,5 +1,5 @@
 # Build with scripts/zcash.sh. Initialize the treasury explicitly before serving.
-# Serving syncs the Zcash treasury; NEAR funding jobs remain queued (no submission).
+# Set auto_fund=true to enable real ZEC deposits; default serving only syncs.
 version = 1
 
 [treasury]
@@ -12,14 +12,14 @@ daily_input_zec = "0.10"
 shield_max_fee_zec = "0.001"
 
 [funding]
-# Explicitly enable source spending only after qualifying authentication and recovery.
+# Enable source spending deliberately for a funded demo; refund recovery is incomplete.
 auto_fund = false
 # near_api_key_env = "NEAR_PARTNER_KEY"
 # near_user_session_env = "NEAR_USER_SESSION"
 base_rpc_url_env = "BASE_RPC_URL"
 base_confirmations = 12
 base_max_block_age_seconds = 120
-confidentiality = "basic"
+confidentiality = "public" # No NEAR signup; public settlement.
 
 [wallets.research]
 mode = "zcash_rotation"

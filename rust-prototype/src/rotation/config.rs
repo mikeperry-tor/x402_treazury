@@ -210,8 +210,11 @@ impl FundingConfig {
             env_name(s)?;
         }
         ensure!(
-            matches!(self.confidentiality.as_str(), "basic" | "advanced"),
-            "confidentiality must be basic or advanced"
+            matches!(
+                self.confidentiality.as_str(),
+                "public" | "basic" | "advanced"
+            ),
+            "confidentiality must be public, basic or advanced"
         );
         ensure!(
             self.base_confirmations > 0

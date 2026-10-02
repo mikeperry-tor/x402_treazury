@@ -25,7 +25,7 @@ shield_max_fee_zec = "0.001"
 
 [funding]
 base_rpc_url_env = "BASE_RPC_URL"
-confidentiality = "basic"
+confidentiality = "public" # No NEAR signup; public settlement.
 
 [sources.pdl]
 extends = "../../providers/pdl.toml"
