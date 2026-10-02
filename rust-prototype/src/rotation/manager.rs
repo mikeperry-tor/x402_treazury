@@ -66,6 +66,16 @@ impl ManagedPool {
             gate: Mutex::new(()),
         })
     }
+    pub async fn reconcile(&self) -> Result<()> {
+        let _gate = self.gate.lock().await;
+        let pool = self.pool.clone();
+        let query = self.store.call(move |s| s.chain_query(&pool)).await?;
+        let view = self.base.view(query).await?;
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| s.reconcile_pool(&pool, view))
+            .await
+    }
     pub async fn pay(
         &self,
         http: &reqwest::Client,

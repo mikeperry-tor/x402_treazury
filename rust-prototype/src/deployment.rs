@@ -449,6 +449,8 @@ impl Deployment {
         let mut treasury = None;
         #[cfg(feature = "zcash")]
         let mut funding_runtime = None;
+        #[cfg(feature = "zcash")]
+        let mut managed_pools = Vec::new();
         if self
             .wallet_resolution
             .wallets
@@ -524,12 +526,11 @@ impl Deployment {
                             SpendPolicy::dollars(max_price_usd)?,
                             *wait_seconds,
                         )?;
+                        let manager = std::sync::Arc::new(manager);
+                        managed_pools.push(manager.clone());
                         wallets.insert(
                             name.clone(),
-                            PaidClient::managed(
-                                reqwest::Client::new(),
-                                std::sync::Arc::new(manager),
-                            ),
+                            PaidClient::managed(reqwest::Client::new(), manager),
                         );
                     }
                 }
@@ -649,6 +650,8 @@ impl Deployment {
             treasury,
             #[cfg(feature = "zcash")]
             funding_runtime,
+            #[cfg(feature = "zcash")]
+            managed_pools,
         })
     }
 }
@@ -661,6 +664,8 @@ type FundingRuntime = (
 pub struct RunningDeployment {
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
+    #[cfg(feature = "zcash")]
+    managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
     #[cfg(feature = "zcash")]
     treasury: Option<crate::treasury::Treasury>,
     listeners: Vec<(String, TcpListener, axum::Router)>,
@@ -695,6 +700,21 @@ impl RunningDeployment {
             (Some(owner), None) => (Some(tokio::spawn(owner.run_sync(stop.clone()))), None),
             (None, _) => (None, None),
         };
+        #[cfg(feature = "zcash")]
+        let mut reconciliation = JoinSet::new();
+        #[cfg(feature = "zcash")]
+        for pool in self.managed_pools {
+            let stopped = stop.clone();
+            reconciliation.spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = stopped.cancelled() => break,
+                        result = pool.reconcile() => { if result.is_err() { tracing::debug!("background Base reconciliation unavailable"); } }
+                    }
+                    tokio::select! { _ = stopped.cancelled()=>break, _ = tokio::time::sleep(Duration::from_secs(5))=>{} }
+                }
+            });
+        }
         let mut tasks = JoinSet::new();
         for (name, listener, app) in self.listeners {
             let stopped = stop.clone();
@@ -727,6 +747,8 @@ impl RunningDeployment {
                 "shutdown deadline exceeded; pending paid calls may have unknown outcomes"
             ));
         }
+        #[cfg(feature = "zcash")]
+        while reconciliation.join_next().await.is_some() {}
         #[cfg(feature = "zcash")]
         if let Some(task) = funding_task {
             // Drop the worker's StoreHandle before waiting for treasury close.

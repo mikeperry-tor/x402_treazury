@@ -1,4 +1,5 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
+mod backup;
 pub mod funding;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
@@ -829,9 +830,14 @@ fn allocate(
         &secret,
     )?;
     db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,?2,?3,?4,?5,?6,'ALLOCATED')",params![id,pool,seq,signer.address().to_string(),encrypted,target])?;
+    let job = Uuid::new_v4().to_string();
     db.execute(
         "INSERT INTO funding_jobs VALUES (?1,?2,'QUEUED',?3)",
-        params![Uuid::new_v4().to_string(), id, target],
+        params![job, id, target],
+    )?;
+    db.execute(
+        "INSERT INTO funding_progress(job_id,operation_id,phase) VALUES (?1,?2,'\"ALLOCATED\"')",
+        params![job, Uuid::new_v4().to_string()],
     )?;
     Ok(())
 }
@@ -1091,6 +1097,19 @@ impl Store {
             anchor,
         })
     }
+    /// Chain-only reconciliation. Never admits a payment or promotes a payer.
+    pub fn reconcile_pool(&mut self, pool: &str, view: super::base::ChainView) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let bootstrapped =
+            tx.query_row("SELECT bootstrapped FROM pools WHERE id=?1", [pool], |r| {
+                r.get(0)
+            })?;
+        apply_chain_view(&tx, pool, bootstrapped, &view)?;
+        tx.commit()?;
+        Ok(())
+    }
     pub(crate) fn admit(
         &mut self,
         pool: &str,
@@ -1113,47 +1132,7 @@ impl Store {
             cost <= amount(&target)?,
             AdmissionError::PriceLimit("payment exceeds deposit_size")
         );
-        for id in view.released {
-            tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
-        }
-        let rows: Vec<(String, String, String)> = tx
-            .prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
-            .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        for (id, role, target) in &rows {
-            let Some(balance) = view.balances.get(id) else {
-                ensure!(role == "RETIRED", "incomplete Base view");
-                continue;
-            };
-            tx.execute(
-                "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
-                params![
-                    balance.to_string(),
-                    view.anchor.hash,
-                    i64::try_from(view.anchor.height)?,
-                    id
-                ],
-            )?;
-            if role == "ALLOCATED" && *balance >= amount(target)? {
-                tx.execute(
-                    "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
-                    [id],
-                )?;
-                if bootstrapped {
-                    tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [id])?;
-                }
-            }
-        }
-        if !bootstrapped
-            && rows.len() == 2
-            && rows
-                .iter()
-                .all(|(id, _, target)| view.balances[id] >= amount(target).unwrap_or(U256::MAX))
-        {
-            tx.execute("UPDATE wallets SET role=CASE sequence WHEN 0 THEN 'ACTIVE' ELSE 'READY' END WHERE pool_id=?1",[pool])?;
-            tx.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [pool])?;
-        }
-        tx.execute("INSERT INTO payment_anchors VALUES (?1,?2,?3) ON CONFLICT(pool_id) DO UPDATE SET height=excluded.height,hash=excluded.hash",params![pool,i64::try_from(view.anchor.height)?,view.anchor.hash])?;
+        apply_chain_view(&tx, pool, bootstrapped, &view)?;
         // Commit evidence even when not ready; payment failures must not lose reconciliation.
         let active: Option<String> = tx
             .query_row(
@@ -1321,4 +1300,54 @@ impl Store {
         ensure!(self.db.execute("UPDATE treasury_operations SET submission=?1 WHERE id=?2 AND attempts=?3 AND submission='BROADCAST_REQUESTED'", params![if accepted {"BROADCAST"} else {"UNKNOWN"},id,attempt])? == 1, "submission_attempt_conflict");
         Ok(())
     }
+}
+
+fn apply_chain_view(
+    tx: &Connection,
+    pool: &str,
+    bootstrapped: bool,
+    view: &super::base::ChainView,
+) -> Result<()> {
+    for id in &view.released {
+        tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
+    }
+    let rows: Vec<(String, String, String)> = tx
+        .prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
+        .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (id, role, target) in &rows {
+        let Some(balance) = view.balances.get(id) else {
+            ensure!(role == "RETIRED", "incomplete Base view");
+            continue;
+        };
+        tx.execute(
+            "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
+            params![
+                balance.to_string(),
+                view.anchor.hash,
+                i64::try_from(view.anchor.height)?,
+                id
+            ],
+        )?;
+        if role == "ALLOCATED" && *balance >= amount(target)? {
+            tx.execute(
+                "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
+                [id],
+            )?;
+            if bootstrapped {
+                tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [id])?;
+            }
+        }
+    }
+    if !bootstrapped
+        && rows.len() == 2
+        && rows
+            .iter()
+            .all(|(id, _, target)| view.balances[id] >= amount(target).unwrap_or(U256::MAX))
+    {
+        tx.execute("UPDATE wallets SET role=CASE sequence WHEN 0 THEN 'ACTIVE' ELSE 'READY' END WHERE pool_id=?1",[pool])?;
+        tx.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [pool])?;
+    }
+    tx.execute("INSERT INTO payment_anchors VALUES (?1,?2,?3) ON CONFLICT(pool_id) DO UPDATE SET height=excluded.height,hash=excluded.hash",params![pool,i64::try_from(view.anchor.height)?,view.anchor.hash])?;
+    Ok(())
 }

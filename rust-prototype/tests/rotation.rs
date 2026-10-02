@@ -482,3 +482,42 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
     }
     assert_eq!(s.status().unwrap().funding_jobs.len(), 4);
 }
+
+#[test]
+fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let id = s.id().to_owned();
+    let pool = s.ensure_pool("a", "5").unwrap();
+    let jobs = s.funding_jobs().unwrap();
+    s.save_funding_quote(&jobs[0].id, b"bound-quote").unwrap();
+    s.reserve("source", Some(&pool), 1, 100, 1000).unwrap();
+    s.prepare("source", 1, b"prepared-snapshot", b"durable-signed-bytes")
+        .unwrap();
+    let original = serde_json::to_value(s.status().unwrap()).unwrap();
+    let secret = s.wallet_secret(&pool, &jobs[0].wallet_id).unwrap();
+    let backup = dir.path().join("backup");
+    s.backup(&backup).unwrap();
+    assert!(s.backup(&backup).is_err());
+    let restored = Store::open(&backup, &backup.join("key"), &id).unwrap();
+    assert_eq!(
+        serde_json::to_value(restored.status().unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(
+        restored
+            .wallet_secret(&pool, &jobs[0].wallet_id)
+            .unwrap()
+            .as_slice(),
+        secret.as_slice()
+    );
+    assert_eq!(
+        restored.prepared_bytes("source").unwrap().as_slice(),
+        b"durable-signed-bytes"
+    );
+    assert_eq!(
+        restored.funding_quote(&jobs[0].id).unwrap().as_slice(),
+        b"bound-quote"
+    );
+    assert!(backup.join("backup.json").is_file());
+}

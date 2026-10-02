@@ -103,8 +103,10 @@ local fake Base RPC and seller services. Funding jobs execute through `rotation/
 credit. Refund/partial-deposit outcomes remain conservative recovery states.
 The embedded treasury implements sync, calculate-only Zcash transaction preparation,
 explicit saved-byte submission and confirmation reconciliation. Payment
-reconciliation is on demand and a changed confirmed anchor blocks admission
-until explicit recovery; add background reconciliation and reorg recovery.
+reconciliation runs on demand and every five seconds in the background. A changed
+confirmed anchor blocks admission until explicit recovery. Consistent offline
+backups include the database, encryption key and completion manifest. Explicit
+reorg recovery remains required.
 The opt-in `zcash-testutils` suite prepares a deposit from synthetic Orchard notes,
 verifies its proof, and checks exact-byte encrypted restart recovery using public
 test keys. Local gRPC fixtures cover sync and submission, including changing-block

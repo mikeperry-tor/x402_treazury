@@ -12,6 +12,10 @@ daily_input_zec = "0.10"
 shield_max_fee_zec = "0.001"
 
 [funding]
+# Explicitly enable source spending only after qualifying authentication and recovery.
+auto_fund = false
+# near_api_key_env = "NEAR_PARTNER_KEY"
+# near_user_session_env = "NEAR_USER_SESSION"
 base_rpc_url_env = "BASE_RPC_URL"
 base_confirmations = 12
 base_max_block_age_seconds = 120

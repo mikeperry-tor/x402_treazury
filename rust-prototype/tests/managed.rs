@@ -681,3 +681,42 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
     drop(client);
     h.close().await;
 }
+
+#[tokio::test]
+async fn background_reconciliation_releases_confirmed_payment_without_rotating_or_signing() {
+    let h = Harness::new().await;
+    h.client.execute(h.route()).await.unwrap();
+    let address = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
+        .address
+        .clone();
+    h.f.used.store(true, Ordering::SeqCst);
+    h.f.balances.lock().unwrap().insert(address, 0);
+    let manager = ManagedPool::new(
+        h.store.clone(),
+        h.pool.clone(),
+        BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
+        "5",
+        SpendPolicy::dollars("none").unwrap(),
+        2,
+    )
+    .unwrap();
+    manager.reconcile().await.unwrap();
+    let state = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(state.pools[0].generation, 0);
+    assert_eq!(state.pools[0].addresses.len(), 2);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let unresolved: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state!='RESOLVED'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved, 0);
+    h.f.reorg.store(true, Ordering::SeqCst);
+    assert!(manager.reconcile().await.is_err());
+    drop(db);
+    drop(manager);
+    h.close().await;
+}

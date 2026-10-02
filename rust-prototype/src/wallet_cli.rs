@@ -12,6 +12,18 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Back up encrypted wallet, EVM keys, journals and encryption key offline.
+    Backup {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        treasury_id: String,
+        /// New owner-only directory; existing destinations are never overwritten.
+        #[arg(long)]
+        destination: PathBuf,
+    },
     /// Reconcile an existing durable transaction; never constructs a replacement.
     Reconcile {
         #[arg(long)]
@@ -76,6 +88,21 @@ pub async fn run() -> Result<()> {
             tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
                 .await??;
         println!("{}", serde_json::to_string_pretty(&status)?);
+        return Ok(());
+    }
+    if let Command::Backup {
+        state_dir,
+        key_file,
+        treasury_id,
+        destination,
+    } = args.command
+    {
+        tokio::task::spawn_blocking(move || {
+            let store = crate::rotation::store::Store::open(&state_dir, &key_file, &treasury_id)?;
+            store.backup(&destination)
+        })
+        .await??;
+        println!("{}", serde_json::json!({"backup_complete":true}));
         return Ok(());
     }
     #[cfg(not(feature = "zcash"))]
@@ -208,7 +235,7 @@ pub async fn run() -> Result<()> {
                 treasury.ensure_pool(name, deposit_size).await?;
                 treasury
             }
-            Command::Status { .. } => unreachable!(),
+            Command::Status { .. } | Command::Backup { .. } => unreachable!(),
         };
         println!(
             "{}",
