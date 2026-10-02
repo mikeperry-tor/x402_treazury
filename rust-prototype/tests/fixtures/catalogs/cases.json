@@ -1,0 +1,72 @@
+[
+  {
+    "name": "socialfetch",
+    "provider": "providers/socialfetch.toml",
+    "spec": "tests/fixtures/socialfetch_openapi.json"
+  },
+  {
+    "name": "pdl",
+    "provider": "providers/pdl.toml",
+    "spec": "tests/fixtures/pdl_openapi.json"
+  },
+  {
+    "name": "deepline",
+    "provider": "providers/deepline.toml",
+    "spec": "tests/fixtures/deepline_openapi.json"
+  },
+  {
+    "name": "kronos",
+    "provider": "providers/kronos.toml",
+    "spec": "tests/fixtures/kronos_openapi.json"
+  },
+  {
+    "name": "regimeshift",
+    "provider": "providers/regimeshift.toml",
+    "spec": "tests/fixtures/regimeshift_openapi.json"
+  },
+  {
+    "name": "agentfund",
+    "provider": "providers/agentfund.toml",
+    "spec": "tests/fixtures/agentfund_openapi.json"
+  },
+  {
+    "name": "otto",
+    "provider": "providers/otto.toml",
+    "spec": "tests/fixtures/otto_openapi.json"
+  },
+  {
+    "name": "lonestar",
+    "provider": "providers/lonestar.toml",
+    "spec": "tests/fixtures/lonestar_unified_openapi.json"
+  },
+  {
+    "name": "brazilayer",
+    "provider": "providers/brazilayer.toml",
+    "spec": "tests/fixtures/brazilayer_openapi.json"
+  },
+  {
+    "name": "genuinegood",
+    "provider": "providers/genuinegood.toml",
+    "spec": "tests/fixtures/genuinegood_openapi.json"
+  },
+  {
+    "name": "straits",
+    "provider": "providers/straits/provider.toml",
+    "spec": null
+  },
+  {
+    "name": "concordance",
+    "provider": "providers/concordance/provider.toml",
+    "spec": null
+  },
+  {
+    "name": "locus",
+    "provider": "providers/locus/provider.toml",
+    "spec": null
+  },
+  {
+    "name": "glassnode",
+    "provider": "providers/glassnode/provider.toml",
+    "spec": null
+  }
+]

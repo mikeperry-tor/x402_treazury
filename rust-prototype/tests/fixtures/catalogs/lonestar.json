@@ -1,0 +1,2330 @@
+[
+  {
+    "name": "lonestar_aero_pool",
+    "description": "Aerodrome (Base DEX) liquidity-pool APR, TVL and reward data. Pass ?pool=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/aero/pool",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "title": "Address"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_africa_pulse",
+    "description": "Sub-Saharan Africa macro and stress pulse across 12 economies. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/africa/pulse",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_agri_report",
+    "description": "Grain, softs and livestock commodity prices and momentum. Price: $0.03 per call (vendor spec).",
+    "method": "GET",
+    "path": "/agri/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_analyst_ratings",
+    "description": "Analyst consensus rating, price target, upside and recent upgrades/downgrades. Pass ?symbol=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/analyst/ratings",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "default": "AAPL",
+          "title": "Symbol"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_asia_pulse",
+    "description": "Asia-Pacific macro and stress pulse across 12 economies. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/asia/pulse",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_bundle_info",
+    "description": "Info Free — no payment required (vendor spec).",
+    "method": "GET",
+    "path": "/bundle/info",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_bundle_scan",
+    "description": "Detects bundled buys and sniper wallets at token launch. Pass ?address=. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/bundle/scan",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "title": "Address",
+          "description": "Token contract address on Base"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_capitol_signal",
+    "description": "Aggregate congressional buy/sell signal (last 30d) Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/capitol/signal",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_capitol_trades",
+    "description": "US Senate and House stock-trade disclosures plus a 30-day buy/sell signal. Pass ?symbol= or /signal. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/capitol/trades",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "title": "Symbol"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 40,
+          "title": "Limit"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_cascade_cascade",
+    "description": "Simulate cascade liquidations if a token drops by X percent. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/cascade/cascade",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "default": "ETH",
+          "title": "Token",
+          "description": "Collateral token (ETH, WBTC, wstETH, etc.)"
+        },
+        "drop_pct": {
+          "type": "number",
+          "default": 10.0,
+          "title": "Drop Pct",
+          "description": "Simulated price drop %"
+        },
+        "chain_id": {
+          "type": "integer",
+          "default": 1,
+          "title": "Chain Id",
+          "description": "Chain ID: 1=Ethereum, 8453=Base"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "token": "query",
+      "drop_pct": "query",
+      "chain_id": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_cascade_report",
+    "description": "Full market-by-market liquidation report for Morpho Blue. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/cascade/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "chain_id": {
+          "type": "integer",
+          "default": 1,
+          "title": "Chain Id",
+          "description": "Chain ID: 1=Ethereum, 8453=Base"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "chain_id": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_cascade_risk",
+    "description": "Cross-market systemic and contagion-cascade risk signal. /risk, /cascade. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/cascade/risk",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_chainscout_narrative",
+    "description": "Claude-written on-chain intel brief. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/chainscout/narrative",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_chainscout_report",
+    "description": "On-chain intel for any token, whales, trending, TVL, holders and narrative signals. Pass ?address=&chain=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/chainscout/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_chainscout_trending",
+    "description": "Trending tokens by volume and momentum. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/chainscout/trending",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_chainscout_tvl",
+    "description": "DeFi protocol TVL movements on Base. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/chainscout/tvl",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_chainscout_whales",
+    "description": "Large transfers on Base + Ethereum in last 24h. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/chainscout/whales",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_compute_report",
+    "description": "GPU and AI-compute pricing, availability and demand signal. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/compute/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_computeindex_index",
+    "description": "Energy cost per GPU-hour by US power region + regional basis Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/computeindex/index",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_conflict_conflict",
+    "description": "Per-country conflict and media-attention signal from GDELT. Pass ?country=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/conflict/conflict",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "country": {
+          "type": "string",
+          "title": "Country"
+        },
+        "q": {
+          "type": "string",
+          "title": "Q"
+        },
+        "nation": {
+          "type": "string",
+          "title": "Nation"
+        },
+        "location": {
+          "type": "string",
+          "title": "Location"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "country": "query",
+      "q": "query",
+      "nation": "query",
+      "location": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_consumer_consumer",
+    "description": "US retail-sales and consumer-demand signal. Census data. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/consumer/consumer",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_content_repurpose",
+    "description": "Turn a URL or article into repurposed social and blog content. POST /repurpose. Price: $0.15 per call (vendor spec).",
+    "method": "POST",
+    "path": "/content/repurpose",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL of the article, blog post, or report to repurpose"
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "professional",
+            "casual",
+            "witty"
+          ],
+          "default": "professional",
+          "description": "Tone for generated content"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "body",
+      "tone": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_contract_verify",
+    "description": "Fast safety check for any EVM contract, verified source, proxy, owner privileges and red flags. Pass ?address=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/contract/verify",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "title": "Address"
+        },
+        "chain": {
+          "type": "string",
+          "default": "eth",
+          "title": "Chain"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query",
+      "chain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_copperhead_audit",
+    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Price: $2.00 per call (vendor spec).",
+    "method": "POST",
+    "path": "/copperhead/audit",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "github_url": {
+          "title": "Github Url",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contract_name": {
+          "default": "Contract",
+          "title": "Contract Name",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "framework": {
+          "default": "",
+          "title": "Framework",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "source": "body",
+      "github_url": "body",
+      "contract_name": "body",
+      "framework": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_cot_cot",
+    "description": "CFTC Commitments-of-Traders futures positioning vs history (crude, gold, S&P, bonds, bitcoin). Pass ?market=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/cot/cot",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "market": {
+          "type": "string",
+          "description": "Futures market to read. Friendly names accepted: crude, gold, silver, copper, natgas, corn, wheat, soybeans, sugar, coffee, cattle, sp500, nasdaq, russell, vix, euro, yen, pound, cad, aud, dollar, bitcoin, ether, 10y, 5y, bonds, sofr. Aliases: commodity, symbol, m."
+        }
+      },
+      "required": [
+        "market"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "market": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_cottonmouth_audit",
+    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Price: $2.00 per call (vendor spec).",
+    "method": "POST",
+    "path": "/cottonmouth/audit",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "github_url": {
+          "title": "Github Url",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contract_name": {
+          "default": "Contract",
+          "title": "Contract Name",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "framework": {
+          "default": "",
+          "title": "Framework",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "source": "body",
+      "github_url": "body",
+      "contract_name": "body",
+      "framework": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_crownblock_history",
+    "description": "Historical commodity and refined product prices for a specific date (YYYY-MM-DD).\nSourced from EIA and FRED. Data available from early 1990s to present. Free — no payment required (vendor spec).",
+    "method": "GET",
+    "path": "/crownblock/history",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "title": "Date"
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "date": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_crownblock_region_name",
+    "description": "Single-region brief. Price: $1.00 per call (vendor spec).",
+    "method": "GET",
+    "path": "/crownblock/region/{name}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "name": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_crownblock_report",
+    "description": "Crude, natural gas and refined-product pricing, spreads and market signals. Price: $1.00 per call (vendor spec).",
+    "method": "GET",
+    "path": "/crownblock/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_cycle_cycle",
+    "description": "US inventory-to-production bullwhip and business-cycle signal. Census data. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/cycle/cycle",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_defi_risk",
+    "description": "DeFi protocol risk score plus live APY yields. Pass ?protocol=. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/defi/risk",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "title": "Protocol",
+          "description": "Protocol name or slug"
+        },
+        "address": {
+          "type": "string",
+          "default": "",
+          "title": "Address",
+          "description": "Optional contract address for GoPlus check"
+        },
+        "chain_id": {
+          "type": "string",
+          "default": "1",
+          "title": "Chain Id",
+          "description": "Chain ID for GoPlus (default: 1 = Ethereum)"
+        }
+      },
+      "required": [
+        "protocol"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "protocol": "query",
+      "address": "query",
+      "chain_id": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_defi_top_yields",
+    "description": "Cross-protocol risk-adjusted DeFi yield screener: ranks pools by REAL base APY (separated from reward/emission APY), flags yield traps, adds a 0-10 risk overlay. $0.10/query via x402.",
+    "method": "GET",
+    "path": "/defi/top-yields",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "type": "string",
+          "description": "Token symbol filter, e.g. USDC"
+        },
+        "chain": {
+          "type": "string",
+          "description": "Chain filter, e.g. Base, Ethereum, Arbitrum"
+        },
+        "stablecoin": {
+          "type": "string",
+          "description": "true = stablecoin pools only"
+        },
+        "min_tvl": {
+          "type": "number",
+          "description": "Minimum pool TVL in USD"
+        },
+        "category": {
+          "type": "string",
+          "description": "lending or lp"
+        },
+        "risk_max": {
+          "type": "integer",
+          "description": "Max risk score 0-10"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Result count (max 50)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "asset": "query",
+      "chain": "query",
+      "stablecoin": "query",
+      "min_tvl": "query",
+      "category": "query",
+      "risk_max": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_doc_convert",
+    "description": "Convert documents between formats. POST /convert. Price: $0.05 per call (vendor spec).",
+    "method": "POST",
+    "path": "/doc/convert",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL of the PDF to convert (provide url OR base64)"
+        },
+        "base64": {
+          "type": "string",
+          "description": "Base64-encoded PDF content (provide url OR base64)"
+        },
+        "summarize": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to include an AI summary"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "body",
+      "base64": "body",
+      "summarize": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_doc_report",
+    "description": "GET wrapper for AW compatibility. Pass ?url=<pdf_url> as query param. Free — no payment required (vendor spec).",
+    "method": "GET",
+    "path": "/doc/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "default": "",
+          "title": "Url"
+        },
+        "summarize": {
+          "type": "boolean",
+          "default": true,
+          "title": "Summarize"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "query",
+      "summarize": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_earnings_calendar",
+    "description": "Upcoming US earnings dates, estimates and surprises for any ticker. Pass ?ticker=. Price: $0.03 per call (vendor spec).",
+    "method": "GET",
+    "path": "/earnings/calendar",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tickers": {
+          "type": "string",
+          "title": "Tickers"
+        },
+        "days_soon": {
+          "type": "integer",
+          "default": 7,
+          "title": "Days Soon"
+        }
+      },
+      "required": [
+        "tickers"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "tickers": "query",
+      "days_soon": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_energy_energy",
+    "description": "US energy inventory catalyst signal (crude, gasoline, distillate and natural-gas builds/draws) plus the upcoming EIA report calendar, for trading or assessing energy around data releases. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/energy/energy",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "report": {
+          "type": "string",
+          "description": "Optional. Focus one report: crude (or oil/petroleum), gasoline, distillate (diesel), or natgas (natural gas). Omit for the full energy dashboard. Aliases: commodity, r."
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "report": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_equity_equity",
+    "description": "Fundamentals, valuation and a buy/sell/strong-buy signal with analyst price-target upside for any US stock or ETF. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/equity/equity",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "title": "Ticker"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_europe_pulse",
+    "description": "Europe macro and stress pulse across 12 economies. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/europe/pulse",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_floyd_hire",
+    "description": "Autonomous AI agent for research, web search and coding tasks. POST /hire with a task. Price: $0.50 per call (vendor spec).",
+    "method": "POST",
+    "path": "/floyd/hire",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "Description of the coding task for Floyd to complete"
+        },
+        "repo": {
+          "type": "string",
+          "description": "Optional GitHub repo URL for Floyd to work in"
+        },
+        "context": {
+          "type": "string",
+          "description": "Optional additional context or constraints"
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "task": "body",
+      "repo": "body",
+      "context": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_funding_extremes",
+    "description": "Top extreme rates — agent-optimized Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/funding/extremes",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_funding_rates",
+    "description": "Perpetual-futures funding rates, extremes and a positioning signal across exchanges. /rates, /extremes, /signal. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/funding/rates",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "title": "Asset",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "asset": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_funding_signal",
+    "description": "Signal only — ultra-lightweight Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/funding/signal",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_funds_funds",
+    "description": "Institutional 13F flow (accumulation/distribution), ownership percent and top holders. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/funds/funds",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Stock ticker to read institutional 13F flow for (e.g. AAPL, NVDA, GME). Aliases: symbol."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_geo_risk",
+    "description": "Per-country geopolitical risk signal from live media and event data. Pass ?country=. Price: $0.07 per call (vendor spec).",
+    "method": "GET",
+    "path": "/geo/risk",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "title": "Location",
+          "description": "Country or region"
+        },
+        "hours": {
+          "type": "integer",
+          "default": 24,
+          "title": "Hours",
+          "description": "News lookback hours (1-72)"
+        }
+      },
+      "required": [
+        "location"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "location": "query",
+      "hours": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_govedge_opportunities",
+    "description": "Fetch upcoming federal contract solicitations from SAM.gov. Price: $0.20 per call (vendor spec).",
+    "method": "GET",
+    "path": "/govedge/opportunities",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "keyword": {
+          "type": "string",
+          "title": "Keyword"
+        },
+        "naics": {
+          "type": "string",
+          "title": "Naics"
+        },
+        "set_aside": {
+          "type": "string",
+          "title": "Set Aside"
+        },
+        "days_back": {
+          "type": "integer",
+          "default": 7,
+          "title": "Days Back"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "keyword": "query",
+      "naics": "query",
+      "set_aside": "query",
+      "days_back": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_govedge_report",
+    "description": "US federal spending, awards and SAM.gov contract opportunities. /report and /opportunities. Price: $0.20 per call (vendor spec).",
+    "method": "GET",
+    "path": "/govedge/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "min_amount": {
+          "type": "number",
+          "default": 10000000,
+          "title": "Min Amount"
+        },
+        "days_back": {
+          "type": "integer",
+          "default": 7,
+          "title": "Days Back"
+        },
+        "agency": {
+          "type": "string",
+          "title": "Agency"
+        },
+        "naics": {
+          "type": "string",
+          "title": "Naics"
+        },
+        "ticker": {
+          "type": "string",
+          "title": "Ticker"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "min_amount": "query",
+      "days_back": "query",
+      "agency": "query",
+      "naics": "query",
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_grid_region_code",
+    "description": "Single region detail. Price: $0.03 per call (vendor spec).",
+    "method": "GET",
+    "path": "/grid/region/{code}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "title": "Code"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "code": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_grid_report",
+    "description": "US electricity grid demand, generation mix and stress signal. Price: $0.03 per call (vendor spec).",
+    "method": "GET",
+    "path": "/grid/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_hazard_hazard",
+    "description": "Natural-hazard and disaster alert signal (quake, cyclone, flood, volcano, wildfire) from GDACS/USGS. ?country= or global. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/hazard/hazard",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "country": {
+          "type": "string",
+          "description": "Optional. Scope to a country (name or ISO/keyword, e.g. Japan, Philippines). Omit for the global hazard signal. Aliases: nation, q, iso."
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "country": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_help",
+    "description": "Extended documentation for all lonestar_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other lonestar_* tools when unsure how to use them.",
+    "method": "GET",
+    "path": "https://lonestaroracle.xyz/llms.txt",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://lonestaroracle.xyz/llms.txt"
+  },
+  {
+    "name": "lonestar_insider_trades",
+    "description": "Recent SEC Form 4 insider buys and sells for any US ticker. Pass ?ticker=. Price: $0.03 per call (vendor spec).",
+    "method": "GET",
+    "path": "/insider/trades",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "title": "Ticker"
+        },
+        "days": {
+          "default": 90,
+          "title": "Days",
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query",
+      "days": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_kya_check",
+    "description": "KYA / counterparty check for a wallet (and optional name) with a signed verdict Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/kya/check",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "wallet": {
+          "type": "string",
+          "title": "Wallet",
+          "description": "Agent/counterparty wallet address (EVM 0x... or any OFAC-listed crypto address)"
+        },
+        "name": {
+          "type": "string",
+          "title": "Name",
+          "description": "Optional agent, company or person name to screen against OFAC"
+        },
+        "chain": {
+          "type": "string",
+          "default": "base",
+          "title": "Chain",
+          "description": "EVM chain for on-chain risk: base, eth, arb, poly, bsc"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "wallet": "query",
+      "name": "query",
+      "chain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_kya_signer",
+    "description": "Signer Free — no payment required (vendor spec).",
+    "method": "GET",
+    "path": "/kya/signer",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_labor_labor",
+    "description": "US jobs, unemployment, wages and JOLTS signal. BLS data. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/labor/labor",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_latam_report",
+    "description": "Latin America macro and country-risk pulse. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/latam/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_launches_scan",
+    "description": "Newly launched tokens with liquidity, volume and early-risk screen. Pass ?chain=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/launches/scan",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "chain": {
+          "type": "string",
+          "default": "base",
+          "title": "Chain"
+        },
+        "hours": {
+          "type": "integer",
+          "default": 24,
+          "title": "Hours"
+        },
+        "min_liquidity": {
+          "type": "number",
+          "default": 500,
+          "title": "Min Liquidity"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20,
+          "title": "Limit"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "chain": "query",
+      "hours": "query",
+      "min_liquidity": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_lease_report",
+    "description": "Offshore Gulf of Mexico oil and gas lease-sale and block data. Price: $0.15 per call (vendor spec).",
+    "method": "GET",
+    "path": "/lease/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string",
+          "title": "Area"
+        },
+        "status": {
+          "type": "string",
+          "title": "Status"
+        },
+        "lease_number": {
+          "type": "string",
+          "title": "Lease Number"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20,
+          "title": "Limit"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "area": "query",
+      "status": "query",
+      "lease_number": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_liq_biggest",
+    "description": "Top liquidation events across all assets Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/liq/biggest",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_liq_liquidations",
+    "description": "Recent liquidations, biggest events and a squeeze signal across crypto perps. /liquidations, /biggest, /signal. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/liq/liquidations",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_liq_signal",
+    "description": "Signal + totals only — ultra-lightweight Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/liq/signal",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_liquidity_liquidity",
+    "description": "US net liquidity (Fed balance sheet minus RRP minus TGA) with trend and regime. FRED data. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/liquidity/liquidity",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_macro_macro",
+    "description": "US macro snapshot, CPI/inflation, rates, growth and unemployment with a regime signal. FRED data. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/macro/macro",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_mena_pulse",
+    "description": "MENA macro and geopolitical stress pulse, FX pegs, Brent and gas. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/mena/pulse",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_metals_report",
+    "description": "Copper, aluminum, steel and industrial-metals pricing and momentum. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/metals/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_minerals_minerals",
+    "description": "Critical-minerals supply concentration and US import-reliance. Pass ?commodity=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/minerals/minerals",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "commodity": {
+          "type": "string",
+          "title": "Commodity"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "commodity": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_news_news",
+    "description": "Aggregated bullish/bearish news sentiment signal for any crypto asset or ticker. Pass ?symbol=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/news/news",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "title": "Query"
+        },
+        "source": {
+          "type": "string",
+          "default": "both",
+          "title": "Source"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "query",
+      "source": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_oi_extremes",
+    "description": "Top movers by OI delta — agent-optimized Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/oi/extremes",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_oi_oi",
+    "description": "Futures open-interest levels, extremes and a positioning signal. /oi, /extremes, /signal. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/oi/oi",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_oi_signal",
+    "description": "Signal only — ultra-lightweight Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/oi/signal",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_options_flow",
+    "description": "Options flow, implied-volatility skew and put/call ratio signal for US stocks and crypto (BTC/ETH/SOL). Pass ?ticker=. Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/options/flow",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "title": "Ticker"
+        },
+        "expiry": {
+          "type": "string",
+          "default": "nearest",
+          "title": "Expiry"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query",
+      "expiry": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_pharma_catalysts",
+    "description": "Upcoming Phase 2/3 clinical-trial readouts and catalyst signal for biotech tickers. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/pharma/catalysts",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Biotech stock ticker (e.g. SRPT, VRTX, MRNA). Resolved to a company via yfinance. Alias: symbol."
+        },
+        "company": {
+          "type": "string",
+          "description": "Company name instead of a ticker (e.g. 'Vertex Pharmaceuticals'). Alias: name."
+        },
+        "days": {
+          "type": "integer",
+          "default": 365,
+          "description": "Look-ahead horizon in days (default 365, max 1095). Alias: horizon."
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query",
+      "company": "query",
+      "days": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_pnl_pnl",
+    "description": "Realized and unrealized trading PnL for any wallet. Pass ?wallet=. Price: $0.20 per call (vendor spec).",
+    "method": "GET",
+    "path": "/pnl/pnl",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "wallet": {
+          "type": "string",
+          "title": "Wallet",
+          "description": "Base wallet address (0x...)"
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365,
+          "default": 30,
+          "title": "Days",
+          "description": "Lookback period in days"
+        }
+      },
+      "required": [
+        "wallet"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "wallet": "query",
+      "days": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_portfolio_analyze",
+    "description": "Risk, volatility, drawdown and correlation breakdown for a portfolio of tickers. Pass ?tickers=. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/portfolio/analyze",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tickers": {
+          "type": "string",
+          "title": "Tickers"
+        },
+        "weights": {
+          "title": "Weights",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "tickers"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "tickers": "query",
+      "weights": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_rates_rates",
+    "description": "US bond-market signal: yield curve (2s10s / 3m10y with inversion & recession flag), IG/HY credit spreads scored vs 1-year history, real yields and inflation breakevens, and a combined rates regime. FRED data. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/rates/rates",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_rattler_audit",
+    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Price: $2.00 per call (vendor spec).",
+    "method": "POST",
+    "path": "/rattler/audit",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "github_url": {
+          "title": "Github Url",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contract_name": {
+          "default": "Contract",
+          "title": "Contract Name",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "source": "body",
+      "github_url": "body",
+      "contract_name": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_rattler_fix",
+    "description": "Generate a patch fix for a specific bug reported in a GitHub issue.\nFetches the contract, runs Slither, and outputs a patch-format fix ready for a PR. Free — no payment required (vendor spec).",
+    "method": "POST",
+    "path": "/rattler/fix",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "issue_url": {
+          "type": "string",
+          "title": "Issue Url"
+        },
+        "repo_url": {
+          "title": "Repo Url",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contract_file": {
+          "title": "Contract File",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "issue_url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "issue_url": "body",
+      "repo_url": "body",
+      "contract_file": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "lonestar_read_read",
+    "description": "Read Price: $0.005 per call (vendor spec).",
+    "method": "GET",
+    "path": "/read/read",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "title": "Url",
+          "description": "URL to read"
+        },
+        "link": {
+          "type": "string",
+          "title": "Link",
+          "description": "Alias for url"
+        },
+        "u": {
+          "type": "string",
+          "title": "U",
+          "description": "Alias for url"
+        },
+        "uri": {
+          "type": "string",
+          "title": "Uri",
+          "description": "Alias for url"
+        },
+        "page": {
+          "type": "string",
+          "title": "Page",
+          "description": "Alias for url"
+        },
+        "q": {
+          "type": "string",
+          "title": "Q",
+          "description": "Alias for url"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "query",
+      "link": "query",
+      "u": "query",
+      "uri": "query",
+      "page": "query",
+      "q": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_realestate_report",
+    "description": "US housing, mortgage rates and home-price momentum signal. Price: $0.03 per call (vendor spec).",
+    "method": "GET",
+    "path": "/realestate/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_rwa_rwa_risk",
+    "description": "Risk scoring for tokenized real-world-asset vaults and protocols. Pass ?vault= or ?protocol=. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/rwa/rwa-risk",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "vault": {
+          "type": "string",
+          "title": "Vault"
+        },
+        "protocol": {
+          "type": "string",
+          "title": "Protocol"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "vault": "query",
+      "protocol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_sanctions_screen",
+    "description": "OFAC SDN sanctions screening by name, entity or wallet. Pass ?name= or ?wallet=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/sanctions/screen",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "entity": {
+          "type": "string",
+          "title": "Entity"
+        },
+        "wallet": {
+          "type": "string",
+          "title": "Wallet"
+        },
+        "q": {
+          "type": "string",
+          "title": "Q"
+        },
+        "query": {
+          "type": "string",
+          "title": "Query"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "name": "query",
+      "entity": "query",
+      "wallet": "query",
+      "q": "query",
+      "query": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_smartmoney_smartmoney",
+    "description": "One call returns the composite smart-money signal on a stock: SEC Form 4 insider buys, congressional STOCK Act disclosures, 13F institutional flow, and Wall Street analyst consensus, each reduced to bullish/neutral/bearish, plus a conviction count. Pass ?ticker=SYMBOL. Price: $0.10 per call (vendor spec).",
+    "method": "GET",
+    "path": "/smartmoney/smartmoney",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "title": "Ticker",
+          "description": "Stock ticker symbol, e.g. NVDA, AAPL, TSLA"
+        },
+        "symbol": {
+          "type": "string",
+          "title": "Symbol",
+          "description": "Alias for ticker"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_sovereign_sovereign",
+    "description": "Per-country sovereign economic and default-risk score (IMF plus World Bank). Pass ?country=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/sovereign/sovereign",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "country": {
+          "type": "string",
+          "description": "Country name (e.g. Argentina, Nigeria, Japan) or ISO3 code (ARG). Aliases accepted: nation, q, iso, code."
+        }
+      },
+      "required": [
+        "country"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "country": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_spark_power",
+    "description": "Wholesale US power prices, volatility and battery-arbitrage signal (CAISO/ERCOT), real-time and day-ahead $/MWh. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/spark/power",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_squeeze_squeeze",
+    "description": "Short-squeeze setup signal from short-percent-float, days-to-cover and momentum. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/squeeze/squeeze",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Stock ticker to screen for squeeze risk (e.g. GME, BYND, CVNA). Aliases: symbol."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_stable_pulse",
+    "description": "Stablecoin peg, reserves and depeg-risk monitor across major stables. /pulse, /symbol/{sym}. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/stable/pulse",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_stable_risk_summary",
+    "description": "Risk Summary Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/stable/risk-summary",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_stable_symbol_symbol",
+    "description": "Symbol Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/stable/symbol/{symbol}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "title": "Symbol"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_stake_report",
+    "description": "Live staking yields and validator data for major proof-of-stake assets (ETH/SOL/DOT/AVAX). Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/stake/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "title": "Symbol"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_supply_report",
+    "description": "Global supply-chain pressure, freight and logistics stress signal. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/supply/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "lonestar_ta_analyze",
+    "description": "Full technical analysis report for any ticker. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/ta/analyze",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "default": "BTC-USD",
+          "title": "Symbol"
+        },
+        "timeframe": {
+          "type": "string",
+          "default": "1d",
+          "title": "Timeframe"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query",
+      "timeframe": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_ta_scan",
+    "description": "Technical-analysis scan, RSI, moving averages, trend and momentum signal for stocks or crypto. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/ta/scan",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "default": "BTC-USD",
+          "title": "Symbol"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_token_report",
+    "description": "Honeypot, ownership, liquidity and holder-concentration risk scan for any EVM or Solana token, returns a 0-10 risk score. Pass ?address=&chain=. Price: $0.15 per call (vendor spec).",
+    "method": "GET",
+    "path": "/token/report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "title": "Address"
+        },
+        "chain": {
+          "type": "string",
+          "default": "eth",
+          "title": "Chain"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query",
+      "chain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_trade_trade",
+    "description": "International trade-flow and tariff data by commodity or HS code. Pass ?category=. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/trade/trade",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "title": "Category"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "category": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_wallet_score",
+    "description": "Risk score and behavioral profile for any EVM wallet, exposure, age and activity. Pass ?address=. Price: $0.15 per call (vendor spec).",
+    "method": "GET",
+    "path": "/wallet/score",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "title": "Address"
+        },
+        "chain": {
+          "type": "string",
+          "default": "eth",
+          "title": "Chain"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query",
+      "chain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_wealth_analyze",
+    "description": "Wealth allocation and diversification analysis across asset classes. Price: $0.25 per call (vendor spec).",
+    "method": "GET",
+    "path": "/wealth/analyze",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "wallet": {
+          "type": "string",
+          "title": "Wallet"
+        },
+        "tickers": {
+          "type": "string",
+          "title": "Tickers"
+        },
+        "contracts": {
+          "type": "string",
+          "title": "Contracts"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "wallet": "query",
+      "tickers": "query",
+      "contracts": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_weather_forecast",
+    "description": "Seven-model consensus temperature and precipitation forecast for any location. Pass ?location=. Price: $0.02 per call (vendor spec).",
+    "method": "GET",
+    "path": "/weather/forecast",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string",
+          "title": "City"
+        },
+        "date": {
+          "type": "string",
+          "title": "Date"
+        },
+        "threshold": {
+          "type": "number",
+          "title": "Threshold"
+        },
+        "direction": {
+          "type": "string",
+          "default": "greater",
+          "title": "Direction"
+        }
+      },
+      "required": [
+        "city",
+        "date"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "city": "query",
+      "date": "query",
+      "threshold": "query",
+      "direction": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "lonestar_whale_whales",
+    "description": "Large whale transactions and accumulation/distribution flow for tokens. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/whale/whales",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "chain": {
+          "type": "string",
+          "default": "base",
+          "title": "Chain",
+          "description": "base or eth"
+        },
+        "min_usd": {
+          "type": "number",
+          "default": 100000,
+          "title": "Min Usd",
+          "description": "Minimum USD value"
+        },
+        "hours": {
+          "type": "integer",
+          "default": 1,
+          "title": "Hours",
+          "description": "Lookback hours (1-24)"
+        },
+        "type": {
+          "type": "string",
+          "default": "all",
+          "title": "Type",
+          "description": "token | native | all"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20,
+          "title": "Limit",
+          "description": "Max results"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "chain": "query",
+      "min_usd": "query",
+      "hours": "query",
+      "type": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  }
+]

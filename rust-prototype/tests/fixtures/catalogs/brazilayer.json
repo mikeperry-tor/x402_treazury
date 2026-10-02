@@ -1,0 +1,1017 @@
+[
+  {
+    "name": "brazilayer_bcb_amostra",
+    "description": "Free — no payment required. Free sample of the Central Bank check response",
+    "method": "GET",
+    "path": "/v1/bcb/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_bcb_instituicao_cnpj",
+    "description": "Central Bank authorization check + verified domains ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/bcb/instituicao/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cadeias_amostra",
+    "description": "Free — no payment required. Free sample of a full causal chain",
+    "method": "GET",
+    "path": "/v1/cadeias/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cadeias_cafe_kc",
+    "description": "Causal chain — Arabica coffee: dry days in the Minas belt lead yield and KC price ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cadeias/cafe_kc",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cadeias_capital_br",
+    "description": "Causal chain — Brazilian capital flight: the USDT premium over PTAX leads FX pressure ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cadeias/capital_br",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cadeias_energia_br",
+    "description": "Causal chain — Brazilian power risk: rainfall leads reservoirs, thermal dispatch and tariff ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cadeias/energia_br",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cadeias_soja_zs",
+    "description": "Causal chain — soybeans: consecutive dry days in the Mato Grosso belt lead yield and shipped volume ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cadeias/soja_zs",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_amostra",
+    "description": "Free — no payment required. Free full sample (format of /v1/empresa/{cnpj}/completo) for one fixed CNPJ",
+    "method": "GET",
+    "path": "/v1/cnpj/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_busca",
+    "description": "Search companies ($0.01 via x402). At least one filter required. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cnpj/busca",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "nome": {
+          "type": "string",
+          "description": "Full-text on legal and trade names (Portuguese, accent-insensitive). Example: padaria."
+        },
+        "uf": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2}$",
+          "description": "2-letter state code"
+        },
+        "municipio": {
+          "type": "string",
+          "pattern": "^\\d{4}$",
+          "description": "4-digit RFB city code"
+        },
+        "cnae": {
+          "type": "string",
+          "pattern": "^\\d{7}$",
+          "description": "7-digit CNAE activity code"
+        },
+        "porte": {
+          "type": "string",
+          "enum": [
+            "micro_empresa",
+            "pequeno_porte",
+            "demais",
+            "nao_informado"
+          ]
+        },
+        "situacao": {
+          "type": "string",
+          "enum": [
+            "ativa",
+            "baixada",
+            "suspensa",
+            "inapta",
+            "nula"
+          ],
+          "default": "ativa"
+        },
+        "pagina": {
+          "type": "integer",
+          "default": 1
+        },
+        "por_pagina": {
+          "type": "integer",
+          "maximum": 50,
+          "default": 20
+        }
+      }
+    },
+    "param_routes": {
+      "nome": "query",
+      "uf": "query",
+      "municipio": "query",
+      "cnae": "query",
+      "porte": "query",
+      "situacao": "query",
+      "pagina": "query",
+      "por_pagina": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_empresa_cnpj",
+    "description": "Company registration data ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cnpj/empresa/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_empresa_cnpj_completo",
+    "description": "Bundle: registration + partners + branches ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cnpj/empresa/{cnpj}/completo",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_empresa_cnpj_socios",
+    "description": "Partners/shareholders of a company ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cnpj/empresa/{cnpj}/socios",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_situacao_cnpj",
+    "description": "Does the CNPJ exist and is it active ($0.001 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cnpj/situacao/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_cnpj_socio_busca",
+    "description": "Reverse lookup: companies where a person/entity is partner ($0.02 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/cnpj/socio/busca",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "nome": {
+          "type": "string",
+          "minLength": 3,
+          "description": "Person or entity name (full-text, accent-insensitive); at least 3 characters."
+        },
+        "pagina": {
+          "type": "integer",
+          "default": 1
+        },
+        "por_pagina": {
+          "type": "integer",
+          "maximum": 50,
+          "default": 20
+        }
+      },
+      "required": [
+        "nome"
+      ]
+    },
+    "param_routes": {
+      "nome": "query",
+      "pagina": "query",
+      "por_pagina": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_amostra",
+    "description": "Free — no payment required. Free sample of the commodity signals dataset",
+    "method": "GET",
+    "path": "/v1/commodities/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_briefing",
+    "description": "Daily AI-synthesized Brazil Commodity Briefing in English ($0.10 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/commodities/briefing",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_clima",
+    "description": "Crop-weather stress per Brazilian producing belt — rain, drought, frost risk ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/commodities/clima",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_exportacoes",
+    "description": "Monthly Brazilian commodity exports with YoY change ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/commodities/exportacoes",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_fogo",
+    "description": "Daily satellite fire hotspots by biome and state, with drought proxy ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/commodities/fogo",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_hidrologia",
+    "description": "Stored hydro energy (EAR) by grid subsystem, daily ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/commodities/hidrologia",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_commodities_pacote",
+    "description": "All five commodity signals in one call, 47% cheaper than one by one ($0.06 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/commodities/pacote",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_desmatamento_amostra",
+    "description": "Free — no payment required. Free sample of the deforestation dataset",
+    "method": "GET",
+    "path": "/v1/desmatamento/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_desmatamento_fornecedor_cnpj",
+    "description": "Supplier origin risk — CNPJ to its municipality's deforestation record ($0.02 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/desmatamento/fornecedor/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_desmatamento_municipio_ibge",
+    "description": "Deforestation profile of a Brazilian municipality since the EUDR cutoff ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/desmatamento/municipio/{ibge}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ibge": {
+          "type": "string",
+          "description": "IBGE code, 7 digits"
+        }
+      },
+      "required": [
+        "ibge"
+      ]
+    },
+    "param_routes": {
+      "ibge": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_desmatamento_ranking",
+    "description": "Where Brazilian deforestation is concentrated ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/desmatamento/ranking",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "por": {
+          "type": "string",
+          "enum": [
+            "municipio",
+            "uf"
+          ]
+        },
+        "dias": {
+          "type": "integer",
+          "maximum": 2000
+        },
+        "bioma": {
+          "type": "string",
+          "enum": [
+            "amazonia",
+            "cerrado"
+          ]
+        },
+        "limite": {
+          "type": "integer",
+          "maximum": 50
+        }
+      }
+    },
+    "param_routes": {
+      "por": "query",
+      "dias": "query",
+      "bioma": "query",
+      "limite": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_empresa_amostra",
+    "description": "Free — no payment required. Free sample of the enriched profile (a sanctioned company with public contracts)",
+    "method": "GET",
+    "path": "/v1/empresa/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_empresa_enriquecer_cnpj",
+    "description": "Full KYB profile in one call — registration + partners + branches + sanctions + Central Bank + public contracts ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/empresa/enriquecer/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_ferramentas",
+    "description": "Free — no payment required. Free tools index — no payment, no limit, no signup",
+    "method": "GET",
+    "path": "/v1/ferramentas",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_ferramentas_cnpj_valor",
+    "description": "Free — no payment required. Check digits, normalized 14-digit form, punctuated form, 8-digit root (economic group) and headquarters/branch flag. Pure arithmetic — no database lookup. Use it before paying: an invalid CNPJ never resolves in any paid endpoint.",
+    "method": "GET",
+    "path": "/v1/ferramentas/cnpj/{valor}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "valor": {
+          "type": "string",
+          "description": "CNPJ with or without punctuation"
+        }
+      },
+      "required": [
+        "valor"
+      ]
+    },
+    "param_routes": {
+      "valor": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_ferramentas_cpf_valor",
+    "description": "Free — no payment required. Check-digit validation only. Pure arithmetic: nothing is stored or looked up, and the response never echoes the full number — only the masked form.",
+    "method": "GET",
+    "path": "/v1/ferramentas/cpf/{valor}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "valor": {
+          "type": "string",
+          "description": "CPF with or without punctuation"
+        }
+      },
+      "required": [
+        "valor"
+      ]
+    },
+    "param_routes": {
+      "valor": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_fundos_amostra",
+    "description": "Free — no payment required. Free sample of the fund industry dataset",
+    "method": "GET",
+    "path": "/v1/fundos/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_fundos_carteira_cnpj",
+    "description": "A fund's equity holdings from the CVM portfolio disclosure (CDA) ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/fundos/carteira/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_fundos_consulta_cnpj",
+    "description": "Verify a Brazilian investment fund at the CVM registry ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/fundos/consulta/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_fundos_fluxos",
+    "description": "Daily net flows of Brazilian institutional money by fund class ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/fundos/fluxos",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "dias": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      }
+    },
+    "param_routes": {
+      "dias": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_fundos_movimentacoes",
+    "description": "What Brazilian funds are buying and selling per stock — institutional net flow ($0.02 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/fundos/movimentacoes",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "competencia": {
+          "type": "string",
+          "description": "month YYYY-MM (default latest consolidated)"
+        },
+        "limite": {
+          "type": "integer",
+          "maximum": 50
+        }
+      }
+    },
+    "param_routes": {
+      "competencia": "query",
+      "limite": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_fundos_ranking",
+    "description": "Rank Brazilian funds by net assets, inflows or shareholders ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/fundos/ranking",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "por": {
+          "type": "string",
+          "enum": [
+            "patrimonio",
+            "captacao",
+            "cotistas"
+          ]
+        },
+        "classificacao": {
+          "type": "string"
+        },
+        "dias": {
+          "type": "integer"
+        },
+        "limite": {
+          "type": "integer",
+          "maximum": 50
+        }
+      }
+    },
+    "param_routes": {
+      "por": "query",
+      "classificacao": "query",
+      "dias": "query",
+      "limite": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_health",
+    "description": "Free — no payment required. Service status and data reference month (free)",
+    "method": "GET",
+    "path": "/v1/health",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_integridade_amostra",
+    "description": "Free — no payment required. Free sample screening response (real sanctioned company)",
+    "method": "GET",
+    "path": "/v1/integridade/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_integridade_consulta_cnpj",
+    "description": "Screens a Brazilian company against CEIS, CNEP, CEPIM, the slave-labor\nblacklist (MTE) and leniency agreements. Legal-entity records only.\nSources updated daily. Price: $0.01 per call (vendor summary).",
+    "method": "GET",
+    "path": "/v1/integridade/consulta/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_licitacoes_abertas",
+    "description": "Open government tenders, live from PNCP ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/licitacoes/abertas",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "uf": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2}$"
+        },
+        "modalidade": {
+          "type": "string",
+          "default": "6",
+          "description": "PNCP modality code (6 = electronic auction)"
+        },
+        "pagina": {
+          "type": "integer",
+          "default": 1
+        },
+        "por_pagina": {
+          "type": "integer",
+          "maximum": 50,
+          "default": 20
+        }
+      }
+    },
+    "param_routes": {
+      "uf": "query",
+      "modalidade": "query",
+      "pagina": "query",
+      "por_pagina": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_licitacoes_amostra",
+    "description": "Free — no payment required. Free sample of the supplier-contracts response",
+    "method": "GET",
+    "path": "/v1/licitacoes/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_licitacoes_fornecedor_cnpj",
+    "description": "All public contracts won by a company, with summary stats ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/licitacoes/fornecedor/{cnpj}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "Brazilian company tax ID, 14 digits, with or without punctuation"
+        }
+      },
+      "required": [
+        "cnpj"
+      ]
+    },
+    "param_routes": {
+      "cnpj": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_mercado_amostra",
+    "description": "Free — no payment required. Free sample of the markets dataset (news + indicators)",
+    "method": "GET",
+    "path": "/v1/mercado/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_mercado_cambio",
+    "description": "Official PTAX + live BRL crypto premium, a capital-flow signal ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/mercado/cambio",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_mercado_indicadores",
+    "description": "Brazil macro snapshot — Selic, IPCA, PTAX, Focus survey medians ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/mercado/indicadores",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_mercado_noticias",
+    "description": "Brazilian financial & crypto news with sentiment, 15-min refresh ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/mercado/noticias",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tema": {
+          "type": "string",
+          "enum": [
+            "cripto",
+            "macro",
+            "cambio",
+            "regulacao",
+            "empresas"
+          ]
+        },
+        "sentimento": {
+          "type": "string",
+          "enum": [
+            "positivo",
+            "negativo",
+            "neutro"
+          ]
+        },
+        "relevancia_min": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "por_pagina": {
+          "type": "integer",
+          "maximum": 50
+        }
+      }
+    },
+    "param_routes": {
+      "tema": "query",
+      "sentimento": "query",
+      "relevancia_min": "query",
+      "por_pagina": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_mercado_pacote",
+    "description": "FX, macro indicators and headlines in one call ($0.004 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/mercado/pacote",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_pacotes_amostra",
+    "description": "Free — no payment required. Free list of the packs, what each contains and what it saves",
+    "method": "GET",
+    "path": "/v1/pacotes/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_pacotes_brasil",
+    "description": "Every parameter-free endpoint of the catalog (13) in one call, 43% cheaper ($0.09 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/pacotes/brasil",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_tributos_amostra",
+    "description": "Free — no payment required. Free sample of the tax reform dataset",
+    "method": "GET",
+    "path": "/v1/tributos/amostra",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_tributos_busca",
+    "description": "Search tax-reform annexes by product/service description ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/tributos/busca",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "termo": {
+          "type": "string",
+          "minLength": 3
+        },
+        "limite": {
+          "type": "integer",
+          "maximum": 30
+        }
+      },
+      "required": [
+        "termo"
+      ]
+    },
+    "param_routes": {
+      "termo": "query",
+      "limite": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_tributos_calendario",
+    "description": "Year-by-year Brazilian tax transition 2026-2033 ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/tributos/calendario",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "brazilayer_tributos_ncm_codigo",
+    "description": "IBS/CBS regime for a product by NCM, with legal basis ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "method": "GET",
+    "path": "/v1/tributos/ncm/{codigo}",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "description": "NCM, 4-8 digits"
+        },
+        "ano": {
+          "type": "string",
+          "description": "2026-2033"
+        }
+      },
+      "required": [
+        "codigo"
+      ]
+    },
+    "param_routes": {
+      "codigo": "path",
+      "ano": "query"
+    },
+    "has_body": false
+  }
+]

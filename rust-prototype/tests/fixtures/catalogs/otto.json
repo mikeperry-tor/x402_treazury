@@ -1,0 +1,2077 @@
+[
+  {
+    "name": "otto_13d_activist_watch",
+    "description": "Schedule 13D and 13G activist stake filings by ticker: every beneficial-ownership filing made about a US-listed issuer in the last 365 days, each validated against its own cover page so a company's outbound filings about OTHER companies are excluded. Returns 13D vs 13G counts, amendments, reporting-person names and EDGAR links. 13D is the schedule filed without a passive/qualified certification. Public-domain SEC EDGAR. $0.005 per call.",
+    "method": "GET",
+    "path": "/13d-activist-watch",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. NVDA, GME, MSTR)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_8k_material_events",
+    "description": "8-K filings by ticker — the item-coded SEC material-event feed: every Form 8-K a US-listed company filed in the last 90 days, tagged with the SEC's own numbered item codes and official titles (1.01 material agreement, 1.05 cybersecurity incident, 2.06 impairment, 3.01 delisting notice, 5.02 officer or director change, 8.01 other events). Returns the event date and the filing date separately, amendments labelled, and EDGAR links. Earnings-only filings are excluded and counted. Public-domain SEC EDGAR. $0.003 per call.",
+    "method": "GET",
+    "path": "/8k-material-events",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. NVDA, GME, MSTR)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_analyst_ratings",
+    "description": "Analyst consensus for a vendor-resolved equity: the latest buy/hold/sell distribution (strong buy · buy · hold · sell · strong sell counts, total, and a deterministic consensus label) plus up to six months of the same distribution so an agent can read the drift — is the street moving toward or away from the name. Vendor counts (Finnhub), label rule stated in the payload. No price targets and no per-analyst grade actions are served. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/analyst-ratings",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Vendor-supported equity ticker (e.g. AAPL, NVDA, AVGO); counts are the vendor's monthly recommendation trend."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_base_ecosystem_news",
+    "description": "Base-chain ecosystem news for Base-native agents, not the general crypto firehose. Up to 12 Base-scoped headlines from the last 48h, each with its own permalink and publication timestamp, screened against the general /crypto-news feed; `screen` states what was dropped. The AI topic read is optional and is withheld, never padded with macro, when there is no Base coverage. Refreshed hourly from cache; a read past the freshness window pulls inline. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/base-ecosystem-news",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_base_season",
+    "description": "Base social intelligence: a current Base sentiment summary + the quality-screened Base tokens (CoinGecko-listed, market-cap/age/liquidity gated) that are catching attention on Base — each row labelled with the basis it stands on (`rankedBy`: measured trusted-KOL signal, or the on-chain screen plus open engagement), with per-token KOL mention counts and verbatim quotes where a KOL is actually behind it. Every tweet and quote served is inside a published recency window (`evidenceWindowDays`), and the board publishes its own coverage arithmetic. Includes the overall crypto-KOL market-sentiment backdrop, with an explicit reason when that leg is unavailable. The social-intelligence wedge for Base — who is saying it, not who pumped. Served from a cached snapshot while fresh (≤1h) and regenerated on demand when a read finds it stale. Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/base-season",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_chain_status",
+    "description": "Base chain status from Otto's configured RPC: latest, safe, finalized and pending heads with validated mined block hashes; pending hash nullable and provisional. Public source ID, per-head observation times and retrieval window disclose non-atomic RPC reads. Base fee, congestion, finality lag and block age at observation, separate from cache staleness. Refreshed every minute. $0.001 per call.",
+    "method": "GET",
+    "path": "/chain-status",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_crypto_news",
+    "description": "Importance-ranked crypto headlines with per-article source links and publish times, plus a sentiment-scored market brief, from Otto's own news engine. Regenerated hourly over a 6h look-back (widened to 12/24h on a quiet window — the report states the period it covers); `meta` carries the snapshot's build time, its age in seconds and a fresh/stale verdict against that cadence. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/crypto-news",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_defi_analytics",
+    "description": "Where DeFi capital is flowing — TVL rankings, fastest-growing vs bleeding protocols, chain-by-chain breakdown, and per-protocol deep dives. Track capital rotation and protocol health. Powered by DefiLlama. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/defi-analytics",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "description": "Protocol slug (e.g., aave, lido, uniswap)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "protocol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_dividend_intel",
+    "description": "Cash-dividend intelligence for a vendor-resolved equity from licensed Tiingo end-of-day history: TTM dividend/share and yield against the latest close, latest dividend, split-adjusted complete-year growth, the last eight payments, split events, and a cut-detection checklist with explicit coverage. Payout ratio, forward ex-dates and declaration/record/payment dates are not served (not in the Tiingo feed). Cash values retain Tiingo payload units because the feed does not identify a currency. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/dividend-intel",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Vendor-supported equity or ETF ticker (e.g. AAPL, NVDA, TSLA, SPY); returned monetary values use vendor payload units and are not relabeled as USD."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_dns_lookup",
+    "description": "Resolve any domain in one call: A/AAAA, MX, NS, CNAME, SOA and TXT records, plus parsed email-auth posture — SPF policy, DMARC policy, and detected DKIM selectors. A drop-in nslookup/dig replacement for agents, resolved over DNS-over-HTTPS (DoH) with redundant resolvers and automatic failover. Keyless, pay-per-call, structured JSON. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/dns-lookup",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "Domain to resolve, e.g. github.com (subdomains allowed)"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "domain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_domain_age",
+    "description": "Domain age and registration intel from authoritative RDAP/WHOIS records: exact creation date, age in days and years, expiration date and days-until-expiry. The fast trust and risk signal agents use to vet a counterparty, link, or sender and to flag newly-registered or soon-to-expire domains. Returns structured JSON, keyless, pay-per-call. ccTLDs without RDAP return an uncharged 503. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/domain-age",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "Registrable domain to check, e.g. coinbase.com"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "domain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_domain_report",
+    "description": "One call returns the full domain profile for vetting, deliverability, or phishing/fraud checks: live DNS (A/MX/NS + record counts), RDAP/WHOIS registration (registrar, domain age, expiry, status, DNSSEC) and email authentication (SPF, DMARC policy, detected DKIM selectors) — plus a one-line summary. Bundles three lookups into one hourly-fresh read. Keyless, license-clean, pay-per-call. Price: $0.02 per call (vendor spec).",
+    "method": "GET",
+    "path": "/domain-report",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "Domain to profile, e.g. uniswap.org"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "domain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_earnings_calendar",
+    "description": "Earnings calendar and surprise history for a vendor-resolved equity: next report date/session with EPS and revenue estimates, latest reported EPS versus estimate, surprise percentage, and four-quarter history. Monetary estimates retain Finnhub payload units because the captured feed does not identify a currency. Event-window price drift is explicitly unavailable rather than inferred. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/earnings-calendar",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Vendor-supported equity or ETF ticker (e.g. AAPL, NVDA, TSLA, SPY); returned monetary values use vendor payload units and are not relabeled as USD."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_equity_intel",
+    "description": "SEC filings and company fundamentals by US-listed ticker: revenue, net income, YoY growth, margin, EPS, assets, liabilities, leverage and cash, plus recent 10-K, 10-Q and 8-K filing links and an AI analysis. SEC EDGAR source; missing issuer financials are disclosed. Fundamentals and filing research, not a stock-price feed. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/equity-intel",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US stock ticker, e.g. NVDA, AAPL, JPM"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_equity_news",
+    "description": "Latest company news for a vendor-resolved equity: licensed Finnhub headlines from the trailing seven days with publication time, source, and summary. Only articles that name the company are served — labelled `primary` when the headline names it, `mentioned` when only the summary does — so a symbol-tagged story about another company never fills the list. Redirect URLs withheld; no sentiment is fabricated. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/equity-news",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Vendor-supported equity or ETF ticker (e.g. AAPL, NVDA, TSLA, SPY); returned monetary values use vendor payload units and are not relabeled as USD."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_equity_smart_money",
+    "description": "Smart-money bundle for any US-listed company by ticker, in ONE call: SEC Form 4 insider activity (purchases vs sales — SEC codes P/S, net purchase-sale balance, who filed and their roles) PLUS trailing-twelve-month fundamentals (revenue + YoY, net income + YoY, diluted EPS) from XBRL filings. 4/A-amended insider windows withheld once detected (~1h lag): unpaid 503. Smart money, fundamentals. Public-domain SEC EDGAR. $0.006 per call.",
+    "method": "GET",
+    "path": "/equity-smart-money",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. NVDA, AAPL, TSLA)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_equity_smart_money_brief",
+    "description": "Smart-money filing brief for US-listed companies by ticker: SEC Form 4 insider purchases vs sales with filer roles, Schedule 13D/13G beneficial-ownership filing events (subject-validated; not 13F), fundamentals with one-time-item flags (TTM where available), regime-aware filings cadence — ONE AI read of the filing record. Observed filings only; buy/sell advice rejected at generation. Public-domain SEC EDGAR + AI. $0.10 per call.",
+    "method": "GET",
+    "path": "/equity-smart-money-brief",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. NVDA, AAPL, TSLA)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_feedback",
+    "description": "Feedback & Refunds (LIVE) — Otto's money-back guarantee. Paid a recommended Otto service (or a Full Auto charge) you didn't like? Send feedback with a >=50-word reason and Otto refunds the service fee + the Meta/router fee (or the whole Full Auto charge), capped $0.01 per transaction, up to 10x per wallet per day, only to the original payer, never more than you paid Otto. Covers Otto's OWN recommended services + Full Auto, not third-party CDP Bazaar picks (no receipt to verify). The $10/day figure is a global system budget, not your personal limit. Price: $0.001 per call (vendor spec).",
+    "method": "POST",
+    "path": "/feedback",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "original_tx_hash": {
+          "type": "string",
+          "description": "The 0x… payment tx of the call you are rating (from the X-Payment-Receipt header). Aliases: tx_hash, call_id."
+        },
+        "verdict": {
+          "type": "string",
+          "description": "Short verdict label, e.g. \"bad_data\" or \"great\""
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why you were dissatisfied — >=50 words required to claim a refund"
+        },
+        "refund_request": {
+          "type": "boolean",
+          "description": "Set true to claim a refund (otherwise feedback is recorded without a payout)"
+        }
+      },
+      "required": [
+        "original_tx_hash"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "original_tx_hash": "body",
+      "verdict": "body",
+      "reason": "body",
+      "refund_request": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_filtered_news",
+    "description": "AI-filtered crypto news and Twitter search for non-token topics (airdrops, DeFi trends, etc). Max 2 words. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/filtered-news",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Topic to filter news by (max 2 words)"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "topic": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_financial_statements",
+    "description": "Financial statements by ticker — the full SEC statement set for any US-listed company: income statement, balance sheet and cash flow, five fiscal periods deep on both an annual and a quarterly basis. Every figure names the XBRL concept it was filed under, the filing and date it came from, and whether it was filed, reconstructed from year-to-date figures or computed from named lines; a period a later filing restated is flagged with the earlier value; a period the filer did not tag is an explicit null, never carried forward. Plus the SEC filing index: 10-K, 10-Q and 8-K with the 8-K item codes and EDGAR links. Public-domain SEC EDGAR. $0.003 per call.",
+    "method": "GET",
+    "path": "/financial-statements",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. AAPL, NVDA, TSLA)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_form_144_filings",
+    "description": "Form 144 filings by ticker — SEC notices of PROPOSED insider sales, filed BEFORE the Form 4 that reports the executed trade: who intends to sell, units, the filer's own market-value estimate, broker, approximate sale date and Rule 10b5-1 plan dates. The earliest public read on insider selling intent; a notice is not a completed trade and may never be executed. Latest 20 notices in a 90-day lookback. Public-domain SEC EDGAR. $0.005 per call.",
+    "method": "GET",
+    "path": "/form-144-filings",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. NVDA, AAPL, TSLA)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_form_4_feed",
+    "description": "Latest insider trades feed across ALL US-listed companies — the 20 most recent SEC Form 4 filings by acceptance time, not one ticker at a time: issuer ticker and name, who filed and their role, transaction code (P purchase / S sale / A award / M exercise / F tax), shares, price, value and shares held after, with EDGAR links. Refreshed every 15 minutes. Derivative-only filings are excluded and counted. Public-domain SEC EDGAR. $0.003 per call.",
+    "method": "GET",
+    "path": "/form-4-feed",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_funding_rates",
+    "description": "Cross-venue funding-rate arbitrage + crowded-positioning radar: live perp funding rates, open interest, global & top-trader long/short ratios, whale positions, and liquidations across Binance, OKX, Bybit, Hyperliquid, and more. Omit symbol for the whole-market overview; pass one (e.g. BTC) for the per-exchange breakdown. (Hyperliquid-only perp data: use hyperliquid-market.) Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/funding-rates",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Token symbol for detailed view (omit for market overview)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_fx_rates",
+    "description": "Live + reference foreign-exchange (forex) rates, base USD. LIVE near-real-time mid quotes for the 12 most-traded currencies (EUR, GBP, JPY, CHF, CAD, AUD, NZD, CNY, HKD, SGD, SEK, KRW), refreshed every minute with an honest market-open/stale flag, PLUS the official ECB daily reference table for ~30 currencies. Derive any cross-rate or pair. For agents pricing cross-border ops, treasury, invoicing and FX conversion. Keyless, pay-per-call. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/fx-rates",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_gas_oracle",
+    "description": "Base gas oracle from Otto's own RPC: current base fee (wei+gwei), legacy gas price, and slow/standard/fast EIP-1559 priority-fee tiers (p25/p50/p90 over the last 20 blocks) with a ready-to-sign maxFeePerGas per tier. Unlike the crowded gas shelf it PUBLISHES the formula, so every tier is reproducible from the response. Flat JSON, refreshed every minute. Base gas oracle, gas price, priority fee, EIP-1559, maxFeePerGas. $0.001 per call.",
+    "method": "GET",
+    "path": "/gas-oracle",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_generate_meme_get",
+    "description": "AI image generation and editing via fal.ai, including memes. model: gpt-image-2 (default) | nano-banana-pro; anything else -> 400. Flat $0.15 per image. Supports image editing via public image URL.",
+    "method": "GET",
+    "path": "/generate-meme",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Description of the image to generate (100+ chars yields best results)"
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "gpt-image-2",
+            "nano-banana-pro"
+          ],
+          "description": "model: gpt-image-2 (default) | nano-banana-pro; anything else -> 400"
+        },
+        "image_url": {
+          "type": "string",
+          "description": "Optional: public HTTPS URL of image to edit/remix"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "1:1",
+            "16:9",
+            "9:16"
+          ],
+          "description": "Aspect ratio (default: 1:1)"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "prompt": "query",
+      "model": "query",
+      "image_url": "query",
+      "aspect_ratio": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_generate_meme_post",
+    "description": "AI image generation and editing via fal.ai, including memes. model: gpt-image-2 (default) | nano-banana-pro; anything else -> 400. Flat $0.15 per image. Supports image editing via public image URL.",
+    "method": "POST",
+    "path": "/generate-meme",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Description of the image to generate (100+ chars yields best results)"
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "gpt-image-2",
+            "nano-banana-pro"
+          ],
+          "description": "model: gpt-image-2 (default) | nano-banana-pro; anything else -> 400"
+        },
+        "image_url": {
+          "type": "string",
+          "description": "Optional: public HTTPS URL of image to edit/remix"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "1:1",
+            "16:9",
+            "9:16"
+          ],
+          "description": "Aspect ratio (default: 1:1)"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "prompt": "body",
+      "model": "body",
+      "image_url": "body",
+      "aspect_ratio": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_hl_transaction_history",
+    "description": "Hyperliquid perpetual trading history: fills, funding payments, and realized PnL per position. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/hl-transaction-history",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed)"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_holder_analytics",
+    "description": "Full holder analytics for any Base ERC-20: total holders with 24h/3d/7d/30d holder-change momentum, whale-tier distribution, acquisition mix (swap vs transfer vs airdrop), top-10/25/50/100 supply share, labeled top holders with concentration (top1/5/10/20% + contract-held%) and an AI concentration-risk read. Bag check, holder analytics, holder concentration, whale distribution. $0.03 per call.",
+    "method": "GET",
+    "path": "/holder-analytics",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "Base ERC-20 token contract address (0x...). Common symbols also accepted as shorthand: weth, usdc, cbbtc, cbxrp, cbdoge, usol."
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "token": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_hyperliquid_account",
+    "description": "Read-only legacy Hyperliquid recovery snapshot with existing positions, margin, collateral and active orders. Otto Hyperliquid trading is retired; this read does not enable new trades or deposits. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/hyperliquid-account",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed)"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_hyperliquid_market",
+    "description": "Hyperliquid perpetuals market data: live mark/oracle price, funding rate, open interest, max leverage, and size specs for any tradable asset. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/hyperliquid-market",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "type": "string",
+          "description": "Asset symbol (e.g., BTC, ETH)"
+        }
+      },
+      "required": [
+        "asset"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "asset": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_insider_trades",
+    "description": "SEC Form 4 insider trades for any US-listed company by ticker: who bought and sold (officer/director/10% owner), purchase vs sale counts and dollar values (SEC codes P/S: open-market or private), net purchase-sale balance, shares held after, filing links — hourly snapshot; 4/A-amended windows withheld once detected (~1h lag): unpaid 503. Insider trading data, insider buys, smart money. Public-domain SEC EDGAR. $0.003 per call.",
+    "method": "GET",
+    "path": "/insider-trades",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "US-listed stock ticker symbol (e.g. NVDA, AAPL, TSLA)"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_institutional_holdings",
+    "description": "13F holdings for any SEC-filing manager (hedge funds, asset managers) by CIK or manager ticker: latest 13F top 20 positions, amendments applied (hourly snapshot, ~1h correction lag): issuer, CUSIP, value in whole USD, share/principal amount (SH/PRN), put/call flag, reported value, position count. Whale tracking from the primary source. 13F holdings, hedge fund positions, institutional ownership. Public-domain SEC EDGAR. $0.003 per call.",
+    "method": "GET",
+    "path": "/institutional-holdings",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "manager": {
+          "type": "string",
+          "description": "SEC CIK number of the manager (e.g. 1067983 for Berkshire Hathaway), or the ticker of a publicly-listed manager (e.g. BLK)"
+        }
+      },
+      "required": [
+        "manager"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "manager": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_kol_sentiment",
+    "description": "Premium alpha from top 50 crypto KOLs. Real trading signals, trending token picks, and sentiment from influencers who move markets. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/kol-sentiment",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_llm_research_get",
+    "description": "Instant AI research on any topic powered by Gemini 3.5 Flash with live Google Search grounding — answers come with cited sources. Ask about science, tech, crypto, history, or anything else. Can analyze images and summarize webpages from URLs. Max 180 character prompts. $0.10 per query.",
+    "method": "GET",
+    "path": "/llm-research",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Research question (max 180 chars)"
+        },
+        "url": {
+          "type": "string",
+          "description": "Optional: URL to analyze or summarize"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "prompt": "query",
+      "url": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_llm_research_post",
+    "description": "Instant AI research on any topic powered by Gemini 3.5 Flash with live Google Search grounding — answers come with cited sources. Ask about science, tech, crypto, history, or anything else. Can analyze images and summarize webpages from URLs. Max 180 character prompts. $0.10 per query.",
+    "method": "POST",
+    "path": "/llm-research",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Research question (max 180 chars)"
+        },
+        "url": {
+          "type": "string",
+          "description": "Optional: URL to analyze or summarize"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "prompt": "body",
+      "url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_lp_intelligence",
+    "description": "Read an exact V3/V4 NFT position on Robinhood Chain (4663), its composition, range status, plain-language advice and independently cached pool APR. Choose a 1–30 day horizon and an objective. Quantitative range comparisons carry their model limits; unverified tokens or hooks cannot earn investment eligibility. No swap, liquidity change or transaction is prepared. $0.02 USDC on Base per call.",
+    "method": "POST",
+    "path": "/lp-intelligence",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "position": {
+          "type": "object",
+          "properties": {
+            "chainId": {
+              "type": "number",
+              "const": 4663
+            },
+            "positionManager": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "tokenId": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,77})$"
+            },
+            "expectedOwner": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            }
+          },
+          "required": [
+            "chainId",
+            "positionManager",
+            "tokenId"
+          ],
+          "additionalProperties": false
+        },
+        "evidenceSetId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$"
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "token0ChangePct": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 100
+              },
+              "token1ChangePct": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "label",
+              "token0ChangePct",
+              "token1ChangePct"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "advisory": {
+          "type": "object",
+          "description": "User objective and comparison horizon only. Data providers, volatility, costs and forecasts cannot be supplied by callers.",
+          "properties": {
+            "horizonDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "default": 7
+            },
+            "objective": {
+              "type": "string",
+              "enum": [
+                "understand",
+                "maintain-fee-uptime",
+                "reduce-concentration"
+              ],
+              "default": "understand"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "position"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "position": "body",
+      "evidenceSetId": "body",
+      "scenarios": "body",
+      "advisory": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_lp_pool_apr",
+    "description": "Read fee APR, provider-advertised incentive APR and total APR for an exact Uniswap V3/V4 pool on Robinhood Chain (4663). Successful observations stay CURRENT for one hour, capped by incentive expiry; failed refreshes retain last-good figures as STALE for up to 24 hours with their original age and component timestamps. Rates are percentage points and pool statistics, not personal earnings or token/hook approval. Independent of NFT reads. $0.001 USDC on Base per call.",
+    "method": "POST",
+    "path": "/lp-pool-apr",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "chainId": {
+          "const": 4663
+        },
+        "protocol": {
+          "enum": [
+            "uniswap-v3",
+            "uniswap-v4"
+          ]
+        },
+        "poolId": {
+          "type": "string",
+          "pattern": "^0x(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"
+        },
+        "token0": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "token1": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "hook": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        }
+      },
+      "required": [
+        "chainId",
+        "hook",
+        "poolId",
+        "protocol",
+        "token0",
+        "token1"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "chainId": "body",
+      "protocol": "body",
+      "poolId": "body",
+      "token0": "body",
+      "token1": "body",
+      "hook": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_macro_regime",
+    "description": "Daily US macro-regime snapshot from licensed Alpha Vantage series: 10-year Treasury yield, effective federal funds rate, three-month rate changes, CPI index and YoY inflation, plus a mechanical rates-direction/inflation-direction label with disclosed thresholds. Three upstream calls per daily refresh; scanner context only. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/macro-regime",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_market_risk",
+    "description": "Composite crypto market-stress digest: a 0-100 score (low/moderate/elevated/high) blended from global USD-stablecoin depeg health (DefiLlama) and Base on-chain DEX exit-liquidity, with a per-leg breakdown and an AI risk line. Stablecoin systemic + Base liquidity microstructure only (not derivatives/sentiment). Both legs required for a score. Every read older than an hour regenerates the score inline (the buyer waits a few seconds) — never an older reading; public sources, pay-per-call. Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/market-risk",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_mega_report",
+    "description": "Alpha & Intel Report — daily crypto market intelligence: headlines, Twitter sentiment, KOL alpha, trending altcoins, and yield opportunities in one report. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/mega-report",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_meta_intelligence_get",
+    "description": "Meta Intelligence (LIVE) — ranked x402 candidates with prices and pay_urls. provider_scope=otto_only (or unconditional Otto-only wording when the field is omitted) excludes third-party candidates. required_capabilities filters catalog-declared block_hashes, source_identity and observation_timestamps; unverified Bazaar descriptions cannot satisfy these filters. No permitted match returns an uncharged 503. Default discovery searches Otto and CDP Bazaar in separate pools. Non-custodial: pay each recommended provider directly; the $0.001 discovery fee adds no downstream markup. Capabilities describe contract support, not guaranteed non-null data or arbitrary requirements in free text.",
+    "method": "GET",
+    "path": "/meta-intelligence",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": "string",
+          "description": "Natural-language description of the data or service you need"
+        },
+        "provider_scope": {
+          "type": "string",
+          "enum": [
+            "all",
+            "otto_only"
+          ],
+          "description": "Authoritative provider filter. When omitted, unambiguous unconditional Otto-only wording is recognized. Invalid values return 400."
+        },
+        "required_capabilities": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "enum": [
+              "block_hashes",
+              "source_identity",
+              "observation_timestamps"
+            ]
+          },
+          "description": "Optional hard output-contract filters. GET uses a comma-separated list. Only declared Otto catalog capabilities qualify; no permitted match is uncharged."
+        },
+        "price_cap_usd": {
+          "type": "number",
+          "description": "Optional: only return candidates at or below this price (USD)"
+        },
+        "network": {
+          "type": "string",
+          "description": "Optional: prefer candidates on this CAIP-2 network (e.g. eip155:8453 for Base)"
+        }
+      },
+      "required": [
+        "ask"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ask": "query",
+      "provider_scope": "query",
+      "required_capabilities": "query",
+      "price_cap_usd": "query",
+      "network": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_meta_intelligence_post",
+    "description": "Meta Intelligence (LIVE) — ranked x402 candidates with prices and pay_urls. provider_scope=otto_only (or unconditional Otto-only wording when the field is omitted) excludes third-party candidates. required_capabilities filters catalog-declared block_hashes, source_identity and observation_timestamps; unverified Bazaar descriptions cannot satisfy these filters. No permitted match returns an uncharged 503. Default discovery searches Otto and CDP Bazaar in separate pools. Non-custodial: pay each recommended provider directly; the $0.001 discovery fee adds no downstream markup. Capabilities describe contract support, not guaranteed non-null data or arbitrary requirements in free text.",
+    "method": "POST",
+    "path": "/meta-intelligence",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": "string",
+          "description": "Natural-language description of the data or service you need"
+        },
+        "provider_scope": {
+          "type": "string",
+          "enum": [
+            "all",
+            "otto_only"
+          ],
+          "description": "Authoritative provider filter. When omitted, unambiguous unconditional Otto-only wording is recognized. Invalid values return 400."
+        },
+        "required_capabilities": {
+          "type": "array",
+          "maxItems": 3,
+          "description": "Optional hard output-contract filters. GET uses a comma-separated list. Only declared Otto catalog capabilities qualify; no permitted match is uncharged.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "block_hashes",
+              "source_identity",
+              "observation_timestamps"
+            ]
+          }
+        },
+        "price_cap_usd": {
+          "type": "number",
+          "description": "Optional: only return candidates at or below this price (USD)"
+        },
+        "network": {
+          "type": "string",
+          "description": "Optional: prefer candidates on this CAIP-2 network (e.g. eip155:8453 for Base)"
+        }
+      },
+      "required": [
+        "ask"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ask": "body",
+      "provider_scope": "body",
+      "required_capabilities": "body",
+      "price_cap_usd": "body",
+      "network": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_news_recaps",
+    "description": "A tight 4-6 sentence crypto market recap an agent can ingest whole: overall direction and why, the 2-3 developments that matter, and anything notable on the top-10 board — distilled on demand (served while fresh, ≤1h) from the same live news engine behind Otto's top-ranked /crypto-news feed. The one-paragraph state-of-market; buy /crypto-news when you want the full report. Beside the prose, stories[] carries the ranked board as named typed fields — rank, title, whyItMatters, url, publishedAt, source (linked to the window's source articles by exact title; null when unmatched, never a guessed link) — with storiesStatus / articlesStatus and the analysis window, so an agent parses the same shape /crypto-news sells instead of regexing the board. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/news-recaps",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_pm_crypto",
+    "description": "Crypto prediction markets on Polymarket: the highest-volume open BTC, ETH and crypto markets with live odds (outcome probabilities), best bid/ask, spread, 24h + total volume, liquidity, price change and end date. \"Bitcoin above X\", price targets, ETF and protocol events — what the prediction market ACTUALLY prices in, as flat JSON refreshed every 5 minutes. Crypto odds, Bitcoin prediction market, ETH probability. $0.001 per call.",
+    "method": "GET",
+    "path": "/pm-crypto",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_pm_markets",
+    "description": "Top Polymarket prediction markets RIGHT NOW: the 25 highest-volume open markets with live odds (outcome probabilities), best bid/ask, spread, last trade price, 24h + total volume, liquidity, 1d/7d price change, end date and event link. Flat JSON, refreshed every 5 minutes. Prediction market odds, Polymarket data, event probabilities, market sentiment. $0.001 per call.",
+    "method": "GET",
+    "path": "/pm-markets",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_pm_movers",
+    "description": "Polymarket movers RIGHT NOW: the 20 biggest 24h odds moves across active prediction markets, ranked by move size, each with direction, the raw 1d and 7d change, live odds, best bid/ask, spread, volume, liquidity and the event link. A tradability floor keeps dead-market swings out. Flat JSON, refreshed every 5 minutes. Polymarket odds movers, biggest prediction-market moves, event probability shifts, market momentum. $0.002 per call.",
+    "method": "GET",
+    "path": "/pm-movers",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_pm_search",
+    "description": "Search Polymarket prediction markets by free text: elections, Fed rates, crypto prices, sports, geopolitics, AI. Returns the top matching open markets with live odds (outcome probabilities), best bid/ask, spread, volume, liquidity, end date and event link as flat JSON. Prediction market search, event odds lookup, \"what are the odds of X\". $0.001 per call — 5x cheaper than comparable PM search.",
+    "method": "GET",
+    "path": "/pm-search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Free-text search across open prediction markets (e.g. \"fed rate cut\", \"bitcoin 150k\", \"world cup\")"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_pools_search",
+    "description": "Search DEX pools across Base, Ethereum, Solana, Polygon, BSC, Arbitrum, Optimism and Avalanche by token symbol, name, or contract address. Returns pool address, DEX, price USD, 24h volume, liquidity (TVL), FDV, 24h price change and 24h txns as flat JSON numbers — no nested joins. Pool search, pool finder, DEX pools, liquidity pools, onchain pool lookup. $0.001 per call.",
+    "method": "GET",
+    "path": "/pools-search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Token symbol, token name, or contract address to find pools for (e.g. WETH, PEPE, or a 0x… / Solana mint address)"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_pools_trending",
+    "description": "Trending DEX pools right now — Base, Ethereum, Solana, Polygon, BSC, Arbitrum, Optimism, Avalanche, or network=all for cross-chain across those same 8. Top 10 hottest pools ranked by GeckoTerminal 24h trending: pool address, DEX, price USD, 24h price change, 24h volume, liquidity (TVL), FDV, 24h txns as flat JSON numbers. Trending pools, hot pools, top movers, momentum screener, what is pumping. $0.001 per call.",
+    "method": "GET",
+    "path": "/pools-trending",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string",
+          "description": "Network to rank trending pools on: base, ethereum, solana, polygon, bsc, arbitrum, optimism, avalanche — or 'all' for the cross-network ranking across those same 8 chains (synonyms eth, matic, avax, op, arb, bnb accepted)"
+        }
+      },
+      "required": [
+        "network"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "network": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_portfolio",
+    "description": "Multi-chain portfolio snapshot with token balances and yield positions for a user's Otto AI Safe accounts across Base, Ethereum, Arbitrum, Polygon, BSC, Avalanche, and Solana. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/portfolio",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed)"
+        }
+      },
+      "required": [
+        "userId"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "userId": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_protocol_revenue_leaders",
+    "description": "Which protocols earn the most — and who is accelerating? Top 30 DeFi protocols by 24h fees, each with revenue, take-rate (the cut the protocol keeps vs fees users pay), 7d/30d trend and category, plus total DeFi fees & revenue. A fundamentals screen (fee/revenue economics), distinct from TVL. Sourced from DefiLlama (public). Served from a cached snapshot while fresh (DefiLlama fees are daily aggregates) and regenerated on demand when a read finds it stale. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/protocol-revenue-leaders",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_rh_season",
+    "description": "Robinhood Chain memecoin intelligence: the rug-screened RH Chain (chainId 4663) movers. Hard liquidity + wash-volume gates filter the $0-liquidity honeypots that fake $1M volumes; every survivor carries rug-risk flags (thin liquidity, vol/liquidity anomaly, pool age, CoinGecko listing) plus trusted-KOL mentions with verbatim quotes and a synthesized RH Chain sentiment read. What is pumping AND whether it is real. Served from a cached snapshot while fresh (≤1h) and regenerated on demand when a read finds it stale. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/rh-season",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_stablecoin_watch",
+    "description": "Is USDC/USDT/DAI holding its $1 peg, and is stablecoin supply growing or shrinking (risk-on vs risk-off)? Live peg deviation (bps), circulating supply + 1d/7d/30d flow, market dominance and chain spread for the top 30 USD stablecoins, plus downside depeg alerts for any coin trading >0.5% below peg. Sourced from DefiLlama (public). Served from a cached snapshot while fresh (≤1h) and regenerated on demand when a read finds it stale. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/stablecoin-watch",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_stock_pools",
+    "description": "Find the DEX pools a tokenized US stock or ETF is a member of, on Robinhood Chain, Base, BNB Chain or Solana. Returns pool id (v4 ids kept distinct from v3), DEX, the side the asset is on, the counterpart with an evidence-backed class, reported USD liquidity, 24h volume and pool age. Membership discovery only: a provider-covered read, not a census; no APR, no execution; a return is the asset's only where it is the base token. $0.001 per call.",
+    "method": "GET",
+    "path": "/stock-pools",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "stock": {
+          "type": "string",
+          "description": "Network-qualified stock identity: \"<network>:<TICKER>\" or \"<network>:<token address>\" where network is robinhood, base, bsc or solana (e.g. robinhood:MU). A bare ticker is rejected — the same ticker is tokenized on several chains."
+        }
+      },
+      "required": [
+        "stock"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "stock": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_supported_tokens",
+    "description": "Search supported ERC-20 tokens by symbol or address across 6 chains (Base, Ethereum, Arbitrum, Polygon, BSC, Avalanche). 5000+ tokens from CoinGecko. Use before swap/bridge to disambiguate tokens. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/supported-tokens",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "type": "string",
+          "description": "Token symbol to search (e.g., USDC)"
+        },
+        "chainId": {
+          "type": "string",
+          "description": "Chain ID to search on"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "search": "query",
+      "chainId": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_technical_signals",
+    "description": "Daily technical snapshot for a vendor-resolved equity from licensed Tiingo adjusted closes: Wilder RSI-14, 20-session momentum, SMA-20/SMA-50, price distance from each average, above/below/mixed trend state, and the latest observed golden/death cross. Price and averages retain Tiingo payload units because the captured feed does not identify a currency. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/technical-signals",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "Vendor-supported equity or ETF ticker (e.g. AAPL, NVDA, TSLA, SPY); returned monetary values use vendor payload units and are not relabeled as USD."
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_alpha",
+    "description": "Premium token intelligence: price metrics, news, Twitter sentiment, and futures data. Find out why your token is moving. Price: $0.005 per call (vendor spec).",
+    "method": "GET",
+    "path": "/token-alpha",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Token symbol (e.g., BTC, ETH, SOL)"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_details",
+    "description": "Token price, market cap, volume, supply, and basic metrics. Works for any listed token. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/token-details",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Token symbol (e.g., BTC, ETH, SOL)"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_fundamentals",
+    "description": "Structured token fundamentals by ticker symbol (resolves to the top-market-cap asset matching it): price, market cap, FDV, rank, 24h volume, full supply breakdown (circulating/total/max), ATH + drawdown from ATH, ATL + recovery, ROI windows (24h/7d/30d/60d/1y), categories, and project links — clean JSON an agent can consume field-by-field. Fundamentals snapshot, not a streaming price feed. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/token-fundamentals",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Token ticker symbol, e.g. BTC, ETH, SOL, LINK — resolves to the highest-market-cap exact match"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_price",
+    "description": "Live DEX token price in USD by ticker symbol or contract address across Base, Ethereum, Solana, Polygon, BSC, Arbitrum, Optimism and Avalanche (bare 0x tries Base then all chains, else network:address). Symbols resolve to the canonical top-market-cap asset — squat-proof. Flat JSON: price, 24h change, volume, market cap, FDV, liquidity — echoes the matched deployment. Token price, crypto price, DEX price. $0.001 per call.",
+    "method": "GET",
+    "path": "/token-price",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "Ticker symbol (e.g. ETH — resolves to the canonical top-market-cap asset; use address mode for long-tail), contract address (0x… tries Base, then any supported chain), or network:address (e.g. solana:JUPyiwr…). Networks: base, ethereum, solana, polygon, bsc, arbitrum, optimism, avalanche"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "token": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_score",
+    "description": "Token score by contract address — one 0-100 composite of a Base token market structure from seven weighted factors: USD liquidity, holder concentration, holder count, 24h volume, market age, pool breadth and price stability. Every sub-score, weight, raw input, source plane and read time comes back with the number, plus the full breakpoint curve, so the score can be recomputed from the response. A factor whose data plane is unavailable is reported absent, never filled in. Market structure, not a contract-security screen. $0.010 per call.",
+    "method": "GET",
+    "path": "/token-score",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "Base (chain 8453) ERC-20 contract address, 0x followed by 40 hex characters. Address-keyed on purpose: a ticker symbol could resolve to a different chain deployment on one data plane than on another, and the composite would then fuse two tokens. Use /token-price for symbol lookups."
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "token": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_security",
+    "description": "Token security scanner — is this token safe to buy? Honeypot, rug-pull, and scam detection for any token contract — flags can't-sell traps, hidden mints, malicious buy/sell taxes, and holder concentration. Powered by GoPlus across 8 chains. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/token-security",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Token contract address (0x-prefixed)"
+        },
+        "chain": {
+          "type": "string",
+          "description": "Chain ID or name, case-insensitive. IDs: 1 (Ethereum), 10 (Optimism), 56 (BSC), 137 (Polygon), 196 (X Layer), 8453 (Base), 42161 (Arbitrum), 43114 (Avalanche). Names also accepted: ethereum/eth, optimism, bsc/bnb, polygon/matic, xlayer/x-layer, base, arbitrum, avalanche/avax. Default: 8453 (Base)."
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "address": "query",
+      "chain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_token_top_holders",
+    "description": "Top holders for any Base ERC-20 (via Moralis), with computed concentration (top1/5/10/20% + contract-held%) and optional whale-risk read. Curated hot set refreshed hourly; long-tail tokens write-through on first call. Price: $0.02 per call (vendor spec).",
+    "method": "GET",
+    "path": "/token-top-holders",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "ERC-20 contract address on Base (0x-prefixed, 42 chars). Common symbols also accepted as shorthand: weth, usdc, cbbtc, cbxrp, cbdoge, usol."
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "token": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_tokenized_equities",
+    "description": "The live registry of tokenized US equities & ETFs on Robinhood Chain (chainId 4663): symbol, canonical token address, decimals, listed-on-rail routability, and the EXECUTABLE buy price — what a $100 buy actually pays per token on the live route, at the route's minimum output — published next to LI.FI's catalog reference price and `referenceDeviationPct`, the gap between them, so a stale catalog reference is visible rather than inherited. Every served row's token address is bound to a hand-verified identity pin; an unpinned address is refused, never published under a ticker. The on-chain settlement layer for tokenized-equity exposure, not a data-coverage claim. Optional `?thesis=` filters the registry to a matched shortlist (per-row match reason + an honesty contract). Informational only; not a quote or a recommendation. Flat JSON, refreshed hourly. $0.001 per call.",
+    "method": "GET",
+    "path": "/tokenized-equities",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "thesis": {
+          "type": "string",
+          "description": "Optional natural-language thesis (e.g. \"semiconductors\", \"AI infrastructure\", \"chinese tech\"). Present → a matched shortlist (relevance-ordered, capped at shortlistCap=12) with a per-row human-readable matchReason plus an honesty contract: matched, matchedCount (score>0 rows across the WHOLE universe — it can exceed the returned rows), fellBackToUniverse, matchedTradableSampled (execution samples among the RETURNED rows). universeSize and tradableSampled keep their universe-level meaning on a thesis read. A no-match/degenerate thesis honestly browses the universe (matched:false, matchedCount:0). Omit → the full registry, byte-compatible with the pre-thesis shape."
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "thesis": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_tokenized_stock_movers",
+    "description": "Day movers for tokenized US stocks and ETFs on TWO rails in one call: Robinhood Chain (chainId 4663, ~95 names) and Base B20 (the 10 Coinbase-issued tokens Coinbase still lists as of 2026-09-21, keyed by token address — B20 metadata is mutable, so the address is the identity). Gainers and losers by REAL day-over-day change of the UNDERLYING stock vs the prior NYSE session close (Finnhub quotes), with per-rail coverage counts. A token that is withdrawn or cannot be quoted is never dropped silently — it is counted and named with a reason in `excluded`. Off-hours values freeze; a tokenized share can trade at a premium/discount to the underlying. Refreshed every 15 minutes. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/tokenized-stock-movers",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_tradfi_data",
+    "description": "TradFi macro intelligence: indices, VIX, DXY, treasury yields, commodities, and individual stock quotes with moving average context. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/tradfi-data",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Ticker symbol for stock quote (omit for macro dashboard)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_transaction_history",
+    "description": "Trade and transaction history for a user's Otto AI Safe account — swaps, bridges, deposits, withdrawals with timestamps and explorer links. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/transaction-history",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed)"
+        }
+      },
+      "required": [
+        "userId"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "userId": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_trending_altcoins",
+    "description": "Top 3 hottest altcoins traders may want to ape into, based on news and Twitter analysis. DYOR. Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/trending-altcoins",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_tweet_search",
+    "description": "Search X/Twitter for any query and get the actual matching tweets — keyword, $CASHTAG, from:handle (a user timeline), @handle (mentions), or boolean OR. Each tweet returns author, full text (long-form note tweets included), timestamp, likes and retweets (reply/quote counts when available). Most-recent-first for real-time monitoring and alerting. Live X search backend, pay-per-call USDC, structured JSON. Price: $0.005 per call (vendor spec).",
+    "method": "GET",
+    "path": "/tweet-search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "X/Twitter search query — keyword, $CASHTAG, from:handle, @handle, or boolean OR (e.g. \"$BTC OR bitcoin -is:retweet\")"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_twitter_summary",
+    "description": "Quick pulse check from crypto Twitter. Breaking news, trending narratives, and sentiment shifts at a glance. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/twitter-summary",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_tx_explainer_get",
+    "description": "Decode and explain any EVM blockchain transaction across 11 chains (Base, Ethereum, Arbitrum, Optimism, Avalanche, Polygon, Mantle, Monad, Plasma, BSC, Hyperliquid). Get a human-readable summary of swaps, transfers, approvals, DeFi interactions, and more. Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/tx-explainer",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "txHash": {
+          "type": "string",
+          "description": "Transaction hash (0x-prefixed, 64 hex characters)"
+        },
+        "chain": {
+          "type": "string",
+          "description": "Chain name (e.g., base, ethereum, arbitrum) — optional, auto-detected if omitted"
+        },
+        "outputLevel": {
+          "type": "string",
+          "enum": [
+            "summary",
+            "detailed"
+          ],
+          "description": "Verbosity — 'summary' (default) = one-liner; 'detailed' = full breakdown"
+        }
+      },
+      "required": [
+        "txHash"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "txHash": "query",
+      "chain": "query",
+      "outputLevel": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_tx_explainer_post",
+    "description": "Decode and explain any EVM blockchain transaction across 11 chains (Base, Ethereum, Arbitrum, Optimism, Avalanche, Polygon, Mantle, Monad, Plasma, BSC, Hyperliquid). Get a human-readable summary of swaps, transfers, approvals, DeFi interactions, and more. Price: $0.01 per call (vendor spec).",
+    "method": "POST",
+    "path": "/tx-explainer",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "txHash": {
+          "type": "string",
+          "description": "Transaction hash (0x-prefixed, 64 hex characters)"
+        },
+        "chain": {
+          "type": "string",
+          "description": "Chain name (e.g., base, ethereum, arbitrum) — optional, auto-detected if omitted"
+        },
+        "outputLevel": {
+          "type": "string",
+          "enum": [
+            "summary",
+            "detailed"
+          ],
+          "description": "Verbosity — 'summary' (default) = one-liner; 'detailed' = full breakdown"
+        }
+      },
+      "required": [
+        "txHash"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "txHash": "body",
+      "chain": "body",
+      "outputLevel": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_video_gen",
+    "description": "AI video generation via fal.ai — default model: ByteDance Seedance 2.0. Alternatives: fal-ai/sora-2/text-to-video, fal-ai/veo3.1. Dynamic pricing per request: at-cost fal.ai rate + 15% margin (floor $0.05); the advertised price is the Seedance 5s reference quote — the actual quote is returned per request. Supports text-to-video and image-to-video. Price: $0.46–$4.60 per call, scaling with usage (vendor spec).",
+    "method": "POST",
+    "path": "/video-gen",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Video description (20-1000 chars)"
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "seedance-2.0",
+            "sora-2",
+            "veo-3.1"
+          ],
+          "description": "Video model (default: seedance-2.0)"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duration in seconds (4-10, per-model caps enforced)"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ],
+          "description": "Aspect ratio (default: 16:9)"
+        },
+        "image_url": {
+          "type": "string",
+          "description": "Optional: public HTTPS URL for image-to-video (seedance-2.0 and sora-2 only)"
+        }
+      },
+      "required": [
+        "duration",
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "prompt": "body",
+      "model": "body",
+      "duration": "body",
+      "aspect_ratio": "body",
+      "image_url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "otto_wallet_holdings",
+    "description": "Base wallet portfolio breakdown: up to 100 token positions with live USD price and value, portfolio percentage, 24h price change — native ETH included, spam filtered, top 50 returned; truncated:true means the wallet exceeds the 100-position fetched page (totals null then). Plus total value, top-position concentration and an AI bagcheck read. Wallet holdings, wallet portfolio, wallet balance, bagcheck. $0.02 per call.",
+    "method": "GET",
+    "path": "/wallet-holdings",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "wallet": {
+          "type": "string",
+          "description": "Wallet address to analyze (0x..., Base network)"
+        }
+      },
+      "required": [
+        "wallet"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "wallet": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_weather",
+    "description": "Live weather for any city or lat/lon worldwide. Returns current conditions — temperature, feels-like, humidity, wind and sky — plus a 5-day forecast with daily highs/lows and precipitation probability. City names auto-geocode (no coordinates needed). Refreshed hourly with transparent freshness metadata. Keyless, pay-per-call, agent-ready JSON. Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/weather",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "City name (e.g. \"Tokyo\") or a \"lat,lon\" pair (e.g. \"51.5,-0.12\")"
+        }
+      },
+      "required": [
+        "location"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "location": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_web_answer",
+    "description": "Quick web answer with citations (Exa upstream): ask one factual or current question and get a concise synthesized answer plus source URLs and publication dates. Optimized for fast lookups and agent loops; use /llm-research for a deeper multi-section research report, reasoning, image analysis, or webpage summarization. Keyless, pay-per-call, cached by query. Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/web-answer",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "One concise factual or current question (max 96 characters), e.g. \"What is EIP-7702?\". Whitespace is collapsed and the cache key is lowercased."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_web_extract",
+    "description": "Turn any URL into clean, LLM-ready markdown — the main article extracted, nav/ads/boilerplate stripped, plus title, description and publish date. Renders JavaScript pages, articles, docs and PDFs. A keyless, pay-per-call web reader for agents that read the web on demand: RAG ingestion, research and summarization. Structured JSON, cached by URL for fast repeat reads. Price: $0.005 per call (vendor spec).",
+    "method": "GET",
+    "path": "/web-extract",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Public http(s) URL to read, e.g. https://example.com (renders JS + PDFs)"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_web_json_extract",
+    "description": "Turn any URL into clean structured JSON for AI agents and RAG. An LLM reads the fully rendered page (JavaScript executed, SPAs included) and returns its title, a 1-2 sentence summary, key entities (people, orgs, products), and any prices, dates or notable numbers — even on pages with no schema.org or JSON-LD markup, no CSS selectors or schema to write. Just pass a URL. Keyless, pay-per-call. Price: $0.005 per call (vendor spec).",
+    "method": "GET",
+    "path": "/web-json-extract",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Public http(s) URL to extract structured data from, e.g. https://a-product-page.com"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_web_links",
+    "description": "Extract all links (hrefs) from any web page as structured JSON — every internal, external and anchor link, deduplicated, returned with a total count. Renders the page in a real headless browser, so it captures links injected after JavaScript runs that fetch-only scrapers miss. For crawling, sitemap building, link audits and site-structure mapping. Keyless, pay-per-call. Price: $0.003 per call (vendor spec).",
+    "method": "GET",
+    "path": "/web-links",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Public http(s) URL to extract links from, e.g. https://example.com"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "url": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_web_search",
+    "description": "Web search for AI agents, powered by Exa neural search: pass a query and receive relevant pages with title, URL, published date, author, relevance score and a text snippet as structured JSON. Pair with /web-extract for full-page content. For RAG retrieval, research, fact-finding and monitoring. Keyless, pay-per-call, cached by query. No matches returns an empty result set. Price: $0.009 per call (vendor spec).",
+    "method": "GET",
+    "path": "/web-search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Free-text web search query (e.g. \"latest ethereum roadmap updates\", \"who founded Anthropic\"). Normalized (whitespace-collapsed, lowercased) so equivalent phrasings share one cached result."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_whois_lookup",
+    "description": "Registration data for any domain, straight from authoritative RDAP registries (the structured WHOIS successor): registrar, ICANN/EPP domain status codes, creation, last-updated and expiration dates, authoritative nameservers, and DNSSEC delegation. The fast, license-clean way for an agent to vet a domain, sender, or counterparty. Keyless, structured JSON, pay-per-call. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/whois-lookup",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "Registrable domain to look up, e.g. stripe.com"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "domain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_yield_alpha",
+    "description": "Best DeFi yield opportunities across stablecoins, ETH, and BTC with risk ratings and APY comparisons. Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/yield-alpha",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_yield_farming_active",
+    "description": "Active yield farming positions for a user across Aave V3 and Morpho on all supported chains, with live APY and accrued interest. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/yield-farming-active",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "userAddress": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed)"
+        }
+      },
+      "required": [
+        "userAddress"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "userAddress": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_yield_farming_historical",
+    "description": "Historical (closed) yield farming positions for a user across all protocols and chains, with realized yield and exit timestamps. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/yield-farming-historical",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "userAddress": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed)"
+        }
+      },
+      "required": [
+        "userAddress"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "userAddress": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "otto_yield_markets",
+    "description": "DeFi yield farming markets with live APYs across Aave V3 and Morpho on Base, Ethereum, and other major chains. Find the best stablecoin yield (USDC) and ETH yield for idle capital: returns supply APY, TVL, and vault/market addresses per token, filterable by protocol, chain, or token symbol. Compare DeFi yield rates across lending markets and vaults before depositing. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/yield-markets",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "otto_yield_recommendations",
+    "description": "Best-available stablecoin deposit venues ranked by net supply APY — Otto's yield-copilot reads supported on-chain lending markets directly and returns the top deployable venue per stablecoin (protocol, chain, APY, deposit target). Best-available across the market, not wallet-personalized. Price: $0.001 per call (vendor spec).",
+    "method": "GET",
+    "path": "/yield-recommendations",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "userAddress": {
+          "type": "string",
+          "description": "Wallet address (0x-prefixed, optional — ignored for the best-available ranking)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "userAddress": "query"
+    },
+    "has_body": false
+  }
+]

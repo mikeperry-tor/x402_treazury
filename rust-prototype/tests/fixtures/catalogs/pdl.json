@@ -1,0 +1,327 @@
+[
+  {
+    "name": "pdl_company_enrich",
+    "description": "People Data Labs company enrichment. $0.10 per match, free on no match. Returns firmographics, industry codes, funding, social profiles. Provide at least one identifier: pdl_id (or LinkedIn slug), name, website domain, ticker, profile URL, or HQ location.",
+    "method": "POST",
+    "path": "/api/pdl/company/enrich",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "pdl_id": {
+          "type": "string",
+          "description": "PDL company ID or LinkedIn slug"
+        },
+        "name": {
+          "type": "string",
+          "description": "Company name"
+        },
+        "website": {
+          "type": "string",
+          "description": "Company domain"
+        },
+        "profile": {
+          "type": "string",
+          "description": "Social profile URL"
+        },
+        "ticker": {
+          "type": "string",
+          "description": "Stock ticker symbol"
+        },
+        "location": {
+          "type": "string",
+          "description": "HQ location (street address to country)"
+        },
+        "street_address": {
+          "type": "string",
+          "description": "HQ street address"
+        },
+        "locality": {
+          "type": "string",
+          "description": "HQ city"
+        },
+        "region": {
+          "type": "string",
+          "description": "HQ state or province"
+        },
+        "country": {
+          "type": "string",
+          "description": "HQ country"
+        },
+        "postal_code": {
+          "type": "string",
+          "description": "HQ postal code"
+        },
+        "min_likelihood": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Minimum confidence score 1-10 (default 2). Higher = fewer, better matches."
+        },
+        "required": {
+          "type": "string",
+          "description": "Boolean expression of required fields"
+        },
+        "data_include": {
+          "type": "string",
+          "description": "Fields to include/exclude"
+        },
+        "include_if_matched": {
+          "type": "boolean",
+          "description": "Show matched input fields"
+        },
+        "titlecase": {
+          "type": "boolean",
+          "description": "Titlecase text"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "pdl_id": "body",
+      "name": "body",
+      "website": "body",
+      "profile": "body",
+      "ticker": "body",
+      "location": "body",
+      "street_address": "body",
+      "locality": "body",
+      "region": "body",
+      "country": "body",
+      "postal_code": "body",
+      "min_likelihood": "body",
+      "required": "body",
+      "data_include": "body",
+      "include_if_matched": "body",
+      "titlecase": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "pdl_company_search",
+    "description": "Search 30M+ People Data Labs company records via Elasticsearch DSL or SQL. $0.10 x size (max $10); free when the result set is empty. Paginate with the returned scroll_token.",
+    "method": "POST",
+    "path": "/api/pdl/company/search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "description": "Elasticsearch v7.7 DSL query object",
+          "additionalProperties": {}
+        },
+        "sql": {
+          "type": "string",
+          "description": "SQL query: SELECT * FROM company WHERE ... Do not include LIMIT — use size for result count."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Batch size 1-100 (default 1). Price scales with size."
+        },
+        "scroll_token": {
+          "type": "string",
+          "description": "Pagination token from previous response"
+        },
+        "titlecase": {
+          "type": "boolean",
+          "description": "Titlecase text in response"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "body",
+      "sql": "body",
+      "size": "body",
+      "scroll_token": "body",
+      "titlecase": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "pdl_person_enrich",
+    "description": "People Data Labs person enrichment. $0.28 per match, free on no match. Returns demographics, work history, education, contact info, social profiles, skills. Provide at least one identifier: pdl_id, email, phone, profile URL (e.g. LinkedIn), name parts, or company/school + location.",
+    "method": "POST",
+    "path": "/api/pdl/person/enrich",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "pdl_id": {
+          "type": "string",
+          "description": "PDL persistent person ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name (first + last)"
+        },
+        "first_name": {
+          "type": "string",
+          "description": "First name"
+        },
+        "last_name": {
+          "type": "string",
+          "description": "Last name"
+        },
+        "middle_name": {
+          "type": "string",
+          "description": "Middle name"
+        },
+        "location": {
+          "type": "string",
+          "description": "Residence location (street address to country)"
+        },
+        "street_address": {
+          "type": "string",
+          "description": "Street address"
+        },
+        "locality": {
+          "type": "string",
+          "description": "City"
+        },
+        "region": {
+          "type": "string",
+          "description": "State or province"
+        },
+        "country": {
+          "type": "string",
+          "description": "Country"
+        },
+        "postal_code": {
+          "type": "string",
+          "description": "ZIP or postal code"
+        },
+        "company": {
+          "type": "string",
+          "description": "Company name, website, or social URL"
+        },
+        "school": {
+          "type": "string",
+          "description": "School name, website, or social URL"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone number (must start with +country_code)"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address"
+        },
+        "email_hash": {
+          "type": "string",
+          "description": "SHA-256 or MD5 email hash"
+        },
+        "profile": {
+          "type": "string",
+          "description": "Social profile URL"
+        },
+        "lid": {
+          "type": "string",
+          "description": "LinkedIn ID"
+        },
+        "birth_date": {
+          "type": "string",
+          "description": "Birth date (YYYY or YYYY-MM-DD)"
+        },
+        "min_likelihood": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Minimum confidence score 1-10 (default 2). Higher = fewer, better matches."
+        },
+        "required": {
+          "type": "string",
+          "description": "Boolean expression of required fields in the response"
+        },
+        "data_include": {
+          "type": "string",
+          "description": "Comma-separated fields to include; prefix - to exclude"
+        },
+        "include_if_matched": {
+          "type": "boolean",
+          "description": "Include list of matched query inputs"
+        },
+        "titlecase": {
+          "type": "boolean",
+          "description": "Titlecase text in response"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "pdl_id": "body",
+      "name": "body",
+      "first_name": "body",
+      "last_name": "body",
+      "middle_name": "body",
+      "location": "body",
+      "street_address": "body",
+      "locality": "body",
+      "region": "body",
+      "country": "body",
+      "postal_code": "body",
+      "company": "body",
+      "school": "body",
+      "phone": "body",
+      "email": "body",
+      "email_hash": "body",
+      "profile": "body",
+      "lid": "body",
+      "birth_date": "body",
+      "min_likelihood": "body",
+      "required": "body",
+      "data_include": "body",
+      "include_if_matched": "body",
+      "titlecase": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "pdl_person_search",
+    "description": "Search 3B+ People Data Labs person records via Elasticsearch DSL or SQL. $0.28 x size (max $28); free when the result set is empty. Recommended size 1-5. Paginate with the returned scroll_token. dataset picks record sources (resume, email, phone, mobile_phone, street_address, consumer_social, developer, all).",
+    "method": "POST",
+    "path": "/api/pdl/person/search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "description": "Elasticsearch v7.7 DSL query object",
+          "additionalProperties": {}
+        },
+        "sql": {
+          "type": "string",
+          "description": "SQL query: SELECT * FROM person WHERE ... Do not include LIMIT — use size for result count."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Batch size 1-100 (default 1). Price scales with size."
+        },
+        "scroll_token": {
+          "type": "string",
+          "description": "Pagination token from previous response"
+        },
+        "dataset": {
+          "type": "string",
+          "description": "Datasets to include: resume, email, phone, mobile_phone, street_address, consumer_social, developer, all"
+        },
+        "titlecase": {
+          "type": "boolean",
+          "description": "Titlecase text in response"
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "query": "body",
+      "sql": "body",
+      "size": "body",
+      "scroll_token": "body",
+      "dataset": "body",
+      "titlecase": "body"
+    },
+    "has_body": true
+  }
+]

@@ -1,0 +1,299 @@
+[
+  {
+    "name": "concordance_company_brief",
+    "description": "The cross-source correlation endpoint: joins market quotes (3\nproviders), SEC filings, and general mentions (news/academic/legal/\ndev-community) for one company in a single call -- something no\nsingle-source competitor in this space can offer, since it requires\nowning all the underlying sources already. Partial results are\nnormal and expected here (e.g. market data present but no recent\nfilings) -- this endpoint aggregates across inherently-optional\nsources, unlike /tools/series which is about exactly one source and\nwhere \"not synced yet\" is a meaningful 503 signal. Price: $0.05 per call (vendor spec).",
+    "method": "POST",
+    "path": "/tools/company-brief",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "company": {
+          "title": "Company",
+          "type": "string",
+          "description": "Ticker (AAPL) or company name (Apple). Coverage is a bounded vendor watchlist."
+        },
+        "per_section_limit": {
+          "default": 5,
+          "maximum": 20.0,
+          "minimum": 1.0,
+          "title": "Per Section Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "company"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "company": "body",
+      "per_section_limit": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "concordance_corroboration",
+    "description": "Is this claim independently corroborated across multiple unrelated\nsources, or does it trace back to a single origin? Groups matches by\nSOURCE (not category, unlike /tools/digest) so a caller can see exactly\nhow many independent outlets/agencies/publications back a claim, not\njust how many raw documents mention it -- the literal meaning of\n\"concordance\": where a claim is attested across a body of independently\nsourced texts. Price: $0.04 per call (vendor spec).",
+    "method": "POST",
+    "path": "/tools/corroboration",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "raw_pull_limit": {
+          "default": 50,
+          "maximum": 200.0,
+          "minimum": 1.0,
+          "title": "Raw Pull Limit",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      "required": [
+        "claim"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "claim": "body",
+      "raw_pull_limit": "body",
+      "since": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "concordance_digest",
+    "description": "The cross-category synthesis endpoint: one call replaces manually\ncalling /tools/search once per category and merging results\nyourself. Deliberately NOT an LLM-generated summary -- pure\nstructured aggregation of real search hits, keeping the same zero-\nmarginal-cost model as the rest of this service (an LLM call here\nwould need its own paid API key and per-call cost, undermining the\nwhole \"free sources, free to run\" design). Price: $0.03 per call (vendor spec).",
+    "method": "POST",
+    "path": "/tools/digest",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "per_category_limit": {
+          "default": 5,
+          "maximum": 20.0,
+          "minimum": 1.0,
+          "title": "Per Category Limit",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "per_category_limit": "body",
+      "since": "body",
+      "topic": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "concordance_help",
+    "description": "Extended documentation for all concordance_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other concordance_* tools when unsure how to use them.",
+    "method": "GET",
+    "path": "https://concordancehq.duckdns.org/llms.txt",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://concordancehq.duckdns.org/llms.txt"
+  },
+  {
+    "name": "concordance_search",
+    "description": "Full-text search across every aggregated data source in one call: news, SEC filings, court opinions, academic papers, government records, and developer discussions. One query surfaces everything concordant across independently-sourced, citable results (source, category, title, content, url, published_at) -- not a single-source wrapper. Optional source/category/since filters; limit 1-100 (default 20). $0.01 per call.",
+    "method": "POST",
+    "path": "/tools/search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 100.0,
+          "minimum": 1.0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "category": "body",
+      "limit": "body",
+      "query": "body",
+      "since": "body",
+      "source": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "concordance_series",
+    "description": "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. $0.01 per call. Source slugs and series ids are listed in the param notes; the vendor's free /catalog endpoint has the live list.",
+    "method": "POST",
+    "path": "/tools/series",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End"
+        },
+        "series_id": {
+          "title": "Series Id",
+          "type": "string",
+          "description": "Vendor series id, e.g. fred: GDP, CPIAUCSL, UNRATE, FEDFUNDS, DGS10; world_bank: US-NY.GDP.MKTP.CD (<COUNTRY>-<indicator>). The vendor's free /catalog endpoint lists every live series."
+        },
+        "source": {
+          "title": "Source",
+          "type": "string",
+          "description": "Catalog source slug: arxiv, core, courtlistener, defillama, finnhub, gdelt, govinfo, hackernews, open_meteo, polygon, regulations_gov, sec_edgar, stackexchange, twelvedata, un_comtrade, wikipedia, world_bank, fred."
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start"
+        }
+      },
+      "required": [
+        "series_id",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "end": "body",
+      "series_id": "body",
+      "source": "body",
+      "start": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "concordance_timeline",
+    "description": "How has coverage of this topic developed over time, across every\naggregated source? Chronologically ordered (oldest first), unlike\n/tools/search (relevance-ranked) or /tools/digest (grouped by\ncategory) -- for tracking a story's evolution or an emerging trend\nacross independently-sourced outlets. Price: $0.03 per call (vendor spec).",
+    "method": "POST",
+    "path": "/tools/timeline",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "default": 30,
+          "maximum": 100.0,
+          "minimum": 1.0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "limit": "body",
+      "since": "body",
+      "topic": "body"
+    },
+    "has_body": true
+  }
+]

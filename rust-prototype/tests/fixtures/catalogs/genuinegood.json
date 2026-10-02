@@ -1,0 +1,504 @@
+[
+  {
+    "name": "genuinegood_brief_get",
+    "description": "Produce a sourced agent-ready brief of up to ten current U.S. federal grant matches, eligibility signals, deadline urgency, award ranges, and next actions. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.50 per call (vendor spec).",
+    "method": "GET",
+    "path": "/v1/grants/brief",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "mission": {
+          "type": "string",
+          "minLength": 5
+        },
+        "keywords": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "string"
+          }
+        },
+        "eligibilityCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deadlineDays": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365
+        }
+      },
+      "required": [
+        "keywords",
+        "mission"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "mission": "query",
+      "keywords": "query",
+      "eligibilityCodes": "query",
+      "deadlineDays": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "genuinegood_brief_post",
+    "description": "Produce a sourced agent-ready brief of up to ten current U.S. federal grant matches, eligibility signals, deadline urgency, award ranges, and next actions. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.50 per call (vendor spec).",
+    "method": "POST",
+    "path": "/v1/grants/brief",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "mission": {
+          "type": "string",
+          "minLength": 5
+        },
+        "keywords": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "string"
+          }
+        },
+        "eligibilityCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deadlineDays": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365
+        }
+      },
+      "required": [
+        "keywords",
+        "mission"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "mission": "body",
+      "keywords": "body",
+      "eligibilityCodes": "body",
+      "deadlineDays": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "genuinegood_detail_get",
+    "description": "Retrieve an official Grants.gov opportunity with normalized applicant types, eligibility text, award range, deadline, categories, and provenance. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.08 per call (vendor spec).",
+    "method": "GET",
+    "path": "/v1/grants/detail",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "opportunityId": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "opportunityId"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "opportunityId": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "genuinegood_detail_post",
+    "description": "Retrieve an official Grants.gov opportunity with normalized applicant types, eligibility text, award range, deadline, categories, and provenance. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.08 per call (vendor spec).",
+    "method": "POST",
+    "path": "/v1/grants/detail",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "opportunityId": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "opportunityId"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "opportunityId": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "genuinegood_fit_get",
+    "description": "Rank current U.S. federal opportunities against a mission profile using transparent keyword, deadline, and applicant-type signals; returns reasons and official records. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.20 per call (vendor spec).",
+    "method": "GET",
+    "path": "/v1/grants/fit",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "mission": {
+          "type": "string",
+          "minLength": 5
+        },
+        "keywords": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "string"
+          }
+        },
+        "eligibilityCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deadlineDays": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365
+        },
+        "resultLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "keywords",
+        "mission"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "mission": "query",
+      "keywords": "query",
+      "eligibilityCodes": "query",
+      "deadlineDays": "query",
+      "resultLimit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "genuinegood_fit_post",
+    "description": "Rank current U.S. federal opportunities against a mission profile using transparent keyword, deadline, and applicant-type signals; returns reasons and official records. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.20 per call (vendor spec).",
+    "method": "POST",
+    "path": "/v1/grants/fit",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "mission": {
+          "type": "string",
+          "minLength": 5
+        },
+        "keywords": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "string"
+          }
+        },
+        "eligibilityCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deadlineDays": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365
+        },
+        "resultLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "keywords",
+        "mission"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "mission": "body",
+      "keywords": "body",
+      "eligibilityCodes": "body",
+      "deadlineDays": "body",
+      "resultLimit": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "genuinegood_help",
+    "description": "Extended documentation for all genuinegood_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other genuinegood_* tools when unsure how to use them.",
+    "method": "GET",
+    "path": "https://genuinegood.online/llms.txt",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://genuinegood.online/llms.txt"
+  },
+  {
+    "name": "genuinegood_preflight_get",
+    "description": "Run deterministic rule-based checks over up to five retrieved Grants.gov notices: deadline horizon, listed applicant-type code intersection, source-field completeness, and official-notice verification flags. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $5.00 per call (vendor spec).",
+    "method": "GET",
+    "path": "/v1/grants/preflight",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "opportunityIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "applicantTypeCodes": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "deadlineHorizonDays": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365,
+          "default": 60
+        }
+      },
+      "required": [
+        "opportunityIds"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "opportunityIds": "query",
+      "applicantTypeCodes": "query",
+      "deadlineHorizonDays": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "genuinegood_preflight_post",
+    "description": "Run deterministic rule-based checks over up to five retrieved Grants.gov notices: deadline horizon, listed applicant-type code intersection, source-field completeness, and official-notice verification flags. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $5.00 per call (vendor spec).",
+    "method": "POST",
+    "path": "/v1/grants/preflight",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "opportunityIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "applicantTypeCodes": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "deadlineHorizonDays": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365,
+          "default": 60
+        }
+      },
+      "required": [
+        "opportunityIds"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "opportunityIds": "body",
+      "applicantTypeCodes": "body",
+      "deadlineHorizonDays": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "genuinegood_search_get",
+    "description": "Search current Grants.gov opportunities with normalized deadlines, days remaining, agency, status, assistance listing numbers, and official source links. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/v1/grants/search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "keyword": {
+          "type": "string",
+          "description": "Plain-language mission or funding topic"
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "posted",
+              "forecasted",
+              "closed",
+              "archived"
+            ]
+          }
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        },
+        "agencies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": "Optional Grants.gov agency codes"
+        },
+        "eligibilityCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fundingCategories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": "Optional Grants.gov funding activity category codes"
+        },
+        "fundingInstruments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": "Optional Grants.gov funding instrument codes"
+        }
+      },
+      "required": [
+        "keyword"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "keyword": "query",
+      "statuses": "query",
+      "rows": "query",
+      "agencies": "query",
+      "eligibilityCodes": "query",
+      "fundingCategories": "query",
+      "fundingInstruments": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "genuinegood_search_post",
+    "description": "Search current Grants.gov opportunities with normalized deadlines, days remaining, agency, status, assistance listing numbers, and official source links. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.05 per call (vendor spec).",
+    "method": "POST",
+    "path": "/v1/grants/search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "keyword": {
+          "type": "string",
+          "description": "Plain-language mission or funding topic"
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "posted",
+              "forecasted",
+              "closed",
+              "archived"
+            ]
+          }
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        },
+        "agencies": {
+          "type": "array",
+          "description": "Optional Grants.gov agency codes",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "eligibilityCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fundingCategories": {
+          "type": "array",
+          "description": "Optional Grants.gov funding activity category codes",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "fundingInstruments": {
+          "type": "array",
+          "description": "Optional Grants.gov funding instrument codes",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        }
+      },
+      "required": [
+        "keyword"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "keyword": "body",
+      "statuses": "body",
+      "rows": "body",
+      "agencies": "body",
+      "eligibilityCodes": "body",
+      "fundingCategories": "body",
+      "fundingInstruments": "body"
+    },
+    "has_body": true
+  }
+]

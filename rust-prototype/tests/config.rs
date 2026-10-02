@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use std::path::Path;
-use x402_mcp_prototype::{catalog::Config, config, deployment::Deployment};
+use x402_mcp_prototype::{config, deployment::Deployment};
 
 #[tokio::test]
 async fn composition_replaces_fields_and_resolves_paths_at_their_declaration() {
@@ -93,51 +93,20 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
 }
 
 #[tokio::test]
-async fn all_bundled_provider_settings_preserve_python_configs() {
+async fn bundled_provider_settings_match_reviewed_snapshots() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let names = [
-        "agentfund",
-        "arkham",
-        "botsmith",
-        "brazilayer",
-        "concordance",
-        "deepline",
-        "genuinegood",
-        "glassnode",
-        "google-trends",
-        "kronos",
-        "locus",
-        "lonestar",
-        "otto",
-        "pdl",
-        "regimeshift",
-        "socialfetch",
-        "straits",
-        "x402stock",
-    ];
-    for name in names {
-        let python = if name == "glassnode" {
-            repo.join("confs/glassnode/glassnode.json")
-        } else {
-            repo.join(format!("confs/{name}.json"))
-        };
-        let expected: Config = serde_json::from_slice(&std::fs::read(python).unwrap()).unwrap();
-        let nested = repo.join(format!("providers/{name}/provider.toml"));
-        let path = if nested.exists() {
-            nested
-        } else {
-            repo.join(format!("providers/{name}.toml"))
-        };
-        let resolved = config::load(&path).await.unwrap();
+    let expected: std::collections::BTreeMap<String, Value> =
+        serde_json::from_str(include_str!("fixtures/catalogs/settings.json")).unwrap();
+    assert_eq!(expected.len(), 18);
+    for (provider, expected) in expected {
+        let resolved = config::load(&repo.join(&provider)).await.unwrap();
         let mut actual = serde_json::to_value(&resolved.settings).unwrap();
-        let mut expected = serde_json::to_value(expected).unwrap();
-        if Path::new(&resolved.settings.spec).is_absolute() {
-            assert!(Path::new(&resolved.settings.spec).exists());
-            actual.as_object_mut().unwrap().remove("spec");
-            expected.as_object_mut().unwrap().remove("spec");
-            expected["pricing_key"] = json!("x-payment-info");
+        let spec = Path::new(&resolved.settings.spec);
+        if spec.is_absolute() {
+            assert!(spec.exists(), "{provider}");
+            actual["spec"] = json!(spec.strip_prefix(repo).unwrap().to_str().unwrap());
         }
-        assert_eq!(actual, expected, "{name}");
+        assert_eq!(actual, expected, "{provider}");
     }
 }
 

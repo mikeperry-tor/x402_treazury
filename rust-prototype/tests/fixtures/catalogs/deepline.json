@@ -1,0 +1,437 @@
+[
+  {
+    "name": "deepline_ads_search",
+    "description": "Ad Intelligence — a company's active ads on Facebook, Google, LinkedIn, or TikTok (via Adyntel): creative copy, spend signals, and targeting. Price: $0.02 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/ads/search",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "facebook",
+            "google",
+            "linkedin",
+            "tiktok"
+          ],
+          "description": "Ad platform to query for active ads."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Company domain in normalized form (for example company.com, no https:// or www). Required for facebook, google, and linkedin."
+        },
+        "keyword": {
+          "type": "string",
+          "description": "Keyword to search the TikTok ad library. Required for tiktok (brand name works well)."
+        },
+        "media_type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "image",
+            "video"
+          ],
+          "description": "Optional Google ad format filter (google only)."
+        },
+        "country_code": {
+          "type": "string",
+          "description": "Optional TikTok country filter (tiktok only): a European country code or \"ALL\". Omit for global results."
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "platform": "body",
+      "domain": "body",
+      "keyword": "body",
+      "media_type": "body",
+      "country_code": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_company_enrich",
+    "description": "Enrich Company — merged 30+ field profile from Apollo, Crustdata, and PeopleDataLabs: revenue, headcount, industry, funding, valuation, tech stack, social profiles, SIC/NAICS codes, HQ address. Price: $0.10 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/company/enrich",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "Company domain to enrich (for example stripe.com)."
+        },
+        "company_name": {
+          "type": "string",
+          "description": "Company name fallback when domain is unavailable."
+        },
+        "linkedin": {
+          "type": "string",
+          "description": "LinkedIn company page id or full company URL."
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "domain": "body",
+      "company_name": "body",
+      "linkedin": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_contacts_by_role",
+    "description": "Find Decision Makers — accumulate contacts at a company matching the given roles (and optional seniority) across Dropleads, Apollo, Icypeas, Prospeo, and Crustdata. Price: $0.25 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/contacts/by-role",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Primary persona intent for contact lookup, e.g. [\"VP Engineering\", \"Head of Security\"].",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "company_name": {
+          "type": "string",
+          "description": "Company name for human context and provider fallbacks."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Company domain for contact lookup (for example acme.com)."
+        },
+        "linkedin_company_url": {
+          "type": "string",
+          "description": "Optional LinkedIn company URL in /company/ format for domain-less lookup."
+        },
+        "seniority": {
+          "type": "array",
+          "description": "Broad seniority intent, e.g. [\"C-Level\", \"VP\", \"Director\", \"Manager\", \"Senior\"].",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Optional result cap per waterfall step (1–100). Use 1 for cheapest lookups."
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "roles": "body",
+      "company_name": "body",
+      "domain": "body",
+      "linkedin_company_url": "body",
+      "seniority": "body",
+      "limit": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_email_from_linkedin",
+    "description": "Email from LinkedIn — waterfall search (Findymail, Prospeo, Lusha, …) that resolves a LinkedIn profile URL into a verified work email. Price: $0.17 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/email/from-linkedin",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "linkedin_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Standard LinkedIn profile URL in /in/ format."
+        }
+      },
+      "required": [
+        "linkedin_url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "linkedin_url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_email_personal",
+    "description": "Find Personal Email — waterfall search (Dropleads, LeadMagic, PeopleDataLabs) for a personal email address. Best coverage with a LinkedIn URL plus first and last name. Price: $0.10 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/email/personal",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "first_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact first name."
+        },
+        "last_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact last name."
+        },
+        "linkedin_url": {
+          "type": "string",
+          "description": "LinkedIn profile URL — improves coverage."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Company domain context."
+        },
+        "company_name": {
+          "type": "string",
+          "description": "Company name context."
+        }
+      },
+      "required": [
+        "first_name",
+        "last_name"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "first_name": "body",
+      "last_name": "body",
+      "linkedin_url": "body",
+      "domain": "body",
+      "company_name": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_email_validate",
+    "description": "Validate Email — ZeroBounce deliverability check for an email address (valid / catch-all / invalid). Price: $0.03 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/email/validate",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Email address to validate."
+        },
+        "ip_address": {
+          "type": "string",
+          "description": "Optional signup IP address used by ZeroBounce for enrichment."
+        }
+      },
+      "required": [
+        "email"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "email": "body",
+      "ip_address": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_email_work",
+    "description": "Find Work Email — waterfall search across 79+ providers (Apollo, Hunter, Prospeo, …) for a verified work email from a name and company domain. Stops at the first provider that returns a hit. Price: $0.04 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/email/work",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "first_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact first name."
+        },
+        "last_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact last name."
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Company domain (for example acme.com)."
+        },
+        "company_name": {
+          "type": "string",
+          "description": "Optional company name hint."
+        },
+        "linkedin_url": {
+          "type": "string",
+          "description": "Optional standard LinkedIn profile URL — enables LinkedIn-native fallback providers."
+        }
+      },
+      "required": [
+        "domain",
+        "first_name",
+        "last_name"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "first_name": "body",
+      "last_name": "body",
+      "domain": "body",
+      "company_name": "body",
+      "linkedin_url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_linkedin_find",
+    "description": "Find LinkedIn Profile — resolve a person into their LinkedIn profile URL from name plus company domain, company name, or email. Price: $0.10 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/linkedin/find",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "first_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact first name."
+        },
+        "last_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact last name."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Company domain context."
+        },
+        "company_name": {
+          "type": "string",
+          "description": "Company name context."
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional known email context."
+        }
+      },
+      "required": [
+        "first_name",
+        "last_name"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "first_name": "body",
+      "last_name": "body",
+      "domain": "body",
+      "company_name": "body",
+      "email": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_person_from_email",
+    "description": "Person from Email — reverse an email address into the person behind it: name, title, company, and LinkedIn URL. Price: $0.12 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/person/from-email",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Business/work email address to enrich. Personal webmail domains such as gmail.com are rejected."
+        },
+        "linkedin_url": {
+          "type": "string",
+          "description": "LinkedIn profile URL to enrich."
+        }
+      },
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "email": "body",
+      "linkedin_url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_person_job_change",
+    "description": "Job Change Check — detect whether a contact has changed jobs by comparing their LinkedIn profile against the company domain you have on record. Price: $0.15 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/person/job-change",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "linkedin_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "LinkedIn profile URL (/in/ format) of the contact to check."
+        },
+        "current_domain": {
+          "type": "string",
+          "description": "Bare domain of the company you have on record — used to detect a change."
+        }
+      },
+      "required": [
+        "linkedin_url"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "linkedin_url": "body",
+      "current_domain": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "deepline_phone_find",
+    "description": "Find Mobile Phone — locate a validated mobile number with automatic region-based provider routing. Strongest coverage in US/CA and Western Europe. Price: $0.50 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/phone/find",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "first_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact first name."
+        },
+        "last_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contact last name."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Company domain context."
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional known email context."
+        },
+        "linkedin_url": {
+          "type": "string",
+          "description": "LinkedIn profile URL — improves coverage."
+        }
+      },
+      "required": [
+        "first_name",
+        "last_name"
+      ],
+      "additionalProperties": false
+    },
+    "param_routes": {
+      "first_name": "body",
+      "last_name": "body",
+      "domain": "body",
+      "email": "body",
+      "linkedin_url": "body"
+    },
+    "has_body": true
+  }
+]
