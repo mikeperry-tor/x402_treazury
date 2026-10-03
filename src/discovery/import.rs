@@ -210,6 +210,20 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
         "invalid source name"
     );
     let spec = endpoint(policy, &c.spec_url)?;
+    let root = parse_document(bytes)?;
+    let paths = root["paths"]
+        .as_object()
+        .context("OpenAPI paths required")?;
+    ensure!(paths.len() <= 10000, "operation_count_limit");
+    let (base, base_url) = resolve_base(policy, c, &spec, &root)?;
+    validate_paths(paths)?;
+    let tools = selected_tools(c, id, &root, &base)?;
+    validate_tools(policy, &tools, &base, &base_url)?;
+    Ok(Built { tools, base })
+}
+
+// Inspect reference expansion before deriving any catalog from untrusted JSON.
+fn parse_document(bytes: &[u8]) -> Result<Value> {
     let root: Value = serde_json::from_slice(bytes).context("invalid OpenAPI JSON")?;
     inspect(
         &root,
@@ -225,10 +239,15 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
             .is_some_and(|v| v.starts_with("3.")),
         "OpenAPI 3 JSON required"
     );
-    let paths = root["paths"]
-        .as_object()
-        .context("OpenAPI paths required")?;
-    ensure!(paths.len() <= 10000, "operation_count_limit");
+    Ok(root)
+}
+
+fn resolve_base(
+    policy: &Policy,
+    c: &Candidate,
+    spec: &reqwest::Url,
+    root: &Value,
+) -> Result<(String, reqwest::Url)> {
     let base = if let Some(base) = &c.base_url {
         base.clone()
     } else {
@@ -244,6 +263,10 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
         base_url.query().is_none(),
         "base_url must not contain query parameters"
     );
+    Ok((base, base_url))
+}
+
+fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
     // Do not silently ignore per-operation server changes supported differently by providers.
     let mut operation_count = 0;
     for item in paths.values() {
@@ -269,9 +292,13 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
             }
         }
     }
+    Ok(())
+}
+
+fn selected_tools(c: &Candidate, id: &str, root: &Value, base: &str) -> Result<Vec<ToolSpec>> {
     let cfg = Config {
         spec: c.spec_url.clone(),
-        base_url: Some(base.clone()),
+        base_url: Some(base.to_owned()),
         include: c.selection.include.clone(),
         exclude: c.selection.exclude.clone(),
         tags: c.selection.tags.clone(),
@@ -281,7 +308,7 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
         ..Default::default()
     };
     let prefix = format!("dyn_{}", id.replace('-', ""));
-    let tools = catalog::build_tools(&cfg, &root, &prefix)?
+    let tools = catalog::build_tools(&cfg, root, &prefix)?
         .into_iter()
         .filter_map(|t| {
             match matches(
@@ -295,12 +322,21 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
             }
         })
         .collect::<Result<Vec<_>>>()?;
+    Ok(tools)
+}
+
+fn validate_tools(
+    policy: &Policy,
+    tools: &[ToolSpec],
+    base: &str,
+    base_url: &reqwest::Url,
+) -> Result<()> {
     ensure!(!tools.is_empty(), "no tools selected");
     ensure!(
         tools.len() <= policy.max_tools_per_source,
         "source_tool_limit"
     );
-    for tool in &tools {
+    for tool in tools {
         ensure!(tool.name.len() <= 128, "tool_name_too_long");
         ensure!(
             serde_json::to_vec(&tool.input_schema)?.len() <= 262144,
@@ -324,7 +360,7 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
             "cross_origin_operation_rejected"
         );
     }
-    Ok(Built { tools, base })
+    Ok(())
 }
 
 #[cfg(test)]

@@ -365,6 +365,103 @@ fn importer_rejects_unsafe_and_expanding_documents() {
     );
 }
 #[test]
+fn import_pipeline_preserves_origin_checks_and_validation_before_selection() {
+    let mut p = policy(None);
+    let mut c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();
+    let id = Uuid::new_v4().to_string();
+    let build = |p: &policy::Policy, c: &Candidate, doc: &Value| {
+        import::build(p, c, &id, &serde_json::to_vec(doc).unwrap())
+    };
+    let mut doc = spec();
+    doc["servers"][0]["url"] = json!("/v1");
+    assert_eq!(
+        build(&p, &c, &doc).unwrap().base,
+        "https://api.example.com/v1"
+    );
+    c.base_url = Some("https://api.example.com/override".into());
+    doc.as_object_mut().unwrap().remove("servers");
+    assert_eq!(
+        build(&p, &c, &doc).unwrap().base,
+        c.base_url.as_ref().unwrap().as_str()
+    );
+    c.base_url = Some("https://api.example.com/v1?secret=value".into());
+    assert!(
+        build(&p, &c, &doc)
+            .unwrap_err()
+            .to_string()
+            .contains("base_url must not contain query")
+    );
+    c.base_url = None;
+
+    // Invalid operations are rejected even when selection would exclude them.
+    c.selection.include = vec!["/write".into()];
+    for (node, field, value, error) in [
+        (
+            "path",
+            "servers",
+            json!([{ "url": "https://other.example.com" }]),
+            "per-path servers unsupported",
+        ),
+        (
+            "operation",
+            "servers",
+            json!([{ "url": "https://other.example.com" }]),
+            "per-operation servers unsupported",
+        ),
+        (
+            "path",
+            "$ref",
+            json!("#/components/path"),
+            "path references unsupported",
+        ),
+    ] {
+        let mut bad = spec();
+        bad["components"] = json!({"path":{"get":{}}});
+        let target = if node == "path" {
+            &mut bad["paths"]["/read"]
+        } else {
+            &mut bad["paths"]["/read"]["get"]
+        };
+        target[field] = value;
+        assert!(
+            build(&p, &c, &bad).unwrap_err().to_string().contains(error),
+            "{error}"
+        );
+    }
+    // Tool-count limits apply to the selected inventory, after document validation.
+    p.max_tools_per_source = 1;
+    assert_eq!(build(&p, &c, &spec()).unwrap().tools.len(), 1);
+    c.selection.include.clear();
+    assert!(
+        build(&p, &c, &spec())
+            .unwrap_err()
+            .to_string()
+            .contains("source_tool_limit")
+    );
+
+    let cross_origin = json!({"openapi":"3.0.3", "servers":[{"url":"https://api.example.com"}],
+        "paths":{"https://other.example.com/read":{"get":{}}}});
+    assert!(
+        build(&p, &c, &cross_origin)
+            .unwrap_err()
+            .to_string()
+            .contains("cross_origin_operation_rejected")
+    );
+    p.allowed_origins = vec![
+        "https://api.example.com".into(),
+        "https://other.example.com".into(),
+    ];
+    assert_eq!(build(&p, &c, &cross_origin).unwrap().tools.len(), 1);
+    p.allowed_origins = vec!["https://api.example.com".into()];
+    assert!(
+        build(&p, &c, &cross_origin)
+            .unwrap_err()
+            .to_string()
+            .contains("destination origin not authorized")
+    );
+}
+
+#[test]
 fn registry_ownership_aliases_corruption_and_inspection_do_not_overwrite() {
     let tmp = tempfile::tempdir().unwrap();
     let file = tmp.path().join("registry.sqlite");
