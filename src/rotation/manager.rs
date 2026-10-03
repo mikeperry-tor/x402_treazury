@@ -103,6 +103,12 @@ impl ManagedPool {
         if let Some(desc) = challenge.pointer_mut("/resource/description")
             && let Some(text) = desc.as_str()
         {
+            if text.chars().count() > 500 {
+                tracing::warn!(
+                    limit_chars = 500,
+                    "x402 challenge description truncated for facilitator protocol compatibility"
+                );
+            }
             *desc = Value::String(text.chars().take(500).collect());
         }
         response.headers_mut().insert(

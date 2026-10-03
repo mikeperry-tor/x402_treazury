@@ -18,6 +18,10 @@ pub struct Policy {
     pub max_tools_per_server: usize,
     #[serde(default = "bytes")]
     pub max_spec_bytes: usize,
+    #[serde(default = "crate::limits::response_default")]
+    pub max_response_bytes: usize,
+    #[serde(default = "crate::limits::help_default")]
+    pub max_help_bytes: usize,
     #[serde(default = "timeout")]
     pub fetch_timeout_seconds: u64,
     #[serde(default)]
@@ -90,6 +94,10 @@ pub fn validate(config: &MetaConfig) -> Result<()> {
             (1024..=67108864).contains(&p.max_spec_bytes)
                 && (1..=300).contains(&p.fetch_timeout_seconds),
             "invalid import limits"
+        );
+        ensure!(
+            p.max_response_bytes > 0 && p.max_help_bytes > 0,
+            "dynamic download limits must be positive"
         );
         for origin in &p.allowed_origins {
             let u = crate::network::public_url(origin)?;

@@ -47,6 +47,12 @@ struct Args {
     #[arg(long)]
     max_response_chars: Option<usize>,
     #[arg(long)]
+    max_response_bytes: Option<usize>,
+    #[arg(long)]
+    max_help_bytes: Option<usize>,
+    #[arg(long)]
+    max_spec_bytes: Option<usize>,
+    #[arg(long)]
     timeout: Option<f64>,
     #[arg(long, default_value="stdio", value_parser=["stdio", "http"])]
     transport: String,
@@ -272,6 +278,15 @@ async fn run() -> Result<()> {
     if let Some(timeout) = args.timeout {
         cfg.timeout = timeout;
     }
+    if let Some(value) = args.max_response_bytes {
+        cfg.max_response_bytes = value;
+    }
+    if let Some(value) = args.max_help_bytes {
+        cfg.max_help_bytes = value;
+    }
+    if let Some(value) = args.max_spec_bytes {
+        cfg.max_spec_bytes = value;
+    }
     x402_treazure::config::validate(&cfg)?;
     let http = x402_treazure::network::discovery(
         if cfg.spec.starts_with("http") {
@@ -281,7 +296,7 @@ async fn run() -> Result<()> {
         },
         Duration::from_secs_f64(cfg.timeout),
     )?;
-    let root = catalog::load_json(&cfg.spec, &http).await?;
+    let root = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes).await?;
     if args.list_tags {
         println!(
             "{}",
@@ -336,7 +351,9 @@ async fn run() -> Result<()> {
     tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
     let mut server = Server::new(
         tools,
-        PaidClient::new(payer).with_timeout(Duration::from_secs_f64(cfg.timeout)),
+        PaidClient::new(payer)
+            .with_timeout(Duration::from_secs_f64(cfg.timeout))
+            .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes),
         base,
         cfg.instructions_text,
         args.max_response_chars,

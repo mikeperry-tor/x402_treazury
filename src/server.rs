@@ -107,10 +107,16 @@ impl Server {
     }
     fn limit(&self, text: String) -> String {
         match self.max_response_chars {
-            Some(max) if text.chars().count() > max => format!(
-                "{}\n[truncated by --max-response-chars]",
-                text.chars().take(max).collect::<String>()
-            ),
+            Some(max) if text.chars().count() > max => {
+                tracing::warn!(
+                    limit_chars = max,
+                    "tool output truncated by max_response_chars"
+                );
+                format!(
+                    "{}\n[truncated by --max-response-chars]",
+                    text.chars().take(max).collect::<String>()
+                )
+            }
             _ => text,
         }
     }
@@ -231,11 +237,19 @@ pub fn http_app(server: Server, token: String) -> axum::Router {
             )
                 .into_response();
         }
-        next.run(request).await
+        let response = next.run(request).await;
+        if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            tracing::warn!(
+                limit_bytes = crate::limits::MCP_REQUEST_BYTES,
+                "MCP request rejected: incoming body exceeds the request byte limit"
+            );
+        }
+        response
     }
     let config = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
-        .with_json_response(true);
+        .with_json_response(true)
+        .with_max_request_body_bytes(crate::limits::MCP_REQUEST_BYTES);
     let service = StreamableHttpService::new(
         move || Ok(server.clone()),
         Arc::new(LocalSessionManager::default()),

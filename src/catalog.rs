@@ -42,6 +42,9 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub timeout: f64,
+    pub max_response_bytes: usize,
+    pub max_help_bytes: usize,
+    pub max_spec_bytes: usize,
     pub spec: String,
     pub name: Option<String>,
     pub base_url: Option<String>,
@@ -70,6 +73,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             timeout: 30.0,
+            max_response_bytes: crate::limits::RESPONSE_BYTES,
+            max_help_bytes: crate::limits::HELP_BYTES,
+            max_spec_bytes: crate::limits::SPEC_BYTES,
             spec: String::new(),
             name: None,
             base_url: None,
@@ -207,14 +213,21 @@ fn anchor<'a>(path: &str, prefixes: &'a [String]) -> Option<&'a str> {
 }
 
 pub async fn load_json(source: &str, http: &reqwest::Client) -> Result<Value> {
+    load_json_with_limit(source, http, crate::limits::SPEC_BYTES).await
+}
+pub async fn load_json_with_limit(
+    source: &str,
+    http: &reqwest::Client,
+    limit: usize,
+) -> Result<Value> {
     let bytes = if source.starts_with("https://") || source.starts_with("http://") {
-        http.get(source)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?
-            .to_vec()
+        crate::limits::read(
+            http.get(source).send().await?.error_for_status()?,
+            limit,
+            "static URL spec",
+            "max_spec_bytes",
+        )
+        .await?
     } else {
         tokio::fs::read(source)
             .await
@@ -601,8 +614,17 @@ pub fn build_tools_with_prices(
             } else {
                 format!("{text} {price}")
             };
-        if let Some(max) = cfg.max_description_chars {
-            description = description.chars().take(max).collect();
+        if let Some(max) = cfg.max_description_chars
+            && description.chars().count() > max
+        {
+            tracing::warn!(
+                limit_chars = max,
+                "tool description truncated by max_description_chars"
+            );
+            description = format!(
+                "{}\n[truncated by max_description_chars={max}]",
+                description.chars().take(max).collect::<String>()
+            );
         }
         tools.push(ToolSpec {
             name,

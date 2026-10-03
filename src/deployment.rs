@@ -269,7 +269,7 @@ impl Deployment {
                 },
                 Duration::from_secs_f64(cfg.timeout),
             )?;
-            let document = catalog::load_json(&cfg.spec, &http)
+            let document = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes)
                 .await
                 .with_context(|| format!("source {id}: loading spec"))?;
             let base_url = cfg
@@ -650,7 +650,11 @@ impl Deployment {
                         t.clone(),
                         wallets[&self.wallet_resolution.bindings[name][id].wallet]
                             .clone()
-                            .with_timeout(Duration::from_secs_f64(source.config.timeout)),
+                            .with_timeout(Duration::from_secs_f64(source.config.timeout))
+                            .with_download_limits(
+                                source.config.max_response_bytes,
+                                source.config.max_help_bytes,
+                            ),
                         source.base_url.clone(),
                     )
                 })

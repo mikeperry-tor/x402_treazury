@@ -121,6 +121,13 @@ impl PricingCache {
             .collect();
         candidates.sort_by_key(|t| (&t.path, &t.method));
         candidates.dedup_by_key(|t| (&t.path, &t.method));
+        if candidates.len() > cfg.probe_max_endpoints {
+            tracing::warn!(
+                candidate_count = candidates.len(),
+                limit_endpoints = cfg.probe_max_endpoints,
+                "pricing discovery capped by probe_max_endpoints; remaining endpoints will have no probed price"
+            );
+        }
         candidates.truncate(cfg.probe_max_endpoints);
         let mut lines = BTreeMap::new();
         // Each batch bounds per-source concurrency; LIMIT bounds the whole process.

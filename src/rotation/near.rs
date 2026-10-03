@@ -93,10 +93,15 @@ impl NearClient {
             .await
             .map_err(|_| anyhow::anyhow!("near_response_failed"))?
         {
-            ensure!(
-                bytes.len() + chunk.len() <= 2_000_000,
-                "near_response_too_large"
-            );
+            if chunk.len() > 2_000_000usize.saturating_sub(bytes.len()) {
+                tracing::warn!(
+                    limit_bytes = 2_000_000,
+                    "NEAR response exceeds fixed byte limit; content rejected"
+                );
+                anyhow::bail!(
+                    "near_response_too_large: fixed 2000000-byte limit exceeded; content rejected"
+                );
+            }
             bytes.extend_from_slice(&chunk);
         }
         serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid NEAR JSON"))

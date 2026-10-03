@@ -63,6 +63,12 @@ pub fn validate(settings: &Config) -> Result<()> {
             "invalid include_operations entry"
         );
     }
+    ensure!(
+        settings.max_response_bytes > 0
+            && settings.max_help_bytes > 0
+            && settings.max_spec_bytes > 0,
+        "max_response_bytes, max_help_bytes and max_spec_bytes must be positive"
+    );
     crate::pricing::validate(settings)
 }
 pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<ResolvedProvider> {

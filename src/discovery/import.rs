@@ -83,22 +83,31 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
             "source_http_{}",
             response.status().as_u16()
         );
-        ensure!(
-            response
-                .content_length()
-                .is_none_or(|n| n <= policy.max_spec_bytes as u64),
-            "spec_too_large"
-        );
+        if response
+            .content_length()
+            .is_some_and(|n| n > policy.max_spec_bytes as u64)
+        {
+            return Err(crate::limits::exceeded(
+                "imported spec",
+                "max_spec_bytes",
+                policy.max_spec_bytes,
+            )
+            .context("spec_too_large"));
+        }
         let mut bytes = Vec::new();
         while let Some(chunk) = response
             .chunk()
             .await
             .map_err(|_| anyhow::anyhow!("source_read_failed"))?
         {
-            ensure!(
-                bytes.len() + chunk.len() <= policy.max_spec_bytes,
-                "spec_too_large"
-            );
+            if chunk.len() > policy.max_spec_bytes.saturating_sub(bytes.len()) {
+                return Err(crate::limits::exceeded(
+                    "imported spec",
+                    "max_spec_bytes",
+                    policy.max_spec_bytes,
+                )
+                .context("spec_too_large"));
+            }
             bytes.extend_from_slice(&chunk);
         }
         Ok(bytes)
@@ -172,7 +181,14 @@ pub fn matches(name: &str, include: &[String], exclude: &[String]) -> Result<boo
     Ok((include.is_empty() || any(include)?) && !any(exclude)?)
 }
 pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<Built> {
-    ensure!(bytes.len() <= policy.max_spec_bytes, "spec_too_large");
+    if bytes.len() > policy.max_spec_bytes {
+        return Err(crate::limits::exceeded(
+            "imported spec",
+            "max_spec_bytes",
+            policy.max_spec_bytes,
+        )
+        .context("spec_too_large"));
+    }
     ensure!(
         !c.name.is_empty()
             && c.name.len() <= 64

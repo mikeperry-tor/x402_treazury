@@ -13,6 +13,9 @@ spec = "catalog.json"
 prefix = "stable"
 tags = ["A", "B"]
 timeout = 90
+max_response_bytes = 100
+max_help_bytes = 50
+max_spec_bytes = 200
 [overrides.stable_old]
 description = "Old"
 "#,
@@ -24,6 +27,7 @@ description = "Old"
         r#"extends = "../provider.toml"
 tags = []
 timeout = 42
+max_help_bytes = 80
 [overrides.stable_new]
 description = "New"
 "#,
@@ -32,6 +36,14 @@ description = "New"
     let resolved = config::resolve(source, &deployment).await.unwrap();
     assert!(resolved.settings.tags.is_empty());
     assert_eq!(resolved.settings.timeout, 42.0);
+    assert_eq!(resolved.settings.max_response_bytes, 100);
+    assert_eq!(resolved.settings.max_help_bytes, 80);
+    assert_eq!(resolved.settings.max_spec_bytes, 200);
+    assert!(resolved.origins["max_response_bytes"].ends_with("provider.toml"));
+    assert_eq!(
+        resolved.origins["max_help_bytes"],
+        deployment.display().to_string()
+    );
     assert_eq!(resolved.settings.prefix.as_deref(), Some("stable"));
     assert!(Path::new(&resolved.settings.spec).ends_with("catalog.json"));
     assert_eq!(
@@ -77,6 +89,10 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
         "spec = 'api.json'\nunknown = true",
         "spec = 'api.json'\ntimeout = 0",
         "extends = ['a.toml']",
+        "spec = 'api.json'\nmax_response_bytes = 0",
+        "spec = 'api.json'\nmax_help_bytes = 0",
+        "spec = 'api.json'\nmax_spec_bytes = 0",
+        "spec = 'api.json'\nmax_response_bytes = -1",
         "config = 'old.json'",
         "spec = 'api.json'\nprobe_methods = ['POST']",
     ] {

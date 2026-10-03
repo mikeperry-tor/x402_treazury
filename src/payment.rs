@@ -67,6 +67,8 @@ impl Payer {
 pub struct PaidClient {
     public_only: bool,
     timeout: std::time::Duration,
+    max_response_bytes: usize,
+    max_help_bytes: usize,
     payer: Option<Arc<RwLock<Arc<Payer>>>>,
     managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
 }
@@ -74,6 +76,8 @@ impl PaidClient {
     pub fn new(payer: Payer) -> Self {
         Self {
             public_only: false,
+            max_response_bytes: crate::limits::RESPONSE_BYTES,
+            max_help_bytes: crate::limits::HELP_BYTES,
             timeout: std::time::Duration::from_secs(60),
             payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
             managed: None,
@@ -82,6 +86,8 @@ impl PaidClient {
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
             public_only: false,
+            max_response_bytes: crate::limits::RESPONSE_BYTES,
+            max_help_bytes: crate::limits::HELP_BYTES,
             timeout: std::time::Duration::from_secs(60),
             payer: None,
             managed: Some(pool),
@@ -90,6 +96,14 @@ impl PaidClient {
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = timeout;
         self
+    }
+    pub fn with_download_limits(mut self, response: usize, help: usize) -> Self {
+        self.max_response_bytes = response;
+        self.max_help_bytes = help;
+        self
+    }
+    pub fn max_help_bytes(&self) -> usize {
+        self.max_help_bytes
     }
     pub fn public_destinations(mut self) -> Self {
         self.public_only = true;
@@ -143,6 +157,7 @@ impl PaidClient {
         }
         let idempotent = matches!(request.method().as_str(), "GET" | "HEAD");
         let mut attempt = 0;
+        let mut paid_submission = false;
         let response = loop {
             let candidate = match &self.managed {
                 Some(pool) => Some(pool.candidate().await?),
@@ -173,6 +188,18 @@ impl PaidClient {
                 .context("request body cannot be retried")?;
             let mut response = http.execute(unsigned).await?;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+                // Bound legacy JSON-body challenges before the SDK can collect them.
+                let mut envelope = axum::http::Response::builder().status(response.status());
+                *envelope.headers_mut().expect("valid status") = response.headers().clone();
+                let bytes = crate::limits::read(
+                    response,
+                    self.max_response_bytes,
+                    "payment challenge body",
+                    "max_response_bytes",
+                )
+                .await
+                .context("payment challenge rejected before signing")?;
+                response = envelope.body(bytes)?.into();
                 if let Some(pool) = &self.managed {
                     match pool
                         .pay(
@@ -183,7 +210,10 @@ impl PaidClient {
                         )
                         .await
                     {
-                        Ok(paid) => response = paid,
+                        Ok(paid) => {
+                            paid_submission = true;
+                            response = paid;
+                        }
                         Err(error)
                             if error.downcast_ref::<crate::rotation::error::AdmissionError>()
                                 == Some(&crate::rotation::error::AdmissionError::PayerChanged)
@@ -202,6 +232,12 @@ impl PaidClient {
                         if let Some(desc) = challenge.pointer_mut("/resource/description")
                             && let Some(text) = desc.as_str()
                         {
+                            if text.chars().count() > 500 {
+                                tracing::warn!(
+                                    limit_chars = 500,
+                                    "x402 challenge description truncated for facilitator protocol compatibility"
+                                );
+                            }
                             *desc = Value::String(text.chars().take(500).collect());
                         }
                         response.headers_mut().insert(
@@ -220,6 +256,7 @@ impl PaidClient {
                     let mut retry = retry;
                     retry.headers_mut().extend(headers);
                     response = http.execute(retry).await?;
+                    paid_submission = true;
                 }
             }
             break response;
@@ -231,7 +268,11 @@ impl PaidClient {
             .and_then(|h| STANDARD.decode(h.as_bytes()).ok())
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .and_then(|v| v.get("error").cloned());
-        let body = response.text().await?;
+        let bytes = crate::limits::read(response, self.max_response_bytes, "API response", "max_response_bytes")
+            .await.map_err(|error| if paid_submission {
+                error.context("API response unavailable; a payment may already have settled. Do not automatically retry a paid request")
+            } else { error })?;
+        let body = String::from_utf8_lossy(&bytes).into_owned();
         if !status.is_success() {
             bail!("HTTP {status}: {} {body}", detail.unwrap_or(Value::Null));
         }

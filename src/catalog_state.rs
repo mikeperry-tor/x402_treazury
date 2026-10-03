@@ -23,15 +23,19 @@ impl BoundTool {
             Ok(self
                 .help
                 .get_or_try_init(|| async {
-                    Ok::<_, anyhow::Error>(
-                        crate::network::discovery(url, self.client.timeout())?
-                            .get(url)
-                            .send()
-                            .await?
-                            .error_for_status()?
-                            .text()
-                            .await?,
+                    let response = crate::network::discovery(url, self.client.timeout())?
+                        .get(url)
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let bytes = crate::limits::read(
+                        response,
+                        self.client.max_help_bytes(),
+                        "help document",
+                        "max_help_bytes",
                     )
+                    .await?;
+                    Ok::<_, anyhow::Error>(String::from_utf8_lossy(&bytes).into_owned())
                 })
                 .await?
                 .clone())
@@ -79,7 +83,10 @@ pub fn bind(tools: Vec<(ToolSpec, PaidClient, String)>) -> Vec<BoundTool> {
         .into_iter()
         .map(|(tool, client, base)| {
             let cell = help
-                .entry(tool.help_url.clone().unwrap_or_default())
+                .entry((
+                    tool.help_url.clone().unwrap_or_default(),
+                    client.max_help_bytes(),
+                ))
                 .or_insert_with(|| Arc::new(OnceCell::new()))
                 .clone();
             BoundTool {

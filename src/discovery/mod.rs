@@ -322,6 +322,10 @@ impl Manager {
                     .context("dynamic wallet unavailable")?
                     .clone()
                     .with_timeout(Duration::from_secs(self.policy.fetch_timeout_seconds))
+                    .with_download_limits(
+                        self.policy.max_response_bytes,
+                        self.policy.max_help_bytes,
+                    )
                     .public_destinations();
                 let view = result.views.get_mut(target).context("target_missing")?;
                 for tool in &built.tools {
