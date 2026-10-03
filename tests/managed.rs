@@ -27,6 +27,10 @@ use x402_treazure::{
 };
 #[path = "support/signatures.rs"]
 mod signatures;
+struct UnsignedGate {
+    barrier: Arc<tokio::sync::Barrier>,
+    remaining: usize,
+}
 #[derive(Clone)]
 struct Fake {
     balances: Arc<Mutex<BTreeMap<String, u64>>>,
@@ -44,6 +48,7 @@ struct Fake {
     hold: Arc<AtomicBool>,
     arrived: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
+    unsigned_gate: Arc<Mutex<Option<UnsignedGate>>>,
     db: std::path::PathBuf,
     traces: Arc<Mutex<Vec<(std::net::SocketAddr, String, String)>>>,
 }
@@ -162,6 +167,22 @@ async fn seller(
         .lock()
         .unwrap()
         .push((peer, "unsigned".into(), String::new()));
+    let gate = {
+        let mut slot = f.unsigned_gate.lock().unwrap();
+        slot.as_mut().and_then(|gate| {
+            if gate.remaining == 0 {
+                None
+            } else {
+                gate.remaining -= 1;
+                Some(gate.barrier.clone())
+            }
+        })
+    };
+    if let Some(gate) = gate {
+        tokio::time::timeout(std::time::Duration::from_secs(10), gate.wait())
+            .await
+            .unwrap();
+    }
     (
         StatusCode::PAYMENT_REQUIRED,
         [(
@@ -210,6 +231,7 @@ impl Harness {
             hold: Arc::default(),
             arrived: Arc::default(),
             release: Arc::default(),
+            unsigned_gate: Arc::default(),
             db: dir.path().join("state/state.sqlite"),
             traces: Arc::default(),
         };
@@ -1014,3 +1036,6 @@ async fn malformed_base_evidence_never_applies_a_partial_view() {
         h.close().await;
     }
 }
+
+#[path = "support/concurrency.rs"]
+mod concurrency;

@@ -389,3 +389,77 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
     drop(worker);
     h.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held() {
+    let h = Harness::new().await;
+    h.f.hold.store(true, Ordering::SeqCst);
+    let client = h.client.clone();
+    let route = h.route();
+    let payment = tokio::spawn(async move { client.execute(route).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), h.f.arrived.notified())
+        .await
+        .unwrap();
+    let other = h
+        .store
+        .call(|s| {
+            let p = s.ensure_pool("background", "5")?;
+            synced(s)?;
+            Ok(p)
+        })
+        .await
+        .unwrap();
+    let sends = Arc::default();
+    let mut worker = funder(&h, Arc::clone(&sends));
+    let mut instant = now().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        for _ in 0..60 {
+            tick(&mut worker, &mut instant).await;
+            if h.store
+                .call(|s| s.status())
+                .await
+                .unwrap()
+                .pools
+                .iter()
+                .find(|p| p.id == other)
+                .unwrap()
+                .bootstrapped
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let state = h.store.call(|s| s.status()).await.unwrap();
+    assert!(
+        state
+            .pools
+            .iter()
+            .find(|p| p.id == other)
+            .unwrap()
+            .bootstrapped
+    );
+    assert_eq!(sends.lock().unwrap().len(), 2);
+    assert!(
+        !payment.is_finished(),
+        "funding must complete before the held payment is released"
+    );
+    let independent = make_client(h.store.clone(), other, &h.base);
+    assert_eq!(independent.execute(h.route()).await.unwrap(), "paid");
+    // The unresolved held authorization still prevents over-admission on research.
+    h.f.release.notify_one();
+    assert_eq!(payment.await.unwrap().unwrap(), "paid");
+    assert!(
+        h.client
+            .execute(h.route())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("payment_pending")
+    );
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    drop(independent);
+    drop(worker);
+    h.close().await;
+}
