@@ -12,6 +12,8 @@ struct Fake {
     chain_credit: bool,
     status_error: bool,
     status_calls: usize,
+    swap_status: fn() -> SwapStatus,
+    credit_calls: usize,
     funds_available: bool,
     quote_deadline: u64,
     quotes: usize,
@@ -88,9 +90,26 @@ impl FundingBackend for Fake {
             !self.status_error,
             "secret-token https://private.invalid/deposit/private-address"
         );
-        Ok(SwapStatus::Success)
+        Ok((self.swap_status)())
     }
     async fn credit(&mut self, j: &FundingJob) -> Result<()> {
+        self.credit_calls += 1;
+        let id = j.id.clone();
+        let phase = self
+            .store
+            .call(move |s| {
+                Ok(s.funding_jobs()?
+                    .into_iter()
+                    .find(|job| job.id == id)
+                    .unwrap()
+                    .phase)
+            })
+            .await?;
+        assert_eq!(
+            phase,
+            x402_treazure::rotation::store::funding::FundingPhase::VerifyingCredit,
+            "verification phase must commit before the external credit check"
+        );
         anyhow::ensure!(self.chain_credit, "no independent Base credit");
         let wallet = j.wallet_id.clone();
         self.store
@@ -145,6 +164,8 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             chain_credit: false,
             status_error: false,
             status_calls: 0,
+            swap_status: || SwapStatus::Success,
+            credit_calls: 0,
             funds_available: true,
             quote_deadline: u64::MAX,
             quotes: 0,
@@ -226,6 +247,8 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             chain_credit: true,
             status_error: false,
             status_calls: 0,
+            swap_status: || SwapStatus::Success,
+            credit_calls: 0,
             funds_available: true,
             quote_deadline: u64::MAX,
             quotes: 0,
@@ -287,6 +310,8 @@ async fn fixture() -> (
             chain_credit: false,
             status_error: false,
             status_calls: 0,
+            swap_status: || SwapStatus::Success,
+            credit_calls: 0,
             funds_available: true,
             quote_deadline: u64::MAX,
             quotes: 0,
@@ -497,5 +522,83 @@ async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits
         }
         drop(worker);
         task.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submission() {
+    use x402_treazure::rotation::store::funding::FundingPhase;
+    let statuses: [fn() -> SwapStatus; 8] = [
+        || SwapStatus::PendingDeposit,
+        || SwapStatus::KnownDeposit,
+        || SwapStatus::Processing,
+        || SwapStatus::Unknown,
+        || SwapStatus::Success,
+        || SwapStatus::Refunded,
+        || SwapStatus::Failed,
+        || SwapStatus::IncompleteDeposit,
+    ];
+    for phase in [
+        FundingPhase::Swapping,
+        FundingPhase::VerifyingCredit,
+        FundingPhase::RefundPending,
+    ] {
+        for status in statuses {
+            let (_dir, mut worker, task) = fixture().await;
+            let now = x402_treazure::rotation::base::now().unwrap();
+            // Real quote/preparation/broadcast-intent/reconciliation transitions.
+            for i in 0..5 {
+                worker.tick(now + i * 100).await.unwrap();
+            }
+            if phase != FundingPhase::Swapping {
+                worker.backend.swap_status = if phase == FundingPhase::RefundPending {
+                    || SwapStatus::Refunded
+                } else {
+                    || SwapStatus::Success
+                };
+                worker.tick(now + 500).await.unwrap();
+            }
+            let before = worker.store.call(|s| s.status()).await.unwrap();
+            assert_eq!(before.funding_jobs[0].phase, phase);
+            let credit_calls = worker.backend.credit_calls;
+            // Credit would succeed if called: refund quarantine must prevent it.
+            worker.backend.chain_credit = true;
+            worker.backend.swap_status = status;
+            worker.tick(now + 600).await.unwrap();
+            let after = worker.store.call(|s| s.status()).await.unwrap();
+            let expected = match status() {
+                SwapStatus::Success if phase != FundingPhase::RefundPending => {
+                    FundingPhase::Complete
+                }
+                SwapStatus::Refunded | SwapStatus::Failed => FundingPhase::RefundPending,
+                SwapStatus::IncompleteDeposit => FundingPhase::RecoveryRequired,
+                _ => phase.clone(),
+            };
+            assert_eq!(
+                after.funding_jobs[0].phase,
+                expected,
+                "{phase:?}: {:?}",
+                status()
+            );
+            assert_eq!(
+                worker.backend.credit_calls - credit_calls,
+                usize::from(expected == FundingPhase::Complete)
+            );
+            assert_eq!(worker.backend.sends, 1);
+            assert_eq!(
+                after.funding_jobs[0].operation_id,
+                before.funding_jobs[0].operation_id
+            );
+            assert_eq!(
+                serde_json::to_value(&after.treasury_operations).unwrap(),
+                serde_json::to_value(&before.treasury_operations).unwrap(),
+                "provider status cannot change the source accounting"
+            );
+            if expected != FundingPhase::Complete {
+                assert_eq!(after.pools[0].addresses[0].role, "ALLOCATED");
+            }
+            drop(worker);
+            task.await.unwrap();
+        }
     }
 }

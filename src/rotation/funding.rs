@@ -149,29 +149,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .call(move |s| s.save_funding_quote(&id, &bytes))
                     .await?;
             }
-            Quoted => {
-                let status = self.store.call(|s| s.status()).await?;
-                if status.outgoing_pending || !status.sync_fresh {
-                    return Ok(());
-                }
-                let quote = self.quote(job).await?;
-                self.backend.ready(job, &quote).await?;
-                if quote.deadline.saturating_sub(instant) < 300 {
-                    if job.attempts.saturating_add(1) >= self.backend.max_attempts(job) {
-                        self.transition(job, RecoveryRequired).await?;
-                        anyhow::bail!("quote_refresh_exhausted");
-                    }
-                    let id = job.id.clone();
-                    return self
-                        .store
-                        .call(move |s| s.refresh_unprepared_quote(&id))
-                        .await;
-                }
-                self.transition(job, Preparing).await?;
-                // The adapter commits PREPARED with bytes+snapshot. A crash/error
-                // with only PREPARING requires guarded recovery, never another send.
-                self.backend.prepare(job, &quote).await?;
-            }
+            Quoted => self.prepare_quoted(job, instant).await?,
             Preparing => {
                 let id = job.operation_id.clone();
                 let prepared = self.store.call(move |s| s.operation_pending(&id)).await?;
@@ -195,34 +173,68 @@ impl<B: FundingBackend> FundingWorker<B> {
                     self.transition(job, Swapping).await?;
                 }
             }
-            Swapping | VerifyingCredit | RefundPending => {
-                let quote = self.quote(job).await?;
-                match self
-                    .backend
-                    .status(&quote)
-                    .await
-                    .context("funding_status_unavailable")?
-                {
-                    SwapStatus::Success if job.phase != RefundPending => {
-                        if job.phase == Swapping {
-                            self.transition(job, VerifyingCredit).await?;
-                        }
-                        self.backend
-                            .credit(job)
-                            .await
-                            .context("base_credit_unverified")?;
-                    }
-                    SwapStatus::Refunded | SwapStatus::Failed if job.phase != RefundPending => {
-                        self.transition(job, RefundPending).await?
-                    }
-                    SwapStatus::IncompleteDeposit => self.transition(job, RecoveryRequired).await?,
-                    _ => {} // Timeouts, unknown states and refunds cannot release funds.
-                }
-            }
+            Swapping | VerifyingCredit | RefundPending => self.reconcile_swap(job).await?,
             Complete | RecoveryRequired => {}
         }
         Ok(())
     }
+    // Readiness and quote refresh precede PREPARING; once that phase commits,
+    // only saved-byte recovery may proceed after an interrupted preparation.
+    async fn prepare_quoted(&mut self, job: &FundingJob, instant: u64) -> Result<()> {
+        use FundingPhase::*;
+        let status = self.store.call(|s| s.status()).await?;
+        if status.outgoing_pending || !status.sync_fresh {
+            return Ok(());
+        }
+        let quote = self.quote(job).await?;
+        self.backend.ready(job, &quote).await?;
+        if quote.deadline.saturating_sub(instant) < 300 {
+            if job.attempts.saturating_add(1) >= self.backend.max_attempts(job) {
+                self.transition(job, RecoveryRequired).await?;
+                anyhow::bail!("quote_refresh_exhausted");
+            }
+            let id = job.id.clone();
+            return self
+                .store
+                .call(move |s| s.refresh_unprepared_quote(&id))
+                .await;
+        }
+        self.transition(job, Preparing).await?;
+        // The adapter commits PREPARED with bytes+snapshot. A crash/error
+        // with only PREPARING requires guarded recovery, never another send.
+        self.backend.prepare(job, &quote).await?;
+        Ok(())
+    }
+
+    // Provider status never releases source exposure. Even SUCCESS needs Base
+    // evidence, and a refund-pending job cannot re-enter the success path.
+    async fn reconcile_swap(&mut self, job: &FundingJob) -> Result<()> {
+        use FundingPhase::*;
+        let quote = self.quote(job).await?;
+        match self
+            .backend
+            .status(&quote)
+            .await
+            .context("funding_status_unavailable")?
+        {
+            SwapStatus::Success if job.phase != RefundPending => {
+                if job.phase == Swapping {
+                    self.transition(job, VerifyingCredit).await?;
+                }
+                self.backend
+                    .credit(job)
+                    .await
+                    .context("base_credit_unverified")?;
+            }
+            SwapStatus::Refunded | SwapStatus::Failed if job.phase != RefundPending => {
+                self.transition(job, RefundPending).await?
+            }
+            SwapStatus::IncompleteDeposit => self.transition(job, RecoveryRequired).await?,
+            _ => {} // Timeouts, unknown states and refunds cannot release funds.
+        }
+        Ok(())
+    }
+
     async fn quote(&self, job: &FundingJob) -> Result<Quote> {
         let id = job.id.clone();
         self.store
