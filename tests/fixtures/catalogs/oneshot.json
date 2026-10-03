@@ -1,0 +1,45 @@
+[
+  {
+    "name": "oneshot_help",
+    "description": "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazure handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly.",
+    "method": "GET",
+    "path": "https://docs.oneshotagent.com/api-reference/web-search.md",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://docs.oneshotagent.com/api-reference/web-search.md"
+  },
+  {
+    "name": "oneshot_search",
+    "description": "Search the web and return structured results inline, without job polling. Vendor-listed price: $0.001 per request; the live x402 challenge and configured payment cap are authoritative. query is 1–500 characters; max_results is 1–20 (default 5). Prefer the smallest useful result count.",
+    "method": "POST",
+    "path": "/v1/tools/search",
+    "input_schema": {
+      "properties": {
+        "max_results": {
+          "default": 5,
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "max_results": "body",
+      "query": "body"
+    },
+    "has_body": true
+  }
+]

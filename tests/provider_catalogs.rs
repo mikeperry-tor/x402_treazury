@@ -14,7 +14,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 16);
+    assert_eq!(cases.len(), 17);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 734);
+    assert_eq!(total, 736);
 }
 
 #[tokio::test]
@@ -179,4 +179,53 @@ fn body_presence_alternatives_follow_collision_renaming() {
         assert_eq!(route.query["ids"], "query value");
         assert_eq!(route.body, Some(json!({"ids":["document"]})));
     }
+}
+
+#[tokio::test]
+async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() {
+    use serde_json::json;
+    use x402_treazure::{catalog, config};
+    let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/oneshot.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    let mut doc: Value =
+        serde_json::from_str(include_str!("fixtures/oneshot_openapi.json")).unwrap();
+    // A new diagnostic method or nested paid route must not expand the catalog.
+    doc["paths"]["/v1/tools/search"]["get"] = json!({"summary":"Search diagnostics"});
+    doc["paths"]["/v1/tools/search/jobs"] = json!({"post":{"summary":"Async search"}});
+    let tools = catalog::build_tools(&cfg, &doc, "oneshot").unwrap();
+    assert_eq!(
+        tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        ["oneshot_search", "oneshot_help"]
+    );
+    let search = &tools[0];
+    assert_eq!(search.input_schema["required"], json!(["query"]));
+    assert_eq!(search.input_schema["properties"]["query"]["minLength"], 1);
+    assert_eq!(search.input_schema["properties"]["query"]["maxLength"], 500);
+    assert_eq!(
+        search.input_schema["properties"]["max_results"]["maximum"],
+        20
+    );
+    assert_eq!(
+        search.input_schema["properties"]["max_results"]["default"],
+        5
+    );
+    assert_eq!(search.param_routes.len(), 2);
+    assert!(search.param_routes.values().all(|v| v == "body"));
+    let args = json!({"query":"Rust MCP integration","max_results":3});
+    let routed = search
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(routed.url, "https://win.oneshotagent.com/v1/tools/search");
+    assert_eq!(routed.method, "POST");
+    assert_eq!(routed.body, Some(args));
+    assert!(routed.query.is_empty());
+    assert!(search.description.contains("$0.001"));
+    assert!(!search.description.contains("securitySchemes"));
+    assert_eq!(
+        tools[1].help_url.as_deref(),
+        Some("https://docs.oneshotagent.com/api-reference/web-search.md")
+    );
 }

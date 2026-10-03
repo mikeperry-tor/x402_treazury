@@ -1,0 +1,16 @@
+# Synchronous search only. Async tools need wallet-bound polling/auth support.
+spec = "https://win.oneshotagent.com/openapi.json"
+name = "OneShot"
+base_url = "https://win.oneshotagent.com"
+prefix = "oneshot"
+include = ["/v1/tools"]
+include_operations = ["POST /v1/tools/search"]
+probe_pricing = false
+help_url = "https://docs.oneshotagent.com/api-reference/web-search.md"
+instructions_text = "OneShot synchronous web search via x402 USDC on Base. oneshot_search returns results directly; no job polling is needed. oneshot_help provides the search API guide. Treazure handles payment using the live x402 challenge; do not manually add the legacy Authorization, X-Quote-ID or X-Payment-Proof headers shown in vendor documentation. The default catalog excludes diagnostics, account management and async tools: those require polling and potentially wallet ownership proofs that this integration does not implement."
+
+[overrides.oneshot_search]
+description = "Search the web and return structured results inline, without job polling. Vendor-listed price: $0.001 per request; the live x402 challenge and configured payment cap are authoritative. query is 1–500 characters; max_results is 1–20 (default 5). Prefer the smallest useful result count."
+
+[overrides.oneshot_help]
+description = "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazure handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly."

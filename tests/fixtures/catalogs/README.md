@@ -2,8 +2,8 @@
 
 The 14 legacy tool catalogs were captured from the independent Python implementation
 before its retirement and verified against Rust. Together with the reviewed Rust
-x402-list and Exa catalogs, the 16 fixtures pin 734 tool names, full descriptions, schemas,
-methods, paths, parameter routes and help URLs. Settings snapshots cover all 20
+x402-list, Exa and OneShot catalogs, the 17 fixtures pin 736 tool names, full descriptions, schemas,
+methods, paths, parameter routes and help URLs. Settings snapshots cover all 21
 bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
 
@@ -22,3 +22,8 @@ the exact two-operation allowlist is tested against the real excluded inventory.
 Only response documentation is removed. Exa's root `oneOf` for `ids` versus `urls`
 is preserved; six Locus tools likewise retain their existing `anyOf` address
 alternatives after flattening. Neither change adds or rewrites HTTP parameters.
+
+The OneShot fixture was captured from `https://win.oneshotagent.com/openapi.json`
+on 2026-10-03 using `snapshot_spec`. It retains all 147 operations (omitting
+response documentation) to pin exclusions as well as synchronous search. The
+selected request schema is unchanged; no OneShot-specific schema repair is needed.

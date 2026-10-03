@@ -78,5 +78,10 @@
     "name": "exa",
     "provider": "providers/exa.toml",
     "spec": "tests/fixtures/exa_openapi.json"
+  },
+  {
+    "name": "oneshot",
+    "provider": "providers/oneshot.toml",
+    "spec": "tests/fixtures/oneshot_openapi.json"
   }
 ]
