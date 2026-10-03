@@ -14,7 +14,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 18);
+    assert_eq!(cases.len(), 19);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 768);
+    assert_eq!(total, 815);
 }
 
 #[tokio::test]
@@ -309,5 +309,89 @@ async fn stableenrich_excludes_async_and_binary_routes_and_keeps_json_routing() 
         selected
             .iter()
             .all(|t| t.help_url.is_some() || t.path.starts_with("/api/google-maps/"))
+    );
+}
+
+#[tokio::test]
+async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
+    use serde_json::json;
+    use x402_treazure::{catalog, config};
+    let mut cfg =
+        config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agent402.toml"))
+            .await
+            .unwrap()
+            .settings;
+    assert!(!cfg.probe_pricing);
+    assert_eq!(cfg.tags, ["web"]);
+    let mut doc: Value =
+        serde_json::from_str(include_str!("fixtures/agent402_openapi.json")).unwrap();
+    assert_eq!(catalog::tag_counts(&doc).unwrap().len(), 24);
+    doc["paths"]["/api/health"] = json!({"get":{"tags":["web"]}});
+    doc["paths"]["/api/search"]["post"] = json!({"tags":["web"]});
+    doc["paths"]["/api/search/debug"] = json!({"get":{"tags":["web"]}});
+    let tools = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
+    assert_eq!(tools.len(), 47);
+    assert!(!tools.iter().any(|t| t.path.contains("screenshot")
+        || t.path.contains("image-crop")
+        || t.path.contains("pdf-merge")
+        || t.path.contains("/debug")
+        || t.path.contains("health")));
+    let search = tools.iter().find(|t| t.name == "agent402_search").unwrap();
+    let routed = search
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"q":"Rust & MCP","count":3}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(routed.url, "https://agent402.tools/api/search");
+    assert_eq!(routed.method, "GET");
+    assert_eq!(routed.query["q"], "Rust & MCP");
+    assert_eq!(routed.query["count"], 3);
+    assert!(routed.body.is_none());
+    assert!(!search.param_routes.contains_key("Idempotency-Key"));
+    assert!(search.description.contains("$0.01"));
+    assert_eq!(
+        tools.last().unwrap().help_url.as_deref(),
+        Some("https://agent402.tools/llms.txt")
+    );
+    cfg.tags = vec!["data".into(), "crypto".into()];
+    assert_eq!(
+        catalog::build_tools(&cfg, &doc, "agent402").unwrap().len(),
+        215
+    );
+    cfg.tags = vec!["llm".into()];
+    let llm = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
+    assert_eq!(llm.len(), 45);
+    let chat = llm
+        .iter()
+        .find(|t| t.name == "agent402_chat_completions")
+        .unwrap();
+    let args = json!({"messages":[{"role":"user","content":"Hello"}],"max_tokens":32});
+    let routed = chat
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(routed.url, "https://agent402.tools/v1/chat/completions");
+    assert_eq!(routed.body, Some(args));
+    let messages = llm.iter().find(|t| t.name == "agent402_messages").unwrap();
+    assert!(
+        messages.input_schema["properties"]["stream"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("false")
+    );
+    cfg.tags.clear();
+    let all = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
+    assert_eq!(all.len(), 472);
+    assert!(!all.iter().any(|t| t.path.starts_with("/api/memory")
+        || t.path == "/api/my-usage"
+        || t.path.starts_with("/api/route/")
+        || t.path.starts_with("/api/skill/")
+        || t.path == "/v1/audio/speech"));
+    cfg.tags = vec!["memory".into()];
+    assert!(
+        catalog::build_tools(&cfg, &doc, "agent402")
+            .unwrap_err()
+            .to_string()
+            .contains("no operations matched")
     );
 }

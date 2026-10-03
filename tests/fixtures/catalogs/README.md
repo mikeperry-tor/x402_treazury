@@ -2,8 +2,8 @@
 
 The 14 legacy tool catalogs were captured from the independent Python implementation
 before its retirement and verified against Rust. Together with the reviewed Rust
-x402-list, Exa, OneShot and StableEnrich catalogs, the 18 fixtures pin 768 tool names, full descriptions, schemas,
-methods, paths, parameter routes and help URLs. Settings snapshots cover all 22
+x402-list, Exa, OneShot, StableEnrich and Agent402 catalogs, the 19 fixtures pin 815 tool names, full descriptions, schemas,
+methods, paths, parameter routes and help URLs. Settings snapshots cover all 23
 bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
 
@@ -32,3 +32,10 @@ The StableEnrich fixture was captured from `https://stableenrich.dev/openapi.jso
 on 2026-10-03 using `snapshot_spec`. All 38 operations are retained to verify the
 31-operation allowlist, omitted async/binary workflows, tag selection and request
 routing. The additional help tool reads the vendor's unified `llms.txt` lazily.
+
+The Agent402 fixture was captured from `https://agent402.tools/openapi.json` on
+2026-10-03 using `snapshot_spec`. It retains all 607 operations and 24 tags while
+omitting response documentation. The default golden contract contains 46 web
+operations plus help. Targeted tests also exercise all 471 eligible operations,
+data/crypto and LLM selections, known exclusions, prospective diagnostics, query
+routing, nested gateway JSON and streaming guidance.
