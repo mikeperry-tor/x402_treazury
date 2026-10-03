@@ -209,11 +209,16 @@ async fn agent_additions_are_atomic_idempotent_owner_scoped_and_durable_under_co
     })
     .await
     .expect("management listeners did not release their connections");
-    assert_eq!(
-        Arc::strong_count(&m),
-        1,
-        "a listener still owns the manager"
-    );
+    // Listener completion can precede destruction of HTTP service task state.
+    // Retain our owner until all others release theirs, then drop it synchronously
+    // so registry reopening cannot race the final manager destructor.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while Arc::strong_count(&m) != 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("HTTP service tasks still own the manager after listener shutdown");
     drop(m);
     let reopened = manager_with(p, grants()).await;
     assert_eq!(reopened.catalog.read().views["writer"].len(), 6);

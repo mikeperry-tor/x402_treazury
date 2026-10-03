@@ -1,5 +1,6 @@
 //! AUTH cases: permission boundaries rather than only generated tool counts.
 use super::*;
+use std::collections::BTreeSet;
 
 fn writers(persistent: bool) -> BTreeMap<String, ListenerConfig> {
     let mut ls = listeners(persistent);
@@ -563,4 +564,111 @@ async fn cursors_bind_owner_process_and_valid_offset() {
             .to_string()
             .contains("stale_cursor")
     );
+}
+
+#[tokio::test]
+async fn static_and_dynamic_listener_tags_select_the_same_operations() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = json!({"openapi":"3.0.3", "servers":[{"url":"https://api.example.com"}], "paths":{
+        "/read":{"get":{"tags":["read"]},"post":{"tags":["write"]}},
+        "/read/child":{"get":{"tags":["write"]}},
+        "/plain":{"get":{}},
+        "/case":{"get":{"tags":["Read"]}},
+        "/mixed":{"get":{"tags":["read","write"]}}
+    }});
+    std::fs::write(dir.path().join("spec.json"), doc.to_string()).unwrap();
+    for (include, exclude, expected) in [
+        (
+            vec![],
+            vec![],
+            vec![
+                "GET /read",
+                "POST /read",
+                "GET /read/child",
+                "GET /plain",
+                "GET /case",
+                "GET /mixed",
+            ],
+        ),
+        (vec!["read"], vec![], vec!["GET /read", "GET /mixed"]),
+        (
+            vec!["write"],
+            vec![],
+            vec!["POST /read", "GET /read/child", "GET /mixed"],
+        ),
+        (vec!["read", "write"], vec!["write"], vec!["GET /read"]),
+        (
+            vec![],
+            vec!["read"],
+            vec!["POST /read", "GET /read/child", "GET /plain", "GET /case"],
+        ),
+        (vec!["Read"], vec![], vec!["GET /case"]),
+        (vec!["READ"], vec![], vec![]),
+        (vec!["read"], vec!["read"], vec![]),
+    ] {
+        let expected: std::collections::BTreeSet<_> =
+            expected.into_iter().map(str::to_owned).collect();
+        let mut ls = listeners(false);
+        let listener = ls.get_mut("writer").unwrap();
+        listener.tags = include.iter().map(|s| (*s).to_owned()).collect();
+        listener.exclude_tags = exclude.iter().map(|s| (*s).to_owned()).collect();
+        let m = manager_with(policy(None), ls).await;
+        let cell = OnceCell::new();
+        cell.set(Ok(Arc::new(serde_json::to_vec(&doc).unwrap())))
+            .unwrap();
+        m.fetches.lock().unwrap().insert(
+            "https://api.example.com/openapi.json".into(),
+            (Instant::now(), Arc::new(cell)),
+        );
+        m.invoke(
+            "writer",
+            "treazure_source_add",
+            json!({"candidate":candidate("shared","process","server"),"idempotency_key":"tags"}),
+        )
+        .await
+        .unwrap();
+        let dynamic: std::collections::BTreeSet<_> = m.catalog.read().views["writer"]
+            .iter()
+            .map(|binding| format!("{} {}", binding.tool.method, binding.tool.path))
+            .collect();
+        assert_eq!(
+            dynamic, expected,
+            "dynamic include={include:?} exclude={exclude:?}"
+        );
+
+        let config = json!({"version":1,
+            "sources":{"api":{"spec":"spec.json","probe_pricing":false,"help_url":"https://api.example.com/llms.txt"}},
+            "wallets":{"shared":{"mode":"static","private_key_env":"UNUSED_KEY"}},
+            "servers":{"writer":{"listen":"127.0.0.1:0","bearer_token_env":"UNUSED_TOKEN","wallet":"shared","sources":["api"],"tags":include,"exclude_tags":exclude}}
+        });
+        let path = dir.path().join("servers.toml");
+        std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+        let deployment = crate::deployment::Deployment::load(&path).await;
+        if expected.is_empty() {
+            // Static startup still rejects an empty inventory; dynamic registration may
+            // remain stored while its listener view is empty. Sharing tags changes neither.
+            let error = match deployment {
+                Ok(_) => panic!("empty static inventory accepted"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains("no tools selected"));
+        } else {
+            let inventory = deployment.unwrap().inventory();
+            let tools = &inventory[0].tools;
+            assert_eq!(
+                tools.iter().any(|t| t.tool.help_url.is_some()),
+                include.is_empty(),
+                "help has no operation tags and positive listener tags must exclude it"
+            );
+            let static_tools: std::collections::BTreeSet<_> = tools
+                .iter()
+                .filter(|t| t.tool.help_url.is_none())
+                .map(|t| format!("{} {}", t.tool.method, t.tool.path))
+                .collect();
+            assert_eq!(
+                static_tools, dynamic,
+                "static include={include:?} exclude={exclude:?}"
+            );
+        }
+    }
 }

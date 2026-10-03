@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -333,25 +333,12 @@ impl Manager {
                     .public_destinations();
                 let view = result.views.get_mut(target).context("target_missing")?;
                 for tool in &built.tools {
-                    let tags: BTreeSet<_> = ops
-                        .iter()
-                        .filter(|o| {
-                            o["path"] == tool.path
-                                && o["method"]
-                                    .as_str()
-                                    .is_some_and(|m| m.eq_ignore_ascii_case(&tool.method))
-                        })
-                        .flat_map(|o| {
-                            o["tags"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .filter_map(Value::as_str)
-                        })
-                        .collect();
-                    if (!cfg.tags.is_empty() && !cfg.tags.iter().any(|t| tags.contains(t.as_str())))
-                        || cfg.exclude_tags.iter().any(|t| tags.contains(t.as_str()))
-                        || !import::matches(&tool.name, &cfg.include_tools, &cfg.exclude_tools)?
+                    if !crate::catalog::matches_operation_tags(
+                        &ops,
+                        tool,
+                        &cfg.tags,
+                        &cfg.exclude_tags,
+                    ) || !import::matches(&tool.name, &cfg.include_tools, &cfg.exclude_tools)?
                     {
                         continue;
                     }

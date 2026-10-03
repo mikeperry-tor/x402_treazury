@@ -381,6 +381,35 @@ pub fn operations(root: &Value, pricing_key: Option<&str>) -> Result<Vec<Value>>
     Ok(ops)
 }
 
+/// Listener tags match the exact path and case-insensitive HTTP method. Tag values
+/// are case-sensitive; exclusions win, and positive filters reject untagged tools.
+/// Keep listener name selectors, quota checks and wallet binding at the call site.
+pub(crate) fn matches_operation_tags(
+    operations: &[Value],
+    tool: &ToolSpec,
+    include: &[String],
+    exclude: &[String],
+) -> bool {
+    let tags: BTreeSet<_> = operations
+        .iter()
+        .filter(|op| {
+            op["path"] == tool.path
+                && op["method"]
+                    .as_str()
+                    .is_some_and(|method| method.eq_ignore_ascii_case(&tool.method))
+        })
+        .flat_map(|op| {
+            op["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+        })
+        .collect();
+    (include.is_empty() || include.iter().any(|tag| tags.contains(tag.as_str())))
+        && !exclude.iter().any(|tag| tags.contains(tag.as_str()))
+}
+
 /// Counts from the source before selection, including tags on excluded operations.
 pub fn tag_counts(root: &Value) -> Result<BTreeMap<String, usize>> {
     let mut counts = BTreeMap::new();

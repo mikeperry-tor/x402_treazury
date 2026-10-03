@@ -698,28 +698,12 @@ fn select_listener_tools(
     for source in &server.sources {
         let operations = catalog::operations(&sources[source].document, None)?;
         for tool in &sources[source].tools {
-            let tags: BTreeSet<_> = operations
-                .iter()
-                .filter(|op| {
-                    op["path"] == tool.path
-                        && op["method"]
-                            .as_str()
-                            .is_some_and(|m| m.eq_ignore_ascii_case(&tool.method))
-                })
-                .flat_map(|op| {
-                    op["tags"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(serde_json::Value::as_str)
-                })
-                .collect();
-            if (!server.tags.is_empty() && !server.tags.iter().any(|t| tags.contains(t.as_str())))
-                || server
-                    .exclude_tags
-                    .iter()
-                    .any(|t| tags.contains(t.as_str()))
-            {
+            if !catalog::matches_operation_tags(
+                &operations,
+                tool,
+                &server.tags,
+                &server.exclude_tags,
+            ) {
                 continue;
             }
 
