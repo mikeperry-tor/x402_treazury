@@ -8,6 +8,7 @@ any working directory unless a command explicitly supplies relative data paths.
 | `check.sh` | Format, vendor provenance, both feature configurations, all-feature Clippy and compatibility suite |
 | `check.sh --no-default-features` | Only the tests and Clippy without the embedded wallet, plus format/provenance |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
+| `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
 | `zcash.sh build` / `zcash.sh test --all-targets` | Cargo-managed protoc; default features include the wallet, `--no-default-features` disables it |
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
