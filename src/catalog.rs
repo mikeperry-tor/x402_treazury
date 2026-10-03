@@ -467,6 +467,31 @@ pub fn build_tools_with_prices(
     prefix: &str,
     prices: &BTreeMap<(String, String), String>,
 ) -> Result<Vec<ToolSpec>> {
+    let selected = selected_operations(cfg, root, prefix)?;
+    let price_tokens = Regex::new(r"\$\d[\d,]*(?:\.\d+)?").expect("constant regex");
+    let mut tools = selected
+        .into_iter()
+        .map(|(op, name)| operation_tool(cfg, &op, name, prices, &price_tokens))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(url) = &cfg.help_url {
+        tools.push(ToolSpec { name: format!("{prefix}_help"), description: format!(
+            "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
+            method:"GET".into(), path:url.clone(), input_schema:json!({"type":"object","properties":{}}),
+            param_routes:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
+    }
+    // Authored overrides also apply to help and always follow generated text/schema.
+    for tool in &mut tools {
+        apply_overrides(cfg, tool);
+    }
+    let names: BTreeSet<_> = tools.iter().map(|t| &t.name).collect();
+    if names.len() != tools.len() {
+        bail!("duplicate generated tool names");
+    }
+    Ok(tools)
+}
+
+// Selection and collision naming depend on the entire sorted inventory.
+fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(Value, String)>> {
     let mut ops = operations(root, cfg.pricing_key.as_deref())?;
     for op in &ops {
         ensure!(
@@ -520,8 +545,7 @@ pub fn build_tools_with_prices(
     }
     ensure!(!selected.is_empty(), "no operations matched");
     let mut seen = BTreeMap::<String, usize>::new();
-    let mut tools = Vec::new();
-    let re = Regex::new(r"\$\d[\d,]*(?:\.\d+)?").expect("constant regex");
+    let mut named = Vec::new();
     for (op, base) in selected {
         let method = op["method"].as_str().unwrap();
         let name = if counts[&base] > 1 {
@@ -536,137 +560,165 @@ pub fn build_tools_with_prices(
         } else {
             name
         };
-        let mut props = Map::new();
-        let mut routes = BTreeMap::new();
-        let mut required = BTreeSet::new();
-        let mut body_names = BTreeMap::new();
-        for p in op["params"].as_array().into_iter().flatten() {
-            if p["in"] == "header" {
-                continue;
-            }
-            let Some(key) = p["name"].as_str() else {
-                continue;
-            };
-            let mut prop = p["schema"].as_object().cloned().unwrap_or_default();
-            prop.entry("type").or_insert(json!("string"));
-            if p["description"].as_str().is_some_and(|s| !s.is_empty()) {
-                prop.entry("description")
-                    .or_insert(p["description"].clone());
-            }
-            props.insert(key.to_string(), Value::Object(prop));
-            routes.insert(
-                key.to_string(),
-                if p["in"] == "path" { "path" } else { "query" }.into(),
-            );
-            if p["required"] == true {
-                required.insert(key.to_string());
-            }
+        named.push((op, name));
+    }
+    Ok(named)
+}
+
+struct OperationInput {
+    schema: Value,
+    routes: BTreeMap<String, String>,
+    body_names: BTreeMap<String, String>,
+    has_body: bool,
+}
+
+fn operation_input(op: &Value) -> Result<OperationInput> {
+    let mut props = Map::new();
+    let mut routes = BTreeMap::new();
+    let mut required = BTreeSet::new();
+    let mut body_names = BTreeMap::new();
+    for p in op["params"].as_array().into_iter().flatten() {
+        if p["in"] == "header" {
+            continue;
         }
-        let has_body = !op["body"].is_null();
-        let body = &op["body"]["schema"];
-        for (key, value) in body["properties"].as_object().into_iter().flatten() {
-            let name = if props.contains_key(key) {
-                format!("{key}_body")
+        let Some(key) = p["name"].as_str() else {
+            continue;
+        };
+        let mut prop = p["schema"].as_object().cloned().unwrap_or_default();
+        prop.entry("type").or_insert(json!("string"));
+        if p["description"].as_str().is_some_and(|s| !s.is_empty()) {
+            prop.entry("description")
+                .or_insert(p["description"].clone());
+        }
+        props.insert(key.to_string(), Value::Object(prop));
+        routes.insert(
+            key.to_string(),
+            if p["in"] == "path" { "path" } else { "query" }.into(),
+        );
+        if p["required"] == true {
+            required.insert(key.to_string());
+        }
+    }
+    let has_body = !op["body"].is_null();
+    let body = &op["body"]["schema"];
+    for (key, value) in body["properties"].as_object().into_iter().flatten() {
+        let name = if props.contains_key(key) {
+            format!("{key}_body")
+        } else {
+            key.clone()
+        };
+        ensure!(
+            !props.contains_key(&name),
+            "unresolvable body/query collision: {key}"
+        );
+        props.insert(
+            name.clone(),
+            if value.is_object() {
+                value.clone()
             } else {
-                key.clone()
-            };
-            ensure!(
-                !props.contains_key(&name),
-                "unresolvable body/query collision: {key}"
-            );
-            props.insert(
-                name.clone(),
-                if value.is_object() {
-                    value.clone()
-                } else {
-                    json!({"type":"string"})
-                },
-            );
-            body_names.insert(name.clone(), key.clone());
-            routes.insert(name.clone(), "body".into());
-            if body["required"]
-                .as_array()
-                .is_some_and(|r| r.contains(&json!(key)))
-            {
-                required.insert(name);
-            }
-        }
-        let mut input_schema = json!({"type":"object", "properties":props});
-        if !required.is_empty() {
-            input_schema["required"] = json!(required);
-        }
-        let text = op["description"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .or_else(|| op["summary"].as_str().filter(|s| !s.is_empty()))
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                format!("{} {}", method.to_uppercase(), op["path"].as_str().unwrap())
-            });
-        let (mut price, vendor) = price(&op);
-        if !vendor
-            && let Some(line) = prices.get(&(
-                method.to_uppercase(),
-                op["path"].as_str().unwrap().to_owned(),
-            ))
+                json!({"type":"string"})
+            },
+        );
+        body_names.insert(name.clone(), key.clone());
+        routes.insert(name.clone(), "body".into());
+        if body["required"]
+            .as_array()
+            .is_some_and(|r| r.contains(&json!(key)))
         {
-            price = line.clone();
+            required.insert(name);
         }
-        let tokens: Vec<_> = re.find_iter(&price).map(|m| m.as_str()).collect();
-        let mut description =
-            if vendor && !tokens.is_empty() && tokens.iter().all(|s| text.contains(s)) {
-                text
-            } else {
-                format!("{text} {price}")
-            };
-        if let Some(max) = cfg.max_description_chars
-            && description.chars().count() > max
-        {
-            tracing::warn!(
-                limit_chars = max,
-                "tool description truncated by max_description_chars"
-            );
-            description = format!(
-                "{}\n[truncated by max_description_chars={max}]",
-                description.chars().take(max).collect::<String>()
-            );
-        }
-        tools.push(ToolSpec {
-            name,
-            description,
-            method: method.to_uppercase(),
-            path: op["path"].as_str().unwrap().into(),
-            input_schema: sanitize(&input_schema),
-            param_routes: routes,
-            has_body,
-            help_url: None,
-            body_names,
-        });
     }
-    if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { name: format!("{prefix}_help"), description: format!(
-            "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
-            method:"GET".into(), path:url.clone(), input_schema:json!({"type":"object","properties":{}}),
-            param_routes:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
+    let mut input_schema = json!({"type":"object", "properties":props});
+    if !required.is_empty() {
+        input_schema["required"] = json!(required);
     }
-    for tool in &mut tools {
-        if let Some(ap) = cfg.additional_properties {
-            tool.input_schema["additionalProperties"] = json!(ap);
+    Ok(OperationInput {
+        schema: sanitize(&input_schema),
+        routes,
+        body_names,
+        has_body,
+    })
+}
+
+fn operation_description(
+    cfg: &Config,
+    op: &Value,
+    prices: &BTreeMap<(String, String), String>,
+    re: &Regex,
+) -> String {
+    let method = op["method"].as_str().unwrap();
+    let text = op["description"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| op["summary"].as_str().filter(|s| !s.is_empty()))
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{} {}", method.to_uppercase(), op["path"].as_str().unwrap()));
+    let (mut price, vendor) = price(op);
+    if !vendor
+        && let Some(line) = prices.get(&(
+            method.to_uppercase(),
+            op["path"].as_str().unwrap().to_owned(),
+        ))
+    {
+        price = line.clone();
+    }
+    let tokens: Vec<_> = re.find_iter(&price).map(|m| m.as_str()).collect();
+    let mut description = if vendor && !tokens.is_empty() && tokens.iter().all(|s| text.contains(s))
+    {
+        text
+    } else {
+        format!("{text} {price}")
+    };
+    if let Some(max) = cfg.max_description_chars
+        && description.chars().count() > max
+    {
+        tracing::warn!(
+            limit_chars = max,
+            "tool description truncated by max_description_chars"
+        );
+        description = format!(
+            "{}\n[truncated by max_description_chars={max}]",
+            description.chars().take(max).collect::<String>()
+        );
+    }
+    description
+}
+
+fn operation_tool(
+    cfg: &Config,
+    op: &Value,
+    name: String,
+    prices: &BTreeMap<(String, String), String>,
+    re: &Regex,
+) -> Result<ToolSpec> {
+    let input = operation_input(op)?;
+    let method = op["method"].as_str().unwrap();
+    let description = operation_description(cfg, op, prices, re);
+    Ok(ToolSpec {
+        name,
+        description,
+        method: method.to_uppercase(),
+        path: op["path"].as_str().unwrap().into(),
+        input_schema: input.schema,
+        param_routes: input.routes,
+        has_body: input.has_body,
+        help_url: None,
+        body_names: input.body_names,
+    })
+}
+
+fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) {
+    if let Some(ap) = cfg.additional_properties {
+        tool.input_schema["additionalProperties"] = json!(ap);
+    }
+    if let Some(patch) = cfg.overrides.get(&tool.name) {
+        if let Some(desc) = patch["description"].as_str() {
+            tool.description = desc.into();
         }
-        if let Some(patch) = cfg.overrides.get(&tool.name) {
-            if let Some(desc) = patch["description"].as_str() {
-                tool.description = desc.into();
+        for (key, value) in patch["params"].as_object().into_iter().flatten() {
+            if value.is_string() && tool.input_schema["properties"][key].is_object() {
+                tool.input_schema["properties"][key]["description"] = value.clone();
             }
-            for (key, value) in patch["params"].as_object().into_iter().flatten() {
-                if value.is_string() && tool.input_schema["properties"][key].is_object() {
-                    tool.input_schema["properties"][key]["description"] = value.clone();
-                }
-            }
         }
     }
-    let names: BTreeSet<_> = tools.iter().map(|t| &t.name).collect();
-    if names.len() != tools.len() {
-        bail!("duplicate generated tool names");
-    }
-    Ok(tools)
 }
