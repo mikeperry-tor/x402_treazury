@@ -876,5 +876,56 @@
       "GET /categories",
       "GET /networks"
     ]
+  },
+  "providers/exa.toml": {
+    "additional_properties": null,
+    "base_url": "https://api.exa.ai",
+    "exclude": [],
+    "exclude_tags": [],
+    "help_url": "https://exa.ai/docs/integrations/payments/x402/quickstart.md",
+    "include": [
+      ""
+    ],
+    "include_operations": [
+      "POST /search",
+      "POST /contents"
+    ],
+    "instructions_text": "Exa web search and page retrieval, paid via x402 USDC on Base without an Exa API key. Use exa_search to discover URLs and exa_contents when URLs are already known. exa_help describes both endpoints and x402 pricing; its generic API-key/SDK setup is unnecessary here. Prices depend on requested options and result/page counts; the payment challenge is authoritative, not the spec's advertised range. Prefer small result sets and highlights for concise context. For contents supply exactly one of urls or ids. Keep search stream false or omitted: these tools return completed responses, not streamed events. Account, monitor, batch, agent, Websets and deprecated findSimilar APIs are excluded.",
+    "max_description_chars": null,
+    "max_help_bytes": 4194304,
+    "max_response_bytes": 16777216,
+    "max_spec_bytes": 33554432,
+    "name": "Exa",
+    "overrides": {
+      "exa_contents": {
+        "description": "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids, never both. Choose text, highlights or summary according to the context needed. Use maxAgeHours for freshness and snapshotAsOf for stored historical content. x402 charges depend on the number of requested pages and selected content options; the live payment challenge is authoritative, and the spec's $0.001–$0.010 range is not a total-request cap.",
+        "params": {
+          "ids": "Exa document IDs to retrieve. Supply this or urls, never both.",
+          "urls": "URLs to retrieve. Supply this or ids, never both; prefer small batches because pricing scales with requested pages and content options."
+        }
+      },
+      "exa_help": {
+        "description": "Read Exa's unified x402 guide for Search and Contents, including request examples and usage-dependent pricing. Fetched on demand and cached for this process. Treazure already handles payment; generic API-key and SDK setup instructions are unnecessary. Any configured document limit is reported explicitly."
+      },
+      "exa_search": {
+        "description": "Search the web with a natural-language query and optionally retrieve result contents. Prefer a small numResults and contents.highlights for concise context. Omit stream or set false. Paid per request via x402; requested search type, result count and content options determine the charge. Vendor price ranges are estimates, not total-request caps; the live challenge is authoritative.",
+        "params": {
+          "stream": "Omit or set false. Treazure returns completed tool responses and does not expose Exa's server-sent event stream."
+        }
+      }
+    },
+    "prefix": "exa",
+    "pricing_key": "x-payment-info",
+    "probe_concurrency": 4,
+    "probe_max_endpoints": 200,
+    "probe_methods": [
+      "GET"
+    ],
+    "probe_pricing": false,
+    "probe_timeout": 5.0,
+    "probe_ttl_seconds": 3600.0,
+    "spec": "https://api.exa.ai/openapi.json",
+    "tags": [],
+    "timeout": 90.0
   }
 }

@@ -1,0 +1,1539 @@
+[
+  {
+    "name": "exa_contents",
+    "description": "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids, never both. Choose text, highlights or summary according to the context needed. Use maxAgeHours for freshness and snapshotAsOf for stored historical content. x402 charges depend on the number of requested pages and selected content options; the live payment challenge is authoritative, and the spec's $0.001–$0.010 range is not a total-request cap.",
+    "method": "POST",
+    "path": "/contents",
+    "input_schema": {
+      "oneOf": [
+        {
+          "required": [
+            "ids"
+          ]
+        },
+        {
+          "required": [
+            "urls"
+          ]
+        }
+      ],
+      "properties": {
+        "compliance": {
+          "anyOf": [
+            {
+              "description": "Enterprise-only compliance mode. Set to `hipaa` for HIPAA mode. Requires cache-only retrieval with supported parameters. See the HIPAA docs for details.",
+              "enum": [
+                "hipaa"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "anyOf": [
+            {
+              "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+              "oneOf": [
+                {
+                  "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                  "type": "boolean"
+                },
+                {
+                  "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                  "properties": {
+                    "maxCharacters": {
+                      "description": "Maximum character limit for the context string.",
+                      "maximum": 1000000,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crawledBeforeDate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deprecated. Use `snapshotAsOf` instead. Alias of snapshotAsOf with identical behavior.",
+          "format": "date-time"
+        },
+        "extras": {
+          "anyOf": [
+            {
+              "description": "Extra parameters to pass.",
+              "properties": {
+                "codeBlocks": {
+                  "anyOf": [
+                    {
+                      "default": 0,
+                      "description": "Number of code blocks to return for each result.",
+                      "maximum": 1000,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "imageLinks": {
+                  "anyOf": [
+                    {
+                      "default": 0,
+                      "description": "Number of images to return for each result.",
+                      "maximum": 1000,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "links": {
+                  "anyOf": [
+                    {
+                      "default": 0,
+                      "description": "Number of URLs to return from each webpage.",
+                      "maximum": 1000,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "richImageLinks": {
+                  "anyOf": [
+                    {
+                      "default": 0,
+                      "description": "Number of rich image links to return for each result.",
+                      "maximum": 1000,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "richLinks": {
+                  "anyOf": [
+                    {
+                      "default": 0,
+                      "description": "Number of rich links to return for each result.",
+                      "maximum": 1000,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "highlights": {
+          "anyOf": [
+            {
+              "description": "Text snippets the LLM identifies as most relevant from each page.",
+              "oneOf": [
+                {
+                  "default": false,
+                  "description": "If true, returns highlights with default settings. If false, disables highlights.",
+                  "title": "Simple highlights retrieval",
+                  "type": "boolean"
+                },
+                {
+                  "description": "Advanced options for steering highlight extraction. Pass highlights: true for the highest-quality default; supply this object only when you need to guide selection with your own query.",
+                  "properties": {
+                    "dynamic": {
+                      "anyOf": [
+                        {
+                          "description": "Enable Dynamic Highlights (research preview): considers all results together and allocates a single shared context budget across the result set instead of a per-document budget. Not compatible with maxCharacters. Beta: requires the `Exa-Beta: dynamic-highlights-2026-08-28` request header; requests setting `dynamic` without it are rejected.",
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "highlightsPerUrl": {
+                      "anyOf": [
+                        {
+                          "description": "Deprecated. Currently ignored. Pass highlights: true for default highlights, or { query } to guide selection with your own query.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxCharacters": {
+                      "anyOf": [
+                        {
+                          "description": "Maximum number of characters to return for highlights. Controls the total length of highlight text returned per URL. Not compatible with highlights.dynamic.",
+                          "maximum": 1000000,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "numSentences": {
+                      "anyOf": [
+                        {
+                          "description": "Deprecated. Use `maxCharacters` instead. Currently mapped to a character budget of about 1333 characters per sentence. Pass highlights: true for default highlights, or { query } to guide selection with your own query.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "query": {
+                      "anyOf": [
+                        {
+                          "description": "Custom query that guides which highlights the LLM picks.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "verbosity": {
+                      "anyOf": [
+                        {
+                          "description": "Preset highlight length: `low`, `medium`, and `high` allocate progressively larger token budgets for the returned highlights. With highlights.dynamic, the preset sets a single shared budget across the whole result set instead of a per-URL budget. Exact budgets are tuned by Exa and may change. Not compatible with maxCharacters or numSentences. Beta: requires the `Exa-Beta: dynamic-highlights-2026-08-28` request header; requests setting `verbosity` without it are rejected.",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "title": "Advanced highlights options",
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ids": {
+          "description": "Exa document IDs to retrieve. Supply this or urls, never both.",
+          "items": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "livecrawl": {
+          "anyOf": [
+            {
+              "description": "Deprecated. Use `maxAgeHours` instead. Does not guarantee freshly fetched content, which may be served according to server freshness policy. Do not send livecrawl and maxAgeHours together.",
+              "enum": [
+                "never",
+                "always",
+                "fallback",
+                "preferred"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "livecrawlTimeout": {
+          "anyOf": [
+            {
+              "default": 10000,
+              "description": "The timeout for livecrawling in milliseconds.",
+              "exclusiveMinimum": 0,
+              "maximum": 90000,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxAgeHours": {
+          "anyOf": [
+            {
+              "description": "Maximum age of cached content in hours. Positive values use cached content if it is less than this many hours old; 0 fetches fresh content and is the supported way to apply text rendering options to newly fetched pages; -1 always uses cache; omitted uses fallback fetching when cached content is unavailable. Maximum supported value is 720 hours.",
+              "maximum": 720,
+              "minimum": -1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshotAsOf": {
+          "anyOf": [
+            {
+              "description": "Return the newest stored version of each page as of this instant. Accepts an ISO 8601 date-time (`2026-01-15T00:00:00Z`) or a date-only value (`2026-01-15`), which is interpreted as midnight UTC. Historical requests are served from stored versions only and never fetch the live page.",
+              "oneOf": [
+                {
+                  "description": "ISO 8601 date-time.",
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "description": "ISO 8601 date (`YYYY-MM-DD`), interpreted as midnight UTC.",
+                  "format": "date",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subpageTarget": {
+          "anyOf": [
+            {
+              "description": "Term to find specific subpages of search results. Can be a single string or an array of strings.",
+              "oneOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 100,
+                  "minItems": 0,
+                  "type": "array"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subpages": {
+          "anyOf": [
+            {
+              "default": 0,
+              "description": "The number of subpages to crawl. The actual number crawled may be limited by system constraints.",
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "description": "Summary of the webpage.",
+              "properties": {
+                "query": {
+                  "anyOf": [
+                    {
+                      "description": "Custom query for the LLM-generated summary.",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": {
+                        "description": "Any JSON value.",
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "items": {},
+                            "type": "array"
+                          },
+                          {
+                            "additionalProperties": {},
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "description": "JSON schema for structured output from summary. See https://json-schema.org/overview/what-is-jsonschema for JSON Schema documentation.",
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "description": "Text extraction options for each result.",
+              "oneOf": [
+                {
+                  "default": false,
+                  "description": "If true, returns full page text with default settings. If false, disables text return.",
+                  "title": "Simple text retrieval",
+                  "type": "boolean"
+                },
+                {
+                  "description": "Advanced options for controlling text extraction. Use this when you need to limit text length or include HTML structure.",
+                  "properties": {
+                    "excludeSections": {
+                      "anyOf": [
+                        {
+                          "description": "Exclude content classified into these semantic page sections. Section classification is best-effort. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "includeHtmlTags": {
+                      "anyOf": [
+                        {
+                          "default": false,
+                          "description": "If true, include lightweight HTML tags in returned text instead of plain markdown-style text. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "includeSections": {
+                      "anyOf": [
+                        {
+                          "description": "Best-effort. Only include content classified into these semantic page sections. Section classification may be unavailable or incomplete for some pages; validate output if strict filtering is required. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxCharacters": {
+                      "anyOf": [
+                        {
+                          "description": "Maximum character limit for the full page text. Useful for controlling response size and API costs.",
+                          "maximum": 1000000,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "verbosity": {
+                      "anyOf": [
+                        {
+                          "default": "compact",
+                          "description": "Controls text rendering verbosity. compact focuses on main content, standard includes more surrounding page context, and full requests the most complete rendered text. Some pages may produce identical standard and full output. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                          "enum": [
+                            "compact",
+                            "standard",
+                            "full"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "title": "Advanced text options",
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "urls": {
+          "description": "URLs to retrieve. Supply this or ids, never both; prefer small batches because pricing scales with requested pages and content options.",
+          "items": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "compliance": "body",
+      "context": "body",
+      "crawledBeforeDate": "body",
+      "extras": "body",
+      "highlights": "body",
+      "ids": "body",
+      "livecrawl": "body",
+      "livecrawlTimeout": "body",
+      "maxAgeHours": "body",
+      "snapshotAsOf": "body",
+      "subpageTarget": "body",
+      "subpages": "body",
+      "summary": "body",
+      "text": "body",
+      "urls": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "exa_help",
+    "description": "Read Exa's unified x402 guide for Search and Contents, including request examples and usage-dependent pricing. Fetched on demand and cached for this process. Treazure already handles payment; generic API-key and SDK setup instructions are unnecessary. Any configured document limit is reported explicitly.",
+    "method": "GET",
+    "path": "https://exa.ai/docs/integrations/payments/x402/quickstart.md",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://exa.ai/docs/integrations/payments/x402/quickstart.md"
+  },
+  {
+    "name": "exa_search",
+    "description": "Search the web with a natural-language query and optionally retrieve result contents. Prefer a small numResults and contents.highlights for concise context. Omit stream or set false. Paid per request via x402; requested search type, result count and content options determine the charge. Vendor price ranges are estimates, not total-request caps; the live challenge is authoritative.",
+    "method": "POST",
+    "path": "/search",
+    "input_schema": {
+      "properties": {
+        "additionalQueries": {
+          "anyOf": [
+            {
+              "description": "Additional query variations for deep-search variants. Only works with a deep-search type. When provided, these queries are used alongside the main query for broader results.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 10,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "category": {
+          "anyOf": [
+            {
+              "description": "A data category to focus on. Known categories include `company`, `publication`, `news`, `personal site`, `financial report`, and `people`. Other strings are accepted and used as category hints for search. The `people` and `company` categories have improved quality for finding people profiles and company pages. The `publication` category surfaces scholarly publications such as research papers, preprints, and journal articles, with structured metadata like authors, venue, and citations. Note: The `company` and `people` categories only support a limited set of filters. The following parameters are NOT supported for these categories: `startPublishedDate`, `endPublishedDate`, `excludeDomains`. Using unsupported parameters will result in a 400 error.",
+              "enum": [
+                "company",
+                "publication",
+                "news",
+                "personal site",
+                "financial report",
+                "people"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compliance": {
+          "anyOf": [
+            {
+              "description": "Enterprise-only compliance mode. Set to `hipaa` for HIPAA mode. Requires cache-only retrieval with supported parameters. See the HIPAA docs for details.",
+              "enum": [
+                "hipaa"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contents": {
+          "anyOf": [
+            {
+              "properties": {
+                "context": {
+                  "anyOf": [
+                    {
+                      "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                      "oneOf": [
+                        {
+                          "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                          "type": "boolean"
+                        },
+                        {
+                          "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                          "properties": {
+                            "maxCharacters": {
+                              "description": "Maximum character limit for the context string.",
+                              "maximum": 1000000,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "crawledBeforeDate": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Deprecated. Use `snapshotAsOf` instead. Alias of snapshotAsOf with identical behavior.",
+                  "format": "date-time"
+                },
+                "extras": {
+                  "anyOf": [
+                    {
+                      "description": "Extra parameters to pass.",
+                      "properties": {
+                        "codeBlocks": {
+                          "anyOf": [
+                            {
+                              "default": 0,
+                              "description": "Number of code blocks to return for each result.",
+                              "maximum": 1000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "imageLinks": {
+                          "anyOf": [
+                            {
+                              "default": 0,
+                              "description": "Number of images to return for each result.",
+                              "maximum": 1000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "links": {
+                          "anyOf": [
+                            {
+                              "default": 0,
+                              "description": "Number of URLs to return from each webpage.",
+                              "maximum": 1000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "richImageLinks": {
+                          "anyOf": [
+                            {
+                              "default": 0,
+                              "description": "Number of rich image links to return for each result.",
+                              "maximum": 1000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "richLinks": {
+                          "anyOf": [
+                            {
+                              "default": 0,
+                              "description": "Number of rich links to return for each result.",
+                              "maximum": 1000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "highlights": {
+                  "anyOf": [
+                    {
+                      "description": "Text snippets the LLM identifies as most relevant from each page.",
+                      "oneOf": [
+                        {
+                          "default": false,
+                          "description": "If true, returns highlights with default settings. If false, disables highlights.",
+                          "title": "Simple highlights retrieval",
+                          "type": "boolean"
+                        },
+                        {
+                          "description": "Advanced options for steering highlight extraction. Pass highlights: true for the highest-quality default; supply this object only when you need to guide selection with your own query.",
+                          "properties": {
+                            "dynamic": {
+                              "anyOf": [
+                                {
+                                  "description": "Enable Dynamic Highlights (research preview): considers all results together and allocates a single shared context budget across the result set instead of a per-document budget. Not compatible with maxCharacters. Beta: requires the `Exa-Beta: dynamic-highlights-2026-08-28` request header; requests setting `dynamic` without it are rejected.",
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "highlightsPerUrl": {
+                              "anyOf": [
+                                {
+                                  "description": "Deprecated. Currently ignored. Pass highlights: true for default highlights, or { query } to guide selection with your own query.",
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "maxCharacters": {
+                              "anyOf": [
+                                {
+                                  "description": "Maximum number of characters to return for highlights. Controls the total length of highlight text returned per URL. Not compatible with highlights.dynamic.",
+                                  "maximum": 1000000,
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "numSentences": {
+                              "anyOf": [
+                                {
+                                  "description": "Deprecated. Use `maxCharacters` instead. Currently mapped to a character budget of about 1333 characters per sentence. Pass highlights: true for default highlights, or { query } to guide selection with your own query.",
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "query": {
+                              "anyOf": [
+                                {
+                                  "description": "Custom query that guides which highlights the LLM picks.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "verbosity": {
+                              "anyOf": [
+                                {
+                                  "description": "Preset highlight length: `low`, `medium`, and `high` allocate progressively larger token budgets for the returned highlights. With highlights.dynamic, the preset sets a single shared budget across the whole result set instead of a per-URL budget. Exact budgets are tuned by Exa and may change. Not compatible with maxCharacters or numSentences. Beta: requires the `Exa-Beta: dynamic-highlights-2026-08-28` request header; requests setting `verbosity` without it are rejected.",
+                                  "enum": [
+                                    "low",
+                                    "medium",
+                                    "high"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "title": "Advanced highlights options",
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "livecrawl": {
+                  "anyOf": [
+                    {
+                      "description": "Deprecated. Use `maxAgeHours` instead. Does not guarantee freshly fetched content, which may be served according to server freshness policy. Do not send livecrawl and maxAgeHours together.",
+                      "enum": [
+                        "never",
+                        "always",
+                        "fallback",
+                        "preferred"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "livecrawlTimeout": {
+                  "anyOf": [
+                    {
+                      "default": 10000,
+                      "description": "The timeout for livecrawling in milliseconds.",
+                      "exclusiveMinimum": 0,
+                      "maximum": 90000,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "maxAgeHours": {
+                  "anyOf": [
+                    {
+                      "description": "Maximum age of cached content in hours. Positive values use cached content if it is less than this many hours old; 0 fetches fresh content and is the supported way to apply text rendering options to newly fetched pages; -1 always uses cache; omitted uses fallback fetching when cached content is unavailable. Maximum supported value is 720 hours.",
+                      "maximum": 720,
+                      "minimum": -1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "snapshotAsOf": {
+                  "anyOf": [
+                    {
+                      "description": "Return the newest stored version of each page as of this instant. Accepts an ISO 8601 date-time (`2026-01-15T00:00:00Z`) or a date-only value (`2026-01-15`), which is interpreted as midnight UTC. Historical requests are served from stored versions only and never fetch the live page.",
+                      "oneOf": [
+                        {
+                          "description": "ISO 8601 date-time.",
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "description": "ISO 8601 date (`YYYY-MM-DD`), interpreted as midnight UTC.",
+                          "format": "date",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "subpageTarget": {
+                  "anyOf": [
+                    {
+                      "description": "Term to find specific subpages of search results. Can be a single string or an array of strings.",
+                      "oneOf": [
+                        {
+                          "maxLength": 100,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "items": {
+                            "maxLength": 100,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "minItems": 0,
+                          "type": "array"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "subpages": {
+                  "anyOf": [
+                    {
+                      "default": 0,
+                      "description": "The number of subpages to crawl. The actual number crawled may be limited by system constraints.",
+                      "maximum": 100,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "summary": {
+                  "anyOf": [
+                    {
+                      "description": "Summary of the webpage.",
+                      "properties": {
+                        "query": {
+                          "anyOf": [
+                            {
+                              "description": "Custom query for the LLM-generated summary.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "schema": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": {
+                                "description": "Any JSON value.",
+                                "oneOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "items": {},
+                                    "type": "array"
+                                  },
+                                  {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "description": "JSON schema for structured output from summary. See https://json-schema.org/overview/what-is-jsonschema for JSON Schema documentation.",
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "description": "Text extraction options for each result.",
+                      "oneOf": [
+                        {
+                          "default": false,
+                          "description": "If true, returns full page text with default settings. If false, disables text return.",
+                          "title": "Simple text retrieval",
+                          "type": "boolean"
+                        },
+                        {
+                          "description": "Advanced options for controlling text extraction. Use this when you need to limit text length or include HTML structure.",
+                          "properties": {
+                            "excludeSections": {
+                              "anyOf": [
+                                {
+                                  "description": "Exclude content classified into these semantic page sections. Section classification is best-effort. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                                  "items": {
+                                    "enum": [
+                                      "header",
+                                      "navigation",
+                                      "banner",
+                                      "body",
+                                      "sidebar",
+                                      "footer",
+                                      "metadata"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "includeHtmlTags": {
+                              "anyOf": [
+                                {
+                                  "default": false,
+                                  "description": "If true, include lightweight HTML tags in returned text instead of plain markdown-style text. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "includeSections": {
+                              "anyOf": [
+                                {
+                                  "description": "Best-effort. Only include content classified into these semantic page sections. Section classification may be unavailable or incomplete for some pages; validate output if strict filtering is required. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                                  "items": {
+                                    "enum": [
+                                      "header",
+                                      "navigation",
+                                      "banner",
+                                      "body",
+                                      "sidebar",
+                                      "footer",
+                                      "metadata"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "maxCharacters": {
+                              "anyOf": [
+                                {
+                                  "description": "Maximum character limit for the full page text. Useful for controlling response size and API costs.",
+                                  "maximum": 1000000,
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "verbosity": {
+                              "anyOf": [
+                                {
+                                  "default": "compact",
+                                  "description": "Controls text rendering verbosity. compact focuses on main content, standard includes more surrounding page context, and full requests the most complete rendered text. Some pages may produce identical standard and full output. Use maxAgeHours: 0 when you need this applied to freshly fetched content.",
+                                  "enum": [
+                                    "compact",
+                                    "standard",
+                                    "full"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "title": "Advanced text options",
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "anyOf": [
+            {
+              "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+              "oneOf": [
+                {
+                  "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                  "type": "boolean"
+                },
+                {
+                  "description": "Deprecated. Use `highlights` or `text` instead. Returns page contents as a combined context string.",
+                  "properties": {
+                    "maxCharacters": {
+                      "description": "Maximum character limit for the context string.",
+                      "maximum": 1000000,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endCrawlDate": {
+          "anyOf": [
+            {
+              "description": "Deprecated. Ignored by the API.",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endPublishedDate": {
+          "anyOf": [
+            {
+              "description": "Only links with a published date before this will be returned. Must be specified in ISO 8601 format.",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "excludeDomains": {
+          "anyOf": [
+            {
+              "description": "List of domains or domain paths to exclude from search results. Each entry can be a hostname (for example, `example.com`), a hostname with a path prefix (for example, `example.com/docs`), or a wildcard subdomain (for example, `*.example.com`). If specified, no results will be returned from the matching domains or paths. Use this parameter for domain or path filtering instead of adding a `site:` operator to the query.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1200,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "excludeText": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deprecated. List of strings that must not be present in the webpage text of results. Matching is approximate (word-level rather than exact phrase). Up to 50 strings, each up to 4096 characters."
+        },
+        "includeDomains": {
+          "anyOf": [
+            {
+              "description": "List of domains or domain paths to include in the search. Each entry can be a hostname (for example, `example.com`), a hostname with a path prefix (for example, `example.com/docs`), or a wildcard subdomain (for example, `*.example.com`). If specified, results will only come from the matching domains or paths. Use this parameter for domain or path filtering instead of adding a `site:` operator to the query.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1200,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "includeText": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deprecated. List of strings that must be present in the webpage text of results. Matching is approximate (word-level rather than exact phrase), so a multi-word entry can match pages where its words appear separately. Up to 50 strings, each up to 4096 characters."
+        },
+        "moderation": {
+          "anyOf": [
+            {
+              "default": false,
+              "description": "Enable content moderation to filter unsafe content from search results.",
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "numResults": {
+          "anyOf": [
+            {
+              "default": 10,
+              "description": "Number of results to return. Limits vary by search type. The maximum public limit is 100 results. Contact sales (hello@exa.ai) to discuss higher limits.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The broader goal this search serves: the task the caller is working on, beyond the query itself. When exposing this field to an agent as a tool parameter, describe it as: \"Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them.\""
+        },
+        "outputSchema": {
+          "anyOf": [
+            {
+              "description": "JSON schema for synthesized output. Supported root types are \"text\" and \"object\". When provided, the response includes an output object whose content matches this schema. Works with every search type and adds about 2 seconds of synthesis latency on top of the selected search type. Object schemas are limited to 10 properties in total (nested and array items properties count toward the limit) and 2 levels of nesting, and every array must define items.",
+              "oneOf": [
+                {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "text",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": {
+                    "description": "Any JSON value.",
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "items": {},
+                        "type": "array"
+                      },
+                      {
+                        "additionalProperties": {},
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "properties": {
+                    "additionalProperties": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "properties": {
+                      "additionalProperties": {
+                        "description": "Any JSON value.",
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "items": {},
+                            "type": "array"
+                          },
+                          {
+                            "additionalProperties": {},
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "object"
+                    },
+                    "required": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "type": {
+                      "const": "object",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "query": {
+          "description": "The query string for the search.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "startCrawlDate": {
+          "anyOf": [
+            {
+              "description": "Deprecated. Ignored by the API.",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startPublishedDate": {
+          "anyOf": [
+            {
+              "description": "Only links with a published date after this will be returned. Must be specified in ISO 8601 format.",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "default": false,
+              "description": "Requests server-sent events for synthesized output streaming. Streaming is currently used only when outputSchema is provided; otherwise the endpoint returns the normal JSON search response.",
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omit or set false. Treazure returns completed tool responses and does not expose Exa's server-sent event stream."
+        },
+        "systemPrompt": {
+          "anyOf": [
+            {
+              "description": "Additional instructions that guide generated output or agent behavior. Use this for source preferences, novelty constraints, duplication constraints, or other behavior guidance.",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "anyOf": [
+            {
+              "default": "auto",
+              "description": "The search mode to use. `auto` (default) is a balanced mode that optimizes for both quality and speed and is recommended for most applications. `fast` returns high-quality results with reduced latency, making it a good fit for user-facing search and interactive workflows. `instant` is optimized for minimum response time, trading some search depth for speed in real-time experiences such as chat, voice agents, and autocomplete. `deep-lite` performs lightweight research with synthesized results and a consistent 4-second latency, lower than full deep search. `deep` conducts comprehensive multi-step research with synthesis, while `deep-reasoning` adds stronger reasoning for complex analysis and decision-making tasks.",
+              "enum": [
+                "instant",
+                "fast",
+                "auto",
+                "deep-lite",
+                "deep",
+                "deep-reasoning"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "userLocation": {
+          "anyOf": [
+            {
+              "description": "The two-letter ISO country code of the user, e.g. US.",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "additionalQueries": "body",
+      "category": "body",
+      "compliance": "body",
+      "contents": "body",
+      "context": "body",
+      "endCrawlDate": "body",
+      "endPublishedDate": "body",
+      "excludeDomains": "body",
+      "excludeText": "body",
+      "includeDomains": "body",
+      "includeText": "body",
+      "moderation": "body",
+      "numResults": "body",
+      "objective": "body",
+      "outputSchema": "body",
+      "query": "body",
+      "startCrawlDate": "body",
+      "startPublishedDate": "body",
+      "stream": "body",
+      "systemPrompt": "body",
+      "type": "body",
+      "userLocation": "body"
+    },
+    "has_body": true
+  }
+]

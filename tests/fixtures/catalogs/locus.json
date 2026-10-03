@@ -218,7 +218,20 @@
           "minimum": 1,
           "type": "integer"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "address"
+          ]
+        },
+        {
+          "required": [
+            "latitude",
+            "longitude"
+          ]
+        }
+      ]
     },
     "param_routes": {
       "address": "body",
@@ -707,7 +720,20 @@
           "minLength": 2,
           "type": "string"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "address"
+          ]
+        },
+        {
+          "required": [
+            "latitude",
+            "longitude"
+          ]
+        }
+      ]
     },
     "param_routes": {
       "address": "body",
@@ -967,7 +993,26 @@
           "minLength": 2,
           "type": "string"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "address"
+          ]
+        },
+        {
+          "required": [
+            "latitude",
+            "longitude"
+          ]
+        },
+        {
+          "required": [
+            "state",
+            "county"
+          ]
+        }
+      ]
     },
     "param_routes": {
       "address": "body",
@@ -3702,7 +3747,19 @@
           "minLength": 1,
           "type": "string"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "address"
+          ]
+        },
+        {
+          "required": [
+            "zip"
+          ]
+        }
+      ]
     },
     "param_routes": {
       "address": "body",
@@ -3802,7 +3859,20 @@
           "minimum": 1000,
           "type": "integer"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "address"
+          ]
+        },
+        {
+          "required": [
+            "latitude",
+            "longitude"
+          ]
+        }
+      ]
     },
     "param_routes": {
       "address": "body",
@@ -5028,7 +5098,20 @@
           "minimum": 50,
           "type": "number"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "address"
+          ]
+        },
+        {
+          "required": [
+            "latitude",
+            "longitude"
+          ]
+        }
+      ]
     },
     "param_routes": {
       "address": "body",

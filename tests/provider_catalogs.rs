@@ -14,7 +14,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 15);
+    assert_eq!(cases.len(), 16);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 731);
+    assert_eq!(total, 734);
 }
 
 #[tokio::test]
@@ -92,4 +92,91 @@ async fn directory_exact_allowlist_excludes_new_write_and_subroutes() {
         .unwrap();
     assert_eq!(route.query["network"], "BSE");
     assert_eq!(route.query["limit"], 2);
+}
+
+#[tokio::test]
+async fn exa_curates_paid_operations_and_preserves_request_contracts() {
+    use serde_json::json;
+    use x402_treazure::{catalog, config};
+    let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/exa.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    let mut doc: Value = serde_json::from_str(include_str!("fixtures/exa_openapi.json")).unwrap();
+    // New diagnostic methods and same-prefix subroutes must not enlarge the default catalog.
+    doc["paths"]["/search"]["get"] = json!({"summary":"Diagnostic"});
+    doc["paths"]["/search/debug"] = json!({"post":{"summary":"Diagnostic"}});
+    doc["paths"]["/health"] = json!({"get":{"summary":"Health"}});
+    let tools = catalog::build_tools(&cfg, &doc, "exa").unwrap();
+    assert_eq!(
+        tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        ["exa_contents", "exa_search", "exa_help"]
+    );
+    let contents = &tools[0];
+    assert_eq!(
+        contents.input_schema["oneOf"],
+        json!([{"required":["ids"]},{"required":["urls"]}])
+    );
+    assert_eq!(contents.input_schema["properties"]["urls"]["minItems"], 1);
+    assert!(contents.description.contains("exactly one"));
+    let args = json!({"urls":["https://example.com/a?b=1"],"highlights":{"query":"context"},"maxAgeHours":0});
+    let routed = contents
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(routed.url, "https://api.exa.ai/contents");
+    assert_eq!(routed.method, "POST");
+    assert_eq!(routed.body, Some(args));
+    assert!(routed.query.is_empty());
+    let search = &tools[1];
+    assert_eq!(search.input_schema["required"], json!(["query"]));
+    assert!(
+        search.input_schema["properties"]["stream"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("false")
+    );
+    let args = json!({"query":"rust","numResults":3,"contents":{"highlights":true},"stream":false});
+    assert_eq!(
+        search
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap()
+            .body,
+        Some(args)
+    );
+    assert_eq!(
+        tools[2].help_url.as_deref(),
+        Some("https://exa.ai/docs/integrations/payments/x402/quickstart.md")
+    );
+    assert!(
+        tools
+            .iter()
+            .all(|t| !t.input_schema.to_string().contains("$ref"))
+    );
+}
+
+#[test]
+fn body_presence_alternatives_follow_collision_renaming() {
+    use serde_json::json;
+    use x402_treazure::catalog::{self, Config};
+    for keyword in ["oneOf", "anyOf", "allOf"] {
+        let mut schema = json!({"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}},"urls":{"type":"array","items":{"type":"string"}}}});
+        schema[keyword] = json!([{"required":["ids"]},{"required":["urls"]}]);
+        let doc = json!({"openapi":"3.1.0","paths":{"/contents":{"post":{
+            "parameters":[{"name":"ids","in":"query","schema":{"type":"string"}}],
+            "requestBody":{"content":{"application/json":{"schema":schema}}}
+        }}}});
+        let tools = catalog::build_tools(&Config::default(), &doc, "test").unwrap();
+        let tool = &tools[0];
+        assert_eq!(
+            tool.input_schema[keyword],
+            json!([{"required":["ids_body"]},{"required":["urls"]}])
+        );
+        let args = json!({"ids":"query value","ids_body":["document"]});
+        let route = tool
+            .route("https://example.com", args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.query["ids"], "query value");
+        assert_eq!(route.body, Some(json!({"ids":["document"]})));
+    }
 }

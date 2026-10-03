@@ -73,5 +73,10 @@
     "name": "x402-list",
     "provider": "providers/x402-list.toml",
     "spec": "tests/fixtures/x402_list_openapi.json"
+  },
+  {
+    "name": "exa",
+    "provider": "providers/exa.toml",
+    "spec": "tests/fixtures/exa_openapi.json"
   }
 ]

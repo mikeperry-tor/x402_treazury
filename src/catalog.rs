@@ -661,12 +661,51 @@ fn operation_input(op: &Value) -> Result<OperationInput> {
     if !required.is_empty() {
         input_schema["required"] = json!(required);
     }
+    preserve_body_required_alternatives(body, &body_names, &mut input_schema);
     Ok(OperationInput {
         schema: sanitize(&input_schema),
         routes,
         body_names,
         has_body,
     })
+}
+
+// Presence-only alternatives remain meaningful when a body is flattened together
+// with query/path arguments. Rename body keys after collisions, so a query value
+// cannot satisfy a body requirement (for example Exa's ids-or-urls constraint).
+fn preserve_body_required_alternatives(
+    body: &Value,
+    body_names: &BTreeMap<String, String>,
+    input: &mut Value,
+) {
+    let names: BTreeMap<_, _> = body_names
+        .iter()
+        .map(|(arg, wire)| (wire.as_str(), arg.as_str()))
+        .collect();
+    for keyword in ["oneOf", "anyOf", "allOf"] {
+        let Some(branches) = body[keyword].as_array() else {
+            continue;
+        };
+        let translated: Option<Vec<Value>> = branches
+            .iter()
+            .map(|branch| {
+                let object = branch.as_object()?;
+                if object.len() != 1 {
+                    return None;
+                }
+                let required: Option<Vec<_>> = object
+                    .get("required")?
+                    .as_array()?
+                    .iter()
+                    .map(|key| names.get(key.as_str()?).copied())
+                    .collect();
+                Some(json!({"required": required?}))
+            })
+            .collect();
+        if let Some(branches) = translated {
+            input[keyword] = json!(branches);
+        }
+    }
 }
 
 fn operation_description(
