@@ -222,7 +222,12 @@ pub async fn load_json_with_limit(
 ) -> Result<Value> {
     let bytes = if source.starts_with("https://") || source.starts_with("http://") {
         crate::limits::read(
-            http.get(source).send().await?.error_for_status()?,
+            http.get(source)
+                .send()
+                .await
+                .map_err(reqwest::Error::without_url)?
+                .error_for_status()
+                .map_err(reqwest::Error::without_url)?,
             limit,
             "static URL spec",
             "max_spec_bytes",

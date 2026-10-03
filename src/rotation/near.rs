@@ -620,7 +620,7 @@ mod tests {
                 axum::routing::post(|| async {
                     (
                         axum::http::StatusCode::UNAUTHORIZED,
-                        include_str!("../../tests/fixtures/near/confidential-unauthorized.json"),
+                        "DUMMY_NEAR_KEY DUMMY_NEAR_SESSION DUMMY_UPSTREAM_DETAIL",
                     )
                 }),
             )
@@ -633,8 +633,8 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = NearClient::at(
             &format!("http://{}", listener.local_addr().unwrap()),
-            Some("test-only-key"),
-            None,
+            Some("DUMMY_NEAR_KEY"),
+            Some("DUMMY_NEAR_SESSION"),
         )
         .unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

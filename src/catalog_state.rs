@@ -26,8 +26,10 @@ impl BoundTool {
                     let response = crate::network::discovery(url, self.client.timeout())?
                         .get(url)
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await
+                        .map_err(reqwest::Error::without_url)?
+                        .error_for_status()
+                        .map_err(reqwest::Error::without_url)?;
                     let bytes = crate::limits::read(
                         response,
                         self.client.max_help_bytes(),

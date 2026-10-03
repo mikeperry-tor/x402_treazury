@@ -186,7 +186,10 @@ impl PaidClient {
             let retry = request
                 .try_clone()
                 .context("request body cannot be retried")?;
-            let mut response = http.execute(unsigned).await?;
+            let mut response = http
+                .execute(unsigned)
+                .await
+                .map_err(reqwest::Error::without_url)?;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 // Bound legacy JSON-body challenges before the SDK can collect them.
                 let mut envelope = axum::http::Response::builder().status(response.status());
@@ -255,7 +258,10 @@ impl PaidClient {
                         .context("x402 challenge rejected or signing failed")?;
                     let mut retry = retry;
                     retry.headers_mut().extend(headers);
-                    response = http.execute(retry).await?;
+                    response = http
+                        .execute(retry)
+                        .await
+                        .map_err(reqwest::Error::without_url)?;
                     paid_submission = true;
                 }
             }

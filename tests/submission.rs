@@ -77,7 +77,7 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
                 bytes(
                     2,
                     if mode == 1 {
-                        b"wrong-txid"
+                        b"DUMMY_SUBMISSION_SECRET"
                     } else {
                         s.txid.as_bytes()
                     },
@@ -136,6 +136,9 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/grpc".parse().unwrap());
     headers.insert("grpc-status", status.parse().unwrap());
+    if status != "0" {
+        headers.insert("grpc-message", "DUMMY_SUBMISSION_SECRET".parse().unwrap());
+    }
     (
         headers,
         if status == "0" {

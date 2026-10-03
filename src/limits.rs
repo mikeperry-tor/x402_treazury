@@ -36,7 +36,11 @@ pub async fn read(
         return Err(exceeded(kind, setting, limit));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(reqwest::Error::without_url)?
+    {
         if chunk.len() > limit.saturating_sub(bytes.len()) {
             return Err(exceeded(kind, setting, limit));
         }
