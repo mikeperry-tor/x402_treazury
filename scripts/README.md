@@ -9,6 +9,9 @@ any working directory unless a command explicitly supplies relative data paths.
 | `check.sh --no-default-features` | Only the tests and Clippy without the embedded wallet, plus format/provenance |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
 | `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
+| `coverage.sh --proving` | Only the named synthetic proving test; `target/coverage-proving` |
+| `coverage.sh --consensus TEST` | One explicitly selected consensus test; `target/coverage-consensus-TEST` |
+| `tests/coverage.sh` | Offline regression check for report publication and failure preservation |
 | `zcash.sh build` / `zcash.sh test --all-targets` | Cargo-managed protoc; default features include the wallet, `--no-default-features` disables it |
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
@@ -48,3 +51,20 @@ With rustup, install `llvm-tools-preview`. The report excludes integration test
 harnesses, examples and vendor code, but can include inline unit-test helpers.
 CLI tests clear inherited environment except `LLVM_PROFILE_FILE` for subprocess
 coverage. Never replace this with unrestricted environment inheritance.
+
+Each coverage run lives in `target/coverage-runs/`. The mode's report path points
+to the latest successful run; failed runs keep their logs and do not replace it.
+Existing report directories are retained inside the first new run. `provenance.txt`
+records the revision, dirty/untracked paths, lockfile hash, compiler/tool versions,
+feature mode and exclusion rule. `commands.txt`, `tests.txt` and `test.log` capture
+exact commands, selected tests and outcomes. `full.json` and
+`unfiltered-summary.json` retain evidence excluded from `summary.json`/HTML.
+`profiles.txt` inventories collected raw profiles, including CLI children that
+preserve `LLVM_PROFILE_FILE`. Abruptly exited children may not flush coverage;
+parent assertions establish their test outcomes independently. Run from a stable
+working tree and do not run two coverage commands concurrently for the same mode.
+
+Optional modes do not run the default suite. Consensus accepts only the five
+named cases in `tests/REGTEST.md`, one per process; it never enables a broad ignored
+test filter. Docker/images must already be available. No live Tor or mainnet tests
+are selected. Keep optional results distinct from default-build percentages.

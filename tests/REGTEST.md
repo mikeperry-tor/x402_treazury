@@ -13,7 +13,7 @@ pinned test infrastructure. Zaino requires amd64 emulation on ARM hosts.
 ```sh
 docker pull docker.io/zfnd/zebra:6.0.0@sha256:78a10b7f24b83a86e6223d97e857094a353454e3268f84a87bd987e7140a33bb
 docker pull --platform linux/amd64 docker.io/zingodevops/zaino:0.6.0-rc.1-no-tls@sha256:e48b133dbf53dbed77b872de74d65aa8a45357a3844b658ea472a340949feb7f
-scripts/zcash.sh test --features zcash-regtest --lib deposit_settlement_and_reorg_recovery -- --ignored --nocapture
+scripts/zcash.sh test --features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery -- --ignored --exact --nocapture
 ```
 
 The network selector's regtest variant is compiled only into this crate's unit
@@ -46,8 +46,30 @@ containers and `x402-regtest-<UUID>` network belonging to that interrupted run.
 No host directories are mounted writable into the containers; their chain state
 is disposable. Cached images remain available for subsequent tests.
 
-This suite does not qualify NEAR swaps, refunds, deep finalized-chain rollback,
+The deposit scenario does not qualify NEAR swaps, refunds, deep finalized-chain rollback,
 or automatic repair of source spends invalidated after accounting confirmation.
 Such spends retain their consumed budget and block new treasury preparation until
 the original transaction regains the configured confirmation depth. No replacement
 transaction or automatic rebroadcast is created as a recovery shortcut.
+
+## Additional isolated scenarios
+
+Run each scenario in its own test process, using its complete name and `--exact`:
+
+| Test in `treasury::regtest` | Evidence |
+| --- | --- |
+| `high_index_refunds_and_separate_shielding` | High-index transparent discovery after restore and independent shielding of two addresses |
+| `expired_ambiguous_deposit_releases_only_after_chain_proof` | Expiry requires chain proof and owned unspent inputs; archived bytes cannot submit again |
+| `indexer_non_inclusion_response` | Missing transaction response remains ambiguous |
+| `tor_consensus_lifecycle` | Deposit, refund and expiry scenarios through authenticated fake SOCKS; run alone because it installs process policy |
+
+For an instrumented run of exactly one scenario:
+
+```sh
+scripts/coverage.sh --consensus high_index_refunds_and_separate_shielding
+```
+
+Use `scripts/coverage.sh --proving` for the synthetic proving test without Docker.
+These commands are optional qualification, not tests run by the default suite.
+A fake SOCKS endpoint proves client routing/credentials, not real Tor circuit
+selection. Neither the optional suite nor its coverage qualifies real NEAR swaps.

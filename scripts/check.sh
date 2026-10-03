@@ -16,6 +16,7 @@ fi
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 cargo fmt --check
+scripts/tests/coverage.sh
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
 cargo test --locked --no-default-features --all-targets
