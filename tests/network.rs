@@ -157,28 +157,124 @@ async fn auth_downgrades_refusals_and_timeouts_never_go_direct() {
     );
     server.abort();
 }
-#[tokio::test]
-async fn legacy_credentials_and_cache_eviction_keep_identity() {
-    let proxy = Socks::start(BTreeMap::new(), Fault::None).await;
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_credentials_eviction_and_runtime_recreation_preserve_inflight_identity() {
+    let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+    let release = std::sync::Arc::new(tokio::sync::Notify::new());
+    let (e, r) = (entered.clone(), release.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new()
+                .route(
+                    "/hold",
+                    axum::routing::get(move || {
+                        let (e, r) = (e.clone(), r.clone());
+                        async move {
+                            e.notify_one();
+                            r.notified().await;
+                            "held"
+                        }
+                    }),
+                )
+                .route("/fast", axum::routing::get(|| async { "fast" })),
+        )
+        .await
+        .unwrap();
+    });
+    let proxy = Socks::start(
+        BTreeMap::from([("eviction.invalid".into(), address)]),
+        Fault::None,
+    )
+    .await;
     let mut settings = policy(&proxy);
     settings.socks_auth = Some(SocksAuth::Legacy);
-    let ctx = NetworkContext::new(settings.clone()).unwrap();
+    let ctx = std::sync::Arc::new(NetworkContext::new(settings).unwrap());
     let id = IsolationId::treasury("uuid");
     let credentials = ctx.credentials(&id);
     assert_eq!(credentials.0, "x402_treazury");
-    for _ in 0..260 {
+    let client = ctx
+        .http(&id, "http://eviction.invalid", Duration::from_secs(10))
+        .unwrap();
+    let pending = tokio::spawn(async move {
+        client
+            .get("http://eviction.invalid/hold")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+    });
+    tokio::time::timeout(Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    // Distinct identities are essential: repeated lookup of one key does not evict.
+    for n in 0..260 {
         ctx.http(
-            &IsolationId::bootstrap(),
-            "https://example.com",
-            Duration::from_secs(2),
+            &IsolationId::treasury(&format!("other-{n}")),
+            "http://eviction.invalid",
+            Duration::from_secs(10),
         )
         .unwrap();
     }
-    assert_eq!(ctx.credentials(&id), credentials);
+    let client = ctx
+        .http(&id, "http://eviction.invalid", Duration::from_secs(10))
+        .unwrap();
     assert_eq!(
-        NetworkContext::new(settings).unwrap().credentials(&id),
-        credentials
+        client
+            .get("http://eviction.invalid/fast")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "fast"
     );
+    release.notify_one();
+    assert_eq!(pending.await.unwrap(), "held");
+    assert_eq!(proxy.records.lock().unwrap().len(), 2);
+    for expected in [3, 4] {
+        let ctx = ctx.clone();
+        tokio::task::spawn_blocking(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                for _ in 0..2 {
+                    let client = ctx
+                        .http(
+                            &IsolationId::treasury("uuid"),
+                            "http://eviction.invalid",
+                            Duration::from_secs(5),
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        client
+                            .get("http://eviction.invalid/fast")
+                            .send()
+                            .await
+                            .unwrap()
+                            .text()
+                            .await
+                            .unwrap(),
+                        "fast"
+                    );
+                }
+            });
+        })
+        .await
+        .unwrap();
+        assert_eq!(proxy.records.lock().unwrap().len(), expected);
+    }
+    for record in proxy.records.lock().unwrap().iter() {
+        assert_eq!((record.user.clone(), record.password.clone()), credentials);
+    }
+    server.abort();
 }
 
 #[cfg(feature = "zcash")]

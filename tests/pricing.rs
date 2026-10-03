@@ -166,3 +166,182 @@ async fn probes_are_bounded_optional_and_validate_get_only() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn observed_global_and_source_bounds_caps_and_full_url_cache_keys() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for (sources, bound, expected_active) in [(1, 1, 1), (1, 2, 2), (2, 3, 4)] {
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let permits = Arc::new(tokio::sync::Semaphore::new(0));
+        let (arrived, mut arrivals) = tokio::sync::mpsc::unbounded_channel();
+        let (a, m, p) = (active.clone(), maximum.clone(), permits.clone());
+        let app = Router::new().fallback(any(move |req: Request| {
+            let (a, m, p, arrived) = (a.clone(), m.clone(), p.clone(), arrived.clone());
+            async move {
+                assert!(!req.headers().contains_key("payment-signature"));
+                let n = a.fetch_add(1, Ordering::SeqCst) + 1;
+                m.fetch_max(n, Ordering::SeqCst);
+                arrived.send(req.uri().path().to_owned()).unwrap();
+                p.acquire().await.unwrap().forget();
+                a.fetch_sub(1, Ordering::SeqCst);
+                (
+                    StatusCode::PAYMENT_REQUIRED,
+                    [(
+                        "payment-required",
+                        STANDARD
+                            .encode(json!({"accepts":[{"amount":"1","asset":"USDC"}]}).to_string()),
+                    )],
+                )
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let vendor = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let cache = Arc::new(PricingCache::default());
+        let root =
+            json!({"paths":{"/d":{"get":{}},"/c":{"get":{}},"/a":{"get":{}},"/b":{"get":{}}}});
+        let cfg = Config {
+            probe_concurrency: bound,
+            probe_max_endpoints: 3,
+            probe_timeout: 5.0,
+            ..Default::default()
+        };
+        let tools = build_tools(&cfg, &root, "t").unwrap();
+        let mut tasks = tokio::task::JoinSet::new();
+        // Duplicate discoverers must share the same per-URL attempt.
+        for source in 0..sources {
+            for _ in 0..2 {
+                let (cache, cfg, root, tools, base) = (
+                    cache.clone(),
+                    cfg.clone(),
+                    root.clone(),
+                    tools.clone(),
+                    format!("{base}/source{source}"),
+                );
+                tasks.spawn(
+                    async move { cache.discover(&cfg, &root, &tools, &base).await.unwrap() },
+                );
+            }
+        }
+        let mut paths = Vec::new();
+        for _ in 0..expected_active {
+            paths.push(
+                tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), arrivals.recv())
+                .await
+                .is_err()
+        );
+        assert_eq!(active.load(Ordering::SeqCst), expected_active);
+        permits.add_permits(100);
+        while let Some(result) = tasks.join_next().await {
+            assert_eq!(result.unwrap().len(), 3);
+        }
+        while let Ok(path) = arrivals.try_recv() {
+            paths.push(path);
+        }
+        paths.sort();
+        let mut expected: Vec<_> = (0..sources)
+            .flat_map(|source| ["a", "b", "c"].map(|p| format!("/source{source}/{p}")))
+            .collect();
+        expected.sort();
+        assert_eq!(paths, expected);
+        assert_eq!(maximum.load(Ordering::SeqCst), expected_active);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        vendor.abort();
+    }
+}
+
+#[tokio::test]
+async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let (h, e) = (hits.clone(), entered.clone());
+    let app = Router::new().fallback(any(move |request: Request| {
+        let (h, e) = (h.clone(), e.clone());
+        async move {
+            h.fetch_add(1, Ordering::SeqCst);
+            if request.uri().path() == "/legacy" {
+                return (
+                    StatusCode::PAYMENT_REQUIRED,
+                    [
+                        ("payment-required", "malformed".to_owned()),
+                        (
+                            "x-payment-required",
+                            STANDARD.encode(
+                                json!({"accepts":[{"maxAmountRequired":"7","asset":"USDC"}]})
+                                    .to_string(),
+                            ),
+                        ),
+                    ],
+                )
+                    .into_response();
+            }
+            e.notify_one();
+            std::future::pending::<()>().await;
+            "unreachable".into_response()
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let vendor = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let cache = Arc::new(PricingCache::default());
+    let root = json!({"paths":{"/timeout":{"get":{}}}});
+    let cfg = Config {
+        probe_timeout: 0.1,
+        ..Default::default()
+    };
+    let tools = build_tools(&cfg, &root, "t").unwrap();
+    // Repeated interrupted initializers would exhaust the four permits if leaked.
+    for _ in 0..5 {
+        let (cache, cfg, root, tools, base) = (
+            cache.clone(),
+            Config {
+                probe_timeout: 5.0,
+                ..cfg.clone()
+            },
+            root.clone(),
+            tools.clone(),
+            base.clone(),
+        );
+        let task = tokio::spawn(async move { cache.discover(&cfg, &root, &tools, &base).await });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+    assert!(
+        cache
+            .discover(&cfg, &root, &tools, &base)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 6);
+    assert!(
+        cache
+            .discover(&cfg, &root, &tools, &base)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 6);
+    let legacy = json!({"paths":{"/legacy":{"get":{}}}});
+    let tools = build_tools(&cfg, &legacy, "legacy").unwrap();
+    let lines = cache.discover(&cfg, &legacy, &tools, &base).await.unwrap();
+    assert!(lines[&("GET".into(), "/legacy".into())].contains("$0.000007"));
+    assert_eq!(hits.load(Ordering::SeqCst), 7);
+    vendor.abort();
+}

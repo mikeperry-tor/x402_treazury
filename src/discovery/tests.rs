@@ -1231,3 +1231,6 @@ fn registry_protected_aliases_and_sidecars_preserve_targets() {
 
 #[path = "../../tests/support/mcp_execution.rs"]
 mod mcp_execution;
+
+#[path = "../../tests/support/import_limits.rs"]
+mod import_limits;

@@ -318,3 +318,125 @@ async fn interrupted_http_body_is_not_retried() {
     assert_eq!(proxy.records.lock().unwrap().len(), 1);
     server.abort();
 }
+
+#[cfg(feature = "zcash")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable() {
+    use zingo_netutils::{
+        Indexer,
+        lightwallet_protocol::{BlockId, BlockRange},
+    };
+    async fn read(mut client: zingo_netutils::GrpcIndexer) {
+        let mut stream = client
+            .get_block_range(
+                BlockRange {
+                    pool_types: vec![],
+                    start: Some(BlockId {
+                        height: 1,
+                        hash: vec![],
+                    }),
+                    end: Some(BlockId {
+                        height: 1,
+                        hash: vec![],
+                    }),
+                },
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stream.message().await.unwrap().unwrap().height, 1);
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new().fallback(|| async {
+                (
+                    [("content-type", "application/grpc"), ("grpc-status", "0")],
+                    vec![0u8, 0, 0, 0, 2, 16, 1],
+                )
+            }),
+        )
+        .await
+        .unwrap();
+    });
+    let socks = Socks::start(
+        BTreeMap::from([("grpc.invalid".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let ctx = Arc::new(
+        NetworkContext::new(NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(socks.address),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let id = IsolationId::treasury("retained");
+    let url = "http://grpc.invalid:1234";
+    let retained = ctx.grpc(&id, url).await.unwrap();
+    read(retained.clone()).await;
+    read(ctx.grpc(&id, url).await.unwrap()).await;
+    assert_eq!(socks.records.lock().unwrap().len(), 1);
+    // Populate cache ownership with channel clones, avoiding hundreds of unrelated
+    // sockets. The real factory's next insertion must exercise its eviction path.
+    {
+        let mut cache = ctx.grpc.lock().await;
+        for n in 0..256 {
+            cache.insert(
+                (
+                    tokio::runtime::Handle::current().id(),
+                    IsolationId::treasury(&format!("cache-{n}")),
+                    url.into(),
+                ),
+                retained.clone(),
+            );
+        }
+    }
+    read(
+        ctx.grpc(&IsolationId::treasury("trigger"), url)
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(ctx.grpc.lock().await.len(), 1);
+    read(retained.clone()).await;
+    assert_eq!(socks.records.lock().unwrap().len(), 2);
+    read(ctx.grpc(&id, url).await.unwrap()).await;
+    assert_eq!(socks.records.lock().unwrap().len(), 3);
+    ctx.release_grpc(&id).await;
+    read(retained).await;
+    read(ctx.grpc(&id, url).await.unwrap()).await;
+    assert_eq!(socks.records.lock().unwrap().len(), 4);
+    for expected in [5, 6] {
+        let ctx = ctx.clone();
+        tokio::task::spawn_blocking(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let id = IsolationId::treasury("retained");
+                for _ in 0..2 {
+                    read(ctx.grpc(&id, url).await.unwrap()).await;
+                }
+                ctx.release_grpc(&id).await;
+            });
+        })
+        .await
+        .unwrap();
+        assert_eq!(socks.records.lock().unwrap().len(), expected);
+    }
+    let credentials = ctx.credentials(&id);
+    for (n, record) in socks.records.lock().unwrap().iter().enumerate() {
+        if n != 1 {
+            assert_eq!(
+                (&record.user, &record.password),
+                (&credentials.0, &credentials.1)
+            );
+        }
+    }
+    server.abort();
+}
