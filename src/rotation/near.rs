@@ -649,4 +649,7 @@ mod tests {
         );
         server.abort();
     }
+    mod boundaries {
+        include!("../../tests/support/near_boundaries.rs");
+    }
 }

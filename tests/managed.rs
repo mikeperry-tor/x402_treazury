@@ -33,6 +33,8 @@ struct Fake {
     challenge: Arc<Mutex<Value>>,
     signed: Arc<Mutex<Vec<Value>>>,
     rpc_calls: Arc<AtomicUsize>,
+    rpc_fault: Arc<Mutex<Option<String>>>,
+    confirmed_reads: Arc<AtomicUsize>,
     used: Arc<AtomicBool>,
     stale: Arc<AtomicBool>,
     reorg: Arc<AtomicBool>,
@@ -54,7 +56,8 @@ async fn rpc(
     Json(v): Json<Value>,
 ) -> Json<Value> {
     f.rpc_calls.fetch_add(1, Ordering::SeqCst);
-    let result = match v["method"].as_str().unwrap() {
+    let fault = f.rpc_fault.lock().unwrap().clone().unwrap_or_default();
+    let mut result = match v["method"].as_str().unwrap() {
         "eth_chainId" => json!(if f.wrong_chain.load(Ordering::SeqCst) {
             "0x1"
         } else {
@@ -89,7 +92,43 @@ async fn rpc(
         }
         _ => panic!("unexpected RPC"),
     };
-    Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
+    if v["method"] == "eth_getBlockByNumber" {
+        match fault.as_str() {
+            "height" if v["params"][0] == "latest" => result["number"] = json!("0x1"),
+            "quantity" => result["number"] = json!("0xgg"),
+            "oversized_quantity" => result["number"] = json!("0xfffffffffffffffff"),
+            "future" => result["timestamp"] = json!(format!("0x{:x}", now().unwrap() + 60)),
+            "final_hash"
+                if v["params"][0] != "latest"
+                    && f.confirmed_reads.fetch_add(1, Ordering::SeqCst) > 0 =>
+            {
+                result["hash"] = json!(format!("0x{:064x}", 9))
+            }
+            _ => {}
+        }
+    }
+    if v["method"] == "eth_call" {
+        let data = v["params"][0]["data"].as_str().unwrap();
+        match fault.as_str() {
+            "word_short" => result = json!("0x00"),
+            "word_long" => result = json!(format!("0x{}", "0".repeat(65))),
+            "word_invalid" => result = json!(format!("0x{}", "g".repeat(64))),
+            "nonce" if !data.starts_with("0x70a08231") => result = json!(format!("0x{:064x}", 2)),
+            _ => {}
+        }
+    }
+    let mut response = json!({"jsonrpc":"2.0","id":v["id"],"result":result});
+    match fault.as_str() {
+        "id" => response["id"] = json!(2),
+        "version" => response["jsonrpc"] = json!("1.0"),
+        "error" => response["error"] = json!({"code":-1,"message":"fixture error"}),
+        "null" => response["result"] = Value::Null,
+        "missing" => {
+            response.as_object_mut().unwrap().remove("result");
+        }
+        _ => {}
+    }
+    Json(response)
 }
 async fn seller(
     State(f): State<Fake>,
@@ -160,6 +199,8 @@ impl Harness {
             challenge: Arc::new(Mutex::new(challenge("3000000"))),
             signed: Arc::default(),
             rpc_calls: Arc::default(),
+            rpc_fault: Arc::default(),
+            confirmed_reads: Arc::default(),
             used: Arc::default(),
             stale: Arc::default(),
             reorg: Arc::default(),
@@ -935,6 +976,41 @@ async fn promotion_identity_child() {
                 network::global().credentials(&IsolationId::evm(address).unwrap())
             );
         }
+        h.close().await;
+    }
+}
+
+#[tokio::test]
+async fn malformed_base_evidence_never_applies_a_partial_view() {
+    for fault in [
+        "id",
+        "version",
+        "error",
+        "null",
+        "missing",
+        "height",
+        "quantity",
+        "oversized_quantity",
+        "future",
+        "word_short",
+        "word_long",
+        "word_invalid",
+        "nonce",
+        "final_hash",
+    ] {
+        let h = Harness::new().await;
+        h.client.execute(h.route()).await.unwrap();
+        let before = serde_json::to_value(h.store.call(|s| s.status()).await.unwrap()).unwrap();
+        let count = h.f.signed.lock().unwrap().len();
+        *h.f.rpc_fault.lock().unwrap() = Some(fault.into());
+        h.f.used.store(true, Ordering::SeqCst); // Earlier nonce evidence alone must not release.
+        assert!(h.client.execute(h.route()).await.is_err(), "{fault}");
+        assert_eq!(h.f.signed.lock().unwrap().len(), count, "{fault}");
+        assert_eq!(
+            before,
+            serde_json::to_value(h.store.call(|s| s.status()).await.unwrap()).unwrap(),
+            "{fault}"
+        );
         h.close().await;
     }
 }

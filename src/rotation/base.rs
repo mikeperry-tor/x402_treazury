@@ -144,11 +144,7 @@ impl BaseRpc {
         }
         let (latest, timestamp) = self.block("latest").await?;
         let clock = now()?;
-        ensure!(
-            timestamp <= clock.saturating_add(30)
-                && clock.saturating_sub(timestamp) <= self.max_age,
-            "stale Base block"
-        );
+        validate_timestamp(timestamp, clock, self.max_age)?;
         let height = latest
             .height
             .checked_sub(self.confirmations)
@@ -213,4 +209,27 @@ fn quantity(v: &Value) -> Result<u64> {
         s.strip_prefix("0x").context("invalid RPC quantity")?,
         16,
     )?)
+}
+
+fn validate_timestamp(timestamp: u64, clock: u64, max_age: u64) -> Result<()> {
+    ensure!(
+        timestamp <= clock.saturating_add(30) && clock.saturating_sub(timestamp) <= max_age,
+        "stale Base block"
+    );
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn timestamp_boundaries_are_exact() {
+        for (stamp, allowed) in [
+            (1030, true),
+            (1031, false),
+            (880, true),
+            (879, false),
+            (1000, true),
+        ] {
+            assert_eq!(super::validate_timestamp(stamp, 1000, 120).is_ok(), allowed);
+        }
+    }
 }
