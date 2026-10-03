@@ -14,7 +14,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 19);
+    assert_eq!(cases.len(), 20);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 818);
+    assert_eq!(total, 834);
 }
 
 #[tokio::test]
@@ -406,4 +406,104 @@ async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
             .to_string()
             .contains("no operations matched")
     );
+}
+
+#[tokio::test]
+async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
+    use x402_treazure::{catalog, config, output::HttpOutput};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut cfg = config::load(&root.join("providers/agentutility/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let mut doc: Value =
+        serde_json::from_str(include_str!("../providers/agentutility/openapi.json")).unwrap();
+    assert_eq!(doc["paths"].as_object().unwrap().len(), 817);
+    assert_eq!(
+        doc["paths"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|o| o["post"].get("x-agentutility-alias-of").is_some())
+            .count(),
+        282
+    );
+    assert_eq!(cfg.tags, ["treazure-research"]);
+    assert!(!cfg.probe_pricing);
+    doc["paths"]["/health"] = serde_json::json!({"post":{"tags":["treazure-research"]}});
+    doc["paths"]["/web-search"]["get"] = serde_json::json!({"tags":["treazure-research"]});
+    let tools = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
+    assert_eq!(tools.len(), 16);
+    assert!(
+        !tools
+            .iter()
+            .any(|t| t.path == "/health" || t.path == "/dns-lookup")
+    );
+    let search = tools
+        .iter()
+        .find(|t| t.name == "agentutility_web_search")
+        .unwrap();
+    let args = serde_json::json!({"query":"Rust MCP","num_results":2,"recency":"week"});
+    let route = search
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://x402.agentutility.ai/web-search");
+    assert_eq!(route.method, "POST");
+    assert_eq!(route.body, Some(args));
+    assert!(route.query.is_empty());
+    assert!(search.description.contains("$0.006"));
+    assert_eq!(
+        search.input_schema["required"],
+        serde_json::json!(["query"])
+    );
+    assert_eq!(
+        tools.last().unwrap().help_url.as_deref(),
+        Some("https://agentutility.ai/llms.txt")
+    );
+    cfg.tags.clear();
+    let all = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
+    assert_eq!(all.len(), 526);
+    for tool in all.iter().filter(|t| t.help_url.is_none()) {
+        assert!(
+            doc["paths"][&tool.path]["post"]
+                .get("x-agentutility-alias-of")
+                .is_none()
+        );
+    }
+    for excluded in [
+        "/watch-page",
+        "/browser-session",
+        "/ipfs-fetch",
+        "/qr-code-generate",
+        "/db-migration-risk",
+    ] {
+        assert!(!all.iter().any(|t| t.path == excluded));
+    }
+    let keywords = all.iter().find(|t| t.path == "/keyword-suggest").unwrap();
+    assert_eq!(
+        keywords.input_schema["anyOf"],
+        serde_json::json!([{"required":["query"]},{"required":["keyword"]}])
+    );
+    cfg.tags = vec!["synthforge".into()];
+    let images = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
+    assert_eq!(images.len(), 14); // Hosted URL results require no automatic asset download.
+    assert!(
+        images
+            .iter()
+            .any(|t| t.path == "/image-generate" && t.response_mapping.is_none())
+    );
+    let satellite = all.iter().find(|t| t.path == "/satellite-change").unwrap();
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
+    let body = serde_json::json!({"before":{"data_base64":png,"anchor_date":"2025-05-15"},"after":{"data_base64":png,"anchor_date":"2026-05-15"},"content_type":"image/png","attribution":"Copernicus fixture","license":"CC BY-SA 3.0 IGO"});
+    let output = HttpOutput {
+        bytes: serde_json::to_vec(&body).unwrap(),
+        mime_type: Some("application/json".into()),
+        paid_submission: false,
+    }
+    .render(satellite.response_mapping.as_ref(), &satellite.image_limits)
+    .unwrap();
+    assert_eq!(output.images.len(), 2);
+    assert!(output.text.contains("Copernicus fixture"));
+    assert!(output.text.contains("2025-05-15"));
+    assert!(!output.text.contains(png));
 }

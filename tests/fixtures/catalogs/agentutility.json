@@ -1,0 +1,637 @@
+[
+  {
+    "name": "agentutility_answer_web",
+    "description": "Answers natural-language questions with live web research, returning a synthesized answer with inline [N] citations and the source URLs. Combines Decodo Google SERP + parallel cheerio scrape + Morpheus llama-3.3-70b. No login, pay-per-call. Use it as a live web answer engine, Perplexity-style cited answers, web Q&A, agent search, research-grade question-to-answer with sources, or SERP + scrape + LLM synthesis. Price: $0.04 per call (vendor spec).",
+    "method": "POST",
+    "path": "/answer-web",
+    "input_schema": {
+      "properties": {
+        "language": {
+          "description": "Two-letter language code. Default 'en'.",
+          "type": "string"
+        },
+        "max_sources": {
+          "description": "Max sources to scrape and cite. Default 3, max 5.",
+          "type": "number"
+        },
+        "question": {
+          "description": "The natural-language question. 1-500 chars.",
+          "type": "string"
+        },
+        "recency": {
+          "description": "Time filter passed to Google. Default 'any'.",
+          "enum": [
+            "day",
+            "week",
+            "month",
+            "year",
+            "any"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "language": "body",
+      "max_sources": "body",
+      "question": "body",
+      "recency": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_archive_snapshot",
+    "description": "Finds the closest archived snapshot of a public URL, like a Wayback Machine API. Given a URL and optional timestamp, returns the closest archived capture URL, archive timestamp, and optional cleaned archived page text for citation repair, reference rot fixes, due diligence, and provenance checks. Use it as a web archive lookup, historical webpage snapshot, or archived URL finder. Price: $0.02 per call (vendor spec).",
+    "method": "POST",
+    "path": "/archive-snapshot",
+    "input_schema": {
+      "properties": {
+        "fetch_text": {
+          "description": "Optional. If true, also fetches and returns the archived page's cleaned text (source capped at 10MB). Default false.",
+          "type": "boolean"
+        },
+        "timestamp": {
+          "description": "Optional. Target date for the snapshot: ISO 8601, 'YYYY-MM-DD', 'YYYYMMDD', or 'YYYYMMDDhhmmss'. Defaults to the most recent capture.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Public http(s) URL to look up in the Wayback Machine.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "fetch_text": "body",
+      "timestamp": "body",
+      "url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_arxiv_search",
+    "description": "Search arXiv's full paper catalog by query, author, category, or a specific id-list and get back structured results instead of scraping HTML. Runs against the public arXiv API, so coverage matches what researchers actually publish. Each result carries title, authors, abstract, primary category, submission and update dates, a PDF URL, and DOI when one exists; the response also reports total_results and how many were returned for the requested limit. Use it as an arXiv search API, academic paper lookup, or research literature search tool for tracking preprints, building citation lists, or monitoring a research topic. Price: $0.03 per call (vendor spec).",
+    "method": "POST",
+    "path": "/arxiv-search",
+    "input_schema": {
+      "properties": {
+        "author": {
+          "description": "Filter by author name.",
+          "type": "string"
+        },
+        "category": {
+          "description": "arXiv category code (e.g. 'cs.LG').",
+          "type": "string"
+        },
+        "id_list": {
+          "description": "Array of specific arXiv IDs to look up directly.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "include_abstract": {
+          "description": "Boolean, default true. Set false to omit abstracts and shrink the payload.",
+          "type": "boolean"
+        },
+        "limit": {
+          "description": "Max results to return, 1-50. Default 10.",
+          "type": "number"
+        },
+        "query": {
+          "description": "Free-text search across title/abstract/full-text. At least one of query, author, category, or id_list is required.",
+          "type": "string"
+        },
+        "sort_by": {
+          "description": "'relevance' (default), 'lastUpdatedDate', or 'submittedDate'.",
+          "enum": [
+            "relevance",
+            "lastUpdatedDate",
+            "submittedDate"
+          ],
+          "type": "string"
+        },
+        "sort_order": {
+          "description": "'descending' (default) or 'ascending'.",
+          "enum": [
+            "ascending",
+            "descending"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "author": "body",
+      "category": "body",
+      "id_list": "body",
+      "include_abstract": "body",
+      "limit": "body",
+      "query": "body",
+      "sort_by": "body",
+      "sort_order": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_arxiv_summarize",
+    "description": "Turn an arXiv paper into a structured research summary without reading the PDF. Send an arxiv_id_or_url (like \"2402.12345\" or a full arxiv.org link) and get back a TLDR, 3-5 key findings, a methods description, disclosed limitations, and a plain-language so-what on why the paper matters outside its subfield, plus title, authors, categories, and links (arxiv_url, pdf_url). Works from the paper's abstract via the arXiv API, so it covers the claim and framing rather than deep results tables. Use it as an arXiv summarizer, research paper TLDR generator, or literature-review triage tool when you need to screen or digest papers faster than reading each one end to end. Price: $0.04 per call (vendor spec).",
+    "method": "POST",
+    "path": "/arxiv-summarize",
+    "input_schema": {
+      "properties": {
+        "arxiv_id_or_url": {
+          "description": "arXiv paper id or URL, e.g. '2402.12345' or an arxiv.org/abs link.",
+          "type": "string"
+        },
+        "include_abstract": {
+          "description": "Include the raw abstract text in the response. Optional, default true.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "arxiv_id_or_url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "arxiv_id_or_url": "body",
+      "include_abstract": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_github_readme",
+    "description": "Fetches the raw README markdown for any public GitHub repository via the official GitHub REST API, no auth required for public repos. Returns the unaltered markdown plus byte size and char count. Useful for agents documenting a stack, explaining a library, or snipping an example. Use it as a repo readme fetch, open-source-readme-as-markdown endpoint, or package documentation puller. Price: $0.005 per call (vendor spec).",
+    "method": "POST",
+    "path": "/github-readme",
+    "input_schema": {
+      "properties": {
+        "repo": {
+          "description": "Repository in 'owner/name' form (e.g. 'vercel/next.js').",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "repo": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_help",
+    "description": "Read AgentUtility's large catalog and usage guide, fetched on demand and cached for the process. It includes aliases, excluded tools, other clients and broader chain support; those are not automatically enabled in Treazure. Use the selected tools and actual result fields. Any configured document limit is reported explicitly.",
+    "method": "GET",
+    "path": "https://agentutility.ai/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://agentutility.ai/llms.txt"
+  },
+  {
+    "name": "agentutility_hn_search",
+    "description": "Searches 30M+ Hacker News stories and comments via the public Algolia HN index. Filter by type (story|comment|poll), author, minimum points, ISO8601 date range (since/until), and sort by relevance or recency. Returns total hit count plus per-hit objectID, title, author, points, comment count, created_at, URL, and story/comment text. Public Algolia API, no auth, commercial-OK. Use it as an HN search, yc-news or startup-news search, who-is-hiring scraper, or programmer-news firehose. Price: $0.001 per call (vendor spec).",
+    "method": "POST",
+    "path": "/hn-search",
+    "input_schema": {
+      "properties": {
+        "author": {
+          "description": "Filter to a specific HN username (e.g. 'pg', 'dang').",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max hits to return. 1-20. Default 10.",
+          "type": "number"
+        },
+        "min_points": {
+          "description": "Minimum points (upvotes) floor. Comments don't have points; using this implicitly filters to stories.",
+          "type": "number"
+        },
+        "query": {
+          "description": "Free-text search query (matches title, body, author, URL).",
+          "type": "string"
+        },
+        "since": {
+          "description": "Lower bound on created_at — ISO8601 date (YYYY-MM-DD) or full timestamp.",
+          "type": "string"
+        },
+        "sort": {
+          "description": "'relevance' (default, popularity-weighted) or 'date' (most-recent-first).",
+          "enum": [
+            "relevance",
+            "date"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "description": "Restrict to a single HN item type. Omit to include all types.",
+          "enum": [
+            "story",
+            "comment",
+            "poll"
+          ],
+          "type": "string"
+        },
+        "until": {
+          "description": "Upper bound on created_at — ISO8601 date (YYYY-MM-DD) or full timestamp.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "author": "body",
+      "limit": "body",
+      "min_points": "body",
+      "query": "body",
+      "since": "body",
+      "sort": "body",
+      "type": "body",
+      "until": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_link_extract",
+    "description": "Extracts every link from a webpage: fetches the HTML URL and returns each <a> link with its anchor text, rel attribute, and an is_external flag. Resolves relative URLs against the page's <base> or final URL. Lighter than full scrape / metadata endpoints; the exact tool for the agent task 'walk this page, pick which links to follow.' Default 500-link cap. SSRF-guarded (no loopback / RFC1918 targets). Use it as a link extractor, page outlink crawler, or to scrape outbound links and get hrefs from a page. Price: $0.005 per call (vendor spec).",
+    "method": "POST",
+    "path": "/link-extract",
+    "input_schema": {
+      "properties": {
+        "include_external_only": {
+          "description": "If true, drop same-host links. Default false (return all).",
+          "type": "boolean"
+        },
+        "include_text": {
+          "description": "If true (default), include the anchor's visible text. Set false to skip text extraction.",
+          "type": "boolean"
+        },
+        "max_links": {
+          "description": "Max links to return (1-2000). Default 500. Pagination beyond max isn't supported; tighten the URL instead.",
+          "type": "number"
+        },
+        "timeout_ms": {
+          "description": "Fetch timeout. Default 12000, max 25000.",
+          "type": "number"
+        },
+        "url": {
+          "description": "Page URL to fetch and extract from. http or https only. Private/loopback targets are rejected. Redirects followed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "include_external_only": "body",
+      "include_text": "body",
+      "max_links": "body",
+      "timeout_ms": "body",
+      "url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_pdf_to_markdown",
+    "description": "Converts digital or scanned PDFs to clean Markdown with AI-powered, layout-aware extraction on the Datalab Marker engine. Preserves headings, tables, equations (LaTeX), bulleted lists, and multi-column flow; outputs Markdown (default), HTML, or structured JSON with per-page blocks. 30 pages max. Use it as a PDF parser, PDF to text converter, OCR PDF reader, extract-tables-from-PDF tool, equation-aware PDF parser, scanned-PDF OCR, or PDF data extractor. Price: $0.0025 per call (vendor spec).",
+    "method": "POST",
+    "path": "/pdf-to-markdown",
+    "input_schema": {
+      "properties": {
+        "output_format": {
+          "description": "'markdown' (default — best for LLM downstream), 'html' (preserves more layout structure), or 'json' (per-page blocks with type + bbox).",
+          "enum": [
+            "markdown",
+            "html",
+            "json"
+          ],
+          "type": "string"
+        },
+        "pdf_url": {
+          "description": "Public URL of a PDF file (http or https). Must be directly fetchable, not behind auth or a viewer redirect. Max 30 pages.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pdf_url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "output_format": "body",
+      "pdf_url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_pubmed_search",
+    "description": "Searches PubMed for biomedical literature by free-text query, with optional date range and sort (relevance / pub_date / first_author). Returns total hit count plus PMID, title, authors, journal, publication date, abstract, MeSH terms, and DOI per paper. Federal public-domain data via NCBI. Use it as a medical journal lookup, NIH paper search, clinical-research finder, MeSH-term query, or NCBI E-utilities wrapper. Price: $0.01 per call (vendor spec).",
+    "method": "POST",
+    "path": "/pubmed-search",
+    "input_schema": {
+      "properties": {
+        "date_from": {
+          "description": "Lower bound on publication date (YYYY/MM/DD or YYYY-MM-DD).",
+          "type": "string"
+        },
+        "date_to": {
+          "description": "Upper bound on publication date (YYYY/MM/DD or YYYY-MM-DD).",
+          "type": "string"
+        },
+        "include_abstract": {
+          "description": "If true (default), include the abstract text per paper. Set false for a smaller, faster response.",
+          "type": "boolean"
+        },
+        "limit": {
+          "description": "Max papers to return. 1-50. Default 10.",
+          "type": "number"
+        },
+        "query": {
+          "description": "PubMed query string. Supports field tags ('cancer[Title]', 'Smith J[Author]'), boolean operators, and MeSH terms.",
+          "type": "string"
+        },
+        "sort": {
+          "description": "Result ordering. Default 'relevance'.",
+          "enum": [
+            "relevance",
+            "pub_date",
+            "first_author"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "date_from": "body",
+      "date_to": "body",
+      "include_abstract": "body",
+      "limit": "body",
+      "query": "body",
+      "sort": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_research_brief",
+    "description": "Builds a structured research brief on a company, person, product, or topic as fixed-shape JSON: overview, key_facts, recent_news (with date hints), all with source-index citations. Combines Decodo Google SERP + parallel cheerio scrape (up to 8 sources) + Morpheus llama-3.3-70b with json_schema response_format. Use it for company briefs, entity profiles, topic briefs, sales-prep dossiers, due-diligence summaries, competitive intel, or agent-readable research. Price: $0.10 per call (vendor spec).",
+    "method": "POST",
+    "path": "/research-brief",
+    "input_schema": {
+      "properties": {
+        "entity_or_topic": {
+          "description": "Entity (company, person, product) or topic. 1-200 chars.",
+          "type": "string"
+        },
+        "focus": {
+          "description": "Optional focus area, e.g. 'recent funding rounds'.",
+          "type": "string"
+        },
+        "language": {
+          "description": "Two-letter language code. Default 'en'.",
+          "type": "string"
+        },
+        "max_sources": {
+          "description": "Max sources. Default 3, max 3.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "entity_or_topic"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "entity_or_topic": "body",
+      "focus": "body",
+      "language": "body",
+      "max_sources": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_scrape",
+    "description": "Scrape any webpage. Pulls title, description, canonical URL, OpenGraph + Twitter card metadata, headings, and outbound links from a single URL. Server-side rendering. Body content rendered as text / raw HTML / clean markdown. Optional link extraction. Cheerio-based, no headless browser — fast and cheap, ideal for static pages and SSR sites. Alias of scrape-website. For JS-heavy SPAs that need a real browser, see website-screenshot. Price: $0.04 per call (vendor spec).",
+    "method": "POST",
+    "path": "/scrape",
+    "input_schema": {
+      "properties": {
+        "format": {
+          "description": "Body output format. 'text' (default), 'html' (raw), or 'markdown' (clean — best for LLM ingestion).",
+          "enum": [
+            "text",
+            "html",
+            "markdown"
+          ],
+          "type": "string"
+        },
+        "include_links": {
+          "description": "If true, also returns an array of all <a href> links on the page. Default false.",
+          "type": "boolean"
+        },
+        "url": {
+          "description": "Public URL to fetch and parse. Must include scheme (http/https). Follows redirects.",
+          "type": "string"
+        },
+        "user_agent": {
+          "description": "Custom User-Agent header. Defaults to a modern desktop Chrome UA.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "format": "body",
+      "include_links": "body",
+      "url": "body",
+      "user_agent": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_scrape_to_json",
+    "description": "Turn any webpage into structured JSON that matches your schema. Fetches the page server-side (cheerio, no headless browser), converts it to clean markdown, then extracts data conforming to a caller-supplied JSON schema via Morpheus mistral-31-24b. The web scraper to reach for when you need website-to-JSON, page-to-structured-data, or scrape-and-extract with schema enforcement. Pair with watch-page or research-brief for richer agent pipelines. Price: $0.02 per call (vendor spec).",
+    "method": "POST",
+    "path": "/scrape-to-json",
+    "input_schema": {
+      "properties": {
+        "format": {
+          "description": "Pre-LLM body normalization. Default 'markdown'.",
+          "enum": [
+            "text",
+            "markdown"
+          ],
+          "type": "string"
+        },
+        "instructions": {
+          "description": "Optional extra extraction guidance.",
+          "type": "string"
+        },
+        "schema": {
+          "description": "JSON schema describing expected output. Must include a 'properties' key.",
+          "type": "object"
+        },
+        "url": {
+          "description": "Public URL to scrape (http or https). Follows redirects.",
+          "type": "string"
+        },
+        "user_agent": {
+          "description": "Optional User-Agent header sent to the target page. Defaults to an x402-scrape-to-json UA string.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "format": "body",
+      "instructions": "body",
+      "schema": "body",
+      "url": "body",
+      "user_agent": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_web_search",
+    "description": "Live web search and web answer engine retrieval API for agents that need ranked sources before writing an answer. Send a query and optional recency filter; receive ranked web results with title, URL, snippet, and domain, not an LLM-written response. Successful results are cached, and provider rate limits trigger a short circuit breaker plus a clearly marked recent public-news fallback. Use it as a web answer engine source API, live web search API, web search MCP tool, RAG source-discovery feed, or source search tool. For fetched page text or cited synthesis, use answer-web or scrape-to-json. Price: $0.006 per call (vendor spec).",
+    "method": "POST",
+    "path": "/web-search",
+    "input_schema": {
+      "properties": {
+        "include_text": {
+          "description": "Accepted for compatibility. This route always returns ranked result metadata with include_text: false; use scrape-to-json for page text.",
+          "type": "boolean"
+        },
+        "limit": {
+          "description": "Alias for num_results. If both are supplied, num_results wins.",
+          "type": "number"
+        },
+        "num_results": {
+          "description": "Number of results to return. Default 10, max 20.",
+          "type": "number"
+        },
+        "query": {
+          "description": "Search query or research question. 1-500 chars.",
+          "type": "string"
+        },
+        "recency": {
+          "description": "Optional freshness filter. Default 'any'.",
+          "enum": [
+            "day",
+            "week",
+            "month",
+            "year",
+            "any"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "include_text": "body",
+      "limit": "body",
+      "num_results": "body",
+      "query": "body",
+      "recency": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_wikipedia_search",
+    "description": "Wikipedia search for full-text lookups across any Wikipedia language edition, built for agents that need a quick encyclopedia fact-check or background pass before answering. Send a query and get back ranked article hits with plain-text snippets (HTML stripped), page ids, and canonical wiki URLs. Wikipedia search, encyclopedia search, wiki full text search, knowledge search. Distinct from a single-page fetch: this ranks matches across the whole encyclopedia. Use it as a Wikipedia search API, an encyclopedia lookup tool, or a knowledge-base search for research and fact-checking agents. Price: $0.008 per call (vendor spec).",
+    "method": "POST",
+    "path": "/wikipedia-search",
+    "input_schema": {
+      "properties": {
+        "lang": {
+          "description": "Wikipedia language edition code, e.g. 'en', 'de', 'fr'. Default 'en'.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max number of results to return. Default 10, max 25.",
+          "type": "number"
+        },
+        "query": {
+          "description": "Full-text search query, e.g. 'quantum computing' or 'Albert Einstein'. Required, max 300 chars.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "lang": "body",
+      "limit": "body",
+      "query": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "agentutility_youtube_transcript",
+    "description": "Fetch the transcript of any YouTube video. Pulls auto-generated or manual captions and returns full text plus per-segment {start, duration, text}, with an optional language pick. Backed by Supadata's transcript pipeline server-side — no caller key required; returns a clear 404 when a video has no transcript. Use it as a YouTube closed-caption fetcher or video subtitles puller. Price: $0.01 per call (vendor spec).",
+    "method": "POST",
+    "path": "/youtube-transcript",
+    "input_schema": {
+      "properties": {
+        "include_chapters": {
+          "description": "Parse chapter timestamps from the video description. Default false.",
+          "type": "boolean"
+        },
+        "language": {
+          "description": "Preferred caption language code (e.g. 'en', 'es', 'ja'). Default: pick the first available.",
+          "type": "string"
+        },
+        "video_id_or_url": {
+          "description": "YouTube video ID (11-char) or full URL (youtube.com/watch?v=…, youtu.be/…, /embed/…, /shorts/…).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "video_id_or_url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "include_chapters": "body",
+      "language": "body",
+      "video_id_or_url": "body"
+    },
+    "has_body": true
+  }
+]

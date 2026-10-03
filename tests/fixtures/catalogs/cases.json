@@ -93,5 +93,10 @@
     "name": "agent402",
     "provider": "providers/agent402.toml",
     "spec": "tests/fixtures/agent402_openapi.json"
+  },
+  {
+    "name": "agentutility",
+    "provider": "providers/agentutility/provider.toml",
+    "spec": null
   }
 ]

@@ -1,0 +1,240 @@
+{
+  "x402Version": 2,
+  "error": "Payment required",
+  "resource": {
+    "url": "https://x402.agentutility.ai/web-search",
+    "description": "Live web search and web answer engine retrieval API for agents that need ranked sources before writing an answer. Send a query and optional recency filter; receive ranked web results with title, URL, snippet, and domain, not an LLM-written response. Successful results are cached, and provider rate limits trigger a short circuit breaker plus a clearly marked recent public-news fallback. Use it as a web answer engine source API, live web search API, web search MCP tool, RAG source-discovery feed, or source search tool. For fetched page text or cited synthesis, use answer-web or scrape-to-json.",
+    "mimeType": "application/json",
+    "serviceName": "AgentUtility.ai",
+    "tags": [
+      "web-probe",
+      "web",
+      "search"
+    ],
+    "iconUrl": "https://agentutility.ai/icon-512.png"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "6000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0x6c0752c09e7F6fA6526fCDf40e456a159ebB5621",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      "amount": "6000",
+      "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "payTo": "FJqAJ4dXkFbrp3EEo8E9x98iaBGUQwaU8Srz5ePfUXLH",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "feePayer": "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM"
+      }
+    }
+  ],
+  "extensions": {
+    "bazaar": {
+      "info": {
+        "input": {
+          "type": "http",
+          "bodyType": "json",
+          "body": {
+            "query": "x402 payment protocol examples",
+            "num_results": 10,
+            "recency": "month"
+          },
+          "method": "POST"
+        },
+        "output": {
+          "type": "json",
+          "example": {
+            "query": "x402 payment protocol examples",
+            "results": [
+              {
+                "title": "x402 documentation",
+                "url": "https://example.com/x402",
+                "snippet": "Pay-per-request protocol examples...",
+                "domain": "example.com"
+              }
+            ],
+            "source": "GDELT public-news fallback",
+            "source_url": "https://www.gdeltproject.org/",
+            "degraded": true,
+            "include_text": false,
+            "note": "Primary web search was unavailable; returned recent public-news results instead."
+          }
+        }
+      },
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "http"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "POST"
+                ]
+              },
+              "bodyType": {
+                "type": "string",
+                "enum": [
+                  "json",
+                  "form-data",
+                  "text"
+                ]
+              },
+              "body": {
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Search query or research question. 1-500 chars."
+                  },
+                  "num_results": {
+                    "type": "number",
+                    "description": "Number of results to return. Default 10, max 20."
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Alias for num_results. If both are supplied, num_results wins."
+                  },
+                  "include_text": {
+                    "type": "boolean",
+                    "description": "Accepted for compatibility. This route always returns ranked result metadata with include_text: false; use scrape-to-json for page text."
+                  },
+                  "recency": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "year",
+                      "any"
+                    ],
+                    "description": "Optional freshness filter. Default 'any'."
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "method",
+              "bodyType",
+              "body"
+            ],
+            "additionalProperties": false
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "example": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "results": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "snippet": {
+                          "type": "string"
+                        },
+                        "domain": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "source_url": {
+                    "type": "string"
+                  },
+                  "degraded": {
+                    "type": "boolean"
+                  },
+                  "include_text": {
+                    "type": "boolean"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "input"
+        ]
+      },
+      "discoverable": true,
+      "related": [
+        "/answer-web",
+        "/research-brief",
+        "/claim-corroborate",
+        "/competitor-snapshot"
+      ]
+    },
+    "builder-code": {
+      "info": {
+        "a": "bc_awpbwsy3"
+      },
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,32}$",
+            "description": "App builder code"
+          },
+          "w": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,32}$",
+            "description": "Wallet builder code"
+          },
+          "s": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$"
+            },
+            "description": "Service builder codes"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

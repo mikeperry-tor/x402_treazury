@@ -2,14 +2,14 @@
 
 The 14 legacy tool catalogs were captured from the independent Python implementation
 before its retirement and verified against Rust. Together with the reviewed Rust
-x402-list, Exa, OneShot, StableEnrich and Agent402 catalogs, the 19 fixtures pin 818 tool names, full descriptions, schemas,
-methods, paths, parameter routes and help URLs. Settings snapshots cover all 23
+x402-list, Exa, OneShot, StableEnrich, Agent402 and AgentUtility catalogs, the 20 fixtures pin 834 tool names, full descriptions, schemas,
+methods, paths, parameter routes and help URLs. Settings snapshots cover all 24
 bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
 
 Run `cargo test --test provider_catalogs --test config` from the Rust project.
 These tests need no Python, credentials or external services. Input OpenAPI
-snapshots are under `tests/fixtures/`; the four curated catalogs are in `providers/`.
+snapshots are under `tests/fixtures/`; the five curated catalogs are in `providers/`.
 
 When changing providers, review the changed input, the generated tool contract,
 and the expected output together. Do not automatically accept generated snapshots
@@ -39,3 +39,12 @@ omitting response documentation. The default golden contract contains 48 web
 operations plus help. Targeted tests also exercise all 480 eligible operations,
 data/crypto and LLM selections, known exclusions, prospective diagnostics, query
 routing, nested gateway JSON and streaming guidance.
+
+The AgentUtility catalog lives at `providers/agentutility/openapi.json`, captured on
+2026-10-03 from the API-host OpenAPI plus documentation-host registry. The Rust
+`snapshot_agentutility` utility keeps all 817 request contracts, enriches missing
+tags, marks 282 aliases and adds a curated research tag. The provider allows 525
+operations; its golden covers 15 research tools plus help. Tests also cover all
+eligible tools, tag subsets, required-only schema alternatives and satellite image
+metadata. A captured unpaid search challenge pins static signing compatibility and
+managed refusal of its bazaar/builder-code extensions; no live funds were used.

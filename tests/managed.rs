@@ -357,6 +357,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
         "permit2",
         "flow",
         "extensions",
+        "agentutility_extensions",
         "asset",
         "chain",
         "zero",
@@ -372,6 +373,12 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
             "permit2" => c["accepts"][0]["extra"]["assetTransferMethod"] = json!("permit2"),
             "flow" => c["accepts"][0]["extra"]["flow"] = json!("upfront"),
             "extensions" => c["extensions"] = json!({"unknown":{}}),
+            "agentutility_extensions" => {
+                c = serde_json::from_str(include_str!(
+                    "fixtures/agentutility_payment_required.json"
+                ))
+                .unwrap()
+            }
             "asset" => {
                 c["accepts"][0]["asset"] = json!("0x0000000000000000000000000000000000000001")
             }

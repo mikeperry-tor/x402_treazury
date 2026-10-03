@@ -85,7 +85,9 @@ async fn start(gate: Gate) -> (String, tokio::task::JoinHandle<()>) {
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
-            Router::new().route("/pay", get(handle)).with_state(gate),
+            Router::new()
+                .route("/pay", get(handle).post(handle))
+                .with_state(gate),
         )
         .await
         .unwrap();
@@ -608,4 +610,33 @@ async fn signed_post_failures_preserve_request_bytes_and_never_replay() {
         assert_eq!(serde_json::from_slice::<Value>(&logs[1].1).unwrap(), body);
         assert!(logs[0].0.contains("q=a+b&q=%E9%9B%AA"));
     }
+}
+
+#[tokio::test]
+async fn agentutility_captured_v2_challenge_signs_base_with_static_payer() {
+    let challenge: Value =
+        serde_json::from_str(include_str!("fixtures/agentutility_payment_required.json")).unwrap();
+    assert!(challenge["extensions"].get("bazaar").is_some());
+    assert!(challenge["extensions"].get("builder-code").is_some());
+    let fixture = gate(challenge);
+    let (url, task) = start(fixture.clone()).await;
+    let client = PaidClient::new(payer(KEY1, "1"));
+    assert_eq!(
+        client
+            .execute(RoutedRequest {
+                method: "POST".into(),
+                url,
+                query: Default::default(),
+                body: None
+            })
+            .await
+            .unwrap(),
+        "paid"
+    );
+    assert_eq!(fixture.count.load(Ordering::SeqCst), 2);
+    let signed = fixture.signed.lock().unwrap();
+    assert_eq!(signed[0]["accepted"]["network"], "eip155:8453");
+    assert_eq!(signed[0]["accepted"]["amount"], "6000");
+    drop(signed);
+    task.abort();
 }
