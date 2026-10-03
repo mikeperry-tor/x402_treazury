@@ -660,3 +660,70 @@ async fn ironwood_capability_rejects_tree_from_a_different_height() {
     assert!(error.to_string().contains("wrong Ironwood tree height"));
     server.abort();
 }
+
+#[tokio::test]
+async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wallet() {
+    use x402_treazure::{
+        rotation::transaction::PrepareRequest,
+        treasury::{actor, submission::GrpcSubmission},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (endpoint, calls, server, _) = mock("main").await;
+    let mut treasury = wallet(dir.path()).await;
+    let id = treasury.status().await.unwrap().treasury_id;
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 300).unwrap());
+    let (handle, commands) = actor::channel();
+    let stop = CancellationToken::new();
+    let owner = tokio::spawn(treasury.run_commands(
+        commands,
+        GrpcSubmission::new(endpoint.clone(), endpoint).unwrap(),
+        stop.clone(),
+    ));
+    let error = handle
+        .prepare(PrepareRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            pool_id: None,
+            daily_limit_zatoshis: 1_000_000,
+            deadline: x402_treazure::rotation::base::now().unwrap() + 1000,
+            recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+            amount_zatoshis: 50_000,
+            max_fee_zatoshis: 20_000,
+            max_input_zatoshis: 70_000,
+        })
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        error.to_string().contains("insufficient_spendable"),
+        "{error}"
+    );
+    assert!(
+        handle
+            .submit(uuid::Uuid::new_v4().to_string(), false)
+            .await
+            .is_err()
+    );
+    assert!(
+        handle
+            .reconcile(uuid::Uuid::new_v4().to_string())
+            .await
+            .is_err()
+    );
+    handle.sync().await.unwrap(); // Failed commands did not kill the healthy owner.
+    stop.cancel();
+    owner.await.unwrap().unwrap();
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    let reopened = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+        .await
+        .unwrap();
+    assert!(
+        reopened
+            .status()
+            .await
+            .unwrap()
+            .treasury_operations
+            .is_empty()
+    );
+    reopened.close().await.unwrap();
+    server.abort();
+}

@@ -1,5 +1,6 @@
-//! Bounded command queue for the single mutable wallet owner. Once accepted,
-//! a command runs to completion even if its caller drops the reply receiver.
+//! Bounded command queue for the single mutable wallet owner. Executing commands
+//! retain their durable results when reply receivers disappear. Shutdown discards
+//! queued work and cancels interruptible sync/submission according to their contracts.
 use super::Treasury;
 use crate::rotation::transaction::{
     PrepareRequest, PreparedTransaction, SubmissionOutcome, TransactionPreparer,
@@ -107,5 +108,134 @@ impl Treasury {
         commands.receiver.close();
         drop(commands);
         self.close().await
+    }
+}
+
+// Observe the real command boundary without substituting a fake FundingBackend.
+#[cfg(test)]
+pub(crate) enum ObservedCommand {
+    Prepare(PrepareRequest),
+    Submit(String, bool),
+    Reconcile(String),
+}
+#[cfg(test)]
+impl TreasuryCommands {
+    pub(crate) fn test_is_empty(&self) -> bool {
+        self.receiver.is_empty()
+    }
+    pub(crate) async fn test_observe(&mut self) -> ObservedCommand {
+        match self.receiver.recv().await.expect("command channel closed") {
+            Command::Prepare(request, reply) => {
+                let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
+                ObservedCommand::Prepare(request)
+            }
+            Command::Submit(id, retry, reply) => {
+                let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
+                ObservedCommand::Submit(id, retry)
+            }
+            Command::Reconcile(id, reply) => {
+                let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
+                ObservedCommand::Reconcile(id)
+            }
+            _ => panic!("unexpected treasury command"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct NoSubmission;
+    impl TransactionSubmission for NoSubmission {
+        async fn submit(
+            &mut self,
+            _: crate::rotation::transaction::BroadcastTransaction,
+        ) -> Result<SubmissionOutcome> {
+            panic!("unexpected submission")
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            panic!("unexpected lookup")
+        }
+    }
+    #[tokio::test]
+    async fn dropped_receivers_preserve_mutations_but_shutdown_discards_queued_work() {
+        for stopped in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut treasury=Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+            treasury
+                .ensure_pool("actor".into(), "5".into())
+                .await
+                .unwrap();
+            let status = treasury.status().await.unwrap();
+            let id = status.treasury_id;
+            let job = status.funding_jobs[0].id.clone();
+            treasury.configure_sync(
+                super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
+            );
+            let (handle, commands) = channel();
+            let stop = CancellationToken::new();
+            let (send, recv) = oneshot::channel();
+            handle
+                .sender
+                .send(Command::Refund(job.clone(), send))
+                .await
+                .unwrap();
+            drop(recv);
+            let (send, reply) = oneshot::channel();
+            handle
+                .sender
+                .send(Command::Refund(job.clone(), send))
+                .await
+                .unwrap();
+            if stopped {
+                stop.cancel();
+            }
+            let task = tokio::spawn(treasury.run_commands(commands, NoSubmission, stop.clone()));
+            let address = tokio::time::timeout(std::time::Duration::from_secs(5), reply)
+                .await
+                .unwrap();
+            if stopped {
+                assert!(address.is_err());
+            } else {
+                assert!(address.unwrap().unwrap().starts_with('t'));
+            }
+            stop.cancel();
+            task.await.unwrap().unwrap();
+            assert!(handle.refund_address(job.clone()).await.is_err());
+            let restored = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+                .await
+                .unwrap();
+            let saved = restored
+                .store
+                .call(move |s| s.refund_address(&job))
+                .await
+                .unwrap();
+            assert_eq!(saved.is_some(), !stopped);
+            assert!(
+                restored
+                    .status()
+                    .await
+                    .unwrap()
+                    .treasury_operations
+                    .is_empty()
+            );
+            restored.close().await.unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn cancellation_before_queue_admission_leaves_no_command() {
+        let (handle, commands) = channel();
+        for _ in 0..8 {
+            let (send, _) = oneshot::channel();
+            handle.sender.send(Command::Sync(send)).await.unwrap();
+        }
+        let mut pending = Box::pin(handle.sync());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut pending)
+                .await
+                .is_err()
+        );
+        drop(pending);
+        assert_eq!(commands.receiver.len(), 8);
     }
 }

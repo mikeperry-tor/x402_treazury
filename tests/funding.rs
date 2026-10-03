@@ -38,9 +38,10 @@ impl FundingBackend for Fake {
             deposit: Some("test-deposit".into()),
         })
     }
-    async fn prepare(&mut self, j: &FundingJob, _: &Quote) -> Result<()> {
+    async fn prepare(&mut self, j: &FundingJob, quote: &Quote) -> Result<()> {
         let id = j.operation_id.clone();
         let pool = j.pool_id.clone();
+        let deadline = quote.deadline;
         self.store
             .call(move |s| {
                 s.reserve(&id, Some(&pool), 1, 100, 1000)?;
@@ -55,7 +56,7 @@ impl FundingBackend for Fake {
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
-                        deadline: u64::MAX,
+                        deadline,
                     }),
                 )?;
                 Ok(())
@@ -405,4 +406,96 @@ async fn insufficient_treasury_waits_and_only_unprepared_quotes_refresh_with_a_b
     );
     drop(worker);
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn quote_and_prepared_validity_boundaries_are_exact() {
+    use x402_treazure::rotation::store::funding::FundingPhase;
+    for remaining in [299, 300] {
+        let (_dir, mut worker, task) = fixture().await;
+        let now = x402_treazure::rotation::base::now().unwrap();
+        worker.backend.quote_deadline = now + 100 + remaining;
+        worker.tick(now).await.unwrap();
+        worker.tick(now + 100).await.unwrap();
+        let status = worker.store.call(|s| s.status()).await.unwrap();
+        assert_eq!(
+            status.funding_jobs[0].phase,
+            if remaining == 300 {
+                FundingPhase::Prepared
+            } else {
+                FundingPhase::Allocated
+            }
+        );
+        assert_eq!(
+            status.treasury_operations.len(),
+            usize::from(remaining == 300)
+        );
+        assert_eq!(worker.backend.sends, 0);
+        drop(worker);
+        task.await.unwrap();
+        let (_dir, mut worker, task) = fixture().await;
+        worker.backend.quote_deadline = now + 200 + remaining;
+        worker.tick(now).await.unwrap();
+        worker.tick(now + 100).await.unwrap();
+        worker.tick(now + 200).await.unwrap();
+        let status = worker.store.call(|s| s.status()).await.unwrap();
+        assert_eq!(
+            status.funding_jobs[0].phase,
+            if remaining == 300 {
+                FundingPhase::Prepared
+            } else {
+                FundingPhase::RecoveryRequired
+            }
+        );
+        assert_eq!(worker.backend.sends, usize::from(remaining == 300));
+        assert_eq!(status.treasury_operations.len(), 1);
+        drop(worker);
+        task.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits() {
+    use x402_treazure::rotation::store::funding::FundingPhase;
+    for saved in [false, true] {
+        let (dir, mut worker, task) = fixture().await;
+        let now = x402_treazure::rotation::base::now().unwrap();
+        worker.tick(now).await.unwrap();
+        if saved {
+            worker.tick(now + 100).await.unwrap();
+        }
+        // Reproduce an interrupted/legacy phase record while preserving real encrypted bytes.
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute("UPDATE funding_progress SET phase='\"PREPARING\"' WHERE job_id=(SELECT id FROM funding_jobs ORDER BY rowid LIMIT 1)",[]).unwrap();
+        drop(db);
+        worker.tick(now + 200).await.unwrap();
+        let status = worker.store.call(|s| s.status()).await.unwrap();
+        assert_eq!(
+            status.funding_jobs[0].phase,
+            if saved {
+                FundingPhase::Prepared
+            } else {
+                FundingPhase::RecoveryRequired
+            }
+        );
+        assert_eq!(worker.backend.sends, 0);
+        if saved {
+            let id = status.funding_jobs[0].operation_id.clone();
+            worker
+                .store
+                .call(move |s| {
+                    s.request_broadcast(&id, now, 1, false)?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            worker.tick(now + 300).await.unwrap();
+            assert_eq!(worker.backend.sends, 0);
+            let after = worker.store.call(|s| s.status()).await.unwrap();
+            assert_eq!(after.funding_jobs[0].phase, FundingPhase::DepositPending);
+            assert_eq!(after.treasury_operations[0].attempts, 1);
+        }
+        drop(worker);
+        task.await.unwrap();
+    }
 }

@@ -443,3 +443,7 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
         _ => "funding_status_unavailable; continuing bounded reconciliation of the existing swap",
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/funding_backend.rs"]
+mod tests;
