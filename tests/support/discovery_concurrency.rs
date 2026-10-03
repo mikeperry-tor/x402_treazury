@@ -85,14 +85,21 @@ async fn agent_additions_are_atomic_idempotent_owner_scoped_and_durable_under_co
     seed(&m).await;
     let mut endpoints = BTreeMap::new();
     let mut tasks = vec![];
+    let shutdown = tokio_util::sync::CancellationToken::new();
     for owner in ["writer", "reader", "hidden"] {
-        let (url, task) = listen(crate::server::http_app(
-            server(&m, owner),
-            format!("{owner}-token"),
-        ))
-        .await;
-        endpoints.insert(owner.to_owned(), url);
-        tasks.push(task);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        endpoints.insert(
+            owner.to_owned(),
+            format!("http://{}", listener.local_addr().unwrap()),
+        );
+        let app = crate::server::http_app(server(&m, owner), format!("{owner}-token"));
+        let stop = shutdown.clone();
+        tasks.push(tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(stop.cancelled_owned())
+                .await
+                .unwrap();
+        }));
     }
     let original = m.catalog.read();
     let observer_stop = tokio_util::sync::CancellationToken::new();
@@ -192,10 +199,21 @@ async fn agent_additions_are_atomic_idempotent_owner_scoped_and_durable_under_co
     assert!(original.views.values().all(Vec::is_empty));
     observer_stop.cancel();
     assert!(observer.await.unwrap() > 0);
-    for task in tasks {
-        task.abort();
-        let _ = task.await;
-    }
+    // Aborting the accept loop does not join its pooled HTTP connection tasks.
+    // Drain them before reopening the registry, as production shutdown does.
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for task in tasks {
+            task.await.unwrap();
+        }
+    })
+    .await
+    .expect("management listeners did not release their connections");
+    assert_eq!(
+        Arc::strong_count(&m),
+        1,
+        "a listener still owns the manager"
+    );
     drop(m);
     let reopened = manager_with(p, grants()).await;
     assert_eq!(reopened.catalog.read().views["writer"].len(), 6);
