@@ -423,3 +423,87 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
         100
     );
 }
+
+#[test]
+fn preparation_and_refund_write_failures_roll_back_through_reopen() {
+    for statement in [
+        "CREATE TRIGGER injected BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'injected'); END;",
+        "CREATE TRIGGER injected BEFORE INSERT ON treasury_operations BEGIN SELECT RAISE(ABORT,'injected'); END;",
+        "CREATE TRIGGER injected BEFORE UPDATE ON budget_entries BEGIN SELECT RAISE(ABORT,'injected'); END;",
+        "CREATE TRIGGER injected BEFORE UPDATE ON funding_progress BEGIN SELECT RAISE(ABORT,'injected'); END;",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("state");
+        let key = tmp.path().join("key");
+        let mut s = Store::create(&dir, &key, 1, b"initial").unwrap();
+        let id = s.id.clone();
+        let pool = s.ensure_pool("test", "5").unwrap();
+        let job = s.funding_jobs().unwrap().remove(0);
+        s.save_funding_quote(&job.id, b"quote").unwrap();
+        s.advance_funding(
+            &job.id,
+            funding::FundingPhase::Quoted,
+            funding::FundingPhase::Preparing,
+        )
+        .unwrap();
+        s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
+            .unwrap();
+        let original = serde_json::to_value(s.status().unwrap()).unwrap();
+        s.db.execute_batch(statement).unwrap();
+        assert!(
+            s.prepare_with_facts(
+                &job.operation_id,
+                1,
+                b"calculated",
+                b"signed",
+                Some(TransactionFacts {
+                    txid: "tx".into(),
+                    expiry_height: 100,
+                    amount_zatoshis: 70,
+                    fee_zatoshis: 20,
+                    deadline: 1000
+                })
+            )
+            .is_err()
+        );
+        drop(s);
+        let mut s = Store::open(&dir, &key, &id).unwrap();
+        assert_eq!(serde_json::to_value(s.status().unwrap()).unwrap(), original);
+        assert_eq!(s.snapshot().unwrap().1.as_slice(), b"initial");
+        assert!(s.prepared_bytes(&job.operation_id).is_err());
+        assert!(s.operation(&job.operation_id).is_err());
+        s.db.execute_batch("DROP TRIGGER injected").unwrap();
+        s.prepare_with_facts(
+            &job.operation_id,
+            1,
+            b"calculated",
+            b"signed",
+            Some(TransactionFacts {
+                txid: "tx".into(),
+                expiry_height: 100,
+                amount_zatoshis: 70,
+                fee_zatoshis: 20,
+                deadline: 1000,
+            }),
+        )
+        .unwrap();
+        s.confirm_spend(&job.operation_id, 90, 1).unwrap();
+        let original = serde_json::to_value(s.status().unwrap()).unwrap();
+        s.db.execute_batch("CREATE TRIGGER injected AFTER INSERT ON refund_outputs BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        let refund = refunds::RefundStatus {
+            txid: "refund".into(),
+            output_index: 0,
+            operation_id: job.operation_id,
+            amount: 20,
+            height: 100,
+        };
+        assert!(s.record_refund(refund.clone()).is_err());
+        drop(s);
+        let mut s = Store::open(&dir, &key, &id).unwrap();
+        assert_eq!(serde_json::to_value(s.status().unwrap()).unwrap(), original);
+        s.db.execute_batch("DROP TRIGGER injected").unwrap();
+        s.record_refund(refund.clone()).unwrap();
+        s.record_refund(refund).unwrap();
+        assert_eq!(s.status().unwrap().refunds.len(), 1);
+    }
+}
