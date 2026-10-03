@@ -30,6 +30,11 @@ fn varint(mut n: u64) -> Vec<u8> {
 
 #[tokio::test]
 async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
+    qualify_preparation(true).await;
+    qualify_preparation(false).await;
+}
+
+async fn qualify_preparation(fail_commit: bool) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -114,19 +119,63 @@ async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
         axum::serve(listener, app).await.unwrap();
     });
     let operation = uuid::Uuid::new_v4().to_string();
-    let prepared = treasury
-        .prepare(PrepareRequest {
-            operation_id: operation.clone(),
-            pool_id: None,
-            daily_limit_zatoshis: 100_000,
-            deadline: now().unwrap() + 600,
-            recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
-            amount_zatoshis: 50_000,
-            max_fee_zatoshis: 20_000,
-            max_input_zatoshis: 80_000,
-        })
-        .await
-        .unwrap();
+    let request = || PrepareRequest {
+        operation_id: operation.clone(),
+        pool_id: None,
+        daily_limit_zatoshis: 100_000,
+        deadline: now().unwrap() + 600,
+        recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+        amount_zatoshis: 50_000,
+        max_fee_zatoshis: 20_000,
+        max_input_zatoshis: 80_000,
+    };
+    if fail_commit {
+        let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
+        let revision = treasury.revision;
+        let error = treasury.prepare(request()).await.err().unwrap();
+        assert!(format!("{error:#}").contains("fixture prepared commit failure"));
+        assert!(!treasury.healthy);
+        assert_eq!(treasury.revision, revision);
+        let status = treasury.status().await.unwrap();
+        assert!(!status.outgoing_pending);
+        assert!(status.treasury_operations.is_empty());
+        assert!(
+            treasury
+                .prepare(request())
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("requires reopen")
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "retry after failure must not reach the indexer"
+        );
+        db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
+        drop(db);
+        treasury.close().await.unwrap();
+        let restored = Treasury::open(state, key, treasury_id).await.unwrap();
+        assert!(restored.healthy);
+        assert_eq!(restored.revision, revision);
+        assert!(!restored.status().await.unwrap().outgoing_pending);
+        let wallet = restored.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(
+            wallet
+                .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+                .unwrap()
+                .into_u64(),
+            100_000,
+            "failed commit must restore the pre-calculation input state"
+        );
+        drop(wallet);
+        restored.close().await.unwrap();
+        server.abort();
+        return;
+    }
+    let prepared = treasury.prepare(request()).await.unwrap();
     let facts = prepared.facts().unwrap().clone();
     assert_eq!(facts.amount_zatoshis, 50_000);
     assert!(facts.fee_zatoshis > 0 && facts.fee_zatoshis <= 20_000);

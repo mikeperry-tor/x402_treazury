@@ -6555,6 +6555,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "x402-reqwest"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77a965e7346eb4e433a6023a609b2bf002be0f76fea20e0ceaa34d86c983a94"
+dependencies = [
+ "async-trait",
+ "http",
+ "reqwest",
+ "reqwest-middleware",
+ "serde_json",
+ "x402-types",
+]
+
+[[package]]
 name = "x402-treazure"
 version = "0.1.0"
 dependencies = [
@@ -6569,6 +6583,7 @@ dependencies = [
  "dotenvy",
  "fs2",
  "hyper-util",
+ "libc",
  "percent-encoding",
  "regex",
  "reqwest",
@@ -6589,20 +6604,6 @@ dependencies = [
  "x402-reqwest",
  "x402-types",
  "zeroize",
-]
-
-[[package]]
-name = "x402-reqwest"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c77a965e7346eb4e433a6023a609b2bf002be0f76fea20e0ceaa34d86c983a94"
-dependencies = [
- "async-trait",
- "http",
- "reqwest",
- "reqwest-middleware",
- "serde_json",
- "x402-types",
 ]
 
 [[package]]

@@ -70,6 +70,12 @@ impl Drop for Chain {
                     "{name}: {}",
                     logs.lines().take(25).collect::<Vec<_>>().join("\n")
                 );
+                let omitted = logs.lines().count().saturating_sub(25);
+                if omitted > 0 {
+                    eprintln!(
+                        "{name}: [diagnostic log truncated at 25 lines; {omitted} lines omitted]"
+                    );
+                }
             }
             let _ = docker(&["rm", "-f", &name]);
         }
