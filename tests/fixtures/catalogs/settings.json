@@ -967,5 +967,82 @@
     "spec": "https://win.oneshotagent.com/openapi.json",
     "tags": [],
     "timeout": 30.0
+  },
+  "providers/stableenrich.toml": {
+    "additional_properties": null,
+    "base_url": "https://stableenrich.dev",
+    "exclude": [],
+    "exclude_tags": [],
+    "help_url": "https://stableenrich.dev/llms.txt",
+    "include": [
+      "/api"
+    ],
+    "include_operations": [
+      "GET /api/google-maps/place-details/full",
+      "GET /api/google-maps/place-details/partial",
+      "GET /api/google-maps/solar/building-insights",
+      "GET /api/google-maps/solar/data-layers",
+      "POST /api/companyenrich/org-enrich",
+      "POST /api/companyenrich/properties-enrich",
+      "POST /api/exa/answer",
+      "POST /api/exa/contents",
+      "POST /api/exa/find-similar",
+      "POST /api/exa/search",
+      "POST /api/firecrawl/scrape",
+      "POST /api/firecrawl/search",
+      "POST /api/fullenrich/company-search",
+      "POST /api/fullenrich/people-search",
+      "POST /api/google-maps/nearby-search/full",
+      "POST /api/google-maps/nearby-search/partial",
+      "POST /api/google-maps/text-search/full",
+      "POST /api/google-maps/text-search/partial",
+      "POST /api/minerva/enrich",
+      "POST /api/minerva/resolve",
+      "POST /api/minerva/validate-emails",
+      "POST /api/pdl/people-enrich",
+      "POST /api/reddit/post-comments",
+      "POST /api/reddit/search",
+      "POST /api/serper/images",
+      "POST /api/serper/lens",
+      "POST /api/serper/news",
+      "POST /api/serper/people-image-search",
+      "POST /api/serper/shopping",
+      "POST /api/whitepages/person-search",
+      "POST /api/whitepages/property-search"
+    ],
+    "instructions_text": "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazure tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling and binary solar images; those workflows are not enabled. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false.",
+    "max_description_chars": null,
+    "max_help_bytes": 4194304,
+    "max_response_bytes": 16777216,
+    "max_spec_bytes": 33554432,
+    "name": "StableEnrich",
+    "overrides": {
+      "stableenrich_exa_answer": {
+        "params": {
+          "stream": "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events."
+        }
+      },
+      "stableenrich_exa_search": {
+        "params": {
+          "stream": "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events."
+        }
+      },
+      "stableenrich_help": {
+        "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX and binary-image endpoints excluded from this catalog. Any configured document limit is reported explicitly."
+      }
+    },
+    "prefix": "stableenrich",
+    "pricing_key": "x-payment-info",
+    "probe_concurrency": 4,
+    "probe_max_endpoints": 200,
+    "probe_methods": [
+      "GET"
+    ],
+    "probe_pricing": false,
+    "probe_timeout": 5.0,
+    "probe_ttl_seconds": 3600.0,
+    "spec": "https://stableenrich.dev/openapi.json",
+    "tags": [],
+    "timeout": 90.0
   }
 }

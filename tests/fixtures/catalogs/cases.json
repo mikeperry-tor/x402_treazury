@@ -83,5 +83,10 @@
     "name": "oneshot",
     "provider": "providers/oneshot.toml",
     "spec": "tests/fixtures/oneshot_openapi.json"
+  },
+  {
+    "name": "stableenrich",
+    "provider": "providers/stableenrich.toml",
+    "spec": "tests/fixtures/stableenrich_openapi.json"
   }
 ]

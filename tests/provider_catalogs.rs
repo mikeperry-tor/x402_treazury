@@ -14,7 +14,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 17);
+    assert_eq!(cases.len(), 18);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 736);
+    assert_eq!(total, 768);
 }
 
 #[tokio::test]
@@ -227,5 +227,87 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
     assert_eq!(
         tools[1].help_url.as_deref(),
         Some("https://docs.oneshotagent.com/api-reference/web-search.md")
+    );
+}
+
+#[tokio::test]
+async fn stableenrich_excludes_async_and_binary_routes_and_keeps_json_routing() {
+    use serde_json::json;
+    use x402_treazure::{catalog, config};
+    let mut cfg =
+        config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/stableenrich.toml"))
+            .await
+            .unwrap()
+            .settings;
+    assert!(!cfg.probe_pricing);
+    let mut doc: Value =
+        serde_json::from_str(include_str!("fixtures/stableenrich_openapi.json")).unwrap();
+    doc["paths"]["/api/health"] = json!({"get":{"summary":"Health"}});
+    doc["paths"]["/api/exa/search"]["get"] = json!({"summary":"Search diagnostics"});
+    doc["paths"]["/api/exa/search/jobs"] = json!({"post":{"summary":"Async search"}});
+    let tools = catalog::build_tools(&cfg, &doc, "stableenrich").unwrap();
+    assert_eq!(tools.len(), 32);
+    assert!(tools.iter().all(|t| !t.path.contains("/hunter/")
+        && !t.path.contains("/cloudflare/")
+        && !t.path.contains("/aerial-view/")
+        && !t.path.ends_with("/rgb-image")
+        && !t.path.contains("/jobs")));
+    let details = tools
+        .iter()
+        .find(|t| t.name == "stableenrich_google_maps_place_details_partial")
+        .unwrap();
+    let routed = details
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"placeId":"place/with space"}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(routed.method, "GET");
+    assert_eq!(
+        routed.url,
+        "https://stableenrich.dev/api/google-maps/place-details/partial"
+    );
+    assert_eq!(routed.query["placeId"], "place/with space");
+    assert!(routed.body.is_none());
+    let search = tools
+        .iter()
+        .find(|t| t.name == "stableenrich_google_maps_text_search_partial")
+        .unwrap();
+    let args = json!({"textQuery":"cafes","maxResultCount":3,"locationBias":{"circle":{"center":{"latitude":37.4,"longitude":-122.1},"radius":500.0}}});
+    assert_eq!(
+        search
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap()
+            .body,
+        Some(args)
+    );
+    assert!(search.description.contains("$0.02"));
+    let scrape = tools
+        .iter()
+        .find(|t| t.name == "stableenrich_firecrawl_scrape")
+        .unwrap();
+    assert!(scrape.description.contains("$0.0126"));
+    let exa = tools
+        .iter()
+        .find(|t| t.name == "stableenrich_exa_search")
+        .unwrap();
+    assert!(
+        exa.input_schema["properties"]["stream"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("false")
+    );
+    assert_eq!(
+        tools.last().unwrap().help_url.as_deref(),
+        Some("https://stableenrich.dev/llms.txt")
+    );
+    cfg.tags = vec!["Google Maps".into()];
+    let selected = catalog::build_tools(&cfg, &doc, "stableenrich").unwrap();
+    // Source tag selection keeps the generated help tool; listener positive tags may remove it.
+    assert_eq!(selected.len(), 9);
+    assert!(
+        selected
+            .iter()
+            .all(|t| t.help_url.is_some() || t.path.starts_with("/api/google-maps/"))
     );
 }
