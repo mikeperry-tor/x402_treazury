@@ -203,218 +203,7 @@ async fn run_args(
     }
     #[cfg(feature = "zcash")]
     {
-        use crate::treasury::Treasury;
-        let treasury = match args.command {
-            Command::RecoverExpired {
-                meta_config,
-                operation_id,
-            } => {
-                let (mut treasury, settings) = configured(&meta_config, network).await?;
-                let indexer =
-                    std::env::var(&settings.indexer_url_env).context("missing indexer endpoint")?;
-                let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
-                    indexer.clone(),
-                    indexer,
-                    network,
-                )?;
-                let stop = tokio_util::sync::CancellationToken::new();
-                let result = finish_on_shutdown(
-                    &stop,
-                    treasury.recover_expired(operation_id, &mut sender, &stop),
-                )
-                .await;
-                if let Err(error) = result {
-                    treasury.close().await?;
-                    return Err(error);
-                }
-                treasury
-            }
-            Command::ShieldRefunds {
-                meta_config,
-                job_id,
-            } => {
-                let (mut treasury, settings) = configured(&meta_config, network).await?;
-                let stop = tokio_util::sync::CancellationToken::new();
-                let result = finish_on_shutdown(
-                    &stop,
-                    treasury.shield_refund(
-                        job_id,
-                        u64::try_from(crate::rotation::config::zatoshis(
-                            &settings.daily_input_zec,
-                        )?)?,
-                        u64::try_from(crate::rotation::config::zatoshis(
-                            &settings.shield_max_fee_zec,
-                        )?)?,
-                        &stop,
-                    ),
-                )
-                .await;
-                if let Err(error) = result {
-                    treasury.close().await?;
-                    return Err(error);
-                }
-                treasury
-            }
-            Command::Reconcile {
-                meta_config,
-                operation_id,
-                rebroadcast,
-            } => {
-                let (mut treasury, settings) = configured(&meta_config, network).await?;
-                let indexer = std::env::var(&settings.indexer_url_env)
-                    .context("missing indexer endpoint environment variable")?;
-                // Read-only reconciliation needs no submission secret.
-                let submission = if rebroadcast {
-                    std::env::var(&settings.submission_url_env)
-                        .context("missing submission endpoint environment variable")?
-                } else {
-                    indexer.clone()
-                };
-                let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
-                    submission, indexer, network,
-                )?;
-                let stop = tokio_util::sync::CancellationToken::new();
-                let result = {
-                    let work = async {
-                        let presence = treasury
-                            .reconcile_prepared(operation_id.clone(), &mut sender, &stop)
-                            .await?;
-                        if rebroadcast
-                            && !matches!(
-                                presence,
-                                crate::rotation::transaction::TransactionPresence::Confirmed { .. }
-                            )
-                        {
-                            treasury
-                                .submit_prepared(operation_id, &mut sender, true, &stop)
-                                .await?;
-                        }
-                        anyhow::Ok(())
-                    };
-                    tokio::pin!(work);
-                    tokio::select! {
-                        result = &mut work => result,
-                        signal = shutdown_signal() => {
-                            stop.cancel();
-                            let result = work.await;
-                            signal?;
-                            result
-                        }
-                    }
-                };
-                if let Err(error) = result {
-                    treasury.close().await?;
-                    return Err(error);
-                }
-                treasury
-            }
-            Command::Sync { meta_config } => {
-                let (mut treasury, _) = configured(&meta_config, network).await?;
-                let stop = tokio_util::sync::CancellationToken::new();
-                let result = {
-                    let work = treasury.sync_once(&stop);
-                    tokio::pin!(work);
-                    tokio::select! {
-                        result = &mut work => result,
-                        signal = shutdown_signal() => {
-                            stop.cancel();
-                            let result = work.await;
-                            signal?;
-                            result
-                        }
-                    }
-                };
-                if let Err(error) = result {
-                    treasury.close().await?;
-                    return Err(error);
-                }
-                treasury
-            }
-            Command::Init {
-                state_dir,
-                key_file,
-                birthday,
-                indexer_url_env,
-                mnemonic_file,
-            } => {
-                anyhow::ensure!(
-                    !state_dir.exists() && !key_file.exists(),
-                    "treasury state or key already exists; init only creates a new wallet. Use `wallet addresses --state-dir PATH --key-file PATH` to display existing receive addresses, or `wallet status --state-dir PATH` for its treasury ID"
-                );
-                // Imports must never infer a recent birthday and skip historical funds.
-                anyhow::ensure!(
-                    mnemonic_file.is_none() || birthday.is_some(),
-                    "seed import requires --birthday"
-                );
-                let birthday = match birthday {
-                    Some(height) => height,
-                    None => {
-                        let endpoint = if let Some(name) = indexer_url_env {
-                            std::env::var(name)
-                                .context("missing birthday indexer environment variable")?
-                        } else {
-                            match std::env::var("ZCASH_INDEXER_URL") {
-                                Ok(endpoint) => endpoint,
-                                Err(std::env::VarError::NotPresent) => {
-                                    crate::treasury::birthday::DEFAULT_INDEXER.into()
-                                }
-                                Err(_) => {
-                                    anyhow::bail!("invalid birthday indexer environment variable")
-                                }
-                            }
-                        };
-                        crate::treasury::birthday::discover(&endpoint).await?
-                    }
-                };
-                let seed = if let Some(path) = mnemonic_file {
-                    let metadata = std::fs::symlink_metadata(&path)?;
-                    anyhow::ensure!(
-                        metadata.file_type().is_file(),
-                        "mnemonic file must be a regular file"
-                    );
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        anyhow::ensure!(
-                            metadata.permissions().mode() & 0o077 == 0,
-                            "mnemonic file must be owner-only"
-                        );
-                    }
-                    Some(zeroize::Zeroizing::new(
-                        std::fs::read_to_string(path).context("reading mnemonic file")?,
-                    ))
-                } else {
-                    None
-                };
-                Treasury::create(state_dir, key_file, birthday, seed).await?
-            }
-            Command::Address {
-                state_dir,
-                key_file,
-                treasury_id,
-            } => {
-                let mut treasury = Treasury::open(state_dir, key_file, treasury_id).await?;
-                treasury.derive_address().await?;
-                treasury
-            }
-            Command::Pool {
-                state_dir,
-                key_file,
-                treasury_id,
-                name,
-                deposit_size,
-            } => {
-                let treasury = Treasury::open(state_dir, key_file, treasury_id).await?;
-                treasury.ensure_pool(name, deposit_size).await?;
-                treasury
-            }
-            Command::Addresses { .. }
-            | Command::Status { .. }
-            | Command::Backup { .. }
-            | Command::RecoverUnprepared { .. } => {
-                unreachable!()
-            }
-        };
+        let treasury = execute_wallet_command(args.command, network).await?;
         println!(
             "{}",
             serde_json::to_string_pretty(
@@ -423,6 +212,274 @@ async fn run_args(
         );
         treasury.close().await
     }
+}
+
+#[cfg(feature = "zcash")]
+async fn execute_wallet_command(
+    command: Command,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<crate::treasury::Treasury> {
+    use crate::treasury::Treasury;
+    let treasury = match command {
+        Command::RecoverExpired {
+            meta_config,
+            operation_id,
+        } => recover_expired(meta_config, operation_id, network).await?,
+
+        Command::ShieldRefunds {
+            meta_config,
+            job_id,
+        } => shield_refunds(meta_config, job_id, network).await?,
+
+        Command::Reconcile {
+            meta_config,
+            operation_id,
+            rebroadcast,
+        } => reconcile(meta_config, operation_id, rebroadcast, network).await?,
+
+        Command::Sync { meta_config } => sync(meta_config, network).await?,
+
+        Command::Init {
+            state_dir,
+            key_file,
+            birthday,
+            indexer_url_env,
+            mnemonic_file,
+        } => {
+            init(
+                state_dir,
+                key_file,
+                birthday,
+                indexer_url_env,
+                mnemonic_file,
+            )
+            .await?
+        }
+
+        Command::Address {
+            state_dir,
+            key_file,
+            treasury_id,
+        } => {
+            let mut treasury = Treasury::open(state_dir, key_file, treasury_id).await?;
+            treasury.derive_address().await?;
+            treasury
+        }
+        Command::Pool {
+            state_dir,
+            key_file,
+            treasury_id,
+            name,
+            deposit_size,
+        } => {
+            let treasury = Treasury::open(state_dir, key_file, treasury_id).await?;
+            treasury.ensure_pool(name, deposit_size).await?;
+            treasury
+        }
+        Command::Addresses { .. }
+        | Command::Status { .. }
+        | Command::Backup { .. }
+        | Command::RecoverUnprepared { .. } => {
+            unreachable!()
+        }
+    };
+    Ok(treasury)
+}
+
+#[cfg(feature = "zcash")]
+async fn recover_expired(
+    meta_config: PathBuf,
+    operation_id: String,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<crate::treasury::Treasury> {
+    let (mut treasury, settings) = configured(&meta_config, network).await?;
+    let indexer = std::env::var(&settings.indexer_url_env).context("missing indexer endpoint")?;
+    let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
+        indexer.clone(),
+        indexer,
+        network,
+    )?;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let result = finish_on_shutdown(
+        &stop,
+        treasury.recover_expired(operation_id, &mut sender, &stop),
+    )
+    .await;
+    if let Err(error) = result {
+        treasury.close().await?;
+        return Err(error);
+    }
+    Ok(treasury)
+}
+
+#[cfg(feature = "zcash")]
+async fn shield_refunds(
+    meta_config: PathBuf,
+    job_id: String,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<crate::treasury::Treasury> {
+    let (mut treasury, settings) = configured(&meta_config, network).await?;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let result = finish_on_shutdown(
+        &stop,
+        treasury.shield_refund(
+            job_id,
+            u64::try_from(crate::rotation::config::zatoshis(
+                &settings.daily_input_zec,
+            )?)?,
+            u64::try_from(crate::rotation::config::zatoshis(
+                &settings.shield_max_fee_zec,
+            )?)?,
+            &stop,
+        ),
+    )
+    .await;
+    if let Err(error) = result {
+        treasury.close().await?;
+        return Err(error);
+    }
+    Ok(treasury)
+}
+
+#[cfg(feature = "zcash")]
+async fn reconcile(
+    meta_config: PathBuf,
+    operation_id: String,
+    rebroadcast: bool,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<crate::treasury::Treasury> {
+    let (mut treasury, settings) = configured(&meta_config, network).await?;
+    let indexer = std::env::var(&settings.indexer_url_env)
+        .context("missing indexer endpoint environment variable")?;
+    // Read-only reconciliation needs no submission secret.
+    let submission = if rebroadcast {
+        std::env::var(&settings.submission_url_env)
+            .context("missing submission endpoint environment variable")?
+    } else {
+        indexer.clone()
+    };
+    let mut sender =
+        crate::treasury::submission::GrpcSubmission::with_network(submission, indexer, network)?;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let result = {
+        let work = async {
+            let presence = treasury
+                .reconcile_prepared(operation_id.clone(), &mut sender, &stop)
+                .await?;
+            if rebroadcast
+                && !matches!(
+                    presence,
+                    crate::rotation::transaction::TransactionPresence::Confirmed { .. }
+                )
+            {
+                treasury
+                    .submit_prepared(operation_id, &mut sender, true, &stop)
+                    .await?;
+            }
+            anyhow::Ok(())
+        };
+        tokio::pin!(work);
+        tokio::select! {
+            result = &mut work => result,
+            signal = shutdown_signal() => {
+                stop.cancel();
+                let result = work.await;
+                signal?;
+                result
+            }
+        }
+    };
+    if let Err(error) = result {
+        treasury.close().await?;
+        return Err(error);
+    }
+    Ok(treasury)
+}
+
+#[cfg(feature = "zcash")]
+async fn sync(
+    meta_config: PathBuf,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<crate::treasury::Treasury> {
+    let (mut treasury, _) = configured(&meta_config, network).await?;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let result = {
+        let work = treasury.sync_once(&stop);
+        tokio::pin!(work);
+        tokio::select! {
+            result = &mut work => result,
+            signal = shutdown_signal() => {
+                stop.cancel();
+                let result = work.await;
+                signal?;
+                result
+            }
+        }
+    };
+    if let Err(error) = result {
+        treasury.close().await?;
+        return Err(error);
+    }
+    Ok(treasury)
+}
+
+#[cfg(feature = "zcash")]
+async fn init(
+    state_dir: PathBuf,
+    key_file: PathBuf,
+    birthday: Option<u32>,
+    indexer_url_env: Option<String>,
+    mnemonic_file: Option<PathBuf>,
+) -> Result<crate::treasury::Treasury> {
+    anyhow::ensure!(
+        !state_dir.exists() && !key_file.exists(),
+        "treasury state or key already exists; init only creates a new wallet. Use `wallet addresses --state-dir PATH --key-file PATH` to display existing receive addresses, or `wallet status --state-dir PATH` for its treasury ID"
+    );
+    // Imports must never infer a recent birthday and skip historical funds.
+    anyhow::ensure!(
+        mnemonic_file.is_none() || birthday.is_some(),
+        "seed import requires --birthday"
+    );
+    let birthday = match birthday {
+        Some(height) => height,
+        None => {
+            let endpoint = if let Some(name) = indexer_url_env {
+                std::env::var(name).context("missing birthday indexer environment variable")?
+            } else {
+                match std::env::var("ZCASH_INDEXER_URL") {
+                    Ok(endpoint) => endpoint,
+                    Err(std::env::VarError::NotPresent) => {
+                        crate::treasury::birthday::DEFAULT_INDEXER.into()
+                    }
+                    Err(_) => {
+                        anyhow::bail!("invalid birthday indexer environment variable")
+                    }
+                }
+            };
+            crate::treasury::birthday::discover(&endpoint).await?
+        }
+    };
+    let seed = if let Some(path) = mnemonic_file {
+        let metadata = std::fs::symlink_metadata(&path)?;
+        anyhow::ensure!(
+            metadata.file_type().is_file(),
+            "mnemonic file must be a regular file"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            anyhow::ensure!(
+                metadata.permissions().mode() & 0o077 == 0,
+                "mnemonic file must be owner-only"
+            );
+        }
+        Some(zeroize::Zeroizing::new(
+            std::fs::read_to_string(path).context("reading mnemonic file")?,
+        ))
+    } else {
+        None
+    };
+    crate::treasury::Treasury::create(state_dir, key_file, birthday, seed).await
 }
 
 #[cfg(feature = "zcash")]
