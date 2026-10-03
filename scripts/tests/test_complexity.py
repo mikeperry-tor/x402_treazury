@@ -98,7 +98,7 @@ class ComplexityTests(unittest.TestCase):
                 self.assertEqual((previous / "status").read_text(), "complete\n")
             runs = list((root / "target/complexity-runs").iterdir())
             self.assertEqual(len(runs), 2)
-            failed = next(p for p in runs if p != previous)
+            failed = next(p for p in runs if p.resolve() != previous)
             self.assertTrue((failed / "raw.json").is_file())
             self.assertEqual(json.loads((failed / "report.json").read_text())["status"], "partial")
             self.assertIn("EXCLUDED src/a.rs", output.getvalue())

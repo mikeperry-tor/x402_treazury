@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -73,7 +74,7 @@ class ReproducibleTests(unittest.TestCase):
                 r.check_environment({"host": "expected"})
 
     def test_homebrew_style_toolchain_selection_is_enforced(self):
-        expected = "1.99.0"
+        expected = tomllib.loads((r.ROOT / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
         with tempfile.TemporaryDirectory() as tmp:
             for tool in ("rustc", "cargo"):
                 path = Path(tmp) / tool
