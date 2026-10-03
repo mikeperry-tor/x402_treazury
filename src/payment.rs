@@ -129,6 +129,15 @@ impl PaidClient {
             .expect("payer lock poisoned") = Arc::new(payer);
     }
     pub async fn execute(&self, route: RoutedRequest) -> Result<String> {
+        self.execute_response(route)
+            .await?
+            .render(None, &Default::default())?
+            .into_text()
+    }
+    pub async fn execute_response(
+        &self,
+        route: RoutedRequest,
+    ) -> Result<crate::output::HttpOutput> {
         // Pin static signer before any I/O; replacement affects only later calls.
         let payer = self
             .payer
@@ -220,7 +229,7 @@ impl PaidClient {
             }
             break response;
         };
-        self.response_text(response, paid_submission).await
+        self.response_output(response, paid_submission).await
     }
 
     async fn bound_challenge(&self, response: reqwest::Response) -> Result<reqwest::Response> {
@@ -238,12 +247,17 @@ impl PaidClient {
         Ok(envelope.body(bytes)?.into())
     }
 
-    async fn response_text(
+    async fn response_output(
         &self,
         response: reqwest::Response,
         paid_submission: bool,
-    ) -> Result<String> {
+    ) -> Result<crate::output::HttpOutput> {
         let status = response.status();
+        let mime_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.split(';').next().unwrap().trim().to_ascii_lowercase());
         let detail = response
             .headers()
             .get("payment-required")
@@ -254,11 +268,15 @@ impl PaidClient {
             .await.map_err(|error| if paid_submission {
                 error.context("API response unavailable; a payment may already have settled. Do not automatically retry a paid request")
             } else { error })?;
-        let body = String::from_utf8_lossy(&bytes).into_owned();
         if !status.is_success() {
+            let body = String::from_utf8_lossy(&bytes);
             bail!("HTTP {status}: {} {body}", detail.unwrap_or(Value::Null));
         }
-        Ok(body)
+        Ok(crate::output::HttpOutput {
+            bytes,
+            mime_type,
+            paid_submission,
+        })
     }
 }
 

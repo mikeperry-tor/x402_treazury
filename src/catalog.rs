@@ -41,6 +41,10 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub response_mappings: BTreeMap<String, crate::output::ResponseMapping>,
+    #[serde(skip_serializing_if = "crate::output::ImageLimits::is_default")]
+    pub image_limits: crate::output::ImageLimits,
     pub timeout: f64,
     pub max_response_bytes: usize,
     pub max_help_bytes: usize,
@@ -72,6 +76,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            response_mappings: BTreeMap::new(),
+            image_limits: Default::default(),
             timeout: 30.0,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -103,6 +109,13 @@ impl Default for Config {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_mapping: Option<crate::output::ResponseMapping>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::output::ImageLimits::is_default"
+    )]
+    pub image_limits: crate::output::ImageLimits,
     pub name: String,
     pub description: String,
     pub method: String,
@@ -503,7 +516,7 @@ pub fn build_tools_with_prices(
         .map(|(op, name)| operation_tool(cfg, &op, name, prices, &price_tokens))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { name: format!("{prefix}_help"), description: format!(
+        tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
             method:"GET".into(), path:url.clone(), input_schema:json!({"type":"object","properties":{}}),
             param_routes:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
@@ -763,6 +776,15 @@ fn operation_tool(
     let method = op["method"].as_str().unwrap();
     let description = operation_description(cfg, op, prices, re);
     Ok(ToolSpec {
+        response_mapping: cfg
+            .response_mappings
+            .get(&format!(
+                "{} {}",
+                method.to_uppercase(),
+                op["path"].as_str().unwrap()
+            ))
+            .cloned(),
+        image_limits: cfg.image_limits.clone(),
         name,
         description,
         method: method.to_uppercase(),

@@ -982,6 +982,7 @@
       "GET /api/google-maps/place-details/partial",
       "GET /api/google-maps/solar/building-insights",
       "GET /api/google-maps/solar/data-layers",
+      "GET /api/google-maps/solar/rgb-image",
       "POST /api/companyenrich/org-enrich",
       "POST /api/companyenrich/properties-enrich",
       "POST /api/exa/answer",
@@ -1010,7 +1011,7 @@
       "POST /api/whitepages/person-search",
       "POST /api/whitepages/property-search"
     ],
-    "instructions_text": "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazure tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling and binary solar images; those workflows are not enabled. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false.",
+    "instructions_text": "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazure tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -1028,7 +1029,7 @@
         }
       },
       "stableenrich_help": {
-        "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX and binary-image endpoints excluded from this catalog. Any configured document limit is reported explicitly."
+        "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly."
       }
     },
     "prefix": "stableenrich",
@@ -1140,6 +1141,7 @@
       "GET /api/password",
       "GET /api/place-search",
       "GET /api/public-holidays",
+      "GET /api/qr",
       "GET /api/random",
       "GET /api/reverse-geocode",
       "GET /api/rwa-asset",
@@ -1150,6 +1152,7 @@
       "GET /api/sahm-rule",
       "GET /api/sanctions/name",
       "GET /api/sanctions/wallet",
+      "GET /api/screenshot",
       "GET /api/search",
       "GET /api/search-images",
       "GET /api/search-lite",
@@ -1318,8 +1321,12 @@
       "POST /api/http-headers",
       "POST /api/iban-validate",
       "POST /api/ics-parse",
+      "POST /api/image-crop",
       "POST /api/image-dominant-color",
       "POST /api/image-exif",
+      "POST /api/image-gen",
+      "POST /api/image-gen-hd",
+      "POST /api/image-gen-premium",
       "POST /api/image-ocr",
       "POST /api/ip-info",
       "POST /api/irr",
@@ -1495,6 +1502,9 @@
       "POST /v1/fund/max",
       "POST /v1/gemini",
       "POST /v1/grounded/chat/completions",
+      "POST /v1/images/fast",
+      "POST /v1/images/generations",
+      "POST /v1/images/pro",
       "POST /v1/insider-report",
       "POST /v1/ipo-report",
       "POST /v1/judge",
@@ -1528,7 +1538,7 @@
       "POST /v1/token-risk",
       "POST /v1/token-risk/pro"
     ],
-    "instructions_text": "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and binary/base64 media output. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazure setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests.",
+    "instructions_text": "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and PDF/audio/video output. Supported PNG/JPEG/WebP results are returned as MCP image attachments, with explicit byte/count limits; no asset URLs are automatically downloaded. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazure setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -1609,6 +1619,70 @@
     "probe_pricing": false,
     "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
+    "response_mappings": {
+      "POST /api/image-crop": {
+        "images": [
+          {
+            "encoding": "data_uri",
+            "pointer": "/dataUri"
+          }
+        ]
+      },
+      "POST /api/image-gen": {
+        "images": [
+          {
+            "encoding": "base64",
+            "mime_type": "image/png",
+            "pointer": "/image"
+          }
+        ]
+      },
+      "POST /api/image-gen-hd": {
+        "images": [
+          {
+            "encoding": "base64",
+            "mime_type": "image/png",
+            "pointer": "/image"
+          }
+        ]
+      },
+      "POST /api/image-gen-premium": {
+        "images": [
+          {
+            "encoding": "base64",
+            "mime_type": "image/png",
+            "pointer": "/image"
+          }
+        ]
+      },
+      "POST /v1/images/fast": {
+        "images": [
+          {
+            "encoding": "base64",
+            "mime_pointer": "/data/0/media_type",
+            "pointer": "/data/0/b64_json"
+          }
+        ]
+      },
+      "POST /v1/images/generations": {
+        "images": [
+          {
+            "encoding": "base64",
+            "mime_pointer": "/data/0/media_type",
+            "pointer": "/data/0/b64_json"
+          }
+        ]
+      },
+      "POST /v1/images/pro": {
+        "images": [
+          {
+            "encoding": "base64",
+            "mime_pointer": "/data/0/media_type",
+            "pointer": "/data/0/b64_json"
+          }
+        ]
+      }
+    },
     "spec": "https://agent402.tools/openapi.json",
     "tags": [
       "web"

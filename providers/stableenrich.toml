@@ -1,4 +1,4 @@
-# Reviewed synchronous JSON operations; async/SIWX and binary workflows are excluded.
+# Reviewed synchronous JSON/image operations; async/SIWX workflows are excluded.
 spec = "https://stableenrich.dev/openapi.json"
 name = "StableEnrich"
 base_url = "https://stableenrich.dev"
@@ -9,6 +9,7 @@ include_operations = [
   "GET /api/google-maps/place-details/partial",
   "GET /api/google-maps/solar/building-insights",
   "GET /api/google-maps/solar/data-layers",
+  "GET /api/google-maps/solar/rgb-image",
   "POST /api/companyenrich/org-enrich",
   "POST /api/companyenrich/properties-enrich",
   "POST /api/exa/answer",
@@ -41,7 +42,7 @@ pricing_key = "x-payment-info"
 probe_pricing = false
 timeout = 90
 help_url = "https://stableenrich.dev/llms.txt"
-instructions_text = "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazure tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling and binary solar images; those workflows are not enabled. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false."
+instructions_text = "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazure tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false."
 
 [overrides.stableenrich_exa_search.params]
 stream = "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events."
@@ -50,4 +51,4 @@ stream = "Omit or set false. Treazure returns completed tool responses, not incr
 stream = "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events."
 
 [overrides.stableenrich_help]
-description = "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX and binary-image endpoints excluded from this catalog. Any configured document limit is reported explicitly."
+description = "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly."

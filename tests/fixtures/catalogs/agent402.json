@@ -776,6 +776,83 @@
     "has_body": true
   },
   {
+    "response_mapping": {
+      "images": [
+        {
+          "pointer": "/dataUri",
+          "encoding": "data_uri"
+        }
+      ]
+    },
+    "name": "agent402_image_crop",
+    "description": "Crop an image to a pixel box, and/or rotate (90/180/270) and flip it - applied in that order. Send a public image URL or a base64 image. Returns the result as binary, or as a JSON data URI with dataUri:true. Deterministic.\n\nPrice: $0.002 per call, over x402 (USDC on Base, Solana, Polygon, Arbitrum, Monad, Celo, Avalanche, Sei, Optimism, Stellar, or Algorand - or USDG on Robinhood Chain) or MPP (Tempo, Base or Celo). Docs: https://agent402.tools/tools/image-crop",
+    "method": "POST",
+    "path": "/api/image-crop",
+    "input_schema": {
+      "properties": {
+        "dataUri": {
+          "description": "return JSON {dataUri, width, height, bytes} instead of binary",
+          "type": "boolean"
+        },
+        "flip": {
+          "description": "horizontal | vertical | both",
+          "type": "string"
+        },
+        "format": {
+          "description": "output format: png (default), jpeg, bmp",
+          "type": "string"
+        },
+        "height": {
+          "description": "crop box height in px",
+          "type": "number"
+        },
+        "image": {
+          "description": "alternative: base64 image, optionally a data: URL",
+          "type": "string"
+        },
+        "left": {
+          "description": "crop box left edge in px (default 0)",
+          "type": "number"
+        },
+        "quality": {
+          "description": "jpeg quality 1-100 (default 80)",
+          "type": "number"
+        },
+        "rotate": {
+          "description": "rotate by 90, 180, or 270 degrees",
+          "type": "number"
+        },
+        "top": {
+          "description": "crop box top edge in px (default 0)",
+          "type": "number"
+        },
+        "url": {
+          "description": "public http(s) image URL (fetched server-side, 5MB cap)",
+          "type": "string"
+        },
+        "width": {
+          "description": "crop box width in px (required with height for a crop)",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "dataUri": "body",
+      "flip": "body",
+      "format": "body",
+      "height": "body",
+      "image": "body",
+      "left": "body",
+      "quality": "body",
+      "rotate": "body",
+      "top": "body",
+      "url": "body",
+      "width": "body"
+    },
+    "has_body": true
+  },
+  {
     "name": "agent402_image_dominant_color",
     "description": "Extract the dominant colors of an image as a palette of hex values with pixel ratios. Send a public image URL or a base64 image, and optionally how many colors (1-10, default 5). Deterministic bucketed quantization; transparent pixels are ignored.\n\nPrice: $0.003 per call, over x402 (USDC on Base, Solana, Polygon, Arbitrum, Monad, Celo, Avalanche, Sei, Optimism, Stellar, or Algorand - or USDG on Robinhood Chain) or MPP (Tempo, Base or Celo). Docs: https://agent402.tools/tools/image-dominant-color",
     "method": "POST",
@@ -1068,6 +1145,33 @@
       "url": "body"
     },
     "has_body": true
+  },
+  {
+    "name": "agent402_screenshot",
+    "description": "Screenshot any public URL in headless Chromium. Returns a PNG image. Use when you need VISUAL evidence (layout, charts, a rendered receipt); when you need the text, extract or render are cheaper and machine-readable. Query params: ?url=https://…&fullPage=true (optional).\n\nPrice: $0.004 per call, over x402 (USDC on Base, Solana, Polygon, Arbitrum, Monad, Celo, Avalanche, Sei, Optimism, Stellar, or Algorand - or USDG on Robinhood Chain) or MPP (Tempo, Base or Celo). Docs: https://agent402.tools/tools/screenshot",
+    "method": "GET",
+    "path": "/api/screenshot",
+    "input_schema": {
+      "properties": {
+        "fullPage": {
+          "description": "true for full-page capture (default false)",
+          "type": "string"
+        },
+        "url": {
+          "description": "Public http(s) URL to screenshot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "fullPage": "query",
+      "url": "query"
+    },
+    "has_body": false
   },
   {
     "name": "agent402_search",

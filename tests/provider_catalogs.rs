@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 815);
+    assert_eq!(total, 818);
 }
 
 #[tokio::test]
@@ -231,7 +231,7 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
 }
 
 #[tokio::test]
-async fn stableenrich_excludes_async_and_binary_routes_and_keeps_json_routing() {
+async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
     use serde_json::json;
     use x402_treazure::{catalog, config};
     let mut cfg =
@@ -246,11 +246,10 @@ async fn stableenrich_excludes_async_and_binary_routes_and_keeps_json_routing() 
     doc["paths"]["/api/exa/search"]["get"] = json!({"summary":"Search diagnostics"});
     doc["paths"]["/api/exa/search/jobs"] = json!({"post":{"summary":"Async search"}});
     let tools = catalog::build_tools(&cfg, &doc, "stableenrich").unwrap();
-    assert_eq!(tools.len(), 32);
+    assert_eq!(tools.len(), 33);
     assert!(tools.iter().all(|t| !t.path.contains("/hunter/")
         && !t.path.contains("/cloudflare/")
         && !t.path.contains("/aerial-view/")
-        && !t.path.ends_with("/rgb-image")
         && !t.path.contains("/jobs")));
     let details = tools
         .iter()
@@ -304,7 +303,7 @@ async fn stableenrich_excludes_async_and_binary_routes_and_keeps_json_routing() 
     cfg.tags = vec!["Google Maps".into()];
     let selected = catalog::build_tools(&cfg, &doc, "stableenrich").unwrap();
     // Source tag selection keeps the generated help tool; listener positive tags may remove it.
-    assert_eq!(selected.len(), 9);
+    assert_eq!(selected.len(), 10);
     assert!(
         selected
             .iter()
@@ -330,9 +329,8 @@ async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
     doc["paths"]["/api/search"]["post"] = json!({"tags":["web"]});
     doc["paths"]["/api/search/debug"] = json!({"get":{"tags":["web"]}});
     let tools = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
-    assert_eq!(tools.len(), 47);
-    assert!(!tools.iter().any(|t| t.path.contains("screenshot")
-        || t.path.contains("image-crop")
+    assert_eq!(tools.len(), 49);
+    assert!(!tools.iter().any(|t| t.path.contains("image-resize")
         || t.path.contains("pdf-merge")
         || t.path.contains("/debug")
         || t.path.contains("health")));
@@ -361,7 +359,7 @@ async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
     );
     cfg.tags = vec!["llm".into()];
     let llm = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
-    assert_eq!(llm.len(), 45);
+    assert_eq!(llm.len(), 48);
     let chat = llm
         .iter()
         .find(|t| t.name == "agent402_chat_completions")
@@ -381,12 +379,26 @@ async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
     );
     cfg.tags.clear();
     let all = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
-    assert_eq!(all.len(), 472);
+    assert_eq!(all.len(), 481);
     assert!(!all.iter().any(|t| t.path.starts_with("/api/memory")
         || t.path == "/api/my-usage"
         || t.path.starts_with("/api/route/")
         || t.path.starts_with("/api/skill/")
         || t.path == "/v1/audio/speech"));
+    assert!(
+        all.iter()
+            .find(|t| t.name == "agent402_images_generations")
+            .unwrap()
+            .response_mapping
+            .is_some()
+    );
+    assert!(
+        all.iter()
+            .find(|t| t.name == "agent402_image_crop")
+            .unwrap()
+            .response_mapping
+            .is_some()
+    );
     cfg.tags = vec!["memory".into()];
     assert!(
         catalog::build_tools(&cfg, &doc, "agent402")

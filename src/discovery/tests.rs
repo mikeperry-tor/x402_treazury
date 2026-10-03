@@ -1364,3 +1364,84 @@ async fn malformed_imports_never_publish_or_leave_partial_records() {
 
 #[path = "../../tests/support/discovery_concurrency.rs"]
 mod concurrency;
+
+#[tokio::test]
+async fn image_results_survive_dynamic_fallback_and_listener_revision_guards() {
+    let m = manager(None).await;
+    let added = add(&m, "media", "process", "process").await;
+    let id = added["source_id"].clone();
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls = count.clone();
+    let (vendor, vendor_task) = listen(axum::Router::new().route(
+        "/read",
+        axum::routing::get(move || {
+            let calls = calls.clone();
+            async move {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                axum::Json(json!({"image":png,"model":"fixture"}))
+            }
+        }),
+    ))
+    .await;
+    let mut snapshot = (*m.catalog.read()).clone();
+    let mut name = String::new();
+    for view in snapshot.views.values_mut() {
+        for bound in view {
+            bound.base = vendor.clone();
+            bound.client = m.payers["shared"].clone();
+            bound.tool.response_mapping = Some(
+                serde_json::from_value(
+                    json!({"images":[{"pointer":"/image","mime_type":"image/png"}]}),
+                )
+                .unwrap(),
+            );
+            if bound.tool.path == "/read" {
+                name = bound.tool.name.clone();
+            }
+        }
+    }
+    m.catalog.publish(snapshot);
+    let (reader, task) = listen(crate::server::http_app(
+        server(&m, "reader"),
+        "test-token".into(),
+    ))
+    .await;
+    assert!(
+        server(&m, "hidden")
+            .invoke_output(&name, &Default::default())
+            .await
+            .is_err()
+    );
+    let args = json!({"tool_id":name,"arguments":{},"expected_revision":1});
+    for (tool, args) in [
+        (name.as_str(), json!({})),
+        ("treazure_tool_call", args.clone()),
+    ] {
+        let result = call(&reader, tool, args).await;
+        assert_eq!(result["content"][1]["type"], "image", "{result}");
+        assert_eq!(result["content"][1]["data"], png);
+        assert!(result.get("structuredContent").is_none());
+    }
+    let invalid = call(
+        &reader,
+        "treazure_tool_call",
+        json!({"tool_id":name,"arguments":{},"expected_revision":2}),
+    )
+    .await;
+    assert_eq!(invalid["isError"], true);
+    m.invoke(
+        "writer",
+        "treazure_source_remove",
+        json!({"source_id":id,"expected_revision":1,"idempotency_key":"remove-media"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        call(&reader, "treazure_tool_call", args).await["isError"],
+        true
+    );
+    assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+    task.abort();
+    vendor_task.abort();
+}

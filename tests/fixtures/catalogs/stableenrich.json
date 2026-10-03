@@ -6154,6 +6154,101 @@
     "has_body": false
   },
   {
+    "name": "stableenrich_google_maps_solar_rgb_image",
+    "description": "Google Solar API - Render a Solar GeoTIFF layer (rgb, dsm, flux, shade, or mask) as PNG/JPEG. Pass either a GeoTIFF id or latitude/longitude. Returns JSON with a public image url and metadata. monthlyFlux supports one month or a 4x3 grid; hourlyShade supports one hour or a 6x4 grid. Price: $0.05 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/google-maps/solar/rgb-image",
+    "input_schema": {
+      "properties": {
+        "crop": {
+          "default": false,
+          "type": "boolean"
+        },
+        "format": {
+          "default": "png",
+          "enum": [
+            "png",
+            "jpeg"
+          ],
+          "type": "string"
+        },
+        "hour": {
+          "description": "Hour (0-23). For hourlyShade: selects one band (omit for 6×4 grid).",
+          "maximum": 23,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "description": "GeoTIFF asset id (Mode A). Required if latitude/longitude are not provided.",
+          "type": "string"
+        },
+        "latitude": {
+          "description": "Latitude (Mode B). Required with longitude if id is not provided.",
+          "maximum": 90,
+          "minimum": -90,
+          "type": "number"
+        },
+        "layer": {
+          "default": "rgb",
+          "enum": [
+            "rgb",
+            "dsm",
+            "annualFlux",
+            "monthlyFlux",
+            "hourlyShade",
+            "mask"
+          ],
+          "type": "string"
+        },
+        "longitude": {
+          "description": "Longitude (Mode B). Required with latitude if id is not provided.",
+          "maximum": 180,
+          "minimum": -180,
+          "type": "number"
+        },
+        "month": {
+          "description": "Month (1-12). For monthlyFlux: selects one band (omit for 4×3 grid). For hourlyShade in Mode B: required.",
+          "maximum": 12,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "quality": {
+          "default": 85,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "radiusMeters": {
+          "default": 30,
+          "maximum": 100,
+          "minimum": 0.1,
+          "type": "number"
+        },
+        "scale": {
+          "default": 1,
+          "maximum": 2,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "crop": "query",
+      "format": "query",
+      "hour": "query",
+      "id": "query",
+      "latitude": "query",
+      "layer": "query",
+      "longitude": "query",
+      "month": "query",
+      "quality": "query",
+      "radiusMeters": "query",
+      "scale": "query"
+    },
+    "has_body": false
+  },
+  {
     "name": "stableenrich_google_maps_text_search_full",
     "description": "Google Maps Text Search (Full). Pagination: repeat the full original body including textQuery on every page; pageToken is only valid for the search that produced it. Price: $0.08 per call (vendor spec).",
     "method": "POST",
@@ -6389,7 +6484,7 @@
   },
   {
     "name": "stableenrich_help",
-    "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX and binary-image endpoints excluded from this catalog. Any configured document limit is reported explicitly.",
+    "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly.",
     "method": "GET",
     "path": "https://stableenrich.dev/llms.txt",
     "input_schema": {

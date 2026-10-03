@@ -1,5 +1,8 @@
 //! Exercise the actual CLI process and wire framing without a Python MCP client.
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+const PNG: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
 use std::{
     process::Stdio,
     sync::{
@@ -19,16 +22,26 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
     let vendor = tokio::spawn(async move {
         axum::serve(
             listener,
-            axum::Router::new().route(
-                "/hello",
-                axum::routing::get(move || {
-                    let count = count.clone();
-                    async move {
-                        count.fetch_add(1, Ordering::SeqCst);
-                        "hello over stdio"
-                    }
-                }),
-            ),
+            axum::Router::new()
+                .route(
+                    "/image",
+                    axum::routing::get(|| async {
+                        (
+                            [("content-type", "image/png")],
+                            STANDARD.decode(PNG).unwrap(),
+                        )
+                    }),
+                )
+                .route(
+                    "/hello",
+                    axum::routing::get(move || {
+                        let count = count.clone();
+                        async move {
+                            count.fetch_add(1, Ordering::SeqCst);
+                            "hello over stdio"
+                        }
+                    }),
+                ),
         )
         .await
         .unwrap();
@@ -36,7 +49,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("spec.json"),
-        json!({"paths":{"/hello":{"get":{}}}}).to_string(),
+        json!({"paths":{"/hello":{"get":{}},"/image":{"get":{}}}}).to_string(),
     )
     .unwrap();
     let config = dir.path().join("provider.toml");
@@ -65,6 +78,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}),
         json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
         json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test_hello","arguments":{}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"test_image","arguments":{}}}),
     ];
     for (index, message) in messages.iter().enumerate() {
         input
@@ -94,6 +108,11 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
                 assert_eq!(calls.load(Ordering::SeqCst), 0);
             }
             2 => assert_eq!(response["result"]["content"][0]["text"], "hello over stdio"),
+            3 => {
+                assert_eq!(response["result"]["content"][1]["type"], "image");
+                assert_eq!(response["result"]["content"][1]["data"], PNG);
+                assert_eq!(response["result"]["content"][1]["mimeType"], "image/png");
+            }
             _ => unreachable!(),
         }
     }

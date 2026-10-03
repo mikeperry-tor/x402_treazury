@@ -19,32 +19,40 @@ impl BoundTool {
         &self,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<String> {
+        self.invoke_output(args).await?.into_text()
+    }
+    pub async fn invoke_output(
+        &self,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<crate::output::ToolOutput> {
         if let Some(url) = &self.tool.help_url {
-            Ok(self
-                .help
-                .get_or_try_init(|| async {
-                    let response = crate::network::discovery(url, self.client.timeout())?
-                        .get(url)
-                        .send()
-                        .await
-                        .map_err(reqwest::Error::without_url)?
-                        .error_for_status()
-                        .map_err(reqwest::Error::without_url)?;
-                    let bytes = crate::limits::read(
-                        response,
-                        self.client.max_help_bytes(),
-                        "help document",
-                        "max_help_bytes",
-                    )
-                    .await?;
-                    Ok::<_, anyhow::Error>(String::from_utf8_lossy(&bytes).into_owned())
-                })
-                .await?
-                .clone())
+            Ok(crate::output::ToolOutput::text(
+                self.help
+                    .get_or_try_init(|| async {
+                        let response = crate::network::discovery(url, self.client.timeout())?
+                            .get(url)
+                            .send()
+                            .await
+                            .map_err(reqwest::Error::without_url)?
+                            .error_for_status()
+                            .map_err(reqwest::Error::without_url)?;
+                        let bytes = crate::limits::read(
+                            response,
+                            self.client.max_help_bytes(),
+                            "help document",
+                            "max_help_bytes",
+                        )
+                        .await?;
+                        Ok::<_, anyhow::Error>(String::from_utf8_lossy(&bytes).into_owned())
+                    })
+                    .await?
+                    .clone(),
+            ))
         } else {
             self.client
-                .execute(self.tool.route(&self.base, args)?)
-                .await
+                .execute_response(self.tool.route(&self.base, args)?)
+                .await?
+                .render(self.tool.response_mapping.as_ref(), &self.tool.image_limits)
         }
     }
 }

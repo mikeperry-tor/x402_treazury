@@ -60,6 +60,13 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<String> {
+        self.invoke_output(name, args).await?.into_text()
+    }
+    pub async fn invoke_output(
+        &self,
+        name: &str,
+        args: &Map<String, serde_json::Value>,
+    ) -> Result<crate::output::ToolOutput> {
         if let Some(manager) = &self.discovery
             && name.starts_with("treazure_")
         {
@@ -68,7 +75,7 @@ impl Server {
                 "unknown tool"
             );
             if name != "treazure_tool_call" {
-                return Ok(serde_json::to_string(
+                return Ok(crate::output::ToolOutput::text(serde_json::to_string(
                     &manager
                         .invoke(
                             &self.catalog_server,
@@ -76,7 +83,7 @@ impl Server {
                             serde_json::Value::Object(args.clone()),
                         )
                         .await?,
-                )?);
+                )?));
             }
             let call: crate::discovery::Call =
                 serde_json::from_value(serde_json::Value::Object(args.clone()))?;
@@ -86,11 +93,11 @@ impl Server {
                 bound.source.as_ref().map_or(0, |s| s.1) == call.expected_revision,
                 "source_revision_conflict"
             );
-            return Ok(self.limit(bound.invoke(&call.arguments).await?));
+            return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
         }
         let snapshot = self.catalog.read();
         let text = catalog_state::find(&snapshot, &self.catalog_server, name)?
-            .invoke(args)
+            .invoke_output(args)
             .await?;
         Ok(self.limit(text))
     }
@@ -105,8 +112,9 @@ impl Server {
             })
             .unwrap_or_default()
     }
-    fn limit(&self, text: String) -> String {
-        match self.max_response_chars {
+    fn limit(&self, mut output: crate::output::ToolOutput) -> crate::output::ToolOutput {
+        let text = output.text;
+        output.text = match self.max_response_chars {
             Some(max) if text.chars().count() > max => {
                 tracing::warn!(
                     limit_chars = max,
@@ -118,7 +126,8 @@ impl Server {
                 )
             }
             _ => text,
-        }
+        };
+        output
     }
 }
 impl ServerHandler for Server {
@@ -196,14 +205,19 @@ impl ServerHandler for Server {
         _: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let result = match self
-            .invoke(&request.name, &request.arguments.unwrap_or_default())
+            .invoke_output(&request.name, &request.arguments.unwrap_or_default())
             .await
         {
-            Ok(text) => {
-                let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())]);
-                if request.name.starts_with("treazure_") && request.name != "treazure_tool_call" {
-                    result.structured_content = serde_json::from_str(&text).ok();
-                }
+            Ok(output) => {
+                let structured = if request.name.starts_with("treazure_")
+                    && request.name != "treazure_tool_call"
+                {
+                    serde_json::from_str(&output.text).ok()
+                } else {
+                    None
+                };
+                let mut result = CallToolResult::success(output.into_content());
+                result.structured_content = structured;
                 result
             }
             Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("{e:#}"))]),

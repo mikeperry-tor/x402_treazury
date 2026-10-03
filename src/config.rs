@@ -69,6 +69,17 @@ pub fn validate(settings: &Config) -> Result<()> {
             && settings.max_spec_bytes > 0,
         "max_response_bytes, max_help_bytes and max_spec_bytes must be positive"
     );
+    settings.image_limits.validate()?;
+    for (operation, mapping) in &settings.response_mappings {
+        let (method, path) = operation
+            .split_once(' ')
+            .context("response_mappings requires METHOD path")?;
+        ensure!(
+            ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method) && path.starts_with('/'),
+            "invalid response_mappings operation"
+        );
+        mapping.validate(&settings.image_limits)?;
+    }
     crate::pricing::validate(settings)
 }
 pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<ResolvedProvider> {
