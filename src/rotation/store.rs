@@ -1474,3 +1474,7 @@ fn apply_chain_view(
     tx.execute("INSERT INTO payment_anchors VALUES (?1,?2,?3) ON CONFLICT(pool_id) DO UPDATE SET height=excluded.height,hash=excluded.hash",params![pool,i64::try_from(view.anchor.height)?,view.anchor.hash])?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/store_integrity.rs"]
+mod integrity_tests;

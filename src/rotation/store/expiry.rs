@@ -122,6 +122,24 @@ mod tests {
         assert!(s.resolve_expired(&job.operation_id, 4, 100).is_err());
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         assert!(s.confirm_spend(&job.operation_id, 100, 1).is_err());
+        let treasury = s.id().to_owned();
+        let mut revision = s.snapshot()?.0;
+        for _ in 0..10 {
+            revision = s.save_snapshot(revision, b"new checkpoint")?;
+        }
+        let retained: Vec<i64> =
+            s.db.prepare("SELECT revision FROM snapshots ORDER BY revision")?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(retained, vec![2, 4, revision]);
+        drop(s);
+        let s = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &treasury,
+        )?;
+        assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
+        assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         Ok(())
     }
 }
