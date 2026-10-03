@@ -260,6 +260,20 @@ async fn listeners_filter_authenticate_route_pay_and_drain_together() {
     tokio::time::timeout(std::time::Duration::from_secs(5), state.arrived.notified())
         .await
         .unwrap();
+    let healthy = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        rpc(
+            &http,
+            limited,
+            "beta-secret",
+            "tools/call",
+            json!({"name":"beta_pay","arguments":{}}),
+        ),
+    )
+    .await
+    .expect("slow alpha must not block healthy beta");
+    assert_eq!(body(&healthy)["vendor"], "beta");
+    assert!(!call.is_finished());
     stop.cancel();
     assert!(!task.is_finished());
     state.release.notify_one();

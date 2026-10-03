@@ -121,6 +121,21 @@ pub async fn fixture_fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
     fetch_response(policy, client.get(url)).await
 }
 
+fn check_complexity(depth: usize, nodes: usize, bytes: usize) -> Result<()> {
+    if depth > 64 || nodes > 500_000 || bytes > 64 * 1024 * 1024 {
+        tracing::warn!(
+            depth,
+            nodes,
+            expanded_bytes = bytes,
+            "import rejected: document_complexity_limit (depth 64, nodes 500000, expanded bytes 67108864)"
+        );
+        anyhow::bail!(
+            "document_complexity_limit: depth <= 64, nodes <= 500000, expanded bytes <= 67108864; document rejected"
+        );
+    }
+    Ok(())
+}
+
 fn inspect(
     root: &Value,
     v: &Value,
@@ -130,10 +145,7 @@ fn inspect(
     seen: &mut std::collections::BTreeSet<String>,
 ) -> Result<()> {
     *nodes += 1;
-    ensure!(
-        depth <= 64 && *nodes <= 500_000 && *bytes <= 64 * 1024 * 1024,
-        "document_complexity_limit"
-    );
+    check_complexity(depth, *nodes, *bytes)?;
     match v {
         Value::Object(o) => {
             if let Some(r) = o.get("$ref") {
@@ -163,7 +175,7 @@ fn inspect(
         }
         Value::String(s) => {
             *bytes += s.len();
-            ensure!(*bytes <= 64 * 1024 * 1024, "document_complexity_limit");
+            check_complexity(depth, *nodes, *bytes)?;
         }
         _ => (),
     }
@@ -313,4 +325,56 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
         );
     }
     Ok(Built { tools, base })
+}
+
+#[cfg(test)]
+mod complexity_tests {
+    use super::*;
+    fn check(value: &Value) -> Result<()> {
+        inspect(value, value, 0, &mut 0, &mut 0, &mut Default::default())
+    }
+    #[test]
+    fn exact_depth_node_and_expanded_byte_limits() {
+        let mut nested = Value::Null;
+        for _ in 0..64 {
+            nested = serde_json::json!([nested]);
+        }
+        check(&nested).unwrap();
+        assert!(
+            check(&serde_json::json!([nested]))
+                .unwrap_err()
+                .to_string()
+                .contains("complexity")
+        );
+        let mut nodes = Value::Array(vec![Value::Null; 499_999]);
+        check(&nodes).unwrap();
+        nodes.as_array_mut().unwrap().push(Value::Null);
+        assert!(check(&nodes).is_err());
+        drop(nodes);
+        let mut bytes = Value::String("x".repeat(64 * 1024 * 1024));
+        check(&bytes).unwrap();
+        if let Value::String(text) = &mut bytes {
+            text.push('x');
+        }
+        assert!(check(&bytes).is_err());
+    }
+    #[test]
+    fn repeated_acyclic_refs_escape_pointers_and_reject_bad_documents() {
+        let doc = serde_json::json!({"components":{"schemas":{"a/b~c":{"type":"string"}}},
+        "paths":{"/test":{"get":{"parameters":[
+            {"name":"a","in":"query","schema":{"$ref":"#/components/schemas/a~1b~0c"}},
+            {"name":"b","in":"query","schema":{"$ref":"#/components/schemas/a~1b~0c"}}
+        ]}}}});
+        check(&doc).unwrap();
+        let tools = catalog::build_tools(&Config::default(), &doc, "t").unwrap();
+        assert_eq!(tools[0].input_schema["properties"]["a"]["type"], "string");
+        assert_eq!(tools[0].input_schema["properties"]["b"]["type"], "string");
+        for doc in [
+            serde_json::json!({"$ref":"#/missing"}),
+            serde_json::json!({"loop":{"$ref":"#/loop"}}),
+            serde_json::json!({"$ref":"https://example.com"}),
+        ] {
+            assert!(check(&doc).is_err());
+        }
+    }
 }

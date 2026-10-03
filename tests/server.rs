@@ -292,3 +292,74 @@ async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_cont
     assert_eq!(hits.load(Ordering::SeqCst), 2);
     task.abort();
 }
+
+#[test]
+fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_overrides() {
+    let body = json!({"type":"object","properties":{"q":{"type":"string"}}});
+    let collision = json!({"parameters":[{"name":"q","in":"query","schema":{"type":"string"}},{"name":"q_body","in":"query","schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":body}}}});
+    let disambiguated = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/a-b":{"get":{}},"/a_b":{"get":{}}}}),
+        "t",
+    )
+    .unwrap();
+    assert_eq!(
+        disambiguated
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["t_a_b_get", "t_a_b_get_2"]
+    );
+    assert_eq!(
+        disambiguated
+            .iter()
+            .map(|t| t.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/a-b", "/a_b"]
+    );
+    for doc in [
+        json!({"paths":{"/a-b":{"get":{}},"/a_b":{"get":{}},"/a_b_get_2":{"get":{}}}}),
+        json!({"paths":{"/x":{"post":collision}}}),
+    ] {
+        assert!(build_tools(&Config::default(), &doc, "t").is_err());
+    }
+    let nested = json!({"type":"object","properties":{"boolean_bound":{"type":"number","minimum":3,"exclusiveMinimum":true},"numeric_bound":{"type":"number","exclusiveMaximum":9}}});
+    let body = json!({"type":"object","properties":{"items":{"type":"array","items":nested}}});
+    let operation = json!({"description":"雪🙂 vendor instructions kept whole", "parameters":[{"name":"Authorization","in":"header","schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":body}}}});
+    let doc = json!({"paths":{"/x":{"post":operation}}});
+    let tools = build_tools(&Config::default(), &doc, "t").unwrap();
+    let props = &tools[0].input_schema["properties"];
+    assert!(props.get("Authorization").is_none());
+    assert_eq!(
+        props["items"]["items"]["properties"]["boolean_bound"]["exclusiveMinimum"],
+        3
+    );
+    assert_eq!(
+        props["items"]["items"]["properties"]["numeric_bound"]["exclusiveMaximum"],
+        9
+    );
+    assert!(
+        tools[0]
+            .description
+            .contains("雪🙂 vendor instructions kept whole")
+    );
+    let cfg = Config {
+        overrides: json!({"t_x":{"description":"Authored instructions"}}),
+        ..Default::default()
+    };
+    let prices = BTreeMap::from([(("POST".into(), "/x".into()), "Discovered price".into())]);
+    let tools = x402_treazure::catalog::build_tools_with_prices(&cfg, &doc, "t", &prices).unwrap();
+    assert_eq!(tools[0].description, "Authored instructions");
+    let route = tools[0]
+        .route(
+            "https://example.com",
+            json!({"items":[{"boolean_bound":4,"numeric_bound":8}]})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        route.body.unwrap(),
+        json!({"items":[{"boolean_bound":4,"numeric_bound":8}]})
+    );
+}

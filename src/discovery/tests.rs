@@ -1234,3 +1234,33 @@ mod mcp_execution;
 
 #[path = "../../tests/support/import_limits.rs"]
 mod import_limits;
+
+#[tokio::test]
+async fn malformed_imports_never_publish_or_leave_partial_records() {
+    for bytes in [
+        b"{broken".to_vec(),
+        format!("{}invalid{}", "[".repeat(200), "]".repeat(200)).into_bytes(),
+        br##"{"paths": {"/x":{"get":{"parameters":[{"schema":{"$ref":"#/missing"}}]}}}}"##.to_vec(),
+    ] {
+        let m = manager(None).await;
+        let cell = OnceCell::new();
+        cell.set(Ok(Arc::new(bytes))).unwrap();
+        m.fetches.lock().unwrap().insert(
+            "https://api.example.com/openapi.json".into(),
+            (Instant::now(), Arc::new(cell)),
+        );
+        let generation = m.catalog.read().generation;
+        assert!(
+            m.invoke(
+                "writer",
+                "treazure_source_add",
+                json!({"candidate":candidate("bad","process","server"),"idempotency_key":"bad"})
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(m.catalog.read().generation, generation);
+        assert!(m.inner.lock().unwrap().state.records.is_empty());
+        assert!(m.catalog.read().views.values().all(Vec::is_empty));
+    }
+}
