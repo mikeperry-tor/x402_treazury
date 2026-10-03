@@ -245,3 +245,43 @@ pub fn http_app(server: Server, token: String) -> axum::Router {
         .route_service("/mcp", service)
         .layer(middleware::from_fn_with_state(token, gate))
 }
+
+// Shared contract for standalone and deployment HTTP listeners.
+pub(crate) const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+pub(crate) const SHUTDOWN_TIMEOUT_MESSAGE: &str =
+    "shutdown deadline exceeded; pending paid calls may have unknown outcomes";
+
+pub(crate) fn log_http_shutdown() {
+    tracing::warn!(
+        "Shutting down: draining in-flight requests for up to 10 seconds to let pending payments finish safely. Please wait."
+    );
+}
+
+/// Serve standalone HTTP with the same signal-triggered drain deadline as deployments.
+/// The executable drops its runtime on return, cancelling any unfinished handlers.
+pub async fn serve_http(
+    listener: tokio::net::TcpListener,
+    server: Server,
+    token: String,
+    shutdown: impl std::future::Future<Output = std::io::Result<()>>,
+) -> Result<()> {
+    use anyhow::Context;
+    use std::future::IntoFuture;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let _cancel_on_drop = stop.clone().drop_guard();
+    let serving = axum::serve(listener, http_app(server, token))
+        .with_graceful_shutdown(stop.clone().cancelled_owned())
+        .into_future();
+    tokio::pin!(serving);
+    let signal = tokio::select! {
+        result = &mut serving => return Ok(result?),
+        signal = shutdown => signal,
+    };
+    log_http_shutdown();
+    stop.cancel();
+    tokio::time::timeout(SHUTDOWN_TIMEOUT, serving)
+        .await
+        .context(SHUTDOWN_TIMEOUT_MESSAGE)??;
+    signal.context("shutdown signal handler failed")?;
+    Ok(())
+}

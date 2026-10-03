@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, time::Duration};
 use x402_treazure::{
     catalog::{self, Config},
     payment::{PaidClient, Payer, SpendPolicy},
-    server::{Server, http_app},
+    server::{Server, serve_http},
 };
 
 #[derive(Parser)]
@@ -358,11 +358,7 @@ async fn run() -> Result<()> {
             .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token")?;
         let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
         tracing::warn!(address = %listener.local_addr()?, "MCP listening at /mcp");
-        axum::serve(listener, http_app(server, token))
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await?;
+        serve_http(listener, server, token, shutdown_signal()).await?;
     }
     Ok(())
 }

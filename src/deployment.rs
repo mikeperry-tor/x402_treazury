@@ -807,8 +807,9 @@ impl RunningDeployment {
                 _ => Err(anyhow::anyhow!("MCP listener exited unexpectedly")),
             }
         };
+        crate::server::log_http_shutdown();
         stop.cancel();
-        if tokio::time::timeout(Duration::from_secs(10), async {
+        if tokio::time::timeout(crate::server::SHUTDOWN_TIMEOUT, async {
             while tasks.join_next().await.is_some() {}
         })
         .await
@@ -816,9 +817,7 @@ impl RunningDeployment {
         {
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
-            result = Err(anyhow::anyhow!(
-                "shutdown deadline exceeded; pending paid calls may have unknown outcomes"
-            ));
+            result = Err(anyhow::anyhow!(crate::server::SHUTDOWN_TIMEOUT_MESSAGE));
         }
         #[cfg(feature = "zcash")]
         while reconciliation.join_next().await.is_some() {}
