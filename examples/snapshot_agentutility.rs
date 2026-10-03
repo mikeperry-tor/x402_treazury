@@ -90,7 +90,7 @@ fn snapshot(mut spec: Value, registry: &Value) -> Result<Vec<u8>> {
                 service.get("aliasOf").is_none(),
                 "default route became an alias; review required"
             );
-            tags.insert("treazure-research".into());
+            tags.insert("treazury-research".into());
         }
         if let Some(alias) = service.get("aliasOf") {
             ensure!(
@@ -108,7 +108,7 @@ fn snapshot(mut spec: Value, registry: &Value) -> Result<Vec<u8>> {
             "default research route missing; review required"
         );
     }
-    spec["x-treazure-provenance"] = json!({"openapi":"https://x402.agentutility.ai/openapi.json","registry":"https://agentutility.ai/registry.json","transforms":["union OpenAPI tags, registry tags and cluster","add treazure-research to reviewed default routes","record registry aliasOf","omit response documentation"],"service_count":services.len()});
+    spec["x-treazury-provenance"] = json!({"openapi":"https://x402.agentutility.ai/openapi.json","registry":"https://agentutility.ai/registry.json","transforms":["union OpenAPI tags, registry tags and cluster","add treazury-research to reviewed default routes","record registry aliasOf","omit response documentation"],"service_count":services.len()});
     spec.sort_all_objects();
     Ok(format!("{}\n", serde_json::to_string(&spec)?).into_bytes())
 }
@@ -151,7 +151,7 @@ mod tests {
         assert_eq!(op["description"], "Keep full guidance");
         assert_eq!(
             op["tags"],
-            json!(["search", "treazure-research", "web-probe"])
+            json!(["search", "treazury-research", "web-probe"])
         );
         assert!(op.get("responses").is_none());
         assert_eq!(

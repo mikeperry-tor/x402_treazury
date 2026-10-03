@@ -289,7 +289,7 @@ fn mapped_output(
     for (index, field) in mapping.images.iter().enumerate() {
         *doc.pointer_mut(&field.pointer)
             .expect("validated image pointer") =
-            json!({"treazure_attachment": index + 1, "mime_type": images[index].mime_type});
+            json!({"treazury_attachment": index + 1, "mime_type": images[index].mime_type});
     }
     Ok(ToolOutput {
         text: format!(

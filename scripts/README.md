@@ -19,7 +19,7 @@ any working directory unless a command explicitly supplies relative data paths.
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 
-Run feature suites sequentially: CLI tests share `target/debug/treazure`.
+Run feature suites sequentially: CLI tests share `target/debug/treazury`.
 `check.sh` leaves the Zcash-enabled executable available at that path.
 All default checks use local fixtures and public test keys; none reads `.env` or
 performs funded transactions. Local socket tests require permission to bind localhost.

@@ -3,7 +3,7 @@ use alloy_primitives::U256;
 use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-use x402_treazure::rotation::base::{Anchor, BaseRpc, ChainQuery, PendingAuthorization, now};
+use x402_treazury::rotation::base::{Anchor, BaseRpc, ChainQuery, PendingAuthorization, now};
 
 #[tokio::test]
 async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() {

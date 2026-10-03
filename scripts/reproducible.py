@@ -77,8 +77,8 @@ def build_environment(work, source, cargo_cache, tool_paths, epoch, profile):
         "SDKROOT": profile["sdk_path"], "MACOSX_DEPLOYMENT_TARGET": profile["deployment_target"],
     }
     # Keep debug/assertion paths independent of both checkout and cache location.
-    mappings = [(source, "/treazure/source"), (cargo_home, "/treazure/cargo"),
-                (cargo_cache, "/treazure/cargo"), (work, "/treazure/build")]
+    mappings = [(source, "/treazury/source"), (cargo_home, "/treazury/cargo"),
+                (cargo_cache, "/treazury/cargo"), (work, "/treazury/build")]
     env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(f"--remap-path-prefix={a}={b}" for a, b in mappings)
     env["CFLAGS"] = env["CXXFLAGS"] = " ".join(f"-ffile-prefix-map={a}={b}" for a, b in mappings)
     # rustup proxies need their toolchain store even though HOME is isolated.
@@ -139,11 +139,11 @@ def qualify(run, no_zcash):
             # Build the locked protoc helper independently in each clean target.
             run_logged(["cargo", "build", "--frozen", "--manifest-path", "compat/protoc/Cargo.toml"], source, env, log)
             env["PROTOC"] = output(SANDBOX + [str(work / "target/debug/x402-protoc-path")], cwd=source, env=env)
-            command = ["cargo", "build", "--frozen", "--release", "--bin", "treazure", "--target", profile["host"]]
+            command = ["cargo", "build", "--frozen", "--release", "--bin", "treazury", "--target", profile["host"]]
             if no_zcash:
                 command.append("--no-default-features")
             run_logged(command, source, env, log)
-            binary = work / "target" / profile["host"] / "release/treazure"
+            binary = work / "target" / profile["host"] / "release/treazury"
             run_logged([str(binary), "--help"], source, env, log)
             report["artifacts"].append({"path": str(binary), "sha256": digest(binary), "bytes": binary.stat().st_size})
         report["matching_sha256"] = compare(*(Path(a["path"]) for a in report["artifacts"]))

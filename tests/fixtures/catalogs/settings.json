@@ -849,7 +849,7 @@
     "include": [
       ""
     ],
-    "instructions_text": "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. Use a documented OpenAPI URL with treazure_source_preview/add when those tools are authorized. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL.",
+    "instructions_text": "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. Use a documented OpenAPI URL with treazury_source_preview/add when those tools are authorized. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -905,12 +905,12 @@
         }
       },
       "exa_help": {
-        "description": "Read Exa's unified x402 guide for Search and Contents, including request examples and usage-dependent pricing. Fetched on demand and cached for this process. Treazure already handles payment; generic API-key and SDK setup instructions are unnecessary. Any configured document limit is reported explicitly."
+        "description": "Read Exa's unified x402 guide for Search and Contents, including request examples and usage-dependent pricing. Fetched on demand and cached for this process. Treazury already handles payment; generic API-key and SDK setup instructions are unnecessary. Any configured document limit is reported explicitly."
       },
       "exa_search": {
         "description": "Search the web with a natural-language query and optionally retrieve result contents. Prefer a small numResults and contents.highlights for concise context. Omit stream or set false. Paid per request via x402; requested search type, result count and content options determine the charge. Vendor price ranges are estimates, not total-request caps; the live challenge is authoritative.",
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not expose Exa's server-sent event stream."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not expose Exa's server-sent event stream."
         }
       }
     },
@@ -940,7 +940,7 @@
     "include_operations": [
       "POST /v1/tools/search"
     ],
-    "instructions_text": "OneShot synchronous web search via x402 USDC on Base. oneshot_search returns results directly; no job polling is needed. oneshot_help provides the search API guide. Treazure handles payment using the live x402 challenge; do not manually add the legacy Authorization, X-Quote-ID or X-Payment-Proof headers shown in vendor documentation. The default catalog excludes diagnostics, account management and async tools: those require polling and potentially wallet ownership proofs that this integration does not implement.",
+    "instructions_text": "OneShot synchronous web search via x402 USDC on Base. oneshot_search returns results directly; no job polling is needed. oneshot_help provides the search API guide. Treazury handles payment using the live x402 challenge; do not manually add the legacy Authorization, X-Quote-ID or X-Payment-Proof headers shown in vendor documentation. The default catalog excludes diagnostics, account management and async tools: those require polling and potentially wallet ownership proofs that this integration does not implement.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -948,7 +948,7 @@
     "name": "OneShot",
     "overrides": {
       "oneshot_help": {
-        "description": "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazure handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly."
+        "description": "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazury handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly."
       },
       "oneshot_search": {
         "description": "Search the web and return structured results inline, without job polling. Vendor-listed price: $0.001 per request; the live x402 challenge and configured payment cap are authoritative. query is 1–500 characters; max_results is 1–20 (default 5). Prefer the smallest useful result count."
@@ -1011,7 +1011,7 @@
       "POST /api/whitepages/person-search",
       "POST /api/whitepages/property-search"
     ],
-    "instructions_text": "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazure tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false.",
+    "instructions_text": "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazury tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -1020,16 +1020,16 @@
     "overrides": {
       "stableenrich_exa_answer": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events."
         }
       },
       "stableenrich_exa_search": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events."
         }
       },
       "stableenrich_help": {
-        "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly."
+        "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazury requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly."
       }
     },
     "prefix": "stableenrich",
@@ -1538,7 +1538,7 @@
       "POST /v1/token-risk",
       "POST /v1/token-risk/pro"
     ],
-    "instructions_text": "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and PDF/audio/video output. Supported PNG/JPEG/WebP results are returned as MCP image attachments, with explicit byte/count limits; no asset URLs are automatically downloaded. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazure setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests.",
+    "instructions_text": "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and PDF/audio/video output. Supported PNG/JPEG/WebP results are returned as MCP image attachments, with explicit byte/count limits; no asset URLs are automatically downloaded. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazury setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -1547,65 +1547,65 @@
     "overrides": {
       "agent402_auto_messages": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_auto_responses": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_help": {
-        "description": "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazure handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly."
+        "description": "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazury handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly."
       },
       "agent402_messages": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_metered_messages": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_metered_responses": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_nano_messages": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_nano_responses": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_premium_messages": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_premium_responses": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_pro_messages": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_pro_responses": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       },
       "agent402_responses": {
         "params": {
-          "stream": "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+          "stream": "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
         }
       }
     },
@@ -2225,7 +2225,7 @@
       "POST /youtube-brief",
       "POST /youtube-transcript"
     ],
-    "instructions_text": "AgentUtility pay-per-call tools using x402 USDC on Base. Use a static EVM wallet: the sampled challenge has bazaar and builder-code extensions, which managed zcash_rotation admission currently rejects. The default is a curated research subset; operators can select other clusters by tag. Catalog tags combine the OpenAPI and registry because the live OpenAPI omits many tags. Aliases and unsupported stateful/mixed-output/schema workflows are excluded. agentutility_help fetches the large vendor guide only on demand; it describes a broader catalog and other MCP/CLI clients. Treazure owns signing: no separate vendor CLI, wallet creation, API keys or provider environment variables are required by this integration. Hosted image/audio/video/file URLs remain JSON metadata and are not automatically fetched. Satellite image payloads become MCP image attachments with original attribution and metadata retained. Preserve degraded, partial, truncated and component-error markers; search may return a marked news fallback rather than full web coverage. Some routes exceed the default payment cap or 90-second timeout. Prices in the local snapshot are estimates; the live challenge is authoritative. Do not repeat a paid call merely because its response or receipt is missing.",
+    "instructions_text": "AgentUtility pay-per-call tools using x402 USDC on Base. Managed zcash_rotation wallets omit advertised x402 extensions with warnings; providers requiring extension echoes may reject payment. A rejected signed payment remains reserved until chain reconciliation. The default is a curated research subset; operators can select other clusters by tag. Catalog tags combine the OpenAPI and registry because the live OpenAPI omits many tags. Aliases and unsupported stateful/mixed-output/schema workflows are excluded. agentutility_help fetches the large vendor guide only on demand; it describes a broader catalog and other MCP/CLI clients. Treazury owns signing: no separate vendor CLI, wallet creation, API keys or provider environment variables are required by this integration. Hosted image/audio/video/file URLs remain JSON metadata and are not automatically fetched. Satellite image payloads become MCP image attachments with original attribution and metadata retained. Preserve degraded, partial, truncated and component-error markers; search may return a marked news fallback rather than full web coverage. Some routes exceed the default payment cap or 90-second timeout. Prices in the local snapshot are estimates; the live challenge is authoritative. Do not repeat a paid call merely because its response or receipt is missing.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,
@@ -2233,7 +2233,7 @@
     "name": "AgentUtility",
     "overrides": {
       "agentutility_help": {
-        "description": "Read AgentUtility's large catalog and usage guide, fetched on demand and cached for the process. It includes aliases, excluded tools, other clients and broader chain support; those are not automatically enabled in Treazure. Use the selected tools and actual result fields. Any configured document limit is reported explicitly."
+        "description": "Read AgentUtility's large catalog and usage guide, fetched on demand and cached for the process. It includes aliases, excluded tools, other clients and broader chain support; those are not automatically enabled in Treazury. Use the selected tools and actual result fields. Any configured document limit is reported explicitly."
       }
     },
     "prefix": "agentutility",
@@ -2291,7 +2291,7 @@
     },
     "spec": "providers/agentutility/openapi.json",
     "tags": [
-      "treazure-research"
+      "treazury-research"
     ],
     "timeout": 90.0
   }

@@ -581,7 +581,7 @@
   },
   {
     "name": "exa_help",
-    "description": "Read Exa's unified x402 guide for Search and Contents, including request examples and usage-dependent pricing. Fetched on demand and cached for this process. Treazure already handles payment; generic API-key and SDK setup instructions are unnecessary. Any configured document limit is reported explicitly.",
+    "description": "Read Exa's unified x402 guide for Search and Contents, including request examples and usage-dependent pricing. Fetched on demand and cached for this process. Treazury already handles payment; generic API-key and SDK setup instructions are unnecessary. Any configured document limit is reported explicitly.",
     "method": "GET",
     "path": "https://exa.ai/docs/integrations/payments/x402/quickstart.md",
     "input_schema": {
@@ -1460,7 +1460,7 @@
               "type": "null"
             }
           ],
-          "description": "Omit or set false. Treazure returns completed tool responses and does not expose Exa's server-sent event stream."
+          "description": "Omit or set false. Treazury returns completed tool responses and does not expose Exa's server-sent event stream."
         },
         "systemPrompt": {
           "anyOf": [

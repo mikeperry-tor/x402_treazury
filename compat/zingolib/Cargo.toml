@@ -6,7 +6,7 @@ edition = "2024"
 publish = false
 [workspace]
 [dependencies]
-x402-treazure = { path = "../..", default-features = false }
+x402_treazury = { path = "../..", default-features = false }
 zingolib = { path = "../../vendor/zingolib", default-features = false }
 
 # Experimental compatibility patch: see vendor/README.md.

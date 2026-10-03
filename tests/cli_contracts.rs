@@ -1,9 +1,9 @@
 //! Offline executable boundaries, with synthetic stores and no real wallet material.
 use serde_json::{Value, json};
 use std::{path::Path, process::Output};
-use x402_treazure::rotation::store::{Store, funding::FundingPhase};
+use x402_treazury::rotation::store::{Store, funding::FundingPhase};
 async fn run(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"));
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
     command
         .current_dir(dir)
         .env_clear()

@@ -62,12 +62,12 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
     });
     let s = server(&m, "writer");
     assert!(s.get_tool(&name).is_some());
-    assert!(s.get_tool("treazure_tool_call").is_some());
+    assert!(s.get_tool("treazury_tool_call").is_some());
     assert!(s.get_tool("missing").is_none());
     assert!(server(&m, "hidden").get_tool(&name).is_none());
     assert!(
         server(&m, "hidden")
-            .get_tool("treazure_source_add")
+            .get_tool("treazury_source_add")
             .is_none()
     );
     for limit in [0, 2, 3, 4] {
@@ -79,7 +79,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             let result = if fallback {
                 call(
                     &base,
-                    "treazure_tool_call",
+                    "treazury_tool_call",
                     json!({"tool_id":name,"expected_revision":0,"arguments":args}),
                 )
                 .await
@@ -97,7 +97,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             assert_eq!(result["content"][0]["text"], expected);
             assert_ne!(result["isError"], true);
         }
-        let structured = call(&base, "treazure_sources_list", json!({})).await;
+        let structured = call(&base, "treazury_sources_list", json!({})).await;
         assert_ne!(structured["isError"], true, "{structured}");
         assert_eq!(
             serde_json::from_str::<Value>(structured["content"][0]["text"].as_str().unwrap())
@@ -136,8 +136,8 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
     for (tool, args) in [
         (name.as_str(), json!({})),
         ("missing", json!({})),
-        ("treazure_tool_call", json!({})),
-        ("treazure_source_add", json!({})),
+        ("treazury_tool_call", json!({})),
+        ("treazury_source_add", json!({})),
     ] {
         assert_eq!(call(&base, tool, args).await["isError"], true);
     }
@@ -149,7 +149,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             let result = if fallback {
                 call(
                     &base,
-                    "treazure_tool_call",
+                    "treazury_tool_call",
                     json!({"tool_id":name,"expected_revision":0,"arguments":{"id":"error"}}),
                 )
                 .await
@@ -213,7 +213,7 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
                 if fallback {
                     call(
                         &url,
-                        "treazure_tool_call",
+                        "treazury_tool_call",
                         json!({"tool_id":n,"arguments":{},"expected_revision":1}),
                     )
                     .await
@@ -225,9 +225,9 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
                 .await
                 .unwrap();
             if remove {
-                m.invoke("writer","treazure_source_remove",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"remove"})).await.unwrap();
+                m.invoke("writer","treazury_source_remove",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"remove"})).await.unwrap();
             } else {
-                m.invoke("writer","treazure_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"update","selection":{"tags":["write"]}})).await.unwrap();
+                m.invoke("writer","treazury_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"update","selection":{"tags":["write"]}})).await.unwrap();
                 assert_eq!(m.catalog.read().views["writer"].len(), 1);
                 assert_eq!(
                     m.catalog.read().views["writer"][0]
@@ -243,7 +243,7 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
             assert_eq!(
                 call(
                     &base,
-                    "treazure_tool_call",
+                    "treazury_tool_call",
                     json!({"tool_id":name,"arguments":{},"expected_revision":1})
                 )
                 .await["isError"],

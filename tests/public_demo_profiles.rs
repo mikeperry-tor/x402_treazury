@@ -1,6 +1,6 @@
 //! Both demo paths are inspectable offline before supplying funds or secrets.
 use std::path::Path;
-use x402_treazure::deployment::Deployment;
+use x402_treazury::deployment::Deployment;
 
 #[tokio::test]
 async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {

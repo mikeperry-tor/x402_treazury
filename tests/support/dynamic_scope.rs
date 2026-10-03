@@ -135,7 +135,7 @@ async fn scope_child() {
     let added = m
         .invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("scoped","process","process"),"idempotency_key":"scoped"}),
         )
         .await
@@ -192,7 +192,7 @@ async fn scope_child() {
         let client = direct.discovery(&url, Duration::from_secs(3)).unwrap();
         for fallback in [false, true] {
             let params = if fallback {
-                json!({"name":"treazure_tool_call","arguments":{"tool_id":name,"arguments":{},"expected_revision":1}})
+                json!({"name":"treazury_tool_call","arguments":{"tool_id":name,"arguments":{},"expected_revision":1}})
             } else {
                 json!({"name":name,"arguments":{}})
             };
@@ -236,15 +236,15 @@ async fn scope_child() {
     for name in ["parallel_a", "parallel_b"] {
         let c = candidate(name, "process", "process");
         let preview = m
-            .invoke("writer", "treazure_source_preview", json!({"candidate":c}))
+            .invoke("writer", "treazury_source_preview", json!({"candidate":c}))
             .await
             .unwrap();
         let manager = m.clone();
-        mutations.spawn(async move { manager.invoke("writer", "treazure_source_add", json!({"candidate":c,"preview_id":preview["preview_id"],"idempotency_key":name})).await });
+        mutations.spawn(async move { manager.invoke("writer", "treazury_source_add", json!({"candidate":c,"preview_id":preview["preview_id"],"idempotency_key":name})).await });
     }
     let manager = m.clone();
     let source = added["source_id"].clone();
-    mutations.spawn(async move { manager.invoke("writer", "treazure_source_update", json!({"source_id":source,"expected_revision":1,"selection":{"tags":["read"]},"idempotency_key":"during-payment"})).await });
+    mutations.spawn(async move { manager.invoke("writer", "treazury_source_update", json!({"source_id":source,"expected_revision":1,"selection":{"tags":["read"]},"idempotency_key":"during-payment"})).await });
     tokio::time::timeout(Duration::from_secs(5), barrier.wait())
         .await
         .unwrap();
@@ -278,14 +278,14 @@ async fn scope_child() {
     assert_eq!(requests.load(Ordering::SeqCst), 16);
     assert_eq!(signatures.lock().unwrap().len(), 8);
     let before = requests.load(Ordering::SeqCst);
-    m.invoke("writer","treazure_source_update",json!({"source_id":added["source_id"],"expected_revision":2,"selection":{"tags":["write"]},"idempotency_key":"hide"})).await.unwrap();
+    m.invoke("writer","treazury_source_update",json!({"source_id":added["source_id"],"expected_revision":2,"selection":{"tags":["write"]},"idempotency_key":"hide"})).await.unwrap();
     for id in ["writer", "reader"] {
         let server = server(&m, id);
         assert!(server.invoke(&name, &Default::default()).await.is_err());
         assert!(
             server
                 .invoke(
-                    "treazure_tool_call",
+                    "treazury_tool_call",
                     json!({"tool_id":name,"expected_revision":1,"arguments":{}})
                         .as_object()
                         .unwrap()

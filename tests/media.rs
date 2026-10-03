@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
-use x402_treazure::output::{HttpOutput, ImageLimits, ResponseMapping};
+use x402_treazury::output::{HttpOutput, ImageLimits, ResponseMapping};
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
 fn response(bytes: Vec<u8>, mime: &str, paid: bool) -> HttpOutput {
@@ -34,7 +34,7 @@ fn image_envelopes_preserve_metadata_and_text_remains_unchanged() {
     let metadata: Value = serde_json::from_str(result.text.split_once('\n').unwrap().1).unwrap();
     assert_eq!(metadata["usage"], doc["usage"]);
     assert_eq!(metadata["truncated"], true);
-    assert_eq!(metadata["escaped/key"]["~image"]["treazure_attachment"], 2);
+    assert_eq!(metadata["escaped/key"]["~image"]["treazury_attachment"], 2);
     for mime in [
         "text/plain",
         "application/json",
@@ -198,7 +198,7 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
-    use x402_treazure::{
+    use x402_treazury::{
         catalog::{Config, build_tools},
         payment::{PaidClient, Payer, SpendPolicy},
         server::{Server, http_app},
@@ -285,7 +285,7 @@ async fn paid_image_decode_failure_is_explicit_and_never_replays() {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
-    use x402_treazure::{
+    use x402_treazury::{
         catalog::RoutedRequest,
         payment::{PaidClient, Payer, SpendPolicy, USDC},
     };
@@ -324,7 +324,7 @@ async fn paid_image_decode_failure_is_explicit_and_never_replays() {
 
 #[tokio::test]
 async fn toml_response_mappings_compose_and_invalid_unused_mappings_fail() {
-    use x402_treazure::config;
+    use x402_treazury::config;
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("provider.toml");
     std::fs::write(
@@ -374,7 +374,7 @@ images=[{pointer="/data/0/image",mime_type="image/png"}]
 
 #[tokio::test]
 async fn reviewed_provider_envelopes_render_without_guessing_fields() {
-    let cfg = x402_treazure::config::load(
+    let cfg = x402_treazury::config::load(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agent402.toml"),
     )
     .await
@@ -400,7 +400,7 @@ async fn reviewed_provider_envelopes_render_without_guessing_fields() {
         assert!(!output.text.contains(PNG), "{operation}");
     }
     assert_eq!(cfg.response_mappings.len(), 7);
-    // Format identification only: Treazure does not decode raster pixels.
+    // Format identification only: Treazury does not decode raster pixels.
     for (mime, bytes) in [
         ("image/jpeg", b"\xff\xd8\xff\xe0".as_slice()),
         ("image/webp", b"RIFF\0\0\0\0WEBP".as_slice()),

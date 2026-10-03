@@ -120,7 +120,7 @@
         },
         "stream": {
           "default": false,
-          "description": "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events.",
+          "description": "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events.",
           "type": "boolean"
         },
         "text": {
@@ -727,7 +727,7 @@
         },
         "stream": {
           "default": false,
-          "description": "Omit or set false. Treazure returns completed tool responses, not incremental server-sent events.",
+          "description": "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events.",
           "type": "boolean"
         },
         "systemPrompt": {
@@ -6484,7 +6484,7 @@
   },
   {
     "name": "stableenrich_help",
-    "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazure requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly.",
+    "description": "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazury requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly.",
     "method": "GET",
     "path": "https://stableenrich.dev/llms.txt",
     "input_schema": {

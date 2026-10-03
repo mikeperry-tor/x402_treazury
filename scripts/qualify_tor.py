@@ -215,7 +215,7 @@ def main():
     result["source_status"] = subprocess.check_output(["git", "status", "--short"], cwd=root, text=True)
     result["platform"] = subprocess.check_output(["sw_vers"], text=True)
     process = control = probes = None
-    temporary = tempfile.TemporaryDirectory(prefix="treazure-tor-")
+    temporary = tempfile.TemporaryDirectory(prefix="treazury-tor-")
     try:
         scratch = Path(temporary.name)
         torrc = scratch / "torrc"

@@ -137,7 +137,7 @@ impl IsolationId {
     }
     pub fn token(&self, namespace: &str) -> String {
         let mut hash = Sha256::new();
-        hash.update(b"x402-mcp-tor-isolation-v1\0");
+        hash.update(b"x402_treazury-tor-isolation-v1\0");
         hash.update((namespace.len() as u32).to_be_bytes());
         hash.update(namespace.as_bytes());
         hash.update(&self.0);

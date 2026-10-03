@@ -591,7 +591,7 @@ impl Deployment {
             let tools = server.catalog.read().views["default"].clone();
             if self.config.source_management.is_some() {
                 ensure!(
-                    tools.iter().all(|t| !t.tool.name.starts_with("treazure_")
+                    tools.iter().all(|t| !t.tool.name.starts_with("treazury_")
                         && !t.tool.name.starts_with("dyn_")),
                     "static tool uses reserved namespace"
                 );

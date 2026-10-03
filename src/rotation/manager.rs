@@ -17,6 +17,8 @@ use x402_chain_eip155::V2Eip155ExactClient;
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 
+pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised x402 extensions; the provider may require them. A submitted authorization may still settle and remains reserved until chain reconciliation. Do not automatically retry";
+
 #[derive(Clone, Debug)]
 pub struct PaymentCandidateHandle {
     pub wallet: String,
@@ -92,12 +94,13 @@ impl ManagedPool {
         expected: PaymentCandidateHandle,
         mut retry: reqwest::Request,
         mut response: reqwest::Response,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<(reqwest::Response, bool)> {
         let header = response
             .headers()
             .get("payment-required")
             .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
         let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
+        let omitted = strip_extensions(&mut challenge)?;
         let offer = select_offer(&challenge, &self.policy, self.target)?;
         challenge["accepts"] = serde_json::json!([offer.raw.clone()]);
         if let Some(desc) = challenge.pointer_mut("/resource/description")
@@ -158,6 +161,12 @@ impl ManagedPool {
                         .as_bytes(),
                 )?,
             )?;
+            ensure!(
+                payload
+                    .get("extensions")
+                    .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
+                "managed signer unexpectedly emitted extensions"
+            );
             let auth = validate_payload(&payload, &offer, &lease.address)?;
             let id = lease.id;
             let wallet = lease.wallet;
@@ -178,12 +187,38 @@ impl ManagedPool {
         })??;
         retry.headers_mut().extend(headers);
         // One attempt only. Receipt/final 402/transport errors do not release exposure.
-        http.execute(retry).await.map_err(|_| {
+        let result = http.execute(retry).await.map_err(|_| {
             anyhow::anyhow!(AdmissionError::OutcomeUnknown(
                 "signed request transport failed"
             ))
-        })
+        });
+        let response = if omitted {
+            result.context(OMITTED_EXTENSIONS)?
+        } else {
+            result?
+        };
+        Ok((response, omitted))
     }
+}
+
+fn strip_extensions(challenge: &mut Value) -> Result<bool> {
+    let Some(extensions) = challenge.get("extensions") else {
+        return Ok(false);
+    };
+    let extensions = extensions
+        .as_object()
+        .context(AdmissionError::UnsupportedPayment(
+            "malformed extensions: expected an object",
+        ))?;
+    let omitted = !extensions.is_empty();
+    for name in extensions.keys() {
+        tracing::warn!(extension = ?name, "managed payment stripping advertised x402 extension; attempting payment without extensions; provider may reject; submitted authorization remains reserved until chain reconciliation");
+    }
+    challenge
+        .as_object_mut()
+        .expect("challenge object")
+        .remove("extensions");
+    Ok(omitted)
 }
 fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result<Offer> {
     ensure!(

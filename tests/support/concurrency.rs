@@ -52,7 +52,7 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     let other = other_pool(&h).await;
-    let tools = x402_treazure::catalog::build_tools(
+    let tools = x402_treazury::catalog::build_tools(
         &Default::default(),
         &json!({"paths":{"/pay":{"get":{}}}}),
         "test",
@@ -66,10 +66,10 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
         .enumerate()
     {
         let server =
-            x402_treazure::server::Server::new(tools.clone(), client, h.base.clone(), None, None);
+            x402_treazury::server::Server::new(tools.clone(), client, h.base.clone(), None, None);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         endpoints.push(format!("http://{}/mcp", listener.local_addr().unwrap()));
-        let app = x402_treazure::server::http_app(server, format!("token-{i}"));
+        let app = x402_treazury::server::http_app(server, format!("token-{i}"));
         let stopped = stop.clone();
         servers.push(tokio::spawn(async move {
             axum::serve(listener, app)
@@ -309,7 +309,7 @@ async fn tor_concurrent_rotation_keeps_each_signer_and_rpc_identity() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "private Tor policy; invoked by parent"]
 async fn tor_burst_child() {
-    use x402_treazure::network::{self, IsolationId, Mode, NetworkPolicy};
+    use x402_treazury::network::{self, IsolationId, Mode, NetworkPolicy};
     let proxy = socks::Socks::start(
         BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
         socks::Fault::None,

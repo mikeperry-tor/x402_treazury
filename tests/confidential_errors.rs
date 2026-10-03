@@ -1,7 +1,7 @@
 //! Server-held credentials must not become diagnostic content. Vendor bodies are distinct.
 use axum::{Router, http::StatusCode, routing::get};
 use serde_json::json;
-use x402_treazure::{
+use x402_treazury::{
     catalog::{Config, RoutedRequest, build_tools, load_json},
     payment::{PaidClient, Payer, SpendPolicy},
     rotation::base::{BaseRpc, ChainQuery},
@@ -57,7 +57,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let db = state.path().join("state");
     let key = state.path().join("key");
     let mut store =
-        x402_treazure::rotation::store::Store::create(&db, &key, 1, b"fixture").unwrap();
+        x402_treazury::rotation::store::Store::create(&db, &key, 1, b"fixture").unwrap();
     let id = store.id().to_owned();
     store.ensure_pool("fixture", "5").unwrap();
     let job = store.funding_jobs().unwrap().remove(0);
@@ -65,7 +65,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
         .defer_funding(&job.id, 100, Some(&err.to_string()), false)
         .unwrap();
     drop(store);
-    let mut store = x402_treazure::rotation::store::Store::open(&db, &key, &id).unwrap();
+    let mut store = x402_treazury::rotation::store::Store::open(&db, &key, &id).unwrap();
     let jobs = store.funding_jobs().unwrap();
     clean(&serde_json::to_string(&jobs).unwrap());
     assert_eq!(jobs[0].last_error.as_deref(), Some("base_rpc_unavailable"));
@@ -127,7 +127,7 @@ async fn executable_startup_and_inspection_do_not_print_environment_secrets() {
     )
     .unwrap();
     for inspect in [true, false] {
-        let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"));
+        let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
         cmd.current_dir(tmp.path())
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))

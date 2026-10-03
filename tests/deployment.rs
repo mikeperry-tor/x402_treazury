@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use x402_treazure::{deployment::Deployment, payment::USDC};
+use x402_treazury::{deployment::Deployment, payment::USDC};
 
 #[derive(Clone)]
 struct Vendor {
@@ -301,7 +301,7 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
         .unwrap();
     }
     let path = write_config(dir.path(), &configuration());
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .args(["--meta-config", path.to_str().unwrap(), "--list-tools"])
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
@@ -479,7 +479,7 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
     let deployment = Deployment::load(&path).await.unwrap();
     let _ = deployment.inventory();
     assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--list-tools"])
@@ -594,7 +594,7 @@ async fn wallet_bindings_are_explicit_offline_and_provider_files_cannot_assign_t
     );
     assert!(Deployment::show_config(&path).await.is_err());
     assert!(
-        x402_treazure::config::load(&dir.path().join("provider.toml"))
+        x402_treazury::config::load(&dir.path().join("provider.toml"))
             .await
             .is_err()
     );

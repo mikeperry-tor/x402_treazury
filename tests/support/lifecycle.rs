@@ -2,7 +2,7 @@
 //! Consensus calculation, shielding and expiry are qualified separately in regtest.
 use super::*;
 use anyhow::Result;
-use x402_treazure::rotation::{
+use x402_treazury::rotation::{
     funding::{FundingBackend, FundingWorker},
     near::{Quote, SwapStatus},
     store::{

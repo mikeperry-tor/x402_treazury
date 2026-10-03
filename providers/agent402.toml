@@ -492,46 +492,46 @@ pricing_key = "x-payment-info"
 probe_pricing = false
 timeout = 90
 help_url = "https://agent402.tools/llms.txt"
-instructions_text = "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and PDF/audio/video output. Supported PNG/JPEG/WebP results are returned as MCP image attachments, with explicit byte/count limits; no asset URLs are automatically downloaded. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazure setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests."
+instructions_text = "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and PDF/audio/video output. Supported PNG/JPEG/WebP results are returned as MCP image attachments, with explicit byte/count limits; no asset URLs are automatically downloaded. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazury setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests."
 
 [overrides.agent402_help]
-description = "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazure handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly."
+description = "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazury handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly."
 
 [overrides.agent402_auto_messages.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_auto_responses.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_messages.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_metered_messages.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_metered_responses.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_nano_messages.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_nano_responses.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_premium_messages.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_premium_responses.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_pro_messages.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_pro_responses.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [overrides.agent402_responses.params]
-stream = "Omit or set false. Treazure returns completed tool responses and does not relay incremental server-sent events."
+stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."
 
 [response_mappings."POST /api/image-crop"]
 images = [{ pointer = "/dataUri", encoding = "data_uri" }]

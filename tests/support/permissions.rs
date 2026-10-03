@@ -112,7 +112,7 @@ async fn target_grants_and_persistence_boundaries_are_explicit() {
         );
         c["targets"] = json!(targets);
         let result = m
-            .invoke("writer", "treazure_source_preview", json!({"candidate":c}))
+            .invoke("writer", "treazury_source_preview", json!({"candidate":c}))
             .await;
         assert_eq!(result.is_ok(), ok, "{visibility} {targets:?}: {result:?}");
         assert_eq!(m.catalog.read().generation, 0);
@@ -172,7 +172,7 @@ async fn authenticated_listener_controls_authority_and_hidden_invocations() {
     let added = call_at(
         writer.clone(),
         "writer-token",
-        "treazure_source_add",
+        "treazury_source_add",
         json!({"candidate":candidate("http-auth","process","process"),"idempotency_key":"one"}),
     )
     .await;
@@ -187,7 +187,7 @@ async fn authenticated_listener_controls_authority_and_hidden_invocations() {
         .name
         .clone();
     for (url, token) in [(&reader, "reader-token"), (&second, "second-token")] {
-        for name in ["treazure_source_update", "treazure_source_remove"] {
+        for name in ["treazury_source_update", "treazury_source_remove"] {
             let result = call_at(
                 url.clone(),
                 token,
@@ -215,7 +215,7 @@ async fn authenticated_listener_controls_authority_and_hidden_invocations() {
     let fallback = call_at(
         reader.clone(),
         "reader-token",
-        "treazure_tool_call",
+        "treazury_tool_call",
         json!({"tool_id":hidden,"expected_revision":1,"arguments":{}}),
     )
     .await;
@@ -232,7 +232,7 @@ async fn authenticated_listener_controls_authority_and_hidden_invocations() {
         let result = call_at(
             writer.clone(),
             "writer-token",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":c,"idempotency_key":field}),
         )
         .await;
@@ -254,7 +254,7 @@ async fn authenticated_listener_controls_authority_and_hidden_invocations() {
         "writer-token".into(),
     ))
     .await;
-    let denied=call_at(shared,"writer-token","treazure_source_add",json!({"candidate":candidate("shared-token","process","server"),"idempotency_key":"shared"})).await;
+    let denied=call_at(shared,"writer-token","treazury_source_add",json!({"candidate":candidate("shared-token","process","server"),"idempotency_key":"shared"})).await;
     assert_eq!(denied["isError"], true);
     assert_eq!(m.catalog.read().generation, generation);
     for task in [w, r, s, task] {
@@ -268,7 +268,7 @@ async fn owner_receipts_and_expiring_previews_do_not_cross_principals() {
     let preview = m
         .invoke(
             "writer",
-            "treazure_source_preview",
+            "treazury_source_preview",
             json!({"candidate":candidate("one","process","server"),"limit":1}),
         )
         .await
@@ -277,14 +277,14 @@ async fn owner_receipts_and_expiring_previews_do_not_cross_principals() {
     assert!(
         m.invoke(
             "second",
-            "treazure_source_preview",
+            "treazury_source_preview",
             json!({"preview_id":pid})
         )
         .await
         .is_err()
     );
-    assert!(m.invoke("second","treazure_source_add",json!({"candidate":candidate("one","process","server"),"preview_id":pid,"idempotency_key":"x"})).await.is_err());
-    assert!(m.invoke("writer","treazure_source_add",json!({"candidate":candidate("changed","process","server"),"preview_id":pid,"idempotency_key":"x"})).await.is_err());
+    assert!(m.invoke("second","treazury_source_add",json!({"candidate":candidate("one","process","server"),"preview_id":pid,"idempotency_key":"x"})).await.is_err());
+    assert!(m.invoke("writer","treazury_source_add",json!({"candidate":candidate("changed","process","server"),"preview_id":pid,"idempotency_key":"x"})).await.is_err());
     m.previews
         .lock()
         .unwrap()
@@ -294,7 +294,7 @@ async fn owner_receipts_and_expiring_previews_do_not_cross_principals() {
     assert!(
         m.invoke(
             "writer",
-            "treazure_source_preview",
+            "treazury_source_preview",
             json!({"preview_id":pid})
         )
         .await
@@ -304,7 +304,7 @@ async fn owner_receipts_and_expiring_previews_do_not_cross_principals() {
     );
     let mut ids = vec![];
     for owner in ["writer", "second"] {
-        let result=m.invoke(owner,"treazure_source_add",json!({"candidate":candidate("same","process","server"),"idempotency_key":"same-key"})).await.unwrap();
+        let result=m.invoke(owner,"treazury_source_add",json!({"candidate":candidate("same","process","server"),"idempotency_key":"same-key"})).await.unwrap();
         assert_eq!(result["targets"], json!([owner]));
         ids.push(result["source_id"].clone());
     }
@@ -417,16 +417,16 @@ async fn quota_boundaries_never_publish_a_partial_multi_listener_view() {
         let a = m
             .invoke(
                 "writer",
-                "treazure_source_add",
+                "treazury_source_add",
                 json!({"candidate":c,"idempotency_key":"first"}),
             )
             .await
             .unwrap();
         let before = m.catalog.read();
         let result = if quota == "source" {
-            m.invoke("writer","treazure_source_update",json!({"source_id":a["source_id"],"expected_revision":1,"selection":{},"idempotency_key":"expand"})).await
+            m.invoke("writer","treazury_source_update",json!({"source_id":a["source_id"],"expected_revision":1,"selection":{},"idempotency_key":"expand"})).await
         } else {
-            m.invoke("writer","treazure_source_add",json!({"candidate":candidate("second","process","process"),"idempotency_key":"second"})).await
+            m.invoke("writer","treazury_source_add",json!({"candidate":candidate("second","process","process"),"idempotency_key":"second"})).await
         };
         assert!(result.is_err(), "{quota}");
         assert_eq!(m.catalog.read().generation, before.generation);
@@ -497,7 +497,7 @@ async fn filter_intersections_preserve_management_and_static_sources_are_immutab
         c["selection"] = selection;
         m.invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":c,"idempotency_key":"filtered"}),
         )
         .await
@@ -505,17 +505,17 @@ async fn filter_intersections_preserve_management_and_static_sources_are_immutab
         assert_eq!(m.catalog.read().views["writer"].len(), expected);
         assert!(
             server(&m, "writer")
-                .get_tool("treazure_source_add")
+                .get_tool("treazury_source_add")
                 .is_some()
         );
         assert!(
             server(&m, "reader")
-                .get_tool("treazure_source_add")
+                .get_tool("treazury_source_add")
                 .is_none()
         );
         let generation = m.catalog.read().generation;
-        assert!(m.invoke("writer","treazure_source_add",json!({"candidate":candidate("immutable","process","server"),"idempotency_key":"reserved"})).await.unwrap_err().to_string().contains("reserved"));
-        for operation in ["treazure_source_remove", "treazure_source_update"] {
+        assert!(m.invoke("writer","treazury_source_add",json!({"candidate":candidate("immutable","process","server"),"idempotency_key":"reserved"})).await.unwrap_err().to_string().contains("reserved"));
+        for operation in ["treazury_source_remove", "treazury_source_update"] {
             assert!(m.invoke("writer",operation,json!({"source_id":"immutable","expected_revision":0,"idempotency_key":operation})).await.unwrap_err().to_string().contains("not_manageable"));
         }
         assert_eq!(m.catalog.read().generation, generation);
@@ -527,12 +527,12 @@ async fn cursors_bind_owner_process_and_valid_offset() {
     let m = manager_with(policy(None), writers(false)).await;
     add(&m, "pages", "process", "process").await;
     let first = m
-        .invoke("writer", "treazure_tools_search", json!({"limit":1}))
+        .invoke("writer", "treazury_tools_search", json!({"limit":1}))
         .await
         .unwrap();
     let cursor = first["next_cursor"].as_str().unwrap();
     assert!(
-        m.invoke("second", "treazure_tools_search", json!({"cursor":cursor}))
+        m.invoke("second", "treazury_tools_search", json!({"cursor":cursor}))
             .await
             .is_err()
     );
@@ -546,7 +546,7 @@ async fn cursors_bind_owner_process_and_valid_offset() {
         assert!(
             m.invoke(
                 "writer",
-                "treazure_tools_search",
+                "treazury_tools_search",
                 json!({"cursor":format!("{prefix}:{suffix}")})
             )
             .await
@@ -558,7 +558,7 @@ async fn cursors_bind_owner_process_and_valid_offset() {
     assert_eq!(m.catalog.read().generation, other.catalog.read().generation);
     assert!(
         other
-            .invoke("writer", "treazure_tools_search", json!({"cursor":cursor}))
+            .invoke("writer", "treazury_tools_search", json!({"cursor":cursor}))
             .await
             .unwrap_err()
             .to_string()
@@ -622,7 +622,7 @@ async fn static_and_dynamic_listener_tags_select_the_same_operations() {
         );
         m.invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("shared","process","server"),"idempotency_key":"tags"}),
         )
         .await

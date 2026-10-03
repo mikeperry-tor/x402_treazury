@@ -1,7 +1,7 @@
 [
   {
     "name": "oneshot_help",
-    "description": "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazure handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly.",
+    "description": "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazury handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly.",
     "method": "GET",
     "path": "https://docs.oneshotagent.com/api-reference/web-search.md",
     "input_schema": {

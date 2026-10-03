@@ -63,7 +63,7 @@ async fn add(m: &Arc<Manager>, name: &str, lifetime: &str, visibility: &str) -> 
     seed(m).await;
     m.invoke(
         "writer",
-        "treazure_source_add",
+        "treazury_source_add",
         json!({"candidate":candidate(name,lifetime,visibility),"idempotency_key":name}),
     )
     .await
@@ -97,7 +97,7 @@ async fn scopes_permissions_idempotency_and_revision_guards() {
     assert!(snap.views["hidden"].is_empty());
     let a = json!({"candidate":candidate("demo","process","process"),"idempotency_key":"demo"});
     assert_eq!(
-        m.invoke("writer", "treazure_source_add", a.clone())
+        m.invoke("writer", "treazury_source_add", a.clone())
             .await
             .unwrap(),
         result
@@ -105,7 +105,7 @@ async fn scopes_permissions_idempotency_and_revision_guards() {
     let mut changed = a;
     changed["candidate"]["name"] = json!("other");
     assert!(
-        m.invoke("writer", "treazure_source_add", changed)
+        m.invoke("writer", "treazury_source_add", changed)
             .await
             .unwrap_err()
             .to_string()
@@ -114,29 +114,29 @@ async fn scopes_permissions_idempotency_and_revision_guards() {
     let remove =
         json!({"source_id":result["source_id"],"expected_revision":1,"idempotency_key":"remove"});
     assert!(
-        m.invoke("reader", "treazure_source_remove", remove.clone())
+        m.invoke("reader", "treazury_source_remove", remove.clone())
             .await
             .is_err()
     );
     assert!(
-        m.invoke("hidden", "treazure_sources_list", json!({}))
+        m.invoke("hidden", "treazury_sources_list", json!({}))
             .await
             .is_err()
     );
     let visible = m
-        .invoke("reader", "treazure_sources_list", json!({}))
+        .invoke("reader", "treazury_sources_list", json!({}))
         .await
         .unwrap();
     assert_eq!(visible["items"][0]["targets"], json!(["reader"]));
     assert_eq!(visible["items"][0]["can_manage"], false);
     let search = m
-        .invoke("writer", "treazure_tools_search", json!({"limit":1}))
+        .invoke("writer", "treazury_tools_search", json!({"limit":1}))
         .await
         .unwrap();
     let tool = search["items"][0]["tool_id"].as_str().unwrap();
     let fallback = server(&m, "writer")
         .invoke(
-            "treazure_tool_call",
+            "treazury_tool_call",
             json!({"tool_id":tool,"arguments":{},"expected_revision":0})
                 .as_object()
                 .unwrap(),
@@ -145,11 +145,11 @@ async fn scopes_permissions_idempotency_and_revision_guards() {
         .unwrap_err();
     assert!(fallback.to_string().contains("revision_conflict"));
     let removed = m
-        .invoke("writer", "treazure_source_remove", remove.clone())
+        .invoke("writer", "treazury_source_remove", remove.clone())
         .await
         .unwrap();
     assert_eq!(
-        m.invoke("writer", "treazure_source_remove", remove)
+        m.invoke("writer", "treazury_source_remove", remove)
             .await
             .unwrap(),
         removed
@@ -159,7 +159,7 @@ async fn scopes_permissions_idempotency_and_revision_guards() {
     assert!(
         m.invoke(
             "writer",
-            "treazure_tools_search",
+            "treazury_tools_search",
             json!({"cursor":search["next_cursor"]})
         )
         .await
@@ -185,7 +185,7 @@ async fn preview_pagination_filters_and_atomic_quota_races() {
     let preview = m
         .invoke(
             "writer",
-            "treazure_source_preview",
+            "treazury_source_preview",
             json!({"candidate":candidate("demo","process","process"),"limit":1}),
         )
         .await
@@ -195,7 +195,7 @@ async fn preview_pagination_filters_and_atomic_quota_races() {
     let next = m
         .invoke(
             "writer",
-            "treazure_source_preview",
+            "treazury_source_preview",
             json!({"preview_id":preview["preview_id"],"cursor":preview["next_cursor"],"limit":1}),
         )
         .await
@@ -203,15 +203,15 @@ async fn preview_pagination_filters_and_atomic_quota_races() {
     assert_ne!(preview["items"], next["items"]);
     let args = json!({"candidate":candidate("demo","process","process"),"preview_id":preview["preview_id"],"idempotency_key":"same"});
     let (a, b) = tokio::join!(
-        m.invoke("writer", "treazure_source_add", args.clone()),
-        m.invoke("writer", "treazure_source_add", args)
+        m.invoke("writer", "treazury_source_add", args.clone()),
+        m.invoke("writer", "treazury_source_add", args)
     );
     assert_eq!(a.unwrap(), b.unwrap());
     assert_eq!(m.catalog.read().views["reader"].len(), 1);
     assert!(
         m.invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("second","process","process"),"idempotency_key":"second"})
         )
         .await
@@ -222,8 +222,8 @@ async fn preview_pagination_filters_and_atomic_quota_races() {
     let u = json!({"source_id":id,"expected_revision":1,"idempotency_key":"update","selection":{"tags":["read"]}});
     let r = json!({"source_id":id,"expected_revision":1,"idempotency_key":"remove"});
     let (a, b) = tokio::join!(
-        m.invoke("writer", "treazure_source_update", u),
-        m.invoke("writer", "treazure_source_remove", r)
+        m.invoke("writer", "treazury_source_update", u),
+        m.invoke("writer", "treazury_source_remove", r)
     );
     assert_ne!(a.is_ok(), b.is_ok());
     assert_eq!(m.catalog.read().generation, 2);
@@ -243,12 +243,12 @@ async fn persistence_exact_bytes_replay_withdrawal_and_revocation() {
     let args =
         json!({"candidate":candidate("saved","persistent","process"),"idempotency_key":"saved"});
     assert_eq!(
-        m.invoke("writer", "treazure_source_add", args)
+        m.invoke("writer", "treazury_source_add", args)
             .await
             .unwrap(),
         first
     ); // no seeded cache or external fetch
-    m.invoke("writer","treazure_source_update",json!({"source_id":id,"expected_revision":1,"idempotency_key":"withdraw","lifetime":"process"})).await.unwrap();
+    m.invoke("writer","treazury_source_update",json!({"source_id":id,"expected_revision":1,"idempotency_key":"withdraw","lifetime":"process"})).await.unwrap();
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
     drop(m);
     let m = manager(Some(file.clone())).await;
@@ -265,13 +265,13 @@ async fn persistence_exact_bytes_replay_withdrawal_and_revocation() {
     let m = manager_with(policy(Some(file.clone())), ls).await;
     assert!(m.catalog.read().views["writer"].is_empty());
     let list = m
-        .invoke("writer", "treazure_sources_list", json!({}))
+        .invoke("writer", "treazury_sources_list", json!({}))
         .await
         .unwrap();
     assert!(list["items"][0]["disabled"].is_string());
     m.invoke(
         "writer",
-        "treazure_source_remove",
+        "treazury_source_remove",
         json!({"source_id":second["source_id"],"expected_revision":1,"idempotency_key":"remove"}),
     )
     .await
@@ -292,7 +292,7 @@ async fn promotion_restores_fixed_targets_and_format_changes_disable() {
     let file = tmp.path().join("sources.sqlite");
     let m = manager(Some(file.clone())).await;
     let r = add(&m, "promote", "process", "server").await;
-    m.invoke("writer","treazure_source_update",json!({"source_id":r["source_id"],"expected_revision":1,"idempotency_key":"promote","lifetime":"persistent","name":"renamed"})).await.unwrap();
+    m.invoke("writer","treazury_source_update",json!({"source_id":r["source_id"],"expected_revision":1,"idempotency_key":"promote","lifetime":"persistent","name":"renamed"})).await.unwrap();
     drop(m);
     let m = manager(Some(file.clone())).await;
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
@@ -491,7 +491,7 @@ async fn durable_commit_is_recovered_and_failed_writes_do_not_publish() {
     let args =
         json!({"candidate":candidate("saved","persistent","server"),"idempotency_key":"crash"});
     assert!(
-        m.invoke("writer", "treazure_source_add", args.clone())
+        m.invoke("writer", "treazury_source_add", args.clone())
             .await
             .is_err()
     );
@@ -500,7 +500,7 @@ async fn durable_commit_is_recovered_and_failed_writes_do_not_publish() {
     let m = manager(Some(file.clone())).await;
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
     let r = m
-        .invoke("writer", "treazure_source_add", args)
+        .invoke("writer", "treazury_source_add", args)
         .await
         .unwrap();
     m.inner
@@ -510,7 +510,7 @@ async fn durable_commit_is_recovered_and_failed_writes_do_not_publish() {
         .as_ref()
         .unwrap()
         .reject_writes();
-    assert!(m.invoke("writer","treazure_source_remove",json!({"source_id":r["source_id"],"expected_revision":1,"idempotency_key":"failed-write"})).await.is_err());
+    assert!(m.invoke("writer","treazury_source_remove",json!({"source_id":r["source_id"],"expected_revision":1,"idempotency_key":"failed-write"})).await.is_err());
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
     drop(m);
     assert_eq!(
@@ -674,22 +674,22 @@ async fn real_http_cached_client_management_and_payment_fallback() {
     assert_eq!(unauthorized.status(), 401);
     let preview = call(
         &writer,
-        "treazure_source_preview",
+        "treazury_source_preview",
         json!({"candidate":candidate("http","process","process")}),
     )
     .await;
     assert_ne!(preview["isError"], true, "{preview}");
-    let added=call(&writer,"treazure_source_add",json!({"candidate":candidate("http","process","process"),"preview_id":preview["structuredContent"]["preview_id"],"idempotency_key":"http"})).await;
+    let added=call(&writer,"treazury_source_add",json!({"candidate":candidate("http","process","process"),"preview_id":preview["structuredContent"]["preview_id"],"idempotency_key":"http"})).await;
     assert_ne!(added["isError"], true, "{added}");
     let id = added["structuredContent"]["source_id"].clone();
-    let search = call(&reader, "treazure_tools_search", json!({"query":"Read"})).await;
+    let search = call(&reader, "treazury_tools_search", json!({"query":"Read"})).await;
     let name = search["structuredContent"]["items"][0]["tool_id"]
         .as_str()
         .unwrap()
         .to_owned();
     let blocked = call(
         &reader,
-        "treazure_source_remove",
+        "treazury_source_remove",
         json!({"source_id":id,"expected_revision":1,"idempotency_key":"wrong-owner"}),
     )
     .await;
@@ -715,35 +715,35 @@ async fn real_http_cached_client_management_and_payment_fallback() {
     }
     m.catalog.publish(snapshot);
     let args = json!({"tool_id":name,"arguments":{},"expected_revision":1});
-    let free = call(&reader, "treazure_tool_call", args.clone()).await;
+    let free = call(&reader, "treazury_tool_call", args.clone()).await;
     assert_eq!(free["content"][0]["text"], "free");
     price.store(20000, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(
-        call(&reader, "treazure_tool_call", args.clone()).await["isError"],
+        call(&reader, "treazury_tool_call", args.clone()).await["isError"],
         true
     );
     assert_eq!(signed.load(std::sync::atomic::Ordering::SeqCst), 0);
     price.store(5000, std::sync::atomic::Ordering::SeqCst);
-    let paid = call(&writer, "treazure_tool_call", args.clone()).await;
+    let paid = call(&writer, "treazury_tool_call", args.clone()).await;
     assert_ne!(paid["isError"], true, "{paid}");
     assert_eq!(signed.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let update=call(&writer,"treazure_source_update",json!({"source_id":id,"expected_revision":1,"idempotency_key":"update","selection":{"tags":["read"]}})).await;
+    let update=call(&writer,"treazury_source_update",json!({"source_id":id,"expected_revision":1,"idempotency_key":"update","selection":{"tags":["read"]}})).await;
     assert_ne!(update["isError"], true, "{update}");
     let before = unsigned.load(std::sync::atomic::Ordering::SeqCst);
     assert_eq!(
-        call(&reader, "treazure_tool_call", args).await["isError"],
+        call(&reader, "treazury_tool_call", args).await["isError"],
         true
     );
     assert_eq!(unsigned.load(std::sync::atomic::Ordering::SeqCst), before);
     let removed = call(
         &writer,
-        "treazure_source_remove",
+        "treazury_source_remove",
         json!({"source_id":id,"expected_revision":2,"idempotency_key":"remove"}),
     )
     .await;
     assert_ne!(removed["isError"], true, "{removed}");
     assert!(
-        call(&reader, "treazure_tools_search", json!({})).await["structuredContent"]["items"]
+        call(&reader, "treazury_tools_search", json!({})).await["structuredContent"]["items"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -804,21 +804,21 @@ async fn bounded_fetch_deadlines_redirects_coalescing_and_explicit_refresh() {
     *m.fixture_endpoint.lock().unwrap() = Some(format!("{url}/spec"));
     let a = json!({"candidate":candidate("one","process","server")});
     let (a, b) = tokio::join!(
-        m.invoke("writer", "treazure_source_preview", a.clone()),
-        m.invoke("reader", "treazure_source_preview", a)
+        m.invoke("writer", "treazury_source_preview", a.clone()),
+        m.invoke("reader", "treazury_source_preview", a)
     );
     assert!(a.is_ok() && b.is_ok());
     assert_eq!(hits.load(Ordering::SeqCst), 1);
     let added = m
         .invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("one","process","server"),"idempotency_key":"add"}),
         )
         .await
         .unwrap();
     assert_eq!(hits.load(Ordering::SeqCst), 1);
-    m.invoke("writer","treazure_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true})).await.unwrap();
+    m.invoke("writer","treazury_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true})).await.unwrap();
     assert_eq!(hits.load(Ordering::SeqCst), 2);
     task.abort();
 }
@@ -873,17 +873,17 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     *m.fixture_endpoint.lock().unwrap() = Some(format!("{url}/spec"));
     m.invoke(
         "writer",
-        "treazure_source_preview",
+        "treazury_source_preview",
         json!({"candidate":candidate("one","persistent","process")}),
     )
     .await
     .unwrap();
     let a = add(&m, "one", "persistent", "process").await;
     add(&m, "two", "persistent", "process").await;
-    m.invoke("writer", "treazure_source_update", json!({"source_id":a["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true,"selection":{"tags":["read"]}})).await.unwrap();
+    m.invoke("writer", "treazury_source_update", json!({"source_id":a["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true,"selection":{"tags":["read"]}})).await.unwrap();
     m.invoke(
         "writer",
-        "treazure_source_remove",
+        "treazury_source_remove",
         json!({"source_id":a["source_id"],"expected_revision":2,"idempotency_key":"remove"}),
     )
     .await
@@ -948,11 +948,11 @@ fn existing_registry_rows_cannot_silently_default_to_empty_state() {
 #[test]
 #[ignore = "subprocess helper, explicitly invoked by crash recovery test"]
 fn registry_crash_child() {
-    let file = PathBuf::from(std::env::var("TREAZURE_TEST_REGISTRY").unwrap());
+    let file = PathBuf::from(std::env::var("TREAZURY_TEST_REGISTRY").unwrap());
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let m=manager(Some(file)).await;seed(&m).await;
         m.crash_after_commit.store(true,std::sync::atomic::Ordering::SeqCst);
-        let _=m.invoke("writer","treazure_source_add",json!({"candidate":candidate("crash","persistent","server"),"idempotency_key":"crash"})).await;
+        let _=m.invoke("writer","treazury_source_add",json!({"candidate":candidate("crash","persistent","server"),"idempotency_key":"crash"})).await;
         panic!("crash hook was not reached");
     });
 }
@@ -963,7 +963,7 @@ async fn process_exit_between_sqlite_commit_and_catalog_publication_recovers() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-        .env("TREAZURE_TEST_REGISTRY", &file)
+        .env("TREAZURY_TEST_REGISTRY", &file)
         .args([
             "--ignored",
             "--exact",
@@ -982,7 +982,7 @@ async fn process_exit_between_sqlite_commit_and_catalog_publication_recovers() {
     let r = m
         .invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("crash","persistent","server"),"idempotency_key":"crash"}),
         )
         .await
@@ -1010,7 +1010,7 @@ async fn actual_mcp_pagination_and_cross_query_cursors_reject_stale_views() {
     let added = m
         .invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("pages","process","server"),"idempotency_key":"pages"}),
         )
         .await
@@ -1057,13 +1057,13 @@ async fn actual_mcp_pagination_and_cross_query_cursors_reject_stale_views() {
     );
 
     let search = m
-        .invoke("writer", "treazure_tools_search", json!({"limit":1}))
+        .invoke("writer", "treazury_tools_search", json!({"limit":1}))
         .await
         .unwrap();
     assert!(
         m.invoke(
             "writer",
-            "treazure_tools_search",
+            "treazury_tools_search",
             json!({"query":"different","cursor":search["next_cursor"]})
         )
         .await
@@ -1071,7 +1071,7 @@ async fn actual_mcp_pagination_and_cross_query_cursors_reject_stale_views() {
     );
     m.invoke(
         "writer",
-        "treazure_source_remove",
+        "treazury_source_remove",
         json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"remove"}),
     )
     .await
@@ -1122,12 +1122,12 @@ async fn explicit_wallet_override_and_parallel_add_quota_are_enforced() {
     let (a, b) = tokio::join!(
         m.invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("a","process","process"),"idempotency_key":"a"})
         ),
         m.invoke(
             "writer",
-            "treazure_source_add",
+            "treazury_source_add",
             json!({"candidate":candidate("b","process","process"),"idempotency_key":"b"})
         )
     );
@@ -1350,7 +1350,7 @@ async fn malformed_imports_never_publish_or_leave_partial_records() {
         assert!(
             m.invoke(
                 "writer",
-                "treazure_source_add",
+                "treazury_source_add",
                 json!({"candidate":candidate("bad","process","server"),"idempotency_key":"bad"})
             )
             .await
@@ -1416,7 +1416,7 @@ async fn image_results_survive_dynamic_fallback_and_listener_revision_guards() {
     let args = json!({"tool_id":name,"arguments":{},"expected_revision":1});
     for (tool, args) in [
         (name.as_str(), json!({})),
-        ("treazure_tool_call", args.clone()),
+        ("treazury_tool_call", args.clone()),
     ] {
         let result = call(&reader, tool, args).await;
         assert_eq!(result["content"][1]["type"], "image", "{result}");
@@ -1425,20 +1425,20 @@ async fn image_results_survive_dynamic_fallback_and_listener_revision_guards() {
     }
     let invalid = call(
         &reader,
-        "treazure_tool_call",
+        "treazury_tool_call",
         json!({"tool_id":name,"arguments":{},"expected_revision":2}),
     )
     .await;
     assert_eq!(invalid["isError"], true);
     m.invoke(
         "writer",
-        "treazure_source_remove",
+        "treazury_source_remove",
         json!({"source_id":id,"expected_revision":1,"idempotency_key":"remove-media"}),
     )
     .await
     .unwrap();
     assert_eq!(
-        call(&reader, "treazure_tool_call", args).await["isError"],
+        call(&reader, "treazury_tool_call", args).await["isError"],
         true
     );
     assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);

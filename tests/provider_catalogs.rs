@@ -17,7 +17,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     assert_eq!(cases.len(), 20);
     let mut total = 0;
     for case in cases {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_treazure"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_treazury"));
         command
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
@@ -53,7 +53,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
 
 #[tokio::test]
 async fn directory_exact_allowlist_excludes_new_write_and_subroutes() {
-    use x402_treazure::{catalog, config};
+    use x402_treazury::{catalog, config};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cfg = config::load(&root.join("providers/x402-list.toml"))
         .await
@@ -97,7 +97,7 @@ async fn directory_exact_allowlist_excludes_new_write_and_subroutes() {
 #[tokio::test]
 async fn exa_curates_paid_operations_and_preserves_request_contracts() {
     use serde_json::json;
-    use x402_treazure::{catalog, config};
+    use x402_treazury::{catalog, config};
     let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/exa.toml"))
         .await
         .unwrap()
@@ -158,7 +158,7 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
 #[test]
 fn body_presence_alternatives_follow_collision_renaming() {
     use serde_json::json;
-    use x402_treazure::catalog::{self, Config};
+    use x402_treazury::catalog::{self, Config};
     for keyword in ["oneOf", "anyOf", "allOf"] {
         let mut schema = json!({"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}},"urls":{"type":"array","items":{"type":"string"}}}});
         schema[keyword] = json!([{"required":["ids"]},{"required":["urls"]}]);
@@ -184,7 +184,7 @@ fn body_presence_alternatives_follow_collision_renaming() {
 #[tokio::test]
 async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() {
     use serde_json::json;
-    use x402_treazure::{catalog, config};
+    use x402_treazury::{catalog, config};
     let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/oneshot.toml"))
         .await
         .unwrap()
@@ -233,7 +233,7 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
 #[tokio::test]
 async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
     use serde_json::json;
-    use x402_treazure::{catalog, config};
+    use x402_treazury::{catalog, config};
     let mut cfg =
         config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/stableenrich.toml"))
             .await
@@ -314,7 +314,7 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
 #[tokio::test]
 async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
     use serde_json::json;
-    use x402_treazure::{catalog, config};
+    use x402_treazury::{catalog, config};
     let mut cfg =
         config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agent402.toml"))
             .await
@@ -410,7 +410,7 @@ async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
 
 #[tokio::test]
 async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
-    use x402_treazure::{catalog, config, output::HttpOutput};
+    use x402_treazury::{catalog, config, output::HttpOutput};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut cfg = config::load(&root.join("providers/agentutility/provider.toml"))
         .await
@@ -428,10 +428,10 @@ async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
             .count(),
         282
     );
-    assert_eq!(cfg.tags, ["treazure-research"]);
+    assert_eq!(cfg.tags, ["treazury-research"]);
     assert!(!cfg.probe_pricing);
-    doc["paths"]["/health"] = serde_json::json!({"post":{"tags":["treazure-research"]}});
-    doc["paths"]["/web-search"]["get"] = serde_json::json!({"tags":["treazure-research"]});
+    doc["paths"]["/health"] = serde_json::json!({"post":{"tags":["treazury-research"]}});
+    doc["paths"]["/web-search"]["get"] = serde_json::json!({"tags":["treazury-research"]});
     let tools = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
     assert_eq!(tools.len(), 16);
     assert!(

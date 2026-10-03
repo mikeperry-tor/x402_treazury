@@ -39,7 +39,7 @@ async fn wave(
             let preview = m
                 .invoke(
                     owner,
-                    "treazure_source_preview",
+                    "treazury_source_preview",
                     json!({"candidate":args["candidate"]}),
                 )
                 .await
@@ -54,7 +54,7 @@ async fn wave(
                 &url,
                 &format!("{owner}-token"),
                 "tools/call",
-                json!({"name":"treazure_source_add","arguments":args}),
+                json!({"name":"treazury_source_add","arguments":args}),
             )
             .await;
             (owner, args, response)
@@ -146,7 +146,7 @@ async fn agent_additions_are_atomic_idempotent_owner_scoped_and_durable_under_co
             &endpoints["reader"],
             "reader-token",
             "tools/call",
-            json!({"name":"treazure_source_add","arguments":duplicate}),
+            json!({"name":"treazury_source_add","arguments":duplicate}),
         )
         .await,
     );
@@ -184,14 +184,14 @@ async fn agent_additions_are_atomic_idempotent_owner_scoped_and_durable_under_co
         } else {
             "writer"
         };
-        let response = rpc(&endpoints[other], &format!("{other}-token"), "tools/call", json!({"name":"treazure_source_remove","arguments":{"source_id":receipt["source_id"],"expected_revision":1,"idempotency_key":"foreign-remove"}})).await;
+        let response = rpc(&endpoints[other], &format!("{other}-token"), "tools/call", json!({"name":"treazury_source_remove","arguments":{"source_id":receipt["source_id"],"expected_revision":1,"idempotency_key":"foreign-remove"}})).await;
         assert_eq!(response["isError"], true);
     }
     let denied = rpc(
         &endpoints["hidden"],
         "hidden-token",
         "tools/call",
-        json!({"name":"treazure_source_add","arguments":args("forbidden","forbidden")}),
+        json!({"name":"treazury_source_add","arguments":args("forbidden","forbidden")}),
     )
     .await;
     assert_eq!(denied["isError"], true);
@@ -227,7 +227,7 @@ async fn agent_additions_are_atomic_idempotent_owner_scoped_and_durable_under_co
     for (owner, args, receipt) in accepted {
         assert_eq!(
             reopened
-                .invoke(&owner, "treazure_source_add", args)
+                .invoke(&owner, "treazury_source_add", args)
                 .await
                 .unwrap(),
             receipt
@@ -255,11 +255,11 @@ async fn concurrent_additions_enforce_listener_and_owner_quotas_without_partial_
         for i in 0..8 {
             let c = candidate(&format!("tool{i}"), "process", "process");
             let preview = m
-                .invoke("writer", "treazure_source_preview", json!({"candidate":c}))
+                .invoke("writer", "treazury_source_preview", json!({"candidate":c}))
                 .await
                 .unwrap();
             let m = m.clone();
-            calls.spawn(async move { m.invoke("writer", "treazure_source_add", json!({"candidate":c,"preview_id":preview["preview_id"],"idempotency_key":format!("tool{i}")})).await });
+            calls.spawn(async move { m.invoke("writer", "treazury_source_add", json!({"candidate":c,"preview_id":preview["preview_id"],"idempotency_key":format!("tool{i}")})).await });
         }
         tokio::time::timeout(Duration::from_secs(8), barrier.wait())
             .await
@@ -331,7 +331,7 @@ async fn overlapping_agent_imports_coalesce_and_busy_rejections_can_retry() {
                 &url,
                 &format!("{owner}-token"),
                 "tools/call",
-                json!({"name":"treazure_source_add","arguments":args}),
+                json!({"name":"treazury_source_add","arguments":args}),
             )
             .await
         }));
@@ -354,7 +354,7 @@ async fn overlapping_agent_imports_coalesce_and_busy_rejections_can_retry() {
             &endpoints[owner],
             &format!("{owner}-token"),
             "tools/call",
-            json!({"name":"treazure_source_add","arguments":retry}),
+            json!({"name":"treazury_source_add","arguments":retry}),
         )
         .await;
         assert_eq!(response["isError"], true);
@@ -380,7 +380,7 @@ async fn overlapping_agent_imports_coalesce_and_busy_rejections_can_retry() {
         &endpoints["writer"],
         "writer-token",
         "tools/call",
-        json!({"name":"treazure_source_add","arguments":retry}),
+        json!({"name":"treazury_source_add","arguments":retry}),
     )
     .await;
     parsed(&response);

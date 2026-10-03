@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use x402_treazure::deployment::Deployment;
+use x402_treazury::deployment::Deployment;
 fn config(scope: &str) -> String {
     format!(
         r#"version=1
@@ -86,7 +86,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     // --show-config runs without credentials or even a spec file; --check loads
     // the catalog but still creates no pool. Inventory carries template provenance.
     let path = dir.path().join("servers.toml");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--show-config"])
@@ -105,7 +105,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let deployment = Deployment::load(&path).await.unwrap();
     let inv = serde_json::to_value(deployment.inventory()).unwrap();
     assert_eq!(inv[0]["wallet_bindings"]["a"]["scope"], "binding");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--check"])
@@ -241,7 +241,7 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
 #[cfg(feature = "zcash")]
 #[tokio::test]
 async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
-    use x402_treazure::{rotation::store::status, treasury::Treasury};
+    use x402_treazury::{rotation::store::status, treasury::Treasury};
     let dir = tempfile::tempdir().unwrap();
     let owner=Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
     let id = owner.status().await.unwrap().treasury_id;
@@ -337,7 +337,7 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
     };
     use base64::{Engine, engine::general_purpose::STANDARD};
     use std::sync::{Arc, Mutex};
-    use x402_treazure::{
+    use x402_treazury::{
         rotation::{base::now, store::status},
         treasury::Treasury,
     };
@@ -377,7 +377,7 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
                 logs.lock().unwrap().push(address.to_string());
                 return Json(json!({"payer":address.to_string()})).into_response();
             }
-            let challenge = json!({"x402Version":2,"resource":{"url":"https://fixture.example.com/pay","description":"pay","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazure::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            let challenge = json!({"x402Version":2,"resource":{"url":"https://fixture.example.com/pay","description":"pay","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (
                 StatusCode::PAYMENT_REQUIRED,
                 [(

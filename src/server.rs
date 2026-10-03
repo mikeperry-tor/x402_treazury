@@ -43,7 +43,7 @@ impl Server {
                 views: BTreeMap::from([("default".into(), catalog_state::bind(tools))]),
             })),
             catalog_server: "default".into(),
-            name: "x402-treazure".into(),
+            name: "x402_treazury".into(),
             instructions,
             max_response_chars,
         }
@@ -68,13 +68,13 @@ impl Server {
         args: &Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
         if let Some(manager) = &self.discovery
-            && name.starts_with("treazure_")
+            && name.starts_with("treazury_")
         {
             anyhow::ensure!(
                 self.management_tools().iter().any(|t| t.name == name),
                 "unknown tool"
             );
-            if name != "treazure_tool_call" {
+            if name != "treazury_tool_call" {
                 return Ok(crate::output::ToolOutput::text(serde_json::to_string(
                     &manager
                         .invoke(
@@ -209,8 +209,8 @@ impl ServerHandler for Server {
             .await
         {
             Ok(output) => {
-                let structured = if request.name.starts_with("treazure_")
-                    && request.name != "treazure_tool_call"
+                let structured = if request.name.starts_with("treazury_")
+                    && request.name != "treazury_tool_call"
                 {
                     serde_json::from_str(&output.text).ok()
                 } else {

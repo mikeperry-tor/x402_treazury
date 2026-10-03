@@ -377,7 +377,7 @@ impl Manager {
                 (t.clone(), policy::wallet(&self.policy, &g).to_owned())
             })
             .collect();
-        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":state.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"can_manage":r.owner==caller&&self.enabled(caller),"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use treazure_tools_search and treazure_tool_call, or explicitly refresh your client's tool list."})
+        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":state.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"can_manage":r.owner==caller&&self.enabled(caller),"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use treazury_tools_search and treazury_tool_call, or explicitly refresh your client's tool list."})
     }
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
@@ -440,12 +440,12 @@ impl Manager {
             "source_management_disabled"
         );
         match name {
-            "treazure_sources_list" => self.list_sources(owner, name, args),
-            "treazure_source_preview" => self.preview_source(owner, args).await,
-            "treazure_source_add" => self.add_source(owner, name, args).await,
-            "treazure_source_update" => self.update_source(owner, name, args).await,
-            "treazure_source_remove" => self.remove_source(owner, name, args).await,
-            "treazure_tools_search" => self.search_tools(owner, name, args),
+            "treazury_sources_list" => self.list_sources(owner, name, args),
+            "treazury_source_preview" => self.preview_source(owner, args).await,
+            "treazury_source_add" => self.add_source(owner, name, args).await,
+            "treazury_source_update" => self.update_source(owner, name, args).await,
+            "treazury_source_remove" => self.remove_source(owner, name, args).await,
+            "treazury_tools_search" => self.search_tools(owner, name, args),
             _ => anyhow::bail!("unknown management tool"),
         }
     }
@@ -921,7 +921,7 @@ pub async fn inspect_cli() -> Result<()> {
     let Args {
         command: Command::Inspect { meta_config },
     } = Args::parse_from(
-        std::iter::once("treazure sources".to_owned()).chain(std::env::args().skip(2)),
+        std::iter::once("treazury sources".to_owned()).chain(std::env::args().skip(2)),
     );
     let cfg: crate::deployment::MetaConfig =
         toml::from_str(&std::fs::read_to_string(&meta_config)?)?;

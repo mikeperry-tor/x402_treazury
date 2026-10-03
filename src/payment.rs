@@ -147,6 +147,7 @@ impl PaidClient {
         let idempotent = matches!(request.method().as_str(), "GET" | "HEAD");
         let mut attempt = 0;
         let mut paid_submission = false;
+        let mut extensions_omitted = false;
         // Only a pre-signing managed identity change can restart this loop.
         // The new unsigned challenge must use the new identity-bound transport.
         let response = loop {
@@ -193,7 +194,8 @@ impl PaidClient {
                         )
                         .await
                     {
-                        Ok(paid) => {
+                        Ok((paid, omitted)) => {
+                            extensions_omitted = omitted;
                             paid_submission = true;
                             response = paid;
                         }
@@ -229,7 +231,12 @@ impl PaidClient {
             }
             break response;
         };
-        self.response_output(response, paid_submission).await
+        let result = self.response_output(response, paid_submission).await;
+        if extensions_omitted {
+            result.context(crate::rotation::manager::OMITTED_EXTENSIONS)
+        } else {
+            result
+        }
     }
 
     async fn bound_challenge(&self, response: reqwest::Response) -> Result<reqwest::Response> {

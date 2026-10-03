@@ -2,7 +2,7 @@
 mod socks;
 use socks::{Fault, Socks};
 use std::{collections::BTreeMap, time::Duration};
-use x402_treazure::network::{IsolationId, Mode, NetworkContext, NetworkPolicy, SocksAuth};
+use x402_treazury::network::{IsolationId, Mode, NetworkContext, NetworkPolicy, SocksAuth};
 fn policy(proxy: &Socks) -> NetworkPolicy {
     NetworkPolicy {
         mode: Mode::Tor,
@@ -42,7 +42,7 @@ fn deterministic_tokens_and_strict_policy() {
     assert_eq!(a, b);
     assert_eq!(
         a.token("x402_treazury"),
-        "9cbb1f514df07edeb7a58d45e3d50e3164cfd214463a7312a80ae8f3bd499ad7"
+        "7b2faaafb15df0e25569ca52f583da2dcd955ac2f50ca4344027ec22d0c01bb9"
     );
     assert_ne!(a.token("x"), a.token("y"));
     assert_ne!(
@@ -345,7 +345,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
         "spec = 'http://unreachable.invalid/openapi.json'\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .args(["--show-config", "--config"])
         .arg(&source)
         .output()
@@ -359,7 +359,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
         "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .args(["--show-config", "--config"])
         .arg(&source)
         .arg("--network-config")
@@ -375,7 +375,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert_eq!(value["network"]["mode"], "tor");
     assert_eq!(value["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(value["network"]["socks_auth"], "tor_extended");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .args(["--meta-config", "missing.toml", "--network-config"])
         .arg(policy)
         .output()

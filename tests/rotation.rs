@@ -1,5 +1,5 @@
 use std::path::Path;
-use x402_treazure::rotation::store::{Store, StoreHandle, status};
+use x402_treazury::rotation::store::{Store, StoreHandle, status};
 fn create(dir: &Path) -> Store {
     Store::create(
         &dir.join("state"),
@@ -283,7 +283,7 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
 
 #[test]
 fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
-    use x402_treazure::rotation::store::{SyncObservation, SyncPhase};
+    use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let ready = SyncObservation {
@@ -363,7 +363,7 @@ fn sync_schema_migrates_admission_state_without_changing_wallet() {
 
 #[test]
 fn submission_contract_only_accepts_durable_pending_bytes() {
-    use x402_treazure::rotation::transaction::PreparedTransaction;
+    use x402_treazury::rotation::transaction::PreparedTransaction;
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     assert!(PreparedTransaction::load(&s, "op").is_err());
@@ -388,7 +388,7 @@ fn submission_contract_only_accepts_durable_pending_bytes() {
 
 #[test]
 fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
-    use x402_treazure::rotation::transaction::{PreparedTransaction, TransactionFacts};
+    use x402_treazury::rotation::transaction::{PreparedTransaction, TransactionFacts};
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let facts = TransactionFacts {
@@ -441,7 +441,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
 
 #[test]
 fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
-    use x402_treazure::rotation::store::funding::FundingPhase;
+    use x402_treazury::rotation::store::funding::FundingPhase;
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
@@ -525,7 +525,7 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
 
 #[test]
 fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
-    use x402_treazure::rotation::store::funding::FundingPhase;
+    use x402_treazury::rotation::store::funding::FundingPhase;
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let pool = s.ensure_pool("a", "5").unwrap();
@@ -554,7 +554,7 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
 
 #[test]
 fn operation_and_refund_identity_survive_promotion_and_reopen() {
-    use x402_treazure::{
+    use x402_treazury::{
         network::IsolationId,
         rotation::{
             store::funding::FundingPhase,
@@ -635,7 +635,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
 
 #[test]
 fn funding_capacity_and_reservation_agree_across_days_and_reduced_limits() {
-    use x402_treazure::rotation::store::{SyncObservation, SyncPhase};
+    use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();

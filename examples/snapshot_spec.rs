@@ -63,11 +63,11 @@ fn snapshot(mut spec: Value) -> Result<Vec<u8>> {
 async fn main() -> Result<()> {
     let args = Args::parse();
     if let Some(path) = &args.network_config {
-        x402_treazure::network::install(x402_treazure::network::NetworkPolicy::load(path)?)?;
+        x402_treazury::network::install(x402_treazury::network::NetworkPolicy::load(path)?)?;
     }
     let raw = if args.source.starts_with("https://") || args.source.starts_with("http://") {
         let http =
-            x402_treazure::network::discovery(&args.source, std::time::Duration::from_secs(120))?;
+            x402_treazury::network::discovery(&args.source, std::time::Duration::from_secs(120))?;
         http.get(&args.source)
             .send()
             .await?

@@ -598,7 +598,7 @@
   },
   {
     "name": "agent402_help",
-    "description": "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazure handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly.",
+    "description": "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazury handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly.",
     "method": "GET",
     "path": "https://agent402.tools/llms.txt",
     "input_schema": {

@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
-use x402_treazure::{
+use x402_treazury::{
     catalog::{Config, build_tools, tag_counts},
     deployment::Deployment,
 };
@@ -106,7 +106,7 @@ include_tools = ["socialfetch_twitter_*"]
         deployment.tag_inventory().unwrap()["socialfetch"],
         tag_counts(&root).unwrap()
     );
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--meta-config", path.to_str().unwrap(), "--list-tags"])
@@ -120,7 +120,7 @@ include_tools = ["socialfetch_twitter_*"]
     let counts: BTreeMap<String, BTreeMap<String, usize>> =
         serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(counts["socialfetch"]["Twitter"], 29);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args([

@@ -134,7 +134,7 @@ fn analyze(path: &Path, code: &str) -> Value {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let paths: Vec<_> = env::args().skip(1).collect();
     if paths.is_empty() {
-        return Err("usage: treazure-complexity FILE.rs [...]".into());
+        return Err("usage: treazury-complexity FILE.rs [...]".into());
     }
     let files: Vec<_> = paths
         .iter()

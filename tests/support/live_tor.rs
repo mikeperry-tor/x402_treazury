@@ -58,7 +58,7 @@ pub async fn smoke() {
             .await
             .unwrap();
         assert!(response.status().is_success());
-        x402_treazure::limits::read(
+        x402_treazury::limits::read(
             response,
             4 * 1024 * 1024,
             "Tor qualification page",

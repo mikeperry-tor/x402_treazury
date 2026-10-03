@@ -40,7 +40,7 @@ async fn payment(
     }
     v.unsigned.fetch_add(1, Ordering::SeqCst);
     let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"fixture","mimeType":"text/plain"},
-        "accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazure::payment::USDC,"amount":"14000",
+        "accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"14000",
         "payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     (
         StatusCode::PAYMENT_REQUIRED,
@@ -79,7 +79,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool) {
         source
     };
     std::fs::write(tmp.path().join("config.toml"), config).unwrap();
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"));
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
     command
         .env_clear()
         .current_dir(tmp.path())

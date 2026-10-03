@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use x402_treazure::{
+use x402_treazury::{
     deployment::Deployment,
     rotation::config::{WalletConfig, zatoshis},
 };
@@ -112,7 +112,7 @@ fn money_is_exact_and_tagged_profiles_reject_cross_mode_fields() {
 
 #[test]
 fn public_funding_is_explicit_and_needs_no_near_credentials() {
-    use x402_treazure::rotation::config::FundingConfig;
+    use x402_treazury::rotation::config::FundingConfig;
     for mode in ["public", "basic", "advanced"] {
         let f: FundingConfig = toml::from_str(&format!(
             "base_rpc_url_env='BASE'\nconfidentiality='{mode}'"

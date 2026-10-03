@@ -15,7 +15,7 @@ use std::{
     },
 };
 use tokio::sync::Notify;
-use x402_treazure::{
+use x402_treazury::{
     catalog::RoutedRequest,
     payment::{PaidClient, Payer, SpendPolicy, USDC},
 };
@@ -210,7 +210,7 @@ async fn upto_authorizes_maximum_and_facilitator() {
             .unwrap(),
         auth.witness.to
     );
-    let now = x402_treazure::rotation::base::now().unwrap();
+    let now = x402_treazury::rotation::base::now().unwrap();
     assert!(auth.witness.validAfter <= U256::from(now));
     assert!(auth.deadline >= U256::from(now) && auth.deadline <= U256::from(now + 60));
     let domain = eip712_domain! {name:"Permit2", chain_id:8453, verifying_contract:"0x000000000022D473030F116dDEE9F6B43aC78BA3".parse::<Address>().unwrap(),};

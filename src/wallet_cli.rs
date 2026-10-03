@@ -546,7 +546,7 @@ async fn finish_on_shutdown<T>(
 #[ignore = "subprocess helper invoked by treasury::regtest::recovery_cli_lifecycle"]
 async fn regtest_command_child() {
     let arguments: Vec<String> = serde_json::from_str(
-        &std::env::var("TREAZURE_TEST_WALLET_ARGS").expect("fixture arguments"),
+        &std::env::var("TREAZURY_TEST_WALLET_ARGS").expect("fixture arguments"),
     )
     .unwrap();
     let result = match WalletArgs::try_parse_from(arguments) {

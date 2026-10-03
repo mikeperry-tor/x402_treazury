@@ -1,6 +1,6 @@
 #![cfg(feature = "zcash")]
 use anyhow::Result;
-use x402_treazure::rotation::{
+use x402_treazury::rotation::{
     funding::{FundingBackend, FundingWorker},
     near::{Quote, SwapStatus},
     store::{Store, StoreHandle, SyncObservation, SyncPhase, funding::FundingJob},
@@ -107,7 +107,7 @@ impl FundingBackend for Fake {
             .await?;
         assert_eq!(
             phase,
-            x402_treazure::rotation::store::funding::FundingPhase::VerifyingCredit,
+            x402_treazury::rotation::store::funding::FundingPhase::VerifyingCredit,
             "verification phase must commit before the external credit check"
         );
         anyhow::ensure!(self.chain_credit, "no independent Base credit");
@@ -134,7 +134,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     let jobs = s.funding_jobs().unwrap();
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
-    let now = x402_treazure::rotation::base::now().unwrap();
+    let now = x402_treazury::rotation::base::now().unwrap();
     s.save_sync_snapshot(
         1,
         b"ready",
@@ -182,7 +182,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     let status = store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
-        x402_treazure::rotation::store::funding::FundingPhase::VerifyingCredit
+        x402_treazury::rotation::store::funding::FundingPhase::VerifyingCredit
     );
     assert_eq!(status.pools[0].addresses[0].role, "ALLOCATED");
     assert_eq!(status.treasury_operations[0].attempts, 1);
@@ -190,7 +190,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     worker.tick(now + 9000).await.unwrap();
     assert_eq!(
         store.call(|s| s.status()).await.unwrap().funding_jobs[0].phase,
-        x402_treazure::rotation::store::funding::FundingPhase::Complete
+        x402_treazury::rotation::store::funding::FundingPhase::Complete
     );
     drop(worker);
     drop(store);
@@ -213,8 +213,8 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
     s.save_funding_quote(&job.id, b"quote").unwrap();
     s.advance_funding(
         &job.id,
-        x402_treazure::rotation::store::funding::FundingPhase::Quoted,
-        x402_treazure::rotation::store::funding::FundingPhase::Preparing,
+        x402_treazury::rotation::store::funding::FundingPhase::Quoted,
+        x402_treazury::rotation::store::funding::FundingPhase::Preparing,
     )
     .unwrap();
     s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
@@ -281,7 +281,7 @@ async fn fixture() -> (
     let jobs = s.funding_jobs().unwrap();
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
-    let now = x402_treazure::rotation::base::now().unwrap();
+    let now = x402_treazury::rotation::base::now().unwrap();
     s.save_sync_snapshot(
         1,
         b"ready",
@@ -325,7 +325,7 @@ async fn fixture() -> (
 #[tokio::test]
 async fn status_backoff_persists_independently_and_redacts_errors() {
     let (dir, mut worker, task) = fixture().await;
-    let now = x402_treazure::rotation::base::now().unwrap();
+    let now = x402_treazury::rotation::base::now().unwrap();
     for i in 0..5 {
         worker.tick(now + i * 1000).await.unwrap();
     }
@@ -364,7 +364,7 @@ async fn status_backoff_persists_independently_and_redacts_errors() {
 async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
     let (_dir, mut worker, task) = fixture().await;
     worker.backend.timeout = 1;
-    let now = x402_treazure::rotation::base::now().unwrap();
+    let now = x402_treazury::rotation::base::now().unwrap();
     for i in 0..6 {
         worker.tick(now + i * 1000).await.unwrap();
     }
@@ -377,7 +377,7 @@ async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
-        x402_treazure::rotation::store::funding::FundingPhase::Complete
+        x402_treazury::rotation::store::funding::FundingPhase::Complete
     );
     assert!(!status.funding_jobs[0].timed_out && !status.pools[0].funding_degraded);
     assert_eq!(worker.backend.sends, 1);
@@ -387,7 +387,7 @@ async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
 #[tokio::test]
 async fn insufficient_treasury_waits_and_only_unprepared_quotes_refresh_with_a_bound() {
     let (_dir, mut worker, task) = fixture().await;
-    let now = x402_treazure::rotation::base::now().unwrap();
+    let now = x402_treazury::rotation::base::now().unwrap();
     worker.backend.quote_deadline = now + 400;
     worker.tick(now).await.unwrap();
     let original = worker
@@ -400,7 +400,7 @@ async fn insufficient_treasury_waits_and_only_unprepared_quotes_refresh_with_a_b
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
-        x402_treazure::rotation::store::funding::FundingPhase::Quoted
+        x402_treazury::rotation::store::funding::FundingPhase::Quoted
     );
     assert!(
         status.funding_jobs[0]
@@ -420,7 +420,7 @@ async fn insufficient_treasury_waits_and_only_unprepared_quotes_refresh_with_a_b
     assert_eq!(worker.backend.sends, 0);
     assert_eq!(
         status.funding_jobs[0].phase,
-        x402_treazure::rotation::store::funding::FundingPhase::RecoveryRequired
+        x402_treazury::rotation::store::funding::FundingPhase::RecoveryRequired
     );
     assert!(
         status.funding_jobs[0]
@@ -435,10 +435,10 @@ async fn insufficient_treasury_waits_and_only_unprepared_quotes_refresh_with_a_b
 
 #[tokio::test]
 async fn quote_and_prepared_validity_boundaries_are_exact() {
-    use x402_treazure::rotation::store::funding::FundingPhase;
+    use x402_treazury::rotation::store::funding::FundingPhase;
     for remaining in [299, 300] {
         let (_dir, mut worker, task) = fixture().await;
-        let now = x402_treazure::rotation::base::now().unwrap();
+        let now = x402_treazury::rotation::base::now().unwrap();
         worker.backend.quote_deadline = now + 100 + remaining;
         worker.tick(now).await.unwrap();
         worker.tick(now + 100).await.unwrap();
@@ -481,10 +481,10 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
 
 #[tokio::test]
 async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits() {
-    use x402_treazure::rotation::store::funding::FundingPhase;
+    use x402_treazury::rotation::store::funding::FundingPhase;
     for saved in [false, true] {
         let (dir, mut worker, task) = fixture().await;
-        let now = x402_treazure::rotation::base::now().unwrap();
+        let now = x402_treazury::rotation::base::now().unwrap();
         worker.tick(now).await.unwrap();
         if saved {
             worker.tick(now + 100).await.unwrap();
@@ -527,7 +527,7 @@ async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits
 
 #[tokio::test]
 async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submission() {
-    use x402_treazure::rotation::store::funding::FundingPhase;
+    use x402_treazury::rotation::store::funding::FundingPhase;
     let statuses: [fn() -> SwapStatus; 8] = [
         || SwapStatus::PendingDeposit,
         || SwapStatus::KnownDeposit,
@@ -545,7 +545,7 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
     ] {
         for status in statuses {
             let (_dir, mut worker, task) = fixture().await;
-            let now = x402_treazure::rotation::base::now().unwrap();
+            let now = x402_treazury::rotation::base::now().unwrap();
             // Real quote/preparation/broadcast-intent/reconciliation transitions.
             for i in 0..5 {
                 worker.tick(now + i * 100).await.unwrap();

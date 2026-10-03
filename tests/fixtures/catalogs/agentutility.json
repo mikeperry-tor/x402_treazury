@@ -192,7 +192,7 @@
   },
   {
     "name": "agentutility_help",
-    "description": "Read AgentUtility's large catalog and usage guide, fetched on demand and cached for the process. It includes aliases, excluded tools, other clients and broader chain support; those are not automatically enabled in Treazure. Use the selected tools and actual result fields. Any configured document limit is reported explicitly.",
+    "description": "Read AgentUtility's large catalog and usage guide, fetched on demand and cached for the process. It includes aliases, excluded tools, other clients and broader chain support; those are not automatically enabled in Treazury. Use the selected tools and actual result fields. Any configured document limit is reported explicitly.",
     "method": "GET",
     "path": "https://agentutility.ai/llms.txt",
     "input_schema": {

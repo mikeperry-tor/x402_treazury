@@ -91,7 +91,7 @@ fn key_lengths_directory_permissions_and_parent_aliases() {
 #[test]
 #[ignore = "invoked by ownership_is_exclusive_across_processes"]
 fn ownership_child() {
-    let dir = std::path::PathBuf::from(std::env::var_os("TREAZURE_TEST_OWNER_DIR").unwrap());
+    let dir = std::path::PathBuf::from(std::env::var_os("TREAZURY_TEST_OWNER_DIR").unwrap());
     let error = match Store::open(&dir.join("state"), &dir.join("key"), "unused") {
         Ok(_) => panic!("second process acquired treasury"),
         Err(error) => error,
@@ -110,7 +110,7 @@ fn ownership_is_exclusive_across_processes() {
     )
     .unwrap();
     let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-    child.env_clear().env("TREAZURE_TEST_OWNER_DIR", tmp.path());
+    child.env_clear().env("TREAZURY_TEST_OWNER_DIR", tmp.path());
     for (key, value) in
         std::env::vars_os().filter(|(key, _)| key.to_string_lossy().starts_with("LLVM_"))
     {

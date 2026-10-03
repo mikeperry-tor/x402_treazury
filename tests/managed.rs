@@ -16,7 +16,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
-use x402_treazure::{
+use x402_treazury::{
     catalog::RoutedRequest,
     payment::{PaidClient, SpendPolicy, USDC},
     rotation::{
@@ -348,6 +348,80 @@ async fn confirmed_depletion_promotes_once_and_queues_one_replacement() {
     );
     h.close().await;
 }
+#[derive(Clone)]
+struct LogCapture(Arc<Mutex<Vec<u8>>>);
+impl std::io::Write for LogCapture {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization() {
+    use tracing::instrument::WithSubscriber;
+    let logs = LogCapture(Arc::default());
+    let sink = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || sink.clone())
+        .finish();
+    async {
+        for captured in [false, true] {
+            let h = Harness::new().await;
+            let mut c = if captured {
+                serde_json::from_str(include_str!("fixtures/agentutility_payment_required.json"))
+                    .unwrap()
+            } else {
+                let mut c = challenge("1");
+                c["extensions"] =
+                    json!({"unknown-extension": {"secret": "private-extension-value"}});
+                c
+            };
+            let expected = c["accepts"][0].clone();
+            *h.f.challenge.lock().unwrap() = c.take();
+            assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+            {
+                let signed = h.f.signed.lock().unwrap();
+                assert_eq!(signed.len(), 1);
+                assert!(
+                    signed[0]["extensions"]
+                        .as_object()
+                        .is_none_or(|m| m.is_empty())
+                );
+                assert_eq!(signed[0]["accepted"], expected);
+                assert_eq!(
+                    signed[0]["payload"]["authorization"]["value"],
+                    expected["amount"]
+                );
+                assert_eq!(
+                    signed[0]["payload"]["authorization"]["to"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<Address>()
+                        .unwrap(),
+                    expected["payTo"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<Address>()
+                        .unwrap()
+                );
+            }
+            h.close().await;
+        }
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    for name in ["unknown-extension", "bazaar", "builder-code"] {
+        assert!(logs.contains(name), "{logs}");
+    }
+    assert!(logs.contains("stripping advertised x402 extension"));
+    assert!(!logs.contains("private-extension-value"));
+}
 #[tokio::test]
 async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
     let h = Harness::new().await;
@@ -356,8 +430,9 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
         "upto",
         "permit2",
         "flow",
-        "extensions",
-        "agentutility_extensions",
+        "malformed_extensions",
+        "offer_extensions",
+        "extra_extensions",
         "asset",
         "chain",
         "zero",
@@ -372,13 +447,9 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
             "upto" => c["accepts"][0]["scheme"] = json!("upto"),
             "permit2" => c["accepts"][0]["extra"]["assetTransferMethod"] = json!("permit2"),
             "flow" => c["accepts"][0]["extra"]["flow"] = json!("upfront"),
-            "extensions" => c["extensions"] = json!({"unknown":{}}),
-            "agentutility_extensions" => {
-                c = serde_json::from_str(include_str!(
-                    "fixtures/agentutility_payment_required.json"
-                ))
-                .unwrap()
-            }
+            "malformed_extensions" => c["extensions"] = json!([]),
+            "offer_extensions" => c["accepts"][0]["extensions"] = json!({"unknown": {}}),
+            "extra_extensions" => c["accepts"][0]["extra"]["extensions"] = json!({"unknown": {}}),
             "asset" => {
                 c["accepts"][0]["asset"] = json!("0x0000000000000000000000000000000000000001")
             }
@@ -408,13 +479,20 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
 async fn rejected_payment_remains_reserved_across_restart_and_is_not_replayed() {
     let mut h = Harness::new().await;
     h.f.reject.store(true, Ordering::SeqCst);
+    h.f.challenge.lock().unwrap()["extensions"] = json!({"unknown": {"secret": "not logged"}});
+    let error = h.client.execute(h.route()).await.unwrap_err();
+    let message = format!("{error:#}");
     assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("402")
+        message.contains("omitted advertised x402 extensions"),
+        "{message}"
+    );
+    assert!(message.contains("remains reserved"), "{message}");
+    assert!(message.contains("Do not automatically retry"), "{message}");
+    assert!(message.contains("402"), "{message}");
+    assert!(
+        h.f.signed.lock().unwrap()[0]["extensions"]
+            .as_object()
+            .is_none_or(|m| m.is_empty())
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     let id = h.store.call(|s| Ok(s.id().to_owned())).await.unwrap();
@@ -495,7 +573,7 @@ async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
 #[cfg(feature = "zcash")]
 #[tokio::test]
 async fn managed_deployment_shares_pools_keeps_static_profiles_and_releases_ownership() {
-    use x402_treazure::{deployment::Deployment, treasury::Treasury};
+    use x402_treazury::{deployment::Deployment, treasury::Treasury};
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
     let dir = tempfile::tempdir().unwrap();
@@ -575,7 +653,7 @@ sources=["api"]
     };
     assert!(error.to_string().contains("TOKEN"));
     assert!(
-        x402_treazure::rotation::store::status(&dir.path().join("state"))
+        x402_treazury::rotation::store::status(&dir.path().join("state"))
             .unwrap()
             .pools
             .is_empty(),
@@ -624,7 +702,7 @@ sources=["api"]
         .bind(&env)
         .await
         .unwrap();
-    let state = x402_treazure::rotation::store::status(&dir.path().join("state")).unwrap();
+    let state = x402_treazury::rotation::store::status(&dir.path().join("state")).unwrap();
     for (before, after) in allocated.iter().zip(&state.pools) {
         assert_eq!(
             serde_json::to_value(&before.addresses).unwrap(),
@@ -662,7 +740,7 @@ sources=["api"]
     t.close().await.unwrap();
     // Exercise the opt-in owner's shutdown with all quote work deferred. This
     // must not contact NEAR, and must release every worker's store handle.
-    let mut state = x402_treazure::rotation::store::Store::open(
+    let mut state = x402_treazury::rotation::store::Store::open(
         &dir.path().join("state"),
         &dir.path().join("key"),
         &state.treasury_id,
@@ -920,7 +998,7 @@ async fn managed_payments_use_isolated_tor_connections() {
 #[test]
 #[ignore = "subprocess helper runs with its own immutable Tor policy"]
 fn tor_managed_child() {
-    use x402_treazure::network::{Mode, NetworkPolicy, install};
+    use x402_treazury::network::{Mode, NetworkPolicy, install};
     install(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(std::env::var("TOR_TEST_PROXY").unwrap().parse().unwrap()),
@@ -930,6 +1008,7 @@ fn tor_managed_child() {
     confirmed_depletion_promotes_once_and_queues_one_replacement();
     concurrent_calls_reserve_before_send_and_cannot_churn_busy_active();
     unsupported_and_over_target_offers_have_no_admission_side_effects();
+    managed_extensions_are_stripped_logged_and_do_not_change_authorization();
     rejected_payment_remains_reserved_across_restart_and_is_not_replayed();
     free_calls_do_not_touch_admission_and_bootstrap_requires_both_candidates();
     post_rotation_returns_before_signing_and_requires_caller_retry();
@@ -984,7 +1063,7 @@ async fn promotion_keeps_rpc_and_payment_transport_bound_to_address() {
 #[tokio::test]
 #[ignore = "private process Tor policy; exercised by parent"]
 async fn promotion_identity_child() {
-    use x402_treazure::network::{self, IsolationId, Mode, NetworkPolicy};
+    use x402_treazury::network::{self, IsolationId, Mode, NetworkPolicy};
     let proxy = socks::Socks::start(
         BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
         socks::Fault::None,

@@ -11,7 +11,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use x402_treazure::{
+use x402_treazury::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
     server::{Server, http_app},
@@ -81,7 +81,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
                 };
                 let _ = s.write_all(wire.as_bytes()).await;
             });
-            let result = x402_treazure::limits::read(
+            let result = x402_treazury::limits::read(
                 http.get(url).send().await.unwrap(),
                 7,
                 "fixture document",
@@ -105,7 +105,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     let (vendor,v)=serve(Router::new().route("/pay",get(move |headers:HeaderMap| {let(s,u)=(s.clone(),u.clone());async move {
         if headers.contains_key("payment-signature") {s.fetch_add(1,Ordering::SeqCst);return "PRIVATE-CONTENT".into_response();}
         u.fetch_add(1,Ordering::SeqCst);
-        let challenge=json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"fixture".repeat(100),"mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazure::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+        let challenge=json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"fixture".repeat(100),"mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
         (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(challenge.to_string()))]).into_response()
     }})).route("/help",get(move||{let h=h.clone();async move{h.fetch_add(1,Ordering::SeqCst);"雪🙂"}}))
         .route("/spec",get(||async {json!({"paths":{"/unused":{"get":{}}}}).to_string()}))).await;
@@ -161,7 +161,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         "雪\n[truncated by --max-response-chars]"
     );
     assert!(
-        x402_treazure::catalog::load_json_with_limit(&format!("{vendor}/spec"), &http, 8)
+        x402_treazury::catalog::load_json_with_limit(&format!("{vendor}/spec"), &http, 8)
             .await
             .unwrap_err()
             .to_string()
@@ -207,7 +207,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     let spec = json!({"paths":{"/skipped":{"get":{}}}});
     let tools = build_tools(&capped, &spec, "t").unwrap();
     assert!(
-        x402_treazure::pricing::PricingCache::default()
+        x402_treazury::pricing::PricingCache::default()
             .discover(&capped, &spec, &tools, &vendor)
             .await
             .unwrap()
@@ -242,7 +242,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("provider.toml"),format!("spec = '{vendor}/spec'\nbase_url = '{vendor}'\nprefix = 'test'\nmax_spec_bytes = 8\nprobe_pricing = false\n")).unwrap();
     for override_limit in [false, true] {
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"));
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
         command
             .env_clear()
             .current_dir(tmp.path())
@@ -270,7 +270,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
     }
     let spec_url = format!("{vendor}/spec");
     std::fs::write(tmp.path().join("servers.toml"),format!("version = 1\n[sources.test]\nspec = '{spec_url}'\nbase_url = '{vendor}'\nmax_spec_bytes = 8\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'MUST_NOT_LOAD'\n[servers.test]\nlisten = '127.0.0.1:0'\nwallet = 'shared'\nsources = ['test']\nbearer_token_env = 'MUST_NOT_LOAD'\n")).unwrap();
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .current_dir(tmp.path())
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
@@ -291,7 +291,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
 #[tokio::test]
 async fn deployment_sources_sharing_a_wallet_keep_distinct_response_caps() {
     use std::collections::BTreeMap;
-    use x402_treazure::deployment::Deployment;
+    use x402_treazury::deployment::Deployment;
     let (vendor, v) = serve(Router::new().route("/hello", get(|| async { "123456789" }))).await;
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(

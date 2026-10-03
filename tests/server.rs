@@ -7,7 +7,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
-use x402_treazure::{
+use x402_treazury::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
     server::{Server, http_app},
@@ -159,7 +159,7 @@ fn schemas_filters_and_routes_handle_boundaries_collisions_and_refs() {
 
 #[tokio::test]
 async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
-    use x402_treazure::catalog_state::{self, CatalogSnapshot};
+    use x402_treazury::catalog_state::{self, CatalogSnapshot};
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let (e, r) = (entered.clone(), release.clone());
@@ -220,7 +220,7 @@ async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_cont
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
     };
-    use x402_treazure::catalog_state::{self, CatalogSnapshot};
+    use x402_treazury::catalog_state::{self, CatalogSnapshot};
     let hits = Arc::new(AtomicUsize::new(0));
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -348,7 +348,7 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
         ..Default::default()
     };
     let prices = BTreeMap::from([(("POST".into(), "/x".into()), "Discovered price".into())]);
-    let tools = x402_treazure::catalog::build_tools_with_prices(&cfg, &doc, "t", &prices).unwrap();
+    let tools = x402_treazury::catalog::build_tools_with_prices(&cfg, &doc, "t", &prices).unwrap();
     assert_eq!(tools[0].description, "Authored instructions");
     let route = tools[0]
         .route(

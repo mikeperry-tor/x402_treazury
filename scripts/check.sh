@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run feature suites sequentially: their CLI tests share target/debug/treazure.
+# Run feature suites sequentially: their CLI tests share target/debug/treazury.
 set -eu
 with_zcash=true
 case ${1:-} in

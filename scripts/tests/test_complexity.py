@@ -75,7 +75,7 @@ class ComplexityTests(unittest.TestCase):
     def test_parser_failure_preserves_successful_publication_and_raw_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for p in ["src/a.rs", "tools/complexity/Cargo.lock", "target/tools/complexity/debug/treazure-complexity"]:
+            for p in ["src/a.rs", "tools/complexity/Cargo.lock", "target/tools/complexity/debug/treazury-complexity"]:
                 path = root / p
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("fixture")

@@ -173,7 +173,7 @@ def main():
     out.mkdir(parents=True)
     print(f"Complexity artifacts: {out}", flush=True)
     try:
-        binary = ROOT / "target/tools/complexity/debug/treazure-complexity"
+        binary = ROOT / "target/tools/complexity/debug/treazury-complexity"
         if not args.no_build:
             with (out / "build.log").open("w") as log:
                 subprocess.run(["cargo", "build", "--locked", "--manifest-path", "tools/complexity/Cargo.toml", "--target-dir", "target/tools/complexity"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)

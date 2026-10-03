@@ -60,7 +60,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         ),
     )
     .unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
@@ -97,7 +97,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         match index {
             0 => {
                 assert!(response["result"]["serverInfo"]["version"].is_string());
-                assert_eq!(response["result"]["serverInfo"]["name"], "x402-treazure");
+                assert_eq!(response["result"]["serverInfo"]["name"], "x402_treazury");
                 input
                     .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
                     .await

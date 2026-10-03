@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use std::path::Path;
-use x402_treazure::{config, deployment::Deployment};
+use x402_treazury::{config, deployment::Deployment};
 
 #[tokio::test]
 async fn composition_replaces_fields_and_resolves_paths_at_their_declaration() {
@@ -188,7 +188,7 @@ fn show_config_is_offline_reports_origins_and_never_resolves_secret_values() {
     let path = dir.path().join("deployment.toml");
     // api.json intentionally does not exist: inspecting composition never loads specs.
     std::fs::write(&path, deployment_text()).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazure"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("PRIVATE_ENV_REFERENCE", "do-not-expose-this")

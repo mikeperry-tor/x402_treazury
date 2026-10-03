@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser};
 use rmcp::ServiceExt;
 use std::{collections::BTreeMap, time::Duration};
-use x402_treazure::{
+use x402_treazury::{
     catalog::{self, Config},
     payment::{PaidClient, Payer, SpendPolicy},
     server::{Server, serve_http},
@@ -10,9 +10,9 @@ use x402_treazure::{
 
 #[derive(Parser)]
 #[command(
-    name = "treazure",
+    name = "treazury",
     version,
-    about = "x402-treazure: paid API tools with managed wallets and optional Tor isolation",
+    about = "x402_treazury: paid API tools with managed wallets and optional Tor isolation",
     after_help = "Treasury commands: wallet --help (init/addresses/address/pool require the zcash feature)"
 )]
 struct Args {
@@ -84,10 +84,10 @@ async fn main() -> std::process::ExitCode {
 }
 async fn run() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("wallet") {
-        return x402_treazure::wallet_cli::run().await;
+        return x402_treazury::wallet_cli::run().await;
     }
     if std::env::args().nth(1).as_deref() == Some("sources") {
-        return x402_treazure::discovery::inspect_cli().await;
+        return x402_treazury::discovery::inspect_cli().await;
     }
     let matches = Args::command().get_matches();
     let args = Args::from_arg_matches(&matches)?;
@@ -100,7 +100,7 @@ async fn run() -> Result<()> {
         return show_config(&args, &matches).await;
     }
     if let Some(path) = &args.network_config {
-        x402_treazure::network::install(x402_treazure::network::NetworkPolicy::load(path)?)?;
+        x402_treazury::network::install(x402_treazury::network::NetworkPolicy::load(path)?)?;
     }
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if let Some(path) = &args.env_file {
@@ -117,7 +117,7 @@ async fn run() -> Result<()> {
 
 async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()> {
     let cfg = standalone_config(&args, &env).await?;
-    let http = x402_treazure::network::discovery(
+    let http = x402_treazury::network::discovery(
         if cfg.spec.starts_with("http") {
             &cfg.spec
         } else {
@@ -146,7 +146,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .prefix
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
-    x402_treazure::pricing::validate(&cfg)?;
+    x402_treazury::pricing::validate(&cfg)?;
     let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
     if args.list_tools {
         println!("{}", serde_json::to_string_pretty(&tools)?);
@@ -174,7 +174,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             .context("EVM_PRIVATE_KEY required")?,
         policy,
     )?;
-    let prices = x402_treazure::pricing::process_cache()
+    let prices = x402_treazury::pricing::process_cache()
         .discover(&cfg, &root, &tools, &base)
         .await?;
     tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
@@ -245,19 +245,19 @@ async fn show_config(args: &Args, matches: &clap::ArgMatches) -> Result<()> {
         }
     }
     let mut value = if let Some(path) = &args.meta_config {
-        x402_treazure::deployment::Deployment::show_config(path).await?
+        x402_treazury::deployment::Deployment::show_config(path).await?
     } else {
         let path = args
             .config
             .as_ref()
             .context("--show-config requires --config or --meta-config")?;
-        serde_json::to_value(x402_treazure::config::load(std::path::Path::new(path)).await?)?
+        serde_json::to_value(x402_treazury::config::load(std::path::Path::new(path)).await?)?
     };
     if args.meta_config.is_none() {
         let policy = args
             .network_config
             .as_ref()
-            .map(|path| x402_treazure::network::NetworkPolicy::load(path))
+            .map(|path| x402_treazury::network::NetworkPolicy::load(path))
             .transpose()?
             .unwrap_or_default();
         value["network"] = policy.inspection();
@@ -271,7 +271,7 @@ async fn run_deployment(
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
 ) -> Result<()> {
-    let deployment = x402_treazure::deployment::Deployment::load(path).await?;
+    let deployment = x402_treazury::deployment::Deployment::load(path).await?;
     if args.list_tags {
         println!(
             "{}",
@@ -331,7 +331,7 @@ async fn run_deployment(
 
 async fn standalone_config(args: &Args, env: &BTreeMap<String, String>) -> Result<Config> {
     let mut cfg: Config = if let Some(path) = &args.config {
-        let resolved = x402_treazure::config::load(std::path::Path::new(path)).await?;
+        let resolved = x402_treazury::config::load(std::path::Path::new(path)).await?;
         resolved.settings
     } else {
         Config::default()
@@ -401,7 +401,7 @@ async fn standalone_config(args: &Args, env: &BTreeMap<String, String>) -> Resul
     if let Some(value) = args.max_spec_bytes {
         cfg.max_spec_bytes = value;
     }
-    x402_treazure::config::validate(&cfg)?;
+    x402_treazury::config::validate(&cfg)?;
     Ok(cfg)
 }
 

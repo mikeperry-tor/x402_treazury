@@ -1,6 +1,6 @@
 # Agent API discovery and source management
 
-Treazure can let an agent register public OpenAPI APIs at runtime. This is optional
+Treazury can let an agent register public OpenAPI APIs at runtime. This is optional
 and available in `--meta-config` HTTP deployments. Standalone stdio/HTTP provider
 commands remain static. Start with [the static-wallet example](../examples/agent-sources.toml)
 or [the managed-wallet example](../examples/agent-sources-managed.toml).
@@ -19,13 +19,13 @@ and synchronize through normal startup; automatic funding still requires `auto_f
 ```sh
 cargo build --locked
 # Offline composition and permissions; no keys, spec requests or registry access:
-target/debug/treazure --meta-config examples/agent-sources.toml --show-config
+target/debug/treazury --meta-config examples/agent-sources.toml --show-config
 # Checks the example's committed directory spec, without credentials or probes:
-target/debug/treazure --meta-config examples/agent-sources.toml --check
+target/debug/treazury --meta-config examples/agent-sources.toml --check
 # Serving needs EVM_PRIVATE_KEY and the two configured MCP bearer tokens:
-target/debug/treazure --meta-config examples/agent-sources.toml --env-file .env
+target/debug/treazury --meta-config examples/agent-sources.toml --env-file .env
 # Offline saved-record inspection; does not create a missing registry:
-target/debug/treazure sources inspect --meta-config examples/agent-sources.toml
+target/debug/treazury sources inspect --meta-config examples/agent-sources.toml
 ```
 
 Use `scripts/zcash.sh build` for the managed example and initialize its treasury
@@ -67,7 +67,7 @@ listener to TOML does not expand saved registrations. Explicitly update visibili
 or targets to expand them. Existing listener tag and tool-name filters remain hard
 limits on dynamic APIs, for both direct and fallback calls. Management tools use
 separate grants and are not removed by provider filters. If using `include_tools`,
-include `dyn_*` to allow dynamic APIs. `treazure_` and `dyn_` tool prefixes are reserved
+include `dyn_*` to allow dynamic APIs. `treazury_` and `dyn_` tool prefixes are reserved
 in deployments with source management configured.
 
 ## Agent workflow
@@ -79,12 +79,12 @@ wallet caps apply. Results are leads; verify a published OpenAPI URL from the ve
 Endpoint lists do not automatically supply usable request schemas, and directory
 results are never registered automatically.
 
-1. Call `treazure_source_preview` with a `candidate` object. This validates and fetches
+1. Call `treazury_source_preview` with a `candidate` object. This validates and fetches
    an OpenAPI 3 JSON document, builds tools, and reports wallet sharing and limits.
-2. Call `treazure_source_add` with the same candidate, an `idempotency_key`, and optionally
+2. Call `treazury_source_add` with the same candidate, an `idempotency_key`, and optionally
    the returned `preview_id`. A preview is optional and is not an approval barrier.
-3. Call `treazure_tools_search` for current tool IDs, input schemas and revisions.
-4. Call `treazure_tool_call` with `tool_id`, `arguments` and `expected_revision`.
+3. Call `treazury_tools_search` for current tool IDs, input schemas and revisions.
+4. Call `treazury_tool_call` with `tool_id`, `arguments` and `expected_revision`.
    It uses the same dispatcher and payment admission as a direct provider tool call.
 
 Example preview input:
@@ -118,13 +118,13 @@ pricing probes, wallet definitions or timeout increases. Unknown fields fail.
 
 | Tool | Additional details |
 | --- | --- |
-| `treazure_sources_list` | Visible/owned records, revision, filtered tool count, lifecycle and effective named wallets; optional `source_id`, `cursor`, `limit` |
-| `treazure_source_preview` | Initial `candidate`, optional `limit`; subsequent pages use `preview_id`, `cursor`, `limit` without candidate |
-| `treazure_source_add` | Candidate, idempotency key, optional preview ID; preview reuse commits exactly its accepted bytes |
-| `treazure_source_update` | Source ID, expected revision and idempotency key; optional `name`, replacement `selection`, visibility/targets/lifetime, `refresh_spec` |
-| `treazure_source_remove` | Source ID, expected revision and idempotency key; removes all bindings, retains persistent tombstone |
-| `treazure_tools_search` | Optional text `query`, `source_id`, cursor/limit; returns full visible descriptions and schemas |
-| `treazure_tool_call` | Expected source revision required; static tools use revision 0; cannot invoke management tools recursively |
+| `treazury_sources_list` | Visible/owned records, revision, filtered tool count, lifecycle and effective named wallets; optional `source_id`, `cursor`, `limit` |
+| `treazury_source_preview` | Initial `candidate`, optional `limit`; subsequent pages use `preview_id`, `cursor`, `limit` without candidate |
+| `treazury_source_add` | Candidate, idempotency key, optional preview ID; preview reuse commits exactly its accepted bytes |
+| `treazury_source_update` | Source ID, expected revision and idempotency key; optional `name`, replacement `selection`, visibility/targets/lifetime, `refresh_spec` |
+| `treazury_source_remove` | Source ID, expected revision and idempotency key; removes all bindings, retains persistent tombstone |
+| `treazury_tools_search` | Optional text `query`, `source_id`, cursor/limit; returns full visible descriptions and schemas |
+| `treazury_tool_call` | Expected source revision required; static tools use revision 0; cannot invoke management tools recursively |
 
 Omitted update fields retain values; supplied lists/maps replace in full. URLs are
 immutable: create a new registration to change them. `refresh_spec = true` explicitly
@@ -174,7 +174,7 @@ challenges.
 All traffic uses the existing network factory and pools. Specs use discovery identities;
 API calls use the resolved EVM payer's identity. Tor uses authenticated remote-DNS SOCKS
 with no direct fallback. With Tor, private DNS-answer rejection depends on Tor's
-`ClientRejectInternalAddresses` protection; Treazure does not resolve destinations
+`ClientRejectInternalAddresses` protection; Treazury does not resolve destinations
 locally or inspect answers hidden by the proxy. Keep that Tor protection enabled.
 An arbitrary SOCKS proxy is not a substitute for this destination policy. Restrict
 origins when only a known provider set should be reachable.
@@ -221,8 +221,8 @@ deployment or treasury paths. Config-only inspection never opens the store.
 Back up the SQLite registry while the process is stopped, separately from treasury/key
 backups. Do not delete or replace its ownership sidecar while serving. Document URLs and
 contents can reveal operator interests even though the registry contains no wallet keys.
-`treazure sources inspect` reports saved records without fetching or changing them;
-`treazure_sources_list` reports the running state, including policy-disabled records.
+`treazury sources inspect` reports saved records without fetching or changing them;
+`treazury_sources_list` reports the running state, including policy-disabled records.
 
 Persistent changes commit before publication; accepted commit jobs finish even if the
 caller disconnects. Restart rebuilds from saved bytes without vendor requests. Promoting

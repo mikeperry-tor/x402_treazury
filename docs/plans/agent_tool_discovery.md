@@ -3,7 +3,7 @@
 ## Objective
 
 Let an operator optionally authorize agents to discover APIs and register OpenAPI
-sources as tools in a running Treazure deployment. Additions can be visible on one
+sources as tools in a running Treazury deployment. Additions can be visible on one
 MCP server, a specified set of authorized servers, or every participating server
 in the process. Independently, a registration can last until process exit or
 persist across restarts.
@@ -141,15 +141,15 @@ Define these defaults and validation rules:
 
 Existing source/listener tag and tool-name exclusions remain hard limits. Agent
 selection can narrow them but cannot override them. Mutation tools use a reserved
-`treazure_` namespace and are authorized separately from provider tool selection;
+`treazury_` namespace and are authorized separately from provider tool selection;
 provider filters cannot unexpectedly remove the management interface. Document
 this distinction and include it in configuration inspection.
 
 `--show-config` reports grants, receiving targets, limits, effective dynamic wallet
 bindings and registry path without opening the registry, reading keys or fetching
-specs. Add an explicit offline CLI command `treazure sources inspect --meta-config
+specs. Add an explicit offline CLI command `treazury sources inspect --meta-config
 FILE` to inspect saved records without network or financial mutations. It must not
-create a missing registry. Runtime `treazure_sources_list` reports active state.
+create a missing registry. Runtime `treazury_sources_list` reports active state.
 
 ## Wallet behavior and capital
 
@@ -194,13 +194,13 @@ Expose a minimal, structured API. Unknown fields fail. Each mutation has an
 
 | Tool | Input and behavior |
 | --- | --- |
-| `treazure_sources_list` | Optional source ID and pagination; visible registrations and manageable owned records, lifecycle, revision, targets visible to caller, selected tools, wallet readiness and allowed actions |
-| `treazure_source_preview` | Candidate spec URL, optional API base URL, selections and desired visibility/lifetime; validate/fetch/build and return paginated tool summaries, limits, destination origins, effective wallet sharing and warnings; no persistence, probes, allocation or funding |
-| `treazure_source_add` | Same candidate plus owner-local name and idempotency key; optionally consume a preview ID; validate and atomically publish the selected source |
-| `treazure_source_update` | Owned source UUID, expected revision, idempotency key, replacement selections/targets/lifetime, optional `refresh_spec`; omitted fields retain current values and supplied lists replace in full |
-| `treazure_source_remove` | Owned source UUID, expected revision and idempotency key; unpublish it from all its bindings and tombstone a persistent record |
-| `treazure_tools_search` | Search caller-visible API tools by text/source with pagination; return namespaced tool IDs, descriptions, input schemas and catalog revision |
-| `treazure_tool_call` | Tool ID, arguments and expected source revision; execute through the same dispatch and payment policy as a direct tool call |
+| `treazury_sources_list` | Optional source ID and pagination; visible registrations and manageable owned records, lifecycle, revision, targets visible to caller, selected tools, wallet readiness and allowed actions |
+| `treazury_source_preview` | Candidate spec URL, optional API base URL, selections and desired visibility/lifetime; validate/fetch/build and return paginated tool summaries, limits, destination origins, effective wallet sharing and warnings; no persistence, probes, allocation or funding |
+| `treazury_source_add` | Same candidate plus owner-local name and idempotency key; optionally consume a preview ID; validate and atomically publish the selected source |
+| `treazury_source_update` | Owned source UUID, expected revision, idempotency key, replacement selections/targets/lifetime, optional `refresh_spec`; omitted fields retain current values and supplied lists replace in full |
+| `treazury_source_remove` | Owned source UUID, expected revision and idempotency key; unpublish it from all its bindings and tombstone a persistent record |
+| `treazury_tools_search` | Search caller-visible API tools by text/source with pagination; return namespaced tool IDs, descriptions, input schemas and catalog revision |
+| `treazury_tool_call` | Tool ID, arguments and expected source revision; execute through the same dispatch and payment policy as a direct tool call |
 
 Candidate selection supports tags/excluded tags, path include/exclude, and generated
 tool-name include/exclude. The agent does not provide arbitrary `extends`, local
@@ -271,7 +271,7 @@ return a restart-listing error; never stitch pages from different generations. D
 add a hidden description truncation limit: large results use explicit pagination,
 summary fields and bounded source/tool counts, preserving accepted tool definitions.
 
-MCP supports `notifications/tools/list_changed`, but current Treazure HTTP is stateless
+MCP supports `notifications/tools/list_changed`, but current Treazury HTTP is stateless
 JSON and does not retain notification connections. Stable search/call tools must be
 advertised from initialization on all participating servers, so clients that cache
 their initial tools can use newly registered APIs immediately.
@@ -384,7 +384,7 @@ registrations only after normal listener binding succeeds.
 Implement `providers/x402-list.toml` using the generic source path, not a bespoke
 network client or a hard-coded directory aggregator. Use the documented canonical
 OpenAPI URL `https://x402-list.com/api/v1/openapi.json`; the shorter `/openapi.json`
-redirects and Treazure disables redirects. Verify the current spec's actual paths,
+redirects and Treazury disables redirects. Verify the current spec's actual paths,
 parameters, base URL and generated names during implementation.
 
 Expose a curated subset for service search, service details, rankings, categories
@@ -406,9 +406,9 @@ can supply a verified spec URL from provider documentation. Discovery-tool descr
 should explain the preview/add workflow, rather than merely dumping service URLs into
 the registration tool's description. Do not automatically register search results.
 
-A normalized multi-directory `treazure_discover_apis` aggregator is outside the first
+A normalized multi-directory `treazury_discover_apis` aggregator is outside the first
 release. The provider config can be replaced or supplemented through ordinary TOML
-composition. Keep internal `treazure_tools_search` distinct from external API discovery.
+composition. Keep internal `treazury_tools_search` distinct from external API discovery.
 
 ## Implementation order and commit boundaries
 

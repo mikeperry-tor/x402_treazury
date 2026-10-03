@@ -1069,7 +1069,7 @@ impl RecoveryCli {
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
             .env("TEST_INDEXER", &self.endpoint)
-            .env("TREAZURE_TEST_WALLET_ARGS", serde_json::to_string(&args)?)
+            .env("TREAZURY_TEST_WALLET_ARGS", serde_json::to_string(&args)?)
             .env("RUST_BACKTRACE", "1")
             .env("RUST_LIB_BACKTRACE", "1")
             .args([
