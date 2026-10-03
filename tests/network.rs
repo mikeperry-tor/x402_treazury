@@ -387,57 +387,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
 #[tokio::test]
 #[ignore = "requires an explicit live Tor SOCKS endpoint; read-only, no wallet or funds"]
 async fn live_tor_unfunded_smoke() {
-    use zingo_netutils::Indexer;
-    let address = std::env::var("TOR_SMOKE_SOCKS")
-        .expect("set TOR_SMOKE_SOCKS")
-        .parse()
-        .unwrap();
-    let ctx = NetworkContext::new(NetworkPolicy {
-        mode: Mode::Tor,
-        socks_endpoint: Some(address),
-        connect_timeout_seconds: Some(60),
-        ..Default::default()
-    })
-    .unwrap();
-    let url = "https://zec.rocks/";
-    for id in [
-        IsolationId::treasury("smoke-one"),
-        IsolationId::treasury("smoke-two"),
-    ] {
-        let result = ctx
-            .http(&id, url, Duration::from_secs(90))
-            .unwrap()
-            .get(url)
-            .send()
-            .await
-            .unwrap();
-        assert!(result.status().is_success());
-        result.bytes().await.unwrap();
-    }
-    let mut indexer = ctx
-        .grpc(
-            &IsolationId::treasury("smoke-grpc"),
-            "https://zec.rocks:443",
-        )
-        .await
-        .unwrap();
-    let info = indexer
-        .get_lightd_info(Duration::from_secs(60))
-        .await
-        .unwrap();
-    assert_eq!(info.chain_name, "main");
-    assert!(info.block_height > 3_428_143);
-    let tree = indexer
-        .get_tree_state(
-            zingo_netutils::lightwallet_protocol::BlockId {
-                height: info.block_height,
-                hash: vec![],
-            },
-            Duration::from_secs(60),
-        )
-        .await
-        .unwrap();
-    assert!(!tree.ironwood_tree.is_empty());
+    live_tor::smoke().await;
 }
 
 #[tokio::test]
@@ -472,4 +422,22 @@ async fn public_only_tor_uses_remote_dns_and_existing_isolation_without_fallback
             )
             .is_err()
     );
+}
+
+#[cfg(feature = "zcash")]
+#[path = "support/live_tor.rs"]
+mod live_tor;
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+#[ignore = "requires the dedicated qualification Tor instance to have stopped"]
+async fn live_tor_proxy_unavailable() {
+    live_tor::unavailable().await;
+}
+
+#[cfg(feature = "zcash")]
+#[test]
+#[ignore = "requires external loopback control listeners and explicit sandbox expectations"]
+fn live_tor_egress_controls() {
+    live_tor::egress_controls();
 }

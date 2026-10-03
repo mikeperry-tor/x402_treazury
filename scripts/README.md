@@ -43,7 +43,11 @@ cargo run --locked --example snapshot_spec -- SOURCE_JSON_OR_URL OUTPUT_JSON
 
 See `tests/fixtures/catalogs/README.md` for provider contract review and
 `tests/REGTEST.md` for explicitly enabled Docker consensus tests. The runtime Tor
-inventory and opt-in live smoke test are documented in `docs/network-egress.md`.
+inventory is documented in `docs/network-egress.md`. The optional macOS
+`scripts/qualify_tor.py` runner observes real circuits and validates SOCKS-only
+process confinement using an installed Tor binary; see `tests/TOR.md`. Its
+standard-library Python observer tests run with
+`python3 -m unittest discover -s scripts/tests -p test_tor_qualification.py`.
 
 Coverage requires `cargo-llvm-cov` and LLVM tools matching `rustc -vV`. Homebrew
 LLVM is detected; explicit `LLVM_COV` / `LLVM_PROFDATA` overrides take precedence.
