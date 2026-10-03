@@ -27,6 +27,7 @@ chacha20poly1305 = "0.10"
 zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
 fs2 = "0.4"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
 zip32 = { version = "0.2.1", optional = true }
 zcash_client_backend = { version = "0.24", default-features = false, optional = true }

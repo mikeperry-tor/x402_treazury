@@ -345,3 +345,106 @@ async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
     assert_eq!(hits.load(Ordering::SeqCst), 7);
     vendor.abort();
 }
+
+#[tokio::test]
+async fn batches_wait_for_slowest_probe_and_cancel_without_losing_completed_cache() {
+    let slow = Arc::new(tokio::sync::Semaphore::new(0));
+    let (arrived, mut arrivals) = tokio::sync::mpsc::unbounded_channel();
+    let gate = slow.clone();
+    let app = Router::new().fallback(any(move |request: Request| {
+        let (gate, arrived) = (gate.clone(), arrived.clone());
+        async move {
+            let path = request.uri().path().to_owned();
+            arrived.send(path.clone()).unwrap();
+            if path == "/b" {
+                gate.acquire().await.unwrap().forget();
+            }
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [(
+                    "payment-required",
+                    STANDARD.encode(json!({"accepts":[{"amount":"1","asset":"USDC"}]}).to_string()),
+                )],
+            )
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let vendor = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let cache = Arc::new(PricingCache::default());
+    let cfg = Config {
+        probe_concurrency: 2,
+        probe_timeout: 5.0,
+        ..Default::default()
+    };
+    let root = json!({"paths":{"/a":{"get":{}},"/b":{"get":{}},"/c":{"get":{}}}});
+    let tools = build_tools(&cfg, &root, "t").unwrap();
+    let launch = || {
+        let (cache, cfg, root, tools, base) = (
+            cache.clone(),
+            cfg.clone(),
+            root.clone(),
+            tools.clone(),
+            base.clone(),
+        );
+        tokio::spawn(async move { cache.discover(&cfg, &root, &tools, &base).await.unwrap() })
+    };
+    let first = launch();
+    let mut paths = Vec::new();
+    for _ in 0..2 {
+        paths.push(
+            tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    paths.sort();
+    assert_eq!(paths, ["/a", "/b"]);
+    // Coalescing with /a establishes that its result has completed and been cached.
+    let completed = tokio::time::timeout(
+        Duration::from_secs(5),
+        cache.discover(&cfg, &root, &tools[..1], &base),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(completed.len(), 1);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), arrivals.recv())
+            .await
+            .is_err(),
+        "next batch started before the slow member completed"
+    );
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    let restarted = launch();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "/b",
+        "completed /a must stay cached; unfinished /b must retry after cancellation"
+    );
+    // Release both server handlers: the cancelled client's request may still be present.
+    slow.add_permits(2);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "/c"
+    );
+    let lines = tokio::time::timeout(Duration::from_secs(5), restarted)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(
+        lines[&("GET".into(), "/a".into())],
+        completed[&("GET".into(), "/a".into())]
+    );
+    assert!(arrivals.try_recv().is_err(), "unexpected extra probe");
+    vendor.abort();
+}

@@ -6582,6 +6582,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "fs2",
+ "futures-util",
  "hyper-util",
  "libc",
  "percent-encoding",

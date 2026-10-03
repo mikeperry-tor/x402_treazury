@@ -139,27 +139,19 @@ impl PricingCache {
                     crate::network::discovery(&url, Duration::from_secs_f64(cfg.probe_timeout))?;
                 pending.push((tool, self.get(url, http, cfg.probe_ttl_seconds)));
             }
-            // Scoped futures are polled concurrently without detached work.
-            let mut futures: Vec<_> = pending.into_iter().map(|(t, f)| (t, Box::pin(f))).collect();
-            std::future::poll_fn(|cx| {
-                let mut i = 0;
-                while i < futures.len() {
-                    if let std::task::Poll::Ready(line) = futures[i].1.as_mut().poll(cx) {
-                        let (tool, _) = futures.swap_remove(i);
-                        if let Some(line) = line {
-                            lines.insert((tool.method.clone(), tool.path.clone()), line);
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-                if futures.is_empty() {
-                    std::task::Poll::Ready(())
-                } else {
-                    std::task::Poll::Pending
-                }
-            })
+            // Scoped futures: wait for the entire batch, without detached tasks.
+            // Dropping discovery cancels unfinished probes; completed cache entries remain.
+            let results = futures_util::future::join_all(
+                pending
+                    .into_iter()
+                    .map(|(tool, probe)| async move { (tool, probe.await) }),
+            )
             .await;
+            for (tool, line) in results {
+                if let Some(line) = line {
+                    lines.insert((tool.method.clone(), tool.path.clone()), line);
+                }
+            }
         }
         Ok(lines)
     }
