@@ -1101,3 +1101,6 @@ async fn public_transport_child() {
     drop(records);
     task.abort();
 }
+
+#[path = "../../tests/support/permissions.rs"]
+mod permissions;
