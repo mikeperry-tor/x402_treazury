@@ -150,7 +150,7 @@ impl Treasury {
     pub async fn open(dir: PathBuf, key: PathBuf, id: String) -> Result<Self> {
         Self::open_with_network(dir, key, id, TreasuryNetwork::Mainnet).await
     }
-    async fn open_with_network(
+    pub(crate) async fn open_with_network(
         dir: PathBuf,
         key: PathBuf,
         id: String,

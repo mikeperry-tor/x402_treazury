@@ -14,7 +14,7 @@ case ${1:-} in
     --consensus)
         shift
         case ${1:-} in
-            deposit_settlement_and_reorg_recovery|high_index_refunds_and_separate_shielding|expired_ambiguous_deposit_releases_only_after_chain_proof|indexer_non_inclusion_response|tor_consensus_lifecycle)
+            deposit_settlement_and_reorg_recovery|high_index_refunds_and_separate_shielding|expired_ambiguous_deposit_releases_only_after_chain_proof|indexer_non_inclusion_response|tor_consensus_lifecycle|recovery_cli_lifecycle)
                 mode=consensus-$1; consensus_test=$1; shift ;;
             *) usage >&2; echo 'Select one named treasury consensus test; broad filters are forbidden.' >&2; exit 2 ;;
         esac ;;

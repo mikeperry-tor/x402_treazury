@@ -61,6 +61,7 @@ Run each scenario in its own test process, using its complete name and `--exact`
 | `high_index_refunds_and_separate_shielding` | High-index transparent discovery after restore and independent shielding of two addresses |
 | `expired_ambiguous_deposit_releases_only_after_chain_proof` | Expiry requires chain proof and owned unspent inputs; archived bytes cannot submit again |
 | `indexer_non_inclusion_response` | Missing transaction response remains ambiguous |
+| `recovery_cli_lifecycle` | Shared production Clap parser and recovery handlers in test-only child processes: shielding, read-only reconciliation, same-byte rebroadcast, confirmed rebroadcast refusal and expiry recovery |
 | `tor_consensus_lifecycle` | Deposit, refund and expiry scenarios through authenticated fake SOCKS; run alone because it installs process policy |
 
 For an instrumented run of exactly one scenario:
@@ -73,3 +74,28 @@ Use `scripts/coverage.sh --proving` for the synthetic proving test without Docke
 These commands are optional qualification, not tests run by the default suite.
 A fake SOCKS endpoint proves client routing/credentials, not real Tor circuit
 selection. Neither the optional suite nor its coverage qualifies real NEAR swaps.
+
+## Recovery command subprocess adapter
+
+`recovery_cli_lifecycle` runs the real wallet command dispatcher against isolated
+regtest state. Only the treasury/sender network constructor is injected. The
+adapter is compiled with `cfg(test)` and `zcash-regtest`; enabling that feature on
+the shipped executable does not provide a regtest flag, environment override or
+alternate public constructor. Default executable tests still cover `main` routing,
+Clap flags, stdout/error conventions and mainnet wallet identity checks.
+
+Each child reads relative state/key paths from a TOML profile containing an unused,
+missing API spec, proving recovery does not load API sources. Read-only commands
+receive no submission environment variable. The parent checks no shielding or
+read-only broadcast, identical prepared bytes, confirmed budgets, one submission
+attempt after refusing reconciliation of an already confirmed operation, and release only after
+expiry proof. Early expiry fails legibly with backtraces enabled; reopening proves
+ownership release after both successful and failed commands. The unit-test runner's
+known stdout prefix is removed before asserting the dispatcher emits one JSON value.
+
+Run this scenario separately with `--features zcash-regtest --lib
+ treasury::regtest::recovery_cli_lifecycle -- --ignored --exact --nocapture` or
+`scripts/coverage.sh --consensus recovery_cli_lifecycle`. It has a thirty-minute
+outer deadline and each child has a three-minute deadline. The ordinary executable
+is still mainnet-only, so this qualifies shared command orchestration with a test
+network adapter, not a funded mainnet invocation.

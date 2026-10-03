@@ -125,6 +125,14 @@ pub async fn run() -> Result<()> {
     let args = WalletArgs::parse_from(
         std::iter::once("wallet".to_owned()).chain(std::env::args().skip(2)),
     );
+    run_args(args, crate::rotation::store::TreasuryNetwork::Mainnet).await
+}
+async fn run_args(
+    args: WalletArgs,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<()> {
+    #[cfg(not(feature = "zcash"))]
+    let _ = network;
     if let Some(path) = &args.network_config {
         let uses_meta = matches!(
             &args.command,
@@ -201,11 +209,14 @@ pub async fn run() -> Result<()> {
                 meta_config,
                 operation_id,
             } => {
-                let (mut treasury, settings) = configured(&meta_config).await?;
+                let (mut treasury, settings) = configured(&meta_config, network).await?;
                 let indexer =
                     std::env::var(&settings.indexer_url_env).context("missing indexer endpoint")?;
-                let mut sender =
-                    crate::treasury::submission::GrpcSubmission::new(indexer.clone(), indexer)?;
+                let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
+                    indexer.clone(),
+                    indexer,
+                    network,
+                )?;
                 let stop = tokio_util::sync::CancellationToken::new();
                 let result = finish_on_shutdown(
                     &stop,
@@ -222,7 +233,7 @@ pub async fn run() -> Result<()> {
                 meta_config,
                 job_id,
             } => {
-                let (mut treasury, settings) = configured(&meta_config).await?;
+                let (mut treasury, settings) = configured(&meta_config, network).await?;
                 let stop = tokio_util::sync::CancellationToken::new();
                 let result = finish_on_shutdown(
                     &stop,
@@ -249,7 +260,7 @@ pub async fn run() -> Result<()> {
                 operation_id,
                 rebroadcast,
             } => {
-                let (mut treasury, settings) = configured(&meta_config).await?;
+                let (mut treasury, settings) = configured(&meta_config, network).await?;
                 let indexer = std::env::var(&settings.indexer_url_env)
                     .context("missing indexer endpoint environment variable")?;
                 // Read-only reconciliation needs no submission secret.
@@ -259,8 +270,9 @@ pub async fn run() -> Result<()> {
                 } else {
                     indexer.clone()
                 };
-                let mut sender =
-                    crate::treasury::submission::GrpcSubmission::new(submission, indexer)?;
+                let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
+                    submission, indexer, network,
+                )?;
                 let stop = tokio_util::sync::CancellationToken::new();
                 let result = {
                     let work = async {
@@ -297,7 +309,7 @@ pub async fn run() -> Result<()> {
                 treasury
             }
             Command::Sync { meta_config } => {
-                let (mut treasury, _) = configured(&meta_config).await?;
+                let (mut treasury, _) = configured(&meta_config, network).await?;
                 let stop = tokio_util::sync::CancellationToken::new();
                 let result = {
                     let work = treasury.sync_once(&stop);
@@ -428,6 +440,7 @@ async fn shutdown_signal() -> std::io::Result<()> {
 #[cfg(feature = "zcash")]
 async fn configured(
     path: &std::path::Path,
+    network: crate::rotation::store::TreasuryNetwork,
 ) -> Result<(
     crate::treasury::Treasury,
     crate::rotation::config::TreasuryConfig,
@@ -446,10 +459,11 @@ async fn configured(
         settings.confirmations,
         settings.max_sync_age_seconds,
     )?;
-    let mut treasury = crate::treasury::Treasury::open(
+    let mut treasury = crate::treasury::Treasury::open_with_network(
         settings.state_dir.clone(),
         settings.key_file.clone(),
         settings.id.clone(),
+        network,
     )
     .await?;
     treasury.configure_sync(sync);
@@ -466,4 +480,25 @@ async fn finish_on_shutdown<T>(
         result = &mut work => result,
         signal = shutdown_signal() => { stop.cancel(); let result = work.await; signal?; result }
     }
+}
+
+// The only non-mainnet CLI adapter exists in the unit-test executable. Enabling
+// zcash-regtest on the shipped executable does not enable this entry point.
+#[cfg(all(test, feature = "zcash-regtest"))]
+#[tokio::test]
+#[ignore = "subprocess helper invoked by treasury::regtest::recovery_cli_lifecycle"]
+async fn regtest_command_child() {
+    let arguments: Vec<String> = serde_json::from_str(
+        &std::env::var("TREAZURE_TEST_WALLET_ARGS").expect("fixture arguments"),
+    )
+    .unwrap();
+    let result = match WalletArgs::try_parse_from(arguments) {
+        Ok(args) => run_args(args, crate::rotation::store::TreasuryNetwork::Regtest).await,
+        Err(error) => Err(error.into()),
+    };
+    if let Err(error) = result {
+        eprintln!("error: {error:#}");
+        std::process::exit(1);
+    }
+    std::process::exit(0);
 }

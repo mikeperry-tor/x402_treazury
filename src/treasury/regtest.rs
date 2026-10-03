@@ -477,9 +477,9 @@ async fn run() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker; isolated refund discovery and per-address shielding"]
 async fn high_index_refunds_and_separate_shielding() -> Result<()> {
-    tokio::time::timeout(Duration::from_secs(900), refunds_run()).await?
+    tokio::time::timeout(Duration::from_secs(900), refunds_run(false)).await?
 }
-async fn refunds_run() -> Result<()> {
+async fn refunds_run(cli: bool) -> Result<()> {
     use crate::rotation::store::funding::FundingPhase;
     let dir = tempfile::tempdir()?;
     let state = dir.path().join("state");
@@ -523,6 +523,7 @@ async fn refunds_run() -> Result<()> {
     let mut chain = Chain::launch(&miner).await?;
     Chain::mine(&chain.rpc, 7).await?;
     chain.indexer_ready(8).await?;
+    let cli_fixture = RecoveryCli::new(dir.path(), &id, &chain.endpoint)?;
     let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
     let stop = CancellationToken::new();
     let mut treasury = Treasury::open_with_network(
@@ -647,25 +648,114 @@ async fn refunds_run() -> Result<()> {
     // Both unrelated transparent addresses are funded. Each shield must consume
     // exactly its selected address, even when the helper's default would combine.
     for (n, height) in [(30usize, 14), (31usize, 16)] {
-        let prepared = treasury
-            .shield_refund(jobs[n].id.clone(), 1_000_000, 30_000, &stop)
-            .await?;
+        let prepared = if cli {
+            let before: Value = chain
+                .rpc
+                .json_result_from_call("getrawmempool", "[]")
+                .await?;
+            treasury.close().await?;
+            let output = cli_fixture
+                .call("shield-refunds", "--job-id", &jobs[n].id, false, None)
+                .await?;
+            assert_eq!(output["state"]["outgoing_pending"], true);
+            let op = output["state"]["treasury_operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|op| op["submission"] == "PREPARED")
+                .unwrap()["operation_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            treasury = cli_fixture.open().await?;
+            assert_eq!(
+                before,
+                chain
+                    .rpc
+                    .json_result_from_call::<Value>("getrawmempool", "[]")
+                    .await?,
+                "shield CLI broadcast without permission"
+            );
+            treasury
+                .store
+                .call(move |s| crate::rotation::transaction::PreparedTransaction::load(s, &op))
+                .await?
+        } else {
+            treasury
+                .shield_refund(jobs[n].id.clone(), 1_000_000, 30_000, &stop)
+                .await?
+        };
         let tx = submission::decode(prepared.bytes())?;
         assert_eq!(tx.transparent_bundle().unwrap().vin.len(), 1);
         assert!(tx.transparent_bundle().unwrap().vout.is_empty());
         assert_eq!(prepared.facts().unwrap().amount_zatoshis, 0);
         let op = prepared.operation_id().to_owned();
-        assert_eq!(
-            treasury
-                .submit_prepared(op.clone(), &mut sender, false, &stop)
-                .await?,
-            SubmissionOutcome::Accepted
-        );
+        if cli {
+            let mempool: Value = chain
+                .rpc
+                .json_result_from_call("getrawmempool", "[]")
+                .await?;
+            treasury.close().await?;
+            let read_only = cli_fixture
+                .call("reconcile", "--operation-id", &op, false, None)
+                .await?;
+            assert_operation(&read_only, &op, "PREPARED", 0);
+            assert_eq!(
+                mempool,
+                chain
+                    .rpc
+                    .json_result_from_call::<Value>("getrawmempool", "[]")
+                    .await?,
+                "read-only CLI submitted a transaction"
+            );
+            let sent = cli_fixture
+                .call("reconcile", "--operation-id", &op, true, None)
+                .await?;
+            assert_operation(&sent, &op, "BROADCAST", 1);
+            treasury = cli_fixture.open().await?;
+            let lookup = op.clone();
+            let saved = treasury
+                .store
+                .call(move |s| s.prepared_bytes(&lookup))
+                .await?;
+            assert_eq!(
+                saved.as_slice(),
+                prepared.bytes(),
+                "CLI rebuilt saved transaction"
+            );
+        } else {
+            assert_eq!(
+                treasury
+                    .submit_prepared(op.clone(), &mut sender, false, &stop)
+                    .await?,
+                SubmissionOutcome::Accepted
+            );
+        }
         Chain::mine(&chain.rpc, 2).await?;
         chain.indexer_ready(height).await?;
-        treasury
-            .reconcile_prepared(op.clone(), &mut sender, &stop)
-            .await?;
+        if cli {
+            treasury.close().await?;
+            let confirmed = cli_fixture
+                .call("reconcile", "--operation-id", &op, false, None)
+                .await?;
+            assert_operation(&confirmed, &op, "CONFIRMED", 1);
+            cli_fixture
+                .call(
+                    "reconcile",
+                    "--operation-id",
+                    &op,
+                    true,
+                    Some("transaction is not pending"),
+                )
+                .await?;
+            treasury = cli_fixture.open().await?;
+            let status = serde_json::json!({"state": treasury.status().await?});
+            assert_operation(&status, &op, "CONFIRMED", 1);
+        } else {
+            treasury
+                .reconcile_prepared(op.clone(), &mut sender, &stop)
+                .await?;
+        }
         assert_eq!(
             budget(&state, &op)?,
             (0, i64::try_from(prepared.facts().unwrap().fee_zatoshis)?)
@@ -680,9 +770,9 @@ async fn refunds_run() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker; isolated expiry recovery with unspent-input proof"]
 async fn expired_ambiguous_deposit_releases_only_after_chain_proof() -> Result<()> {
-    tokio::time::timeout(Duration::from_secs(900), expiry_run()).await?
+    tokio::time::timeout(Duration::from_secs(900), expiry_run(false)).await?
 }
-async fn expiry_run() -> Result<()> {
+async fn expiry_run(cli: bool) -> Result<()> {
     let dir = tempfile::tempdir()?;
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -707,6 +797,7 @@ async fn expiry_run() -> Result<()> {
     let mut chain = Chain::launch(&miner).await?;
     Chain::mine(&chain.rpc, 7).await?;
     chain.indexer_ready(8).await?;
+    let cli_fixture = RecoveryCli::new(dir.path(), &id, &chain.endpoint)?;
     let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
@@ -754,6 +845,19 @@ async fn expiry_run() -> Result<()> {
             .to_string()
             .contains("expiry not buried")
     );
+    if cli {
+        treasury.close().await?;
+        cli_fixture
+            .call(
+                "recover-expired",
+                "--operation-id",
+                &op,
+                false,
+                Some("expiry not buried"),
+            )
+            .await?;
+        treasury = cli_fixture.open().await?;
+    }
     assert!(budget(&state, &op)?.0 > 0);
     treasury.close().await?;
     let target = u64::from(prepared.facts().unwrap().expiry_height) + 2;
@@ -793,9 +897,18 @@ async fn expiry_run() -> Result<()> {
         ];
         assert!(checked.into_iter().any(|checked| checked));
     }
-    treasury
-        .recover_expired(op.clone(), &mut sender, &stop)
-        .await?;
+    if cli {
+        treasury.close().await?;
+        let recovered = cli_fixture
+            .call("recover-expired", "--operation-id", &op, false, None)
+            .await?;
+        assert_operation(&recovered, &op, "EXPIRED", 1);
+        treasury = cli_fixture.open().await?;
+    } else {
+        treasury
+            .recover_expired(op.clone(), &mut sender, &stop)
+            .await?;
+    }
     assert_eq!(budget(&state, &op)?, (0, 0));
     assert_eq!(
         treasury.status().await?.treasury_operations[0].submission,
@@ -885,8 +998,8 @@ async fn tor_consensus_lifecycle() -> Result<()> {
         ..Default::default()
     })?;
     run().await?;
-    refunds_run().await?;
-    expiry_run().await?;
+    refunds_run(false).await?;
+    expiry_run(false).await?;
     let records = proxy.records.lock().unwrap();
     ensure!(records.len() >= 6, "no proxied consensus activity");
     ensure!(
@@ -903,4 +1016,110 @@ async fn tor_consensus_lifecycle() -> Result<()> {
         "identities were not separated"
     );
     Ok(())
+}
+
+/// Separate process runs the production parser/dispatcher; only the network
+/// constructor differs. No regtest switch is compiled into the shipped CLI.
+struct RecoveryCli {
+    directory: PathBuf,
+    id: String,
+    endpoint: String,
+}
+impl RecoveryCli {
+    fn new(directory: &Path, id: &str, endpoint: &str) -> Result<Self> {
+        std::fs::write(
+            directory.join("recovery.toml"),
+            format!(
+                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\ndaily_input_zec = '0.01'\nshield_max_fee_zec = '0.0003'\nconfirmations = 2\nmax_sync_age_seconds = 300\n"
+            ),
+        )?;
+        Ok(Self {
+            directory: directory.into(),
+            id: id.into(),
+            endpoint: endpoint.into(),
+        })
+    }
+    async fn open(&self) -> Result<Treasury> {
+        let mut treasury = Treasury::open_with_network(
+            self.directory.join("state"),
+            self.directory.join("key"),
+            self.id.clone(),
+            TreasuryNetwork::Regtest,
+        )
+        .await?;
+        treasury.configure_sync(SyncSettings::new(self.endpoint.clone(), 2, 300)?);
+        Ok(treasury)
+    }
+    async fn call(
+        &self,
+        name: &str,
+        flag: &str,
+        id: &str,
+        rebroadcast: bool,
+        expected_error: Option<&str>,
+    ) -> Result<Value> {
+        eprintln!("regtest recovery CLI: {name} (rebroadcast={rebroadcast})");
+        let mut args = vec!["wallet", name, "--meta-config", "recovery.toml", flag, id];
+        if rebroadcast {
+            args.push("--rebroadcast");
+        }
+        let mut command = tokio::process::Command::new(std::env::current_exe()?);
+        command
+            .current_dir(&self.directory)
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+            .env("TEST_INDEXER", &self.endpoint)
+            .env("TREAZURE_TEST_WALLET_ARGS", serde_json::to_string(&args)?)
+            .env("RUST_BACKTRACE", "1")
+            .env("RUST_LIB_BACKTRACE", "1")
+            .args([
+                "--exact",
+                "wallet_cli::regtest_command_child",
+                "--ignored",
+                "--nocapture",
+                "--quiet",
+            ])
+            .kill_on_drop(true);
+        // Read-only reconciliation and expiry/shielding work without this secret.
+        if rebroadcast {
+            command.env("TEST_SUBMISSION", &self.endpoint);
+        }
+        let output = tokio::time::timeout(Duration::from_secs(180), command.output()).await??;
+        let stderr = String::from_utf8(output.stderr)?;
+        assert!(
+            !stderr.contains("stack backtrace") && !stderr.contains("panicked at"),
+            "{stderr}"
+        );
+        let stdout = String::from_utf8(output.stdout)?;
+        if let Some(message) = expected_error {
+            assert!(!output.status.success());
+            assert!(stderr.contains(message), "{stderr}");
+            assert_eq!(stdout.trim(), "running 1 test");
+            return Ok(Value::Null);
+        }
+        assert!(output.status.success(), "{stderr}");
+        let start = stdout.find('{').context("missing CLI JSON")?;
+        // The unit-test runner emits this prefix; the shared CLI emits JSON only.
+        assert_eq!(stdout[..start].trim(), "running 1 test");
+        Ok(serde_json::from_str(&stdout[start..])?)
+    }
+}
+fn assert_operation(output: &Value, id: &str, submission: &str, attempts: u64) {
+    let operation = output["state"]["treasury_operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|op| op["operation_id"] == id)
+        .unwrap();
+    assert_eq!(operation["submission"], submission);
+    assert_eq!(operation["attempts"], attempts);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Docker; production recovery CLI handlers in isolated regtest child processes"]
+async fn recovery_cli_lifecycle() -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(1800), async {
+        refunds_run(true).await?;
+        expiry_run(true).await
+    })
+    .await?
 }
