@@ -21,7 +21,7 @@ async fn dynamic_wallet_signatures_and_tor_identity_match_listener_scope() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "private process network policy; exercised by parent"]
 async fn scope_child() {
     use crate::{
@@ -228,6 +228,33 @@ async fn scope_child() {
             .unwrap()
     });
     arrived.notified().await;
+    // Keep an actual guarded HTTPS payment in flight while additions and an
+    // update atomically replace the shared catalog on multiple worker threads.
+    let barrier = Arc::new(tokio::sync::Barrier::new(4));
+    *m.commit_barrier.lock().unwrap() = Some(barrier.clone());
+    let mut mutations = tokio::task::JoinSet::new();
+    for name in ["parallel_a", "parallel_b"] {
+        let c = candidate(name, "process", "process");
+        let preview = m
+            .invoke("writer", "treazure_source_preview", json!({"candidate":c}))
+            .await
+            .unwrap();
+        let manager = m.clone();
+        mutations.spawn(async move { manager.invoke("writer", "treazure_source_add", json!({"candidate":c,"preview_id":preview["preview_id"],"idempotency_key":name})).await });
+    }
+    let manager = m.clone();
+    let source = added["source_id"].clone();
+    mutations.spawn(async move { manager.invoke("writer", "treazure_source_update", json!({"source_id":source,"expected_revision":1,"selection":{"tags":["read"]},"idempotency_key":"during-payment"})).await });
+    tokio::time::timeout(Duration::from_secs(5), barrier.wait())
+        .await
+        .unwrap();
+    while let Some(result) = mutations.join_next().await {
+        result.unwrap().unwrap();
+    }
+    *m.commit_barrier.lock().unwrap() = None;
+    assert_eq!(m.catalog.read().generation, 4);
+    assert!(!pending.is_finished());
+    assert_eq!(signatures.lock().unwrap().len(), 6);
     m.payers["shared"].replace_payer(
         Payer::new(
             &format!("{:064x}", 3),
@@ -251,7 +278,7 @@ async fn scope_child() {
     assert_eq!(requests.load(Ordering::SeqCst), 16);
     assert_eq!(signatures.lock().unwrap().len(), 8);
     let before = requests.load(Ordering::SeqCst);
-    m.invoke("writer","treazure_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"selection":{"tags":["write"]},"idempotency_key":"hide"})).await.unwrap();
+    m.invoke("writer","treazure_source_update",json!({"source_id":added["source_id"],"expected_revision":2,"selection":{"tags":["write"]},"idempotency_key":"hide"})).await.unwrap();
     for id in ["writer", "reader"] {
         let server = server(&m, id);
         assert!(server.invoke(&name, &Default::default()).await.is_err());

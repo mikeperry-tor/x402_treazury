@@ -185,6 +185,31 @@ Registration success is not a qualification of a vendor's payment or delivery be
 Wallet balance/readiness is checked during payment admission; an unfunded managed profile
 can register tools but paid invocation may return `wallet_not_ready`.
 
+## Concurrent agents
+
+Authority and mutation keys are scoped to the authenticated MCP listener, not to
+an individual agent connection. Agents using the same endpoint should choose
+independent idempotency keys for independent operations. A retry must preserve
+both the key and arguments, including any preview ID. Concurrent identical
+requests cannot create duplicate registrations; successful retries return the same
+receipt. An attempt rejected as busy must still be retried. Different arguments with
+a previously accepted key produce an idempotency conflict. Another listener has
+its own key namespace and cannot mutate the first listener's registrations.
+
+The importer admits one in-flight request per listener and four process-wide.
+Calls exceeding these bounds receive `owner_import_busy` or `imports_busy`;
+`mutation_queue_full` similarly reports saturation of the 16-job mutation queue.
+These errors do not silently drop or publish a partial registration. Retry after
+other work completes, preserving the mutation key and arguments. Accepted preview
+IDs let additions reuse already fetched bytes without another import.
+
+Quota checks and catalog publication are serialized across listeners. Concurrent
+sources cannot independently claim the same remaining registration or tool quota.
+Each published snapshot contains all applicable listener views and filters;
+already-running tool calls retain their captured binding while later calls use
+the current catalog. Persistent receipts and registrations survive reopening the
+registry, including operations that raced with other writers.
+
 ## Persistence and recovery
 
 The registry is separate from treasury state and contains no wallet keys. It stores

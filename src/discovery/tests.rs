@@ -1264,3 +1264,6 @@ async fn malformed_imports_never_publish_or_leave_partial_records() {
         assert!(m.catalog.read().views.values().all(Vec::is_empty));
     }
 }
+
+#[path = "../../tests/support/discovery_concurrency.rs"]
+mod concurrency;

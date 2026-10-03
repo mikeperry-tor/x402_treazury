@@ -69,6 +69,8 @@ struct Preview {
 type FetchCell = Arc<OnceCell<std::result::Result<Arc<Vec<u8>>, String>>>;
 pub struct Manager {
     #[cfg(test)]
+    commit_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    #[cfg(test)]
     fixture_endpoint: Mutex<Option<String>>,
     #[cfg(test)]
     fail_after_commit: std::sync::atomic::AtomicBool,
@@ -224,6 +226,8 @@ impl Manager {
             fixture_endpoint: Mutex::new(None),
             #[cfg(test)]
             fail_after_commit: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            commit_barrier: Mutex::new(None),
             #[cfg(test)]
             crash_after_commit: std::sync::atomic::AtomicBool::new(false),
             policy,
@@ -698,6 +702,15 @@ impl Manager {
         args: Value,
         change: Change,
     ) -> Result<Value> {
+        #[cfg(test)]
+        {
+            let barrier = self.commit_barrier.lock().unwrap().clone();
+            if let Some(barrier) = barrier {
+                tokio::time::timeout(Duration::from_secs(10), barrier.wait())
+                    .await
+                    .context("test commit barrier deadline")?;
+            }
+        }
         let permit = self
             .mutations
             .clone()
