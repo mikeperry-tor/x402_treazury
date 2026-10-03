@@ -129,35 +129,17 @@ impl PaidClient {
             .expect("payer lock poisoned") = Arc::new(payer);
     }
     pub async fn execute(&self, route: RoutedRequest) -> Result<String> {
+        // Pin static signer before any I/O; replacement affects only later calls.
         let payer = self
             .payer
             .as_ref()
             .map(|p| p.read().expect("payer lock poisoned").clone());
-        let mut request =
-            reqwest::Request::new(route.method.parse()?, reqwest::Url::parse(&route.url)?);
-        let mut query = Vec::new();
-        for (key, value) in route.query {
-            if let Some(values) = value.as_array() {
-                for v in values {
-                    query.push((key.clone(), arg_text(v)));
-                }
-            } else {
-                query.push((key, arg_text(&value)));
-            }
-        }
-        if !query.is_empty() {
-            request.url_mut().query_pairs_mut().extend_pairs(query);
-        }
-        if let Some(body) = route.body {
-            *request.body_mut() = Some(serde_json::to_vec(&body)?.into());
-            request.headers_mut().insert(
-                reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_static("application/json"),
-            );
-        }
+        let request = build_request(route)?;
         let idempotent = matches!(request.method().as_str(), "GET" | "HEAD");
         let mut attempt = 0;
         let mut paid_submission = false;
+        // Only a pre-signing managed identity change can restart this loop.
+        // The new unsigned challenge must use the new identity-bound transport.
         let response = loop {
             let candidate = match &self.managed {
                 Some(pool) => Some(pool.candidate().await?),
@@ -191,18 +173,7 @@ impl PaidClient {
                 .await
                 .map_err(reqwest::Error::without_url)?;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
-                // Bound legacy JSON-body challenges before the SDK can collect them.
-                let mut envelope = axum::http::Response::builder().status(response.status());
-                *envelope.headers_mut().expect("valid status") = response.headers().clone();
-                let bytes = crate::limits::read(
-                    response,
-                    self.max_response_bytes,
-                    "payment challenge body",
-                    "max_response_bytes",
-                )
-                .await
-                .context("payment challenge rejected before signing")?;
-                response = envelope.body(bytes)?.into();
+                response = self.bound_challenge(response).await?;
                 if let Some(pool) = &self.managed {
                     match pool
                         .pay(
@@ -229,25 +200,7 @@ impl PaidClient {
                         Err(error) => return Err(error),
                     }
                 } else {
-                    if let Some(header) = response.headers().get("payment-required") {
-                        let mut challenge: Value =
-                            serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
-                        if let Some(desc) = challenge.pointer_mut("/resource/description")
-                            && let Some(text) = desc.as_str()
-                        {
-                            if text.chars().count() > 500 {
-                                tracing::warn!(
-                                    limit_chars = 500,
-                                    "x402 challenge description truncated for facilitator protocol compatibility"
-                                );
-                            }
-                            *desc = Value::String(text.chars().take(500).collect());
-                        }
-                        response.headers_mut().insert(
-                            "payment-required",
-                            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
-                        );
-                    }
+                    sanitize_challenge(&mut response)?;
                     // Selection (asset/network/cap) happens inside the SDK before signing.
                     let headers = payer
                         .as_ref()
@@ -267,6 +220,29 @@ impl PaidClient {
             }
             break response;
         };
+        self.response_text(response, paid_submission).await
+    }
+
+    async fn bound_challenge(&self, response: reqwest::Response) -> Result<reqwest::Response> {
+        // Bound legacy JSON-body challenges before the SDK can collect them.
+        let mut envelope = axum::http::Response::builder().status(response.status());
+        *envelope.headers_mut().expect("valid status") = response.headers().clone();
+        let bytes = crate::limits::read(
+            response,
+            self.max_response_bytes,
+            "payment challenge body",
+            "max_response_bytes",
+        )
+        .await
+        .context("payment challenge rejected before signing")?;
+        Ok(envelope.body(bytes)?.into())
+    }
+
+    async fn response_text(
+        &self,
+        response: reqwest::Response,
+        paid_submission: bool,
+    ) -> Result<String> {
         let status = response.status();
         let detail = response
             .headers()
@@ -284,4 +260,52 @@ impl PaidClient {
         }
         Ok(body)
     }
+}
+
+fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
+    let mut request =
+        reqwest::Request::new(route.method.parse()?, reqwest::Url::parse(&route.url)?);
+    let mut query = Vec::new();
+    for (key, value) in route.query {
+        if let Some(values) = value.as_array() {
+            for v in values {
+                query.push((key.clone(), arg_text(v)));
+            }
+        } else {
+            query.push((key, arg_text(&value)));
+        }
+    }
+    if !query.is_empty() {
+        request.url_mut().query_pairs_mut().extend_pairs(query);
+    }
+    if let Some(body) = route.body {
+        *request.body_mut() = Some(serde_json::to_vec(&body)?.into());
+        request.headers_mut().insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
+    }
+    Ok(request)
+}
+
+fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
+    if let Some(header) = response.headers().get("payment-required") {
+        let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
+        if let Some(desc) = challenge.pointer_mut("/resource/description")
+            && let Some(text) = desc.as_str()
+        {
+            if text.chars().count() > 500 {
+                tracing::warn!(
+                    limit_chars = 500,
+                    "x402 challenge description truncated for facilitator protocol compatibility"
+                );
+            }
+            *desc = Value::String(text.chars().take(500).collect());
+        }
+        response.headers_mut().insert(
+            "payment-required",
+            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
+        );
+    }
+    Ok(())
 }
