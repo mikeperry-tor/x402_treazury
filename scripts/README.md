@@ -5,6 +5,8 @@ any working directory unless a command explicitly supplies relative data paths.
 
 | Tool | Purpose |
 | --- | --- |
+| `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
+| `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
 | `check.sh` | Format, vendor provenance, both feature configurations, all-feature Clippy and compatibility suite |
 | `check.sh --no-default-features` | Only the tests and Clippy without the embedded wallet, plus format/provenance |
 | `python3 scripts/complexity.py` | Pinned source complexity metrics; ranked Markdown and complete JSON/CSV under `target/complexity` |
@@ -22,7 +24,9 @@ Run feature suites sequentially: CLI tests share `target/debug/treazure`.
 All default checks use local fixtures and public test keys; none reads `.env` or
 performs funded transactions. Local socket tests require permission to bind localhost.
 Cargo and Zingolib may download dependencies/public proving parameters on first build.
-Set `CARGO_NET_OFFLINE=true` to require cached build inputs.
+Set `CARGO_NET_OFFLINE=true` to require cached Cargo inputs; it does not block
+network requests from build scripts. Release qualification adds an OS network
+sandbox and validates prefetched proving parameters.
 
 Regenerate the independent cryptographic vectors with:
 

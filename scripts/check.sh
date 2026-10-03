@@ -15,6 +15,7 @@ if [ "$#" -ne 0 ]; then
 fi
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
+sh scripts/check_toolchain.sh
 cargo fmt --check
 scripts/tests/coverage.sh
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'

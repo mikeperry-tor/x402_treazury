@@ -1,0 +1,9 @@
+{
+  "host": "aarch64-apple-darwin",
+  "rust_commit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+  "cargo_version": "cargo 1.99.0 (5f94df478 2026-08-27) (Homebrew)",
+  "clang_version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+  "linker_version": "@(#)PROGRAM:ld PROJECT:ld-1267",
+  "sdk_version": "26.5",
+  "deployment_target": "14.0"
+}
