@@ -25,6 +25,7 @@ pub struct Record {
     pub host: String,
     pub port: u16,
     pub address_type: u8,
+    pub upstream_peer: Option<SocketAddr>,
 }
 pub struct Socks {
     pub address: SocketAddr,
@@ -120,13 +121,19 @@ async fn serve(
         _ => return Err(std::io::Error::other("invalid address type")),
     };
     let port = socket.read_u16().await?;
-    records.lock().unwrap().push(Record {
-        user,
-        password,
-        host: host.clone(),
-        port,
-        address_type: head[3],
-    });
+    let record_index = {
+        let mut logs = records.lock().unwrap();
+        let index = logs.len();
+        logs.push(Record {
+            user,
+            password,
+            host: host.clone(),
+            port,
+            address_type: head[3],
+            upstream_peer: None,
+        });
+        index
+    };
     if matches!(fault, Fault::Refuse) {
         socket.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
         return Ok(());
@@ -145,6 +152,7 @@ async fn serve(
         return Ok(());
     };
     let mut remote = TcpStream::connect(target).await?;
+    records.lock().unwrap()[record_index].upstream_peer = Some(remote.local_addr()?);
     socket.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await?;
     tokio::io::copy_bidirectional(&mut socket, &mut remote).await?;
     Ok(())

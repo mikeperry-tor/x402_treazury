@@ -19,3 +19,7 @@ mod test_socks;
 mod test_tls;
 
 pub mod discovery;
+
+#[cfg(test)]
+#[path = "../tests/support/signatures.rs"]
+mod test_signatures;

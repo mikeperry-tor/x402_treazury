@@ -2,7 +2,7 @@
 use alloy_primitives::Address;
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -25,6 +25,8 @@ use x402_treazure::{
         store::{Store, StoreHandle},
     },
 };
+#[path = "support/signatures.rs"]
+mod signatures;
 #[derive(Clone)]
 struct Fake {
     balances: Arc<Mutex<BTreeMap<String, u64>>>,
@@ -41,11 +43,16 @@ struct Fake {
     arrived: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
     db: std::path::PathBuf,
+    traces: Arc<Mutex<Vec<(std::net::SocketAddr, String, String)>>>,
 }
 fn challenge(amount: &str) -> Value {
     json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"x".repeat(700),"mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
 }
-async fn rpc(State(f): State<Fake>, Json(v): Json<Value>) -> Json<Value> {
+async fn rpc(
+    State(f): State<Fake>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    Json(v): Json<Value>,
+) -> Json<Value> {
     f.rpc_calls.fetch_add(1, Ordering::SeqCst);
     let result = match v["method"].as_str().unwrap() {
         "eth_chainId" => json!(if f.wrong_chain.load(Ordering::SeqCst) {
@@ -70,6 +77,10 @@ async fn rpc(State(f): State<Fake>, Json(v): Json<Value>) -> Json<Value> {
                     .parse::<Address>()
                     .unwrap()
                     .to_string();
+                f.traces
+                    .lock()
+                    .unwrap()
+                    .push((peer, "balance".into(), address.clone()));
                 *f.balances.lock().unwrap().get(&address).unwrap_or(&0)
             } else {
                 u64::from(f.used.load(Ordering::SeqCst))
@@ -80,12 +91,21 @@ async fn rpc(State(f): State<Fake>, Json(v): Json<Value>) -> Json<Value> {
     };
     Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
 }
-async fn seller(State(f): State<Fake>, headers: HeaderMap) -> Response {
+async fn seller(
+    State(f): State<Fake>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
     if f.free.load(Ordering::SeqCst) {
         return "free".into_response();
     }
     if let Some(h) = headers.get("payment-signature") {
         let p: Value = serde_json::from_slice(&STANDARD.decode(h.as_bytes()).unwrap()).unwrap();
+        let recovered = signatures::recover_exact(&p);
+        f.traces
+            .lock()
+            .unwrap()
+            .push((peer, "signed".into(), recovered.to_string()));
         // Assert the journal is committed before any signed bytes reach the seller.
         let db = rusqlite::Connection::open(&f.db).unwrap();
         let count:i64=db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED' AND nonce=?1",[p["payload"]["authorization"]["nonce"].as_str().unwrap()],|r|r.get(0)).unwrap();
@@ -99,6 +119,10 @@ async fn seller(State(f): State<Fake>, headers: HeaderMap) -> Response {
             return "paid".into_response();
         }
     }
+    f.traces
+        .lock()
+        .unwrap()
+        .push((peer, "unsigned".into(), String::new()));
     (
         StatusCode::PAYMENT_REQUIRED,
         [(
@@ -146,6 +170,7 @@ impl Harness {
             arrived: Arc::default(),
             release: Arc::default(),
             db: dir.path().join("state/state.sqlite"),
+            traces: Arc::default(),
         };
         for address in &store.status().unwrap().pools[0].addresses {
             f.balances
@@ -160,7 +185,14 @@ impl Harness {
             .route("/rpc", post(rpc))
             .route("/pay", get(seller).post(seller))
             .with_state(f.clone());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
         let client = make_client(store.clone(), pool.clone(), &base);
         Self {
             dir,
@@ -793,4 +825,116 @@ async fn post_rotation_returns_before_signing_and_requires_caller_retry() {
     h.client.execute(route).await.unwrap();
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     h.close().await;
+}
+
+#[tokio::test]
+async fn promotion_keeps_rpc_and_payment_transport_bound_to_address() {
+    let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .args([
+            "--ignored",
+            "--exact",
+            "promotion_identity_child",
+            "--nocapture",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+#[tokio::test]
+#[ignore = "private process Tor policy; exercised by parent"]
+async fn promotion_identity_child() {
+    use x402_treazure::network::{self, IsolationId, Mode, NetworkPolicy};
+    let proxy = socks::Socks::start(
+        BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
+        socks::Fault::None,
+    )
+    .await;
+    network::install(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(proxy.address),
+        ..Default::default()
+    })
+    .unwrap();
+    for method in ["GET", "POST"] {
+        let h = Harness::new().await;
+        let initial = h.store.call(|s| s.status()).await.unwrap();
+        let active = initial.pools[0].addresses[0].address.clone();
+        let standby = initial.pools[0].addresses[1].address.clone();
+        h.client.execute(h.route()).await.unwrap();
+        h.f.used.store(true, Ordering::SeqCst);
+        h.f.balances.lock().unwrap().insert(active.clone(), 0);
+        let mut route = h.route();
+        route.method = method.into();
+        let result = h.client.execute(route).await;
+        if method == "POST" {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("payer_changed_before_payment")
+            );
+            assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+            let mut retry = h.route();
+            retry.method = method.into();
+            h.client.execute(retry).await.unwrap();
+        } else {
+            result.unwrap();
+        }
+        let status = h.store.call(|s| s.status()).await.unwrap();
+        assert_eq!(status.pools[0].generation, 1);
+        assert_eq!(status.pools[0].addresses.len(), 3);
+        assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+        let traces = h.f.traces.lock().unwrap().clone();
+        let records = proxy.records.lock().unwrap().clone();
+        let payment = traces
+            .iter()
+            .filter(|(_, phase, _)| phase != "balance")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            payment.len(),
+            5,
+            "unsigned active, signed active, unsigned depleted, unsigned standby, signed standby"
+        );
+        for ((peer, phase, signer), expected) in payment
+            .into_iter()
+            .zip([&active, &active, &active, &standby, &standby])
+        {
+            let connection = records
+                .iter()
+                .find(|r| r.upstream_peer == Some(*peer))
+                .unwrap();
+            assert_eq!(
+                (connection.user.clone(), connection.password.clone()),
+                network::global().credentials(&IsolationId::evm(expected).unwrap()),
+                "{phase}"
+            );
+            if phase == "signed" {
+                assert_eq!(signer, expected);
+            }
+        }
+        let balances = traces
+            .iter()
+            .filter(|(_, phase, _)| phase == "balance")
+            .collect::<Vec<_>>();
+        assert!(!balances.is_empty());
+        for (peer, _, address) in balances {
+            let connection = records
+                .iter()
+                .find(|r| r.upstream_peer == Some(*peer))
+                .unwrap();
+            assert_eq!(
+                (connection.user.clone(), connection.password.clone()),
+                network::global().credentials(&IsolationId::evm(address).unwrap())
+            );
+        }
+        h.close().await;
+    }
 }

@@ -754,26 +754,40 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         )
         .unwrap(),
     ));
-    let ls = listeners(false);
+    let ls = listeners(true);
+    let registry = tmp.path().join("registry.sqlite");
+    let (url, task) = listen(
+        axum::Router::new().route("/spec", axum::routing::get(|| async { axum::Json(spec()) })),
+    )
+    .await;
     let snapshot = CatalogSnapshot {
         generation: 0,
         views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
     };
     let m = Manager::new(
-        policy(None),
-        ls,
-        BTreeMap::from([("shared".into(), managed)]),
+        policy(Some(registry.clone())),
+        ls.clone(),
+        BTreeMap::from([("shared".into(), managed.clone())]),
         Arc::new(CatalogState::new(snapshot)),
         vec![],
     )
     .await
     .unwrap();
-    let a = add(&m, "one", "process", "process").await;
-    add(&m, "two", "process", "process").await;
+    *m.fixture_endpoint.lock().unwrap() = Some(format!("{url}/spec"));
+    m.invoke(
+        "writer",
+        "treazure_source_preview",
+        json!({"candidate":candidate("one","persistent","process")}),
+    )
+    .await
+    .unwrap();
+    let a = add(&m, "one", "persistent", "process").await;
+    add(&m, "two", "persistent", "process").await;
+    m.invoke("writer", "treazure_source_update", json!({"source_id":a["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true,"selection":{"tags":["read"]}})).await.unwrap();
     m.invoke(
         "writer",
         "treazure_source_remove",
-        json!({"source_id":a["source_id"],"expected_revision":1,"idempotency_key":"remove"}),
+        json!({"source_id":a["source_id"],"expected_revision":2,"idempotency_key":"remove"}),
     )
     .await
     .unwrap();
@@ -783,6 +797,39 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         .unwrap();
     assert_eq!(before, after);
     drop(m);
+    let reopened = Manager::new(
+        policy(Some(registry)),
+        ls.clone(),
+        BTreeMap::from([("shared".into(), managed)]),
+        Arc::new(CatalogState::new(CatalogSnapshot {
+            generation: 0,
+            views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
+        })),
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reopened
+            .inner
+            .lock()
+            .unwrap()
+            .state
+            .records
+            .values()
+            .filter(|r| !r.removed)
+            .count(),
+        1
+    );
+    assert_eq!(
+        before,
+        store
+            .call(|s| Ok(serde_json::to_value(s.status()?)?))
+            .await
+            .unwrap()
+    );
+    drop(reopened);
+    task.abort();
     drop(store);
     worker.await.unwrap();
 }
@@ -1104,3 +1151,6 @@ async fn public_transport_child() {
 
 #[path = "../../tests/support/permissions.rs"]
 mod permissions;
+
+#[path = "../../tests/support/dynamic_scope.rs"]
+mod dynamic_scope;

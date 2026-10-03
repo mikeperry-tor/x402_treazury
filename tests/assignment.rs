@@ -322,3 +322,174 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
             .unwrap();
     }
 }
+
+#[cfg(feature = "zcash")]
+#[path = "support/signatures.rs"]
+mod signatures;
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn automatic_scope_bindings_match_actual_payment_signers() {
+    use axum::{
+        Json,
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::{get, post},
+    };
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::sync::{Arc, Mutex};
+    use x402_treazure::{
+        rotation::{base::now, store::status},
+        treasury::Treasury,
+    };
+    let signed = Arc::new(Mutex::new(vec![]));
+    let logs = signed.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let rpc = |Json(request): Json<Value>| async move {
+        let result = match request["method"].as_str().unwrap() {
+            "eth_chainId" => json!("0x2105"),
+            "eth_getBlockByNumber" => {
+                let tag = request["params"][0].as_str().unwrap();
+                json!({"number":if tag=="latest" {"0x100"} else {tag},"timestamp":format!("0x{:x}",now().unwrap()),"hash":format!("0x{:064x}",7)})
+            }
+            "eth_call" => {
+                let data = request["params"][0]["data"].as_str().unwrap();
+                json!(format!(
+                    "0x{:064x}",
+                    if data.starts_with("0x70a08231") {
+                        5_000_001u64
+                    } else {
+                        0
+                    }
+                ))
+            }
+            other => panic!("unexpected RPC {other}"),
+        };
+        Json(json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
+    };
+    let vendor = move |headers: HeaderMap| {
+        let logs = logs.clone();
+        async move {
+            if let Some(h) = headers.get("payment-signature") {
+                let payload: Value =
+                    serde_json::from_slice(&STANDARD.decode(h.as_bytes()).unwrap()).unwrap();
+                let address = signatures::recover_exact(&payload);
+                logs.lock().unwrap().push(address.to_string());
+                return Json(json!({"payer":address.to_string()})).into_response();
+            }
+            let challenge = json!({"x402Version":2,"resource":{"url":"https://fixture.example.com/pay","description":"pay","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazure::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [(
+                    "payment-required",
+                    STANDARD.encode(serde_json::to_vec(&challenge).unwrap()),
+                )],
+            )
+                .into_response()
+        }
+    };
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new()
+                .route("/rpc", post(rpc))
+                .route("/pay", get(vendor)),
+        )
+        .await
+        .unwrap()
+    });
+    for scope in ["deployment", "server", "source", "binding", "overrides"] {
+        let dir = tempfile::tempdir().unwrap();
+        let owner=Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        let id = owner.status().await.unwrap().treasury_id;
+        owner.close().await.unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            json!({"servers":[{"url":base}],"paths":{"/pay":{"get":{}}}}).to_string(),
+        )
+        .unwrap();
+        let text = config(if scope == "overrides" {
+            "binding"
+        } else {
+            scope
+        })
+        .replace("11111111-1111-4111-8111-111111111111", &id);
+        let text = if scope == "overrides" {
+            text.replace("[sources.a]", "[sources.a]\nwallet='source_override'")
+                .replace("[servers.one]", "[servers.one]\nwallet='server_override'")
+                + "\n[wallets.source_override]\nmode='static'\nprivate_key_env='SOURCE_KEY'\n[wallets.server_override]\nmode='static'\nprivate_key_env='SERVER_KEY'\n"
+        } else {
+            text
+        };
+        let path = dir.path().join("servers.toml");
+        std::fs::write(&path, text).unwrap();
+        let shown = Deployment::show_config(&path).await.unwrap();
+        let running = Deployment::load(&path)
+            .await
+            .unwrap()
+            .bind(&std::collections::BTreeMap::from([
+                ("TOKEN".into(), "scope-token".into()),
+                ("SOURCE_KEY".into(), format!("{:064x}", 1)),
+                ("SERVER_KEY".into(), format!("{:064x}", 2)),
+                ("INDEXER".into(), "http://127.0.0.1:1".into()),
+                ("SUBMISSION".into(), "http://127.0.0.1:1".into()),
+                ("BASE".into(), format!("{base}/rpc")),
+            ]))
+            .await
+            .unwrap();
+        let state = status(&dir.path().join("state")).unwrap();
+        let ports = running.addresses();
+        let stop = tokio_util::sync::CancellationToken::new();
+        let serve = tokio::spawn(running.serve(stop.clone()));
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for (server, address) in ports {
+            for source in ["a", "b"] {
+                let response:Value=client.post(format!("http://{address}/mcp")).bearer_auth("scope-token").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":format!("{source}_pay"),"arguments":{}}})).send().await.unwrap().json().await.unwrap();
+                assert_ne!(
+                    response["result"]["isError"], true,
+                    "{scope} {server}/{source}: {response}"
+                );
+                let body: Value = serde_json::from_str(
+                    response["result"]["content"][0]["text"].as_str().unwrap(),
+                )
+                .unwrap();
+                let profile = shown["wallet_bindings"][&server][source]["wallet"]
+                    .as_str()
+                    .unwrap();
+                let expected = match profile {
+                    "source_override" | "server_override" => {
+                        let key = if profile == "source_override" { 1 } else { 2 };
+                        let signer: alloy_signer_local::PrivateKeySigner =
+                            format!("{key:064x}").parse().unwrap();
+                        signer.address().to_string()
+                    }
+                    _ => state
+                        .pools
+                        .iter()
+                        .find(|p| p.name == profile)
+                        .unwrap()
+                        .addresses[0]
+                        .address
+                        .clone(),
+                };
+                assert_eq!(
+                    body["payer"].as_str().unwrap().to_lowercase(),
+                    expected.to_lowercase()
+                );
+            }
+        }
+        stop.cancel();
+        serve.await.unwrap().unwrap();
+        let owner = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+            .await
+            .unwrap();
+        let reopened = owner.status().await.unwrap();
+        owner.close().await.unwrap();
+        assert_eq!(
+            reopened.pools.iter().map(|p| &p.id).collect::<Vec<_>>(),
+            state.pools.iter().map(|p| &p.id).collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(signed.lock().unwrap().len(), 20);
+    task.abort();
+}

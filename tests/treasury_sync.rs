@@ -391,6 +391,14 @@ spec="nonexistent.json"
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["state"]["sync"]["phase"], "ready");
     assert_eq!(output["state"]["sync_fresh"], true);
+    let context =
+        x402_treazure::network::NetworkContext::new(x402_treazure::network::NetworkPolicy {
+            mode: x402_treazure::network::Mode::Tor,
+            socks_endpoint: Some(proxy_address),
+            ..Default::default()
+        })
+        .unwrap();
+    let credentials = context.credentials(&x402_treazure::network::IsolationId::treasury(&id));
     assert!(!proxy.records.lock().unwrap().is_empty());
     assert!(
         proxy
@@ -398,7 +406,7 @@ spec="nonexistent.json"
             .lock()
             .unwrap()
             .iter()
-            .all(|r| r.user == "<torS0X>0")
+            .all(|r| (r.user.clone(), r.password.clone()) == credentials)
     );
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     server.abort();
