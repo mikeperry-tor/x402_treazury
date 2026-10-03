@@ -1154,3 +1154,51 @@ mod permissions;
 
 #[path = "../../tests/support/dynamic_scope.rs"]
 mod dynamic_scope;
+
+#[cfg(unix)]
+#[test]
+fn registry_protected_aliases_and_sidecars_preserve_targets() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    for suffix in ["", ".owner.lock", "-wal", "-shm", "-journal"] {
+        for hard in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let protected = tmp.path().join("protected");
+            std::fs::write(&protected, b"private sentinel").unwrap();
+            std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let file = tmp.path().join("registry.sqlite");
+            let alias = tmp.path().join(format!("registry.sqlite{suffix}"));
+            if hard {
+                std::fs::hard_link(&protected, &alias).unwrap();
+            } else {
+                symlink(&protected, &alias).unwrap();
+            }
+            assert!(store::Store::open(&file, std::slice::from_ref(&protected)).is_err());
+            assert_eq!(std::fs::read(&protected).unwrap(), b"private sentinel");
+        }
+    }
+    for suffix in [".owner.lock", "-wal", "-shm", "-journal"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("registry.sqlite");
+        let missing = tmp.path().join("missing");
+        symlink(
+            &missing,
+            tmp.path().join(format!("registry.sqlite{suffix}")),
+        )
+        .unwrap();
+        assert!(store::Store::open(&file, &[]).is_err());
+        assert!(!missing.exists());
+        assert!(!file.exists());
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let parent = tmp.path().join("protected");
+    std::fs::create_dir(&parent).unwrap();
+    symlink(&parent, tmp.path().join("alias")).unwrap();
+    assert!(
+        store::Store::open(
+            &tmp.path().join("alias/../protected/registry.sqlite"),
+            std::slice::from_ref(&parent)
+        )
+        .is_err()
+    );
+    assert!(!parent.join("registry.sqlite").exists());
+}

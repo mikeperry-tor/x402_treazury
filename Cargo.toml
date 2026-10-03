@@ -81,3 +81,6 @@ required-features = ["zcash"]
 [patch."https://github.com/zingolabs/zingolib"]
 zingolib = { path = "vendor/zingolib" }
 zingo-netutils = { path = "vendor/zingo-netutils" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -144,17 +144,51 @@ pub struct Store {
 #[cfg(unix)]
 fn private_options(options: &mut OpenOptions) {
     use std::os::unix::fs::OpenOptionsExt;
-    options.mode(0o600);
+    options
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
 }
 #[cfg(not(unix))]
 fn private_options(_: &mut OpenOptions) {}
-fn private_file(path: &Path, create: bool) -> Result<File> {
-    if path.exists() {
+fn validate_private_metadata(metadata: &fs::Metadata) -> Result<()> {
+    ensure!(
+        metadata.file_type().is_file(),
+        "state path must be a regular file"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
         ensure!(
-            fs::symlink_metadata(path)?.file_type().is_file(),
-            "state path must be a regular file"
+            metadata.nlink() == 1,
+            "state/key file must not have hard links"
+        );
+        ensure!(
+            metadata.permissions().mode() & 0o077 == 0,
+            "state/key file must be owner-only"
         );
     }
+    Ok(())
+}
+fn existing_private_path(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => validate_private_metadata(&metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+fn database_paths(dir: &Path) -> Result<()> {
+    for name in [
+        "state.sqlite",
+        "state.sqlite-wal",
+        "state.sqlite-shm",
+        "state.sqlite-journal",
+    ] {
+        existing_private_path(&dir.join(name))?;
+    }
+    Ok(())
+}
+fn private_file(path: &Path, create: bool) -> Result<File> {
+    existing_private_path(path)?;
     let mut options = OpenOptions::new();
     options.read(true).write(true);
     if create {
@@ -162,14 +196,7 @@ fn private_file(path: &Path, create: bool) -> Result<File> {
     }
     private_options(&mut options);
     let file = options.open(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        ensure!(
-            file.metadata()?.permissions().mode() & 0o077 == 0,
-            "state/key file must be owner-only"
-        );
-    }
+    validate_private_metadata(&file.metadata()?)?;
     Ok(file)
 }
 fn directory(path: &Path) -> Result<()> {
@@ -308,6 +335,7 @@ impl Store {
         expected_network: TreasuryNetwork,
     ) -> Result<Self> {
         let owner = lock(dir)?;
+        database_paths(dir)?;
         private_file(&dir.join("state.sqlite"), false)?;
         let mut file = private_file(key_file, false)?;
         use std::io::Read;
@@ -860,6 +888,7 @@ fn allocate(
 }
 pub fn status(dir: &Path) -> Result<Status> {
     directory(dir)?;
+    database_paths(dir)?;
     let path = dir.join("state.sqlite");
     private_file(&path, false)?;
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
@@ -1478,3 +1507,7 @@ fn apply_chain_view(
 #[cfg(test)]
 #[path = "../../tests/support/store_integrity.rs"]
 mod integrity_tests;
+
+#[cfg(all(test, unix))]
+#[path = "../../tests/support/store_filesystem.rs"]
+mod filesystem_tests;
