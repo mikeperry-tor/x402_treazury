@@ -980,3 +980,124 @@ async fn explicit_wallet_override_and_parallel_add_quota_are_enforced() {
             .shares_profile_with(&shared)
     );
 }
+
+// The real import and public-only payer are exercised in a fresh process because
+// all production outbound paths share one immutable process network policy.
+#[tokio::test]
+async fn production_public_transport_is_exercised_without_fixture_client_replacement() {
+    let result = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .env("ALL_PROXY", "http://127.0.0.1:1")
+        .env("HTTP_PROXY", "http://127.0.0.1:1")
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("NO_PROXY", "*")
+        .args([
+            "--ignored",
+            "--exact",
+            "discovery::tests::public_transport_child",
+            "--nocapture",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+#[tokio::test]
+#[ignore = "isolated immutable Tor policy; exercised by parent"]
+async fn public_transport_child() {
+    use crate::{
+        network::{IsolationId, Mode, NetworkContext, NetworkPolicy},
+        test_socks::{Fault, Socks},
+    };
+    use axum::{
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::get,
+    };
+    use base64::Engine;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let requests = Arc::new(AtomicUsize::new(0));
+    let signed = Arc::new(AtomicUsize::new(0));
+    let (u, s) = (requests.clone(), signed.clone());
+    let (address,task)=crate::test_tls::serve(axum::Router::new()
+        .route("/openapi.json",get(|| async {axum::Json(spec())}))
+        .route("/redirect",get(|| async {axum::response::Redirect::temporary("https://other.example.com/never")}))
+        .route("/downgrade",get(|| async {axum::response::Redirect::temporary("http://127.0.0.1:1/never")}))
+        .route("/read",get(move |headers:HeaderMap| {let (u,s)=(u.clone(),s.clone());async move {
+            u.fetch_add(1,Ordering::SeqCst);
+            if headers.contains_key("payment-signature") {s.fetch_add(1,Ordering::SeqCst);return "paid".into_response();}
+            let challenge=json!({"x402Version":2,"resource":{"url":"https://api.example.com/read","description":"read","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            (StatusCode::PAYMENT_REQUIRED,[("payment-required",base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
+        }}))).await;
+    let proxy = Socks::start(
+        BTreeMap::from([
+            ("spec.example.com".into(), address),
+            ("api.example.com".into(), address),
+        ]),
+        Fault::None,
+    )
+    .await;
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(proxy.address),
+        connect_timeout_seconds: Some(1),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
+    crate::network::install_test_context(context);
+    let p = policy(None);
+    let bytes = import::fetch(&p, "https://spec.example.com/openapi.json")
+        .await
+        .unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), spec());
+    let payer = payer().public_destinations();
+    let request = crate::catalog::RoutedRequest {
+        method: "GET".into(),
+        url: "https://api.example.com/read".into(),
+        query: BTreeMap::new(),
+        body: None,
+    };
+    assert_eq!(payer.execute(request).await.unwrap(), "paid");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(signed.load(Ordering::SeqCst), 1);
+    for path in ["redirect", "downgrade"] {
+        assert!(
+            import::fetch(&p, &format!("https://spec.example.com/{path}"))
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        import::fetch(&p, "https://127.0.0.1/openapi.json")
+            .await
+            .is_err()
+    );
+    let ctx = crate::network::global();
+    let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    let ids = [
+        IsolationId::discovery("https://spec.example.com").unwrap(),
+        IsolationId::evm(&signer.address().to_string()).unwrap(),
+    ];
+    let records = proxy.records.lock().unwrap();
+    assert_eq!(
+        records.len(),
+        2,
+        "redirect or private URL caused an extra connection"
+    );
+    for (record, id) in records.iter().zip(ids) {
+        assert_eq!(record.address_type, 3);
+        assert_eq!(
+            (record.user.clone(), record.password.clone()),
+            ctx.credentials(&id)
+        );
+    }
+    drop(records);
+    task.abort();
+}

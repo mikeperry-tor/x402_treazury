@@ -155,6 +155,10 @@ struct HttpKey {
 pub struct NetworkContext {
     pub policy: NetworkPolicy,
     http: Mutex<HashMap<HttpKey, reqwest::Client>>,
+    #[cfg(test)]
+    test_root: Option<&'static [u8]>,
+    #[cfg(test)]
+    test_dns: Option<Arc<dyn reqwest::dns::Resolve>>,
     #[cfg(feature = "zcash")]
     grpc: tokio::sync::Mutex<
         HashMap<(tokio::runtime::Id, IsolationId, String), zingo_netutils::GrpcIndexer>,
@@ -166,6 +170,10 @@ impl NetworkContext {
         Ok(Self {
             policy,
             http: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            test_root: None,
+            #[cfg(test)]
+            test_dns: None,
             #[cfg(feature = "zcash")]
             grpc: tokio::sync::Mutex::new(HashMap::new()),
         })
@@ -182,6 +190,13 @@ impl NetworkContext {
             SocksAuth::TorExtended => ("<torS0X>0".into(), format!("{namespace}:v1:{token}")),
             SocksAuth::Legacy => (namespace.into(), format!("v1:{token}")),
         }
+    }
+    /// A fixture CA changes trust only in unit-test binaries, never URL policy,
+    /// SNI, certificate verification, identities, redirects or proxy selection.
+    #[cfg(test)]
+    pub(crate) fn with_test_root(mut self, root: &'static [u8]) -> Self {
+        self.test_root = Some(root);
+        self
     }
     pub fn http(&self, id: &IsolationId, url: &str, timeout: Duration) -> Result<reqwest::Client> {
         self.http_policy(id, url, timeout, false)
@@ -225,7 +240,16 @@ impl NetworkContext {
             .connect_timeout(self.policy.timeout())
             .redirect(reqwest::redirect::Policy::none());
         if public_only && self.policy.mode == Mode::Direct {
-            builder = builder.dns_resolver(Arc::new(PublicResolver));
+            let resolver = PublicResolver::default();
+            #[cfg(test)]
+            let resolver = PublicResolver {
+                lookup: self.test_dns.clone().unwrap_or(resolver.lookup),
+            };
+            builder = builder.dns_resolver(Arc::new(resolver));
+        }
+        #[cfg(test)]
+        if let Some(root) = self.test_root {
+            builder = builder.tls_certs_only([reqwest::Certificate::from_pem(root)?]);
         }
         if self.policy.mode == Mode::Tor {
             let (user, pass) = self.credentials(id);
@@ -264,6 +288,13 @@ pub fn install(policy: NetworkPolicy) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(test)]
+pub(crate) fn install_test_context(context: NetworkContext) {
+    assert!(
+        NETWORK.set(Arc::new(context)).is_ok(),
+        "test policy already installed"
+    );
+}
 pub fn discovery(url: &str, timeout: Duration) -> Result<reqwest::Client> {
     global().discovery(url, timeout)
 }
@@ -300,7 +331,14 @@ impl NetworkContext {
             .connect_timeout(self.policy.timeout())
             .tcp_nodelay(true);
         if uri.scheme_str() == Some("https") {
-            endpoint = endpoint.tls_config(ClientTlsConfig::new().with_webpki_roots())?;
+            let tls = ClientTlsConfig::new().with_webpki_roots();
+            #[cfg(test)]
+            let tls = if let Some(root) = self.test_root {
+                tls.ca_certificate(tonic::transport::Certificate::from_pem(root))
+            } else {
+                tls
+            };
+            endpoint = endpoint.tls_config(tls)?;
         }
         let channel: Channel = if self.policy.mode == Mode::Tor {
             let proxy = self
@@ -404,16 +442,39 @@ pub fn public_url(url: &str) -> Result<reqwest::Url> {
     }
     Ok(u)
 }
-struct PublicResolver;
-impl reqwest::dns::Resolve for PublicResolver {
+struct SystemResolver;
+impl reqwest::dns::Resolve for SystemResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         Box::pin(async move {
             let addresses: Vec<_> = tokio::net::lookup_host((name.as_str(), 0)).await?.collect();
+            Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+struct PublicResolver {
+    lookup: Arc<dyn reqwest::dns::Resolve>,
+}
+impl Default for PublicResolver {
+    fn default() -> Self {
+        Self {
+            lookup: Arc::new(SystemResolver),
+        }
+    }
+}
+impl reqwest::dns::Resolve for PublicResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let lookup = self.lookup.resolve(name);
+        Box::pin(async move {
+            let addresses: Vec<_> = lookup.await?.collect();
             validate_public_addresses(&addresses)?;
             Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs)
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/network_boundary.rs"]
+mod boundary_tests;
 
 fn validate_public_addresses(addresses: &[std::net::SocketAddr]) -> std::io::Result<()> {
     if addresses.is_empty() || addresses.iter().any(|a| !public_ip(a.ip())) {

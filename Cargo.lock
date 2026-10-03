@@ -4831,6 +4831,7 @@ dependencies = [
  "aws-lc-rs",
  "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki 0.103.15",
  "subtle",
@@ -6586,6 +6587,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "x402-reqwest"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77a965e7346eb4e433a6023a609b2bf002be0f76fea20e0ceaa34d86c983a94"
+dependencies = [
+ "async-trait",
+ "http",
+ "reqwest 0.13.5",
+ "reqwest-middleware",
+ "serde_json",
+ "x402-types",
+]
+
+[[package]]
 name = "x402-treazure"
 version = "0.1.0"
 dependencies = [
@@ -6615,6 +6630,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "toml",
  "tonic",
@@ -6634,20 +6650,6 @@ dependencies = [
  "zingo-netutils",
  "zingolib",
  "zip32",
-]
-
-[[package]]
-name = "x402-reqwest"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c77a965e7346eb4e433a6023a609b2bf002be0f76fea20e0ceaa34d86c983a94"
-dependencies = [
- "async-trait",
- "http",
- "reqwest 0.13.5",
- "reqwest-middleware",
- "serde_json",
- "x402-types",
 ]
 
 [[package]]

@@ -65,6 +65,7 @@ x402-types = "=2.0.2"
 
 [dev-dependencies]
 alloy-sol-types = "1.5"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 # Experimental compatibility patch: see vendor/README.md.
 [patch.crates-io]

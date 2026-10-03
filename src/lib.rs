@@ -14,5 +14,8 @@ pub mod wallet_cli;
 #[cfg(test)]
 #[path = "../tests/support/socks.rs"]
 mod test_socks;
+#[cfg(test)]
+#[path = "../tests/support/tls.rs"]
+mod test_tls;
 
 pub mod discovery;
