@@ -719,6 +719,8 @@ impl Deployment {
         }
         Ok(RunningDeployment {
             listeners,
+            #[cfg(test)]
+            listener_failure: None,
             #[cfg(feature = "zcash")]
             treasury,
             #[cfg(feature = "zcash")]
@@ -735,6 +737,8 @@ type FundingRuntime = (
     crate::rotation::funding::FundingWorker<crate::rotation::funding::Backend>,
 );
 pub struct RunningDeployment {
+    #[cfg(test)]
+    listener_failure: Option<(String, tokio::sync::oneshot::Receiver<()>)>,
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
@@ -789,11 +793,30 @@ impl RunningDeployment {
             });
         }
         let mut tasks = JoinSet::new();
+        #[cfg(test)]
+        let mut listener_failure = self.listener_failure;
         for (name, listener, app) in self.listeners {
             let stopped = stop.clone();
+            #[cfg(test)]
+            let failure = if listener_failure.as_ref().is_some_and(|(id, _)| id == &name) {
+                listener_failure.take().map(|(_, signal)| signal)
+            } else {
+                None
+            };
             tasks.spawn(async move {
-                axum::serve(listener, app)
-                    .with_graceful_shutdown(stopped.cancelled_owned())
+                let serving =
+                    axum::serve(listener, app).with_graceful_shutdown(stopped.cancelled_owned());
+                #[cfg(test)]
+                let serving = async move {
+                    match failure {
+                        Some(signal) => tokio::select! {
+                            result = serving => result,
+                            _ = signal => Err(std::io::Error::other("injected listener failure")),
+                        },
+                        None => serving.await,
+                    }
+                };
+                serving
                     .await
                     .with_context(|| format!("server {name} stopped unexpectedly"))
             });
@@ -831,5 +854,90 @@ impl RunningDeployment {
             task.await.context("treasury worker failed")??;
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[tokio::test]
+    async fn failed_listener_stops_siblings_and_releases_registry_ownership() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"paths":{"/test":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let path = dir.path().join("servers.toml");
+        std::fs::write(
+            &path,
+            r#"
+version = 1
+[sources.test]
+spec = "spec.json"
+base_url = "https://example.com"
+probe_pricing = false
+[wallets.shared]
+mode = "static"
+private_key_env = "KEY"
+[source_management]
+wallet = "shared"
+registry_file = "registry.sqlite"
+[servers.one]
+listen = "127.0.0.1:0"
+sources = ["test"]
+wallet = "shared"
+bearer_token_env = "TOKEN"
+[servers.two]
+listen = "127.0.0.1:0"
+sources = ["test"]
+wallet = "shared"
+bearer_token_env = "TOKEN"
+"#,
+        )
+        .unwrap();
+        let env = BTreeMap::from([
+            ("KEY".into(), format!("{:064x}", 1)),
+            ("TOKEN".into(), "fixture".into()),
+        ]);
+        let deployment = Deployment::load(&path).await.unwrap();
+        let mut running = deployment.bind(&env).await.unwrap();
+        let addresses = running.addresses();
+        let (send, signal) = tokio::sync::oneshot::channel();
+        running.listener_failure = Some(("one".into(), signal));
+        let task = tokio::spawn(running.serve(CancellationToken::new()));
+        // Both real listeners have entered serving before failure injection.
+        for (_, address) in &addresses {
+            let http =
+                crate::network::discovery(&format!("http://{address}"), Duration::from_secs(5))
+                    .unwrap();
+            assert_eq!(
+                http.post(format!("http://{address}/mcp"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                401
+            );
+        }
+        send.send(()).unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("injected listener failure"));
+        for (_, address) in addresses {
+            TcpListener::bind(address).await.unwrap();
+        }
+        // Rebinding also reacquires the same registry's exclusive ownership.
+        drop(
+            Deployment::load(&path)
+                .await
+                .unwrap()
+                .bind(&env)
+                .await
+                .unwrap(),
+        );
     }
 }

@@ -933,6 +933,32 @@ async fn actual_mcp_pagination_and_cross_query_cursors_reject_stale_views() {
     )
     .await;
     assert_eq!(second["tools"].as_array().unwrap().len(), 12);
+    let names: std::collections::BTreeSet<_> = first["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(second["tools"].as_array().unwrap())
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 112);
+    assert!(second.get("nextCursor").is_none());
+    let expected: std::collections::BTreeSet<_> = m.catalog.read().views["writer"]
+        .iter()
+        .map(|t| t.tool.name.clone())
+        .chain(
+            crate::discovery::tools::definitions(true, true)
+                .into_iter()
+                .map(|t| t.name.into_owned()),
+        )
+        .collect();
+    assert_eq!(
+        names
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected
+    );
+
     let search = m
         .invoke("writer", "treazure_tools_search", json!({"limit":1}))
         .await
@@ -1202,3 +1228,6 @@ fn registry_protected_aliases_and_sidecars_preserve_targets() {
     );
     assert!(!parent.join("registry.sqlite").exists());
 }
+
+#[path = "../../tests/support/mcp_execution.rs"]
+mod mcp_execution;

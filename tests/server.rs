@@ -77,6 +77,20 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
     assert!(response.headers().get("mcp-session-id").is_none());
     let initialized: Value = response.json().await.unwrap();
     assert_eq!(initialized["result"]["instructions"], "Read help first");
+    assert_ne!(
+        initialized["result"]["capabilities"]["tools"]["listChanged"],
+        true
+    );
+    let malformed = http
+        .post(&endpoint)
+        .bearer_auth("test-token")
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .body("{broken")
+        .send()
+        .await
+        .unwrap();
+    assert!(malformed.status().is_client_error());
     let listed: Value = request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))
         .send()
         .await
@@ -197,5 +211,84 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
     assert_eq!(server.catalog.read().views["other"][0].tool.path, "/new");
     release.notify_one();
     assert_eq!(pending.await.unwrap(), "old");
+    task.abort();
+}
+
+#[tokio::test]
+async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_content() {
+    use axum::{
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+    };
+    use x402_treazure::catalog_state::{self, CatalogSnapshot};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (h, e, r) = (hits.clone(), entered.clone(), release.clone());
+    let (url, task) = serve(
+        Router::new()
+            .route(
+                "/help",
+                get(move |headers: HeaderMap| {
+                    let (h, e, r) = (h.clone(), e.clone(), r.clone());
+                    async move {
+                        assert!(!headers.contains_key("payment-signature"));
+                        if h.fetch_add(1, Ordering::SeqCst) == 0 {
+                            return (StatusCode::BAD_GATEWAY, "retry").into_response();
+                        }
+                        e.notify_one();
+                        r.notified().await;
+                        "old documentation".into_response()
+                    }
+                }),
+            )
+            .route("/new-help", get(|| async { "new documentation" })),
+    )
+    .await;
+    let cfg = Config {
+        help_url: Some(format!("{url}/help")),
+        ..Default::default()
+    };
+    let tools = build_tools(&cfg, &json!({"paths":{"/unused":{"get":{}}}}), "help").unwrap();
+    let client = PaidClient::new(
+        Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
+    );
+    let server = Server::new(tools.clone(), client.clone(), url.clone(), None, None);
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    assert!(
+        server
+            .invoke("help_help", &Default::default())
+            .await
+            .is_err()
+    );
+    let mut callers = tokio::task::JoinSet::new();
+    for _ in 0..8 {
+        let s = server.clone();
+        callers.spawn(async move { s.invoke("help_help", &Default::default()).await.unwrap() });
+    }
+    entered.notified().await;
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    release.notify_one();
+    while let Some(result) = callers.join_next().await {
+        assert_eq!(result.unwrap(), "old documentation");
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    let mut tool = tools.iter().find(|t| t.help_url.is_some()).unwrap().clone();
+    tool.help_url = Some(format!("{url}/new-help"));
+    server.catalog.publish(CatalogSnapshot {
+        generation: 1,
+        views: BTreeMap::from([(
+            "default".into(),
+            catalog_state::bind(vec![(tool, client, url)]),
+        )]),
+    });
+    assert_eq!(
+        server
+            .invoke("help_help", &Default::default())
+            .await
+            .unwrap(),
+        "new documentation"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
     task.abort();
 }
