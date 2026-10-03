@@ -13,7 +13,7 @@ path = "src/main.rs"
 [features]
 default = ["zcash"]
 # Explicit opt-in for synthetic-note proving tests; never needed by serving.
-zcash-testutils = ["zcash", "zingolib/testutils", "dep:orchard"]
+zcash-testutils = ["zcash", "zingolib/testutils", "dep:orchard", "dep:zingo-status"]
 zcash-regtest = ["zcash-testutils", "dep:zcash_local_net"]
 zcash = ["dep:zingolib", "dep:zip32", "dep:zcash_client_backend", "dep:zcash_primitives", "dep:zcash_protocol", "dep:zcash_keys", "dep:zingo-netutils", "dep:tonic", "dep:pepper-sync", "dep:bip0039", "dep:zcash_proofs"]
 
@@ -34,6 +34,7 @@ zcash_primitives = { version = "0.30.1", default-features = false, optional = tr
 zcash_protocol = { version = "0.10.6", optional = true }
 zcash_keys = { version = "0.16.1", default-features = false, optional = true }
 zingo-netutils = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
+zingo-status = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", optional = true }
 pepper-sync = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", optional = true }
 bip0039 = { version = "0.14", optional = true }
 zcash_proofs = { version = "0.30", optional = true }

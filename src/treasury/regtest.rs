@@ -568,11 +568,76 @@ async fn refunds_run() -> Result<()> {
             .await?;
     }
     treasury.close().await?;
-    let mut treasury =
-        Treasury::open_with_network(state.clone(), key, id, TreasuryNetwork::Regtest).await?;
-    treasury.configure_sync(settings);
+    let mut treasury = Treasury::open_with_network(
+        state.clone(),
+        key.clone(),
+        id.clone(),
+        TreasuryNetwork::Regtest,
+    )
+    .await?;
+    treasury.configure_sync(settings.clone());
     treasury.sync_once(&stop).await?;
     assert_eq!(treasury.status().await?.refunds.len(), 2);
+    for fail_commit in [false, true] {
+        let before = treasury.status().await?.treasury_operations.len();
+        let mempool: Value = chain
+            .rpc
+            .json_result_from_call("getrawmempool", "[]")
+            .await?;
+        let db = rusqlite::Connection::open(state.join("state.sqlite"))?;
+        if fail_commit {
+            db.execute_batch("CREATE TRIGGER reject_shield BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture shield commit failure'); END;")?;
+        }
+        let error = treasury
+            .shield_refund(
+                jobs[30].id.clone(),
+                1_000_000,
+                if fail_commit { 30_000 } else { 1 },
+                &stop,
+            )
+            .await
+            .err()
+            .expect("shielding failure was not injected");
+        if !fail_commit {
+            assert!(
+                error.to_string().contains("shielding fee cap exceeded"),
+                "{error}"
+            );
+        }
+        if fail_commit {
+            db.execute_batch("DROP TRIGGER reject_shield;")?;
+        }
+        assert_eq!(treasury.status().await?.treasury_operations.len(), before);
+        assert!(!treasury.status().await?.outgoing_pending);
+        let after: Value = chain
+            .rpc
+            .json_result_from_call("getrawmempool", "[]")
+            .await?;
+        assert_eq!(
+            mempool, after,
+            "calculate-only failure broadcast a transaction"
+        );
+        let abandoned: Vec<String> = db.prepare("SELECT id FROM budget_entries WHERE consumed=0 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE outgoing.id=budget_entries.id)")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        drop(db);
+        treasury.close().await?;
+        treasury = Treasury::open_with_network(
+            state.clone(),
+            key.clone(),
+            id.clone(),
+            TreasuryNetwork::Regtest,
+        )
+        .await?;
+        treasury.configure_sync(settings.clone());
+        treasury
+            .store
+            .call(move |s| {
+                for id in abandoned {
+                    s.abandon_unprepared(&id)?;
+                }
+                Ok(())
+            })
+            .await?;
+    }
     // Both unrelated transparent addresses are funded. Each shield must consume
     // exactly its selected address, even when the helper's default would combine.
     for (n, height) in [(30usize, 14), (31usize, 16)] {

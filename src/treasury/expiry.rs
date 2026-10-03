@@ -23,12 +23,24 @@ pub(super) fn check_inputs<T: OutputInterface>(
         .get(txid)
         .context("prepared transaction missing from snapshot")?;
     let inputs = T::transaction_inputs(record);
+    check_owned_outputs(
+        original
+            .wallet_outputs::<T>()
+            .into_iter()
+            .filter(|o| o.spend_link().is_some_and(|link| inputs.contains(&&link))),
+        current,
+        height,
+        depth,
+    )
+}
+fn check_owned_outputs<'a, T: OutputInterface + 'a>(
+    outputs: impl IntoIterator<Item = &'a T>,
+    current: &LightWallet,
+    height: u64,
+    depth: u32,
+) -> Result<u64> {
     let mut value = 0u64;
-    for old in original
-        .wallet_outputs::<T>()
-        .into_iter()
-        .filter(|o| o.spend_link().is_some_and(|link| inputs.contains(&&link)))
-    {
+    for old in outputs {
         let output = current
             .wallet_outputs::<T>()
             .into_iter()
@@ -146,15 +158,7 @@ impl Treasury {
         .into_iter()
         .try_fold(0u64, |a, b| a.checked_add(b))
         .context("input value overflow")?;
-        ensure!(
-            input
-                >= facts
-                    .amount_zatoshis
-                    .checked_add(facts.fee_zatoshis)
-                    .context("cost overflow")?
-                && input > 0,
-            "expiry recovery missing owned inputs"
-        );
+        validate_owned_value(input, facts.amount_zatoshis, facts.fee_zatoshis)?;
         drop(current);
         drop(original);
         ensure!(!stop.is_cancelled(), "expiry recovery cancelled");
@@ -162,5 +166,35 @@ impl Treasury {
         self.store
             .call(move |s| s.resolve_expired(&id, revision, now()?))
             .await
+    }
+}
+
+#[cfg(all(test, feature = "zcash-testutils"))]
+#[path = "../../tests/support/expiry_inputs.rs"]
+mod tests;
+
+fn validate_owned_value(input: u64, amount: u64, fee: u64) -> Result<()> {
+    ensure!(
+        input >= amount.checked_add(fee).context("cost overflow")? && input > 0,
+        "expiry recovery missing owned inputs"
+    );
+    Ok(())
+}
+#[cfg(test)]
+mod value_tests {
+    #[test]
+    fn expiry_requires_enough_owned_value_without_overflow() {
+        for (input, amount, fee, allowed) in [
+            (0, 0, 0, false),
+            (99, 80, 20, false),
+            (100, 80, 20, true),
+            (101, 80, 20, true),
+            (u64::MAX, u64::MAX, 1, false),
+        ] {
+            assert_eq!(
+                super::validate_owned_value(input, amount, fee).is_ok(),
+                allowed
+            );
+        }
     }
 }

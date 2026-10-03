@@ -105,16 +105,21 @@ mod tests {
             confirmed_shielded_zatoshis: 1000,
             spendable_shielded_zatoshis: 1000,
         };
-        s.save_sync_snapshot(2, b"synced", Some(observation))?;
+        let mut shallow = observation.clone();
+        shallow.height = Some(21);
+        s.save_sync_snapshot(2, b"shallow", Some(shallow))?;
+        assert!(s.resolve_expired(&job.operation_id, 3, 100).is_err());
+        assert!(s.operation_pending(&job.operation_id)?);
+        s.save_sync_snapshot(3, b"synced", Some(observation))?;
         assert!(s.resolve_expired(&job.operation_id, 2, 100).is_err());
-        assert!(s.resolve_expired(&job.operation_id, 3, 401).is_err());
-        s.resolve_expired(&job.operation_id, 3, 100)?;
+        assert!(s.resolve_expired(&job.operation_id, 4, 401).is_err());
+        s.resolve_expired(&job.operation_id, 4, 100)?;
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         assert!(!s.operation_pending(&job.operation_id)?);
         let next = s.funding_jobs()?.remove(0);
         assert_ne!(next.operation_id, job.operation_id);
         assert_eq!(next.phase, funding::FundingPhase::Allocated);
-        assert!(s.resolve_expired(&job.operation_id, 3, 100).is_err());
+        assert!(s.resolve_expired(&job.operation_id, 4, 100).is_err());
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         assert!(s.confirm_spend(&job.operation_id, 100, 1).is_err());
         Ok(())

@@ -114,11 +114,17 @@ mod tests {
         assert!(s.record_refund(refund.clone()).is_err());
         s.confirm_spend(&id, 100, 1)?;
         s.record_refund(refund.clone())?;
-        s.record_refund(refund)?;
+        s.record_refund(refund.clone())?;
+        let mut conflict = refund.clone();
+        conflict.amount += 1;
+        assert!(s.record_refund(conflict).is_err());
+        let mut unrelated = refund.clone();
+        unrelated.operation_id = "unknown-operation".into();
+        assert!(s.record_refund(unrelated).is_err());
         // Third-party overpayment cannot refund the fee or create negative cost.
         s.record_refund(RefundStatus {
-            txid: "extra".into(),
-            output_index: 0,
+            txid: "refund".into(),
+            output_index: 1,
             operation_id: id.clone(),
             amount: 10,
             height: 10,
@@ -127,6 +133,16 @@ mod tests {
         assert!(s.reserve("too_much", None, 1, 181, 200).is_err());
         s.reserve("allowed", None, 1, 180, 200)?;
         assert_eq!(s.status()?.refunds.len(), 2);
+        let treasury_id = s.id().to_owned();
+        drop(s);
+        let mut s = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &treasury_id,
+        )?;
+        s.record_refund(refund)?;
+        assert_eq!(s.status()?.refunds.len(), 2);
+        assert!(s.reserve("extra-budget", None, 1, 1, 200).is_err());
         Ok(())
     }
 }

@@ -24,50 +24,7 @@ impl SyncSession {
             .call(|s| Ok((s.refund_bindings()?, s.status()?)))
             .await?;
         let wallet = self.client.wallet().read().await;
-        let mut seen = std::collections::BTreeSet::new();
-        let mut refunds = vec![];
-        for record in wallet.wallet_transactions.values() {
-            let Some(h) = record
-                .status()
-                .get_confirmed_height()
-                .map(|h| u64::from(u32::from(h)))
-            else {
-                continue;
-            };
-            if h == 0 || height < h || height - h + 1 < u64::from(confirmations) {
-                continue;
-            }
-            for coin in record.transparent_coins() {
-                let txid = coin.output_id().txid().to_string();
-                let index = coin.output_id().output_index();
-                seen.insert((txid.clone(), index));
-                if let Some((operation, _)) = bindings
-                    .iter()
-                    .find(|(_, address)| address == coin.address())
-                    && status
-                        .treasury_operations
-                        .iter()
-                        .any(|o| &o.operation_id == operation && o.submission == "CONFIRMED")
-                {
-                    refunds.push(RefundStatus {
-                        txid,
-                        output_index: index,
-                        operation_id: operation.clone(),
-                        amount: i64::try_from(coin.value())?,
-                        height: i64::try_from(h)?,
-                    });
-                }
-            }
-        }
-        // A refunded input may already be shielded: its originating transaction
-        // must still be present and confirmed even when its coin is spent.
-        ensure!(
-            status
-                .refunds
-                .iter()
-                .all(|r| seen.contains(&(r.txid.clone(), r.output_index))),
-            "treasury_refund_reorg: credited refund requires recovery"
-        );
+        let refunds = collect_refunds(&wallet, &bindings, &status, height, confirmations)?;
         drop(wallet);
         self.store
             .call(move |s| {
@@ -78,6 +35,59 @@ impl SyncSession {
             })
             .await
     }
+}
+fn collect_refunds(
+    wallet: &zingolib::wallet::LightWallet,
+    bindings: &[(String, String)],
+    status: &crate::rotation::store::Status,
+    height: u64,
+    confirmations: u32,
+) -> Result<Vec<RefundStatus>> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut refunds = vec![];
+    for record in wallet.wallet_transactions.values() {
+        let Some(h) = record
+            .status()
+            .get_confirmed_height()
+            .map(|h| u64::from(u32::from(h)))
+        else {
+            continue;
+        };
+        if h == 0 || height < h || height - h + 1 < u64::from(confirmations) {
+            continue;
+        }
+        for coin in record.transparent_coins() {
+            let txid = coin.output_id().txid().to_string();
+            let index = coin.output_id().output_index();
+            seen.insert((txid.clone(), index));
+            if let Some((operation, _)) = bindings
+                .iter()
+                .find(|(_, address)| address == coin.address())
+                && status
+                    .treasury_operations
+                    .iter()
+                    .any(|o| &o.operation_id == operation && o.submission == "CONFIRMED")
+            {
+                refunds.push(RefundStatus {
+                    txid,
+                    output_index: index,
+                    operation_id: operation.clone(),
+                    amount: i64::try_from(coin.value())?,
+                    height: i64::try_from(h)?,
+                });
+            }
+        }
+    }
+    // A refunded input may already be shielded: its originating transaction
+    // must still be present and confirmed even when its coin is spent.
+    ensure!(
+        status
+            .refunds
+            .iter()
+            .all(|r| seen.contains(&(r.txid.clone(), r.output_index))),
+        "treasury_refund_reorg: credited refund requires recovery"
+    );
+    Ok(refunds)
 }
 impl Treasury {
     /// Operator requested, one job/address per transaction. No broadcast here.
@@ -279,3 +289,7 @@ impl Treasury {
         Ok(prepared)
     }
 }
+
+#[cfg(all(test, feature = "zcash-testutils"))]
+#[path = "../../tests/support/refund_observations.rs"]
+mod tests;

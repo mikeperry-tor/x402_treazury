@@ -159,7 +159,7 @@ async fn concurrent_pool_requests_and_budget_reservations_serialize() {
     assert_eq!(ids.len(), 1);
     let h = handle.clone();
     let pool = ids.into_iter().next().unwrap();
-    let other = pool.clone();
+    let other = handle.call(|s| s.ensure_pool("other", "5")).await.unwrap();
     let (a, b) = tokio::join!(
         handle.call(move |s| s.reserve("a", Some(&pool), 1, 60, 100)),
         h.call(move |s| s.reserve("b", Some(&other), 1, 60, 100))
@@ -550,4 +550,144 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
         .unwrap();
     assert!(s.recover_unprepared_funding(&job.id).is_err());
     assert!(s.operation_pending(&next.operation_id).unwrap());
+}
+
+#[test]
+fn operation_and_refund_identity_survive_promotion_and_reopen() {
+    use x402_treazure::{
+        network::IsolationId,
+        rotation::{
+            store::funding::FundingPhase,
+            transaction::{PreparedTransaction, TransactionFacts},
+        },
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let treasury_id = s.id().to_owned();
+    let pool = s.ensure_pool("identity", "5").unwrap();
+    let job = s.funding_jobs().unwrap().remove(0);
+    s.save_refund_address(&job.id, "fixture-refund-address", 1, b"refund snapshot")
+        .unwrap();
+    s.save_funding_quote(&job.id, b"immutable quote").unwrap();
+    s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
+        .unwrap();
+    s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
+        .unwrap();
+    s.prepare_with_facts(
+        &job.operation_id,
+        2,
+        b"prepared snapshot",
+        b"immutable signed bytes",
+        Some(TransactionFacts {
+            txid: "fixture".into(),
+            expiry_height: 100,
+            amount_zatoshis: 80,
+            fee_zatoshis: 20,
+            deadline: 1000,
+        }),
+    )
+    .unwrap();
+    let expected = IsolationId::evm(&job.recipient).unwrap();
+    assert_eq!(
+        PreparedTransaction::load(&s, &job.operation_id)
+            .unwrap()
+            .network_identity()
+            .unwrap(),
+        expected
+    );
+    for address in s.status().unwrap().pools[0]
+        .addresses
+        .iter()
+        .map(|a| a.id.clone())
+        .collect::<Vec<_>>()
+    {
+        s.record_credit(&address, "5000000", "block", 1).unwrap();
+    }
+    s.promote(&pool, 0).unwrap();
+    assert_ne!(
+        s.status().unwrap().pools[0].addresses[1].address,
+        job.recipient
+    );
+    drop(s);
+    let s = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &treasury_id,
+    )
+    .unwrap();
+    let original = PreparedTransaction::load(&s, &job.operation_id).unwrap();
+    assert_eq!(original.network_identity().unwrap(), expected);
+    assert_eq!(original.bytes(), b"immutable signed bytes");
+    assert_eq!(
+        s.refund_address(&job.id).unwrap().as_deref(),
+        Some("fixture-refund-address")
+    );
+    assert!(
+        s.refund_bindings()
+            .unwrap()
+            .contains(&(job.operation_id.clone(), "fixture-refund-address".into()))
+    );
+    assert_eq!(
+        s.funding_quote(&job.id).unwrap().as_slice(),
+        b"immutable quote"
+    );
+}
+
+#[test]
+fn funding_capacity_and_reservation_agree_across_days_and_reduced_limits() {
+    use x402_treazure::rotation::store::{SyncObservation, SyncPhase};
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let id = s.id().to_owned();
+    let fresh = |s: &mut Store, instant: u64| {
+        let revision = s.snapshot().unwrap().0;
+        s.save_sync_snapshot(
+            revision,
+            b"fresh",
+            Some(SyncObservation {
+                phase: SyncPhase::Ready,
+                last_error: None,
+                snapshot_revision: revision,
+                checked_at: Some(instant),
+                checkpoint_at: instant,
+                scanned_blocks: 1,
+                target_height: Some(1),
+                height: Some(1),
+                confirmations: 1,
+                max_age_seconds: 300,
+                confirmed_pool_balances_zatoshis: None,
+                confirmed_shielded_zatoshis: 1000,
+                spendable_shielded_zatoshis: 1000,
+            }),
+        )
+        .unwrap();
+    };
+    fresh(&mut s, 86410);
+    s.reserve("pending", None, 1, 90, 100).unwrap();
+    for day in [1u32, 2] {
+        let instant = u64::from(day) * 86400 + 10;
+        fresh(&mut s, instant);
+        assert!(s.check_funding_capacity(instant, 10, 100).is_ok());
+        assert!(s.check_funding_capacity(instant, 11, 100).is_err());
+        assert!(s.reserve("too-large", None, day, 11, 100).is_err());
+    }
+    let revision = s.snapshot().unwrap().0;
+    s.prepare("pending", revision, b"prepared", b"signed")
+        .unwrap();
+    s.confirm_spend("pending", 80, 2).unwrap();
+    s.confirm_spend("pending", 80, 2).unwrap();
+    fresh(&mut s, 172810);
+    assert!(s.check_funding_capacity(172810, 20, 100).is_ok());
+    s.reserve("at-limit", None, 2, 20, 100).unwrap();
+    assert!(s.reserve("over-limit", None, 2, 1, 100).is_err());
+    assert!(s.reserve("overflow", None, 2, i64::MAX, i64::MAX).is_err());
+    drop(s);
+    let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert!(s.check_funding_capacity(172810, 1, 99).is_err());
+    assert!(s.reserve("reduced", None, 2, 1, 99).is_err());
+    fresh(&mut s, 259210);
+    // Confirmed expense belonged to day 2, but the unspent reservation crosses day 3.
+    assert!(s.check_funding_capacity(259210, 80, 100).is_ok());
+    assert!(s.check_funding_capacity(259210, 81, 100).is_err());
+    s.reserve("next-day", None, 3, 80, 100).unwrap();
 }
