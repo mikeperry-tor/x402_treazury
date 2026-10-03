@@ -555,6 +555,62 @@ sources=["api"]
         ("SUBMIT".into(), "https://example.invalid".into()),
         ("BASE".into(), format!("{}/rpc", h.base)),
     ]);
+    let mut missing_auth = env.clone();
+    missing_auth.remove("TOKEN");
+    let error = match Deployment::load(&path)
+        .await
+        .unwrap()
+        .bind(&missing_auth)
+        .await
+    {
+        Ok(_) => panic!("missing authentication accepted"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("TOKEN"));
+    assert!(
+        x402_treazure::rotation::store::status(&dir.path().join("state"))
+            .unwrap()
+            .pools
+            .is_empty(),
+        "authentication must be checked before allocating managed pools"
+    );
+
+    // Fail after wallets and an earlier listener exist; retry must reuse identities.
+    let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let first_address = first.local_addr().unwrap();
+    drop(first);
+    let mut conflicting: toml::Value = toml::from_str(&config).unwrap();
+    conflicting["servers"]["one"]["listen"] = toml::Value::String(first_address.to_string());
+    conflicting["servers"]["three"]["listen"] =
+        toml::Value::String(occupied.local_addr().unwrap().to_string());
+    std::fs::write(&path, toml::to_string(&conflicting).unwrap()).unwrap();
+    let error = match Deployment::load(&path).await.unwrap().bind(&env).await {
+        Ok(_) => panic!("occupied listener accepted"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("server three: cannot bind"),
+        "{error}"
+    );
+    drop(tokio::net::TcpListener::bind(first_address).await.unwrap());
+    // Store shutdown is asynchronous once its last handle is dropped.
+    let reopened = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Ok(owner) =
+                Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone()).await
+            {
+                break owner;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("failed startup retained treasury ownership");
+    let allocated = reopened.status().await.unwrap().pools;
+    assert_eq!(allocated.len(), 2);
+    reopened.close().await.unwrap();
+    std::fs::write(&path, &config).unwrap();
     let running = Deployment::load(&path)
         .await
         .unwrap()
@@ -562,6 +618,13 @@ sources=["api"]
         .await
         .unwrap();
     let state = x402_treazure::rotation::store::status(&dir.path().join("state")).unwrap();
+    for (before, after) in allocated.iter().zip(&state.pools) {
+        assert_eq!(
+            serde_json::to_value(&before.addresses).unwrap(),
+            serde_json::to_value(&after.addresses).unwrap(),
+            "startup retry must retain allocated wallet identities"
+        );
+    }
     assert_eq!(state.pools.len(), 2);
     assert_eq!(state.pools[0].addresses.len(), 2);
     assert!(

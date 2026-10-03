@@ -254,132 +254,11 @@ impl Deployment {
         crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
-            let mut cfg = crate::config::resolve(source.provider.clone(), path)
-                .await
-                .with_context(|| format!("source {id}"))?
-                .settings;
-            if cfg.prefix.is_none() {
-                cfg.prefix = Some(id.clone());
-            }
-            let http = crate::network::discovery(
-                if cfg.spec.starts_with("http") {
-                    &cfg.spec
-                } else {
-                    "https://local.invalid"
-                },
-                Duration::from_secs_f64(cfg.timeout),
-            )?;
-            let document = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes)
-                .await
-                .with_context(|| format!("source {id}: loading spec"))?;
-            let base_url = cfg
-                .base_url
-                .clone()
-                .or_else(|| {
-                    document
-                        .pointer("/servers/0/url")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_owned)
-                })
-                .with_context(|| format!("source {id}: base_url required"))?;
-            let parsed = reqwest::Url::parse(&base_url)?;
-            ensure!(
-                matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
-                "source {id}: base_url must be HTTP(S)"
-            );
-            let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
-                .with_context(|| format!("source {id}: catalog generation"))?;
-            sources.insert(
-                id.clone(),
-                Source {
-                    tools,
-                    base_url,
-                    instructions: cfg.instructions_text.clone(),
-                    config: cfg,
-                    document,
-                },
-            );
+            sources.insert(id.clone(), Source::load(id, source, path).await?);
         }
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
-            let mut available = BTreeMap::new();
-            for source in &server.sources {
-                let operations = catalog::operations(&sources[source].document, None)?;
-                for tool in &sources[source].tools {
-                    let tags: BTreeSet<_> = operations
-                        .iter()
-                        .filter(|op| {
-                            op["path"] == tool.path
-                                && op["method"]
-                                    .as_str()
-                                    .is_some_and(|m| m.eq_ignore_ascii_case(&tool.method))
-                        })
-                        .flat_map(|op| {
-                            op["tags"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .filter_map(serde_json::Value::as_str)
-                        })
-                        .collect();
-                    if (!server.tags.is_empty()
-                        && !server.tags.iter().any(|t| tags.contains(t.as_str())))
-                        || server
-                            .exclude_tags
-                            .iter()
-                            .any(|t| tags.contains(t.as_str()))
-                    {
-                        continue;
-                    }
-
-                    ensure!(
-                        available
-                            .insert(tool.name.clone(), (source.clone(), tool.clone()))
-                            .is_none(),
-                        "server {name}: duplicate tool {}",
-                        tool.name
-                    );
-                }
-            }
-            let compile = |selectors: &[String]| -> Result<Vec<Regex>> {
-                selectors
-                    .iter()
-                    .map(|text| {
-                        let re = pattern(text)?;
-                        if !available.keys().any(|n| re.is_match(n)) {
-                            if text.contains(['*', '?']) {
-                                tracing::warn!(
-                                    server = name,
-                                    selector = text,
-                                    "Tool pattern matches nothing"
-                                );
-                            } else {
-                                bail!("server {name}: unknown tool selector {text}");
-                            }
-                        }
-                        Ok(re)
-                    })
-                    .collect()
-            };
-            let include = compile(&server.include_tools)?;
-            let exclude = compile(&server.exclude_tools)?;
-            let tools: Vec<_> = available
-                .into_iter()
-                .filter(|(n, _)| {
-                    (include.is_empty() || include.iter().any(|p| p.is_match(n)))
-                        && !exclude.iter().any(|p| p.is_match(n))
-                })
-                .map(|(_, t)| t)
-                .collect();
-            ensure!(
-                !tools.is_empty()
-                    || server
-                        .source_management
-                        .as_ref()
-                        .is_some_and(|g| g.accept_sources),
-                "server {name}: no tools selected"
-            );
-            selected.insert(name.clone(), tools);
+            selected.insert(name.clone(), select_listener_tools(name, server, &sources)?);
         }
         Ok(Self {
             config,
@@ -421,18 +300,11 @@ impl Deployment {
             .map(|(id, source)| Ok((id.clone(), catalog::tag_counts(&source.document)?)))
             .collect()
     }
-    pub async fn bind(mut self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
-        let secret = |key: &str| {
-            env.get(key)
-                .filter(|s| !s.trim().is_empty())
-                .cloned()
-                .with_context(|| format!("required environment variable {key} is missing or empty"))
-        };
-        // Validate every credential before opening any port.
-        let mut tokens = BTreeMap::new();
-        for (name, cfg) in &self.config.servers {
-            tokens.insert(name.clone(), secret(&cfg.bearer_token_env)?);
-        }
+    async fn initialize_wallets(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<InitializedWallets> {
+        let secret = |key: &str| required_secret(env, key);
         // Static-only serving does not unlock state, but must not reuse a known
         // managed profile name as a different wallet identity.
         if !self
@@ -605,6 +477,18 @@ impl Deployment {
                 treasury = Some(owner);
             }
         }
+        Ok(InitializedWallets {
+            wallets,
+            #[cfg(feature = "zcash")]
+            treasury,
+            #[cfg(feature = "zcash")]
+            funding_runtime,
+            #[cfg(feature = "zcash")]
+            managed_pools,
+        })
+    }
+
+    async fn discover_prices(&mut self) -> Result<()> {
         for (id, source) in &self.sources {
             let selected: Vec<_> = self
                 .selected
@@ -639,6 +523,10 @@ impl Deployment {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn build_servers(&self, wallets: &BTreeMap<String, PaidClient>) -> BTreeMap<String, Server> {
         let mut servers = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
             let selected = &self.selected[name];
@@ -678,6 +566,26 @@ impl Deployment {
             server.name = name.clone();
             servers.insert(name.clone(), server);
         }
+        servers
+    }
+
+    pub async fn bind(mut self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
+        let secret = |key: &str| required_secret(env, key);
+        // Validate every credential before opening any port.
+        let mut tokens = BTreeMap::new();
+        for (name, cfg) in &self.config.servers {
+            tokens.insert(name.clone(), secret(&cfg.bearer_token_env)?);
+        }
+        let initialized = self.initialize_wallets(env).await?;
+        let wallets = initialized.wallets;
+        #[cfg(feature = "zcash")]
+        let treasury = initialized.treasury;
+        #[cfg(feature = "zcash")]
+        let funding_runtime = initialized.funding_runtime;
+        #[cfg(feature = "zcash")]
+        let managed_pools = initialized.managed_pools;
+        self.discover_prices().await?;
+        let mut servers = self.build_servers(&wallets);
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
             let tools = server.catalog.read().views["default"].clone();
@@ -733,6 +641,153 @@ impl Deployment {
             managed_pools,
         })
     }
+}
+impl Source {
+    async fn load(id: &str, source: &SourceConfig, path: &Path) -> Result<Self> {
+        let mut cfg = crate::config::resolve(source.provider.clone(), path)
+            .await
+            .with_context(|| format!("source {id}"))?
+            .settings;
+        if cfg.prefix.is_none() {
+            cfg.prefix = Some(id.to_owned());
+        }
+        let http = crate::network::discovery(
+            if cfg.spec.starts_with("http") {
+                &cfg.spec
+            } else {
+                "https://local.invalid"
+            },
+            Duration::from_secs_f64(cfg.timeout),
+        )?;
+        let document = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes)
+            .await
+            .with_context(|| format!("source {id}: loading spec"))?;
+        let base_url = cfg
+            .base_url
+            .clone()
+            .or_else(|| {
+                document
+                    .pointer("/servers/0/url")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+            })
+            .with_context(|| format!("source {id}: base_url required"))?;
+        let parsed = reqwest::Url::parse(&base_url)?;
+        ensure!(
+            matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
+            "source {id}: base_url must be HTTP(S)"
+        );
+        let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
+            .with_context(|| format!("source {id}: catalog generation"))?;
+        Ok(Self {
+            tools,
+            base_url,
+            instructions: cfg.instructions_text.clone(),
+            config: cfg,
+            document,
+        })
+    }
+}
+
+fn select_listener_tools(
+    name: &str,
+    server: &ListenerConfig,
+    sources: &BTreeMap<String, Source>,
+) -> Result<Vec<(String, ToolSpec)>> {
+    let mut available = BTreeMap::new();
+    for source in &server.sources {
+        let operations = catalog::operations(&sources[source].document, None)?;
+        for tool in &sources[source].tools {
+            let tags: BTreeSet<_> = operations
+                .iter()
+                .filter(|op| {
+                    op["path"] == tool.path
+                        && op["method"]
+                            .as_str()
+                            .is_some_and(|m| m.eq_ignore_ascii_case(&tool.method))
+                })
+                .flat_map(|op| {
+                    op["tags"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(serde_json::Value::as_str)
+                })
+                .collect();
+            if (!server.tags.is_empty() && !server.tags.iter().any(|t| tags.contains(t.as_str())))
+                || server
+                    .exclude_tags
+                    .iter()
+                    .any(|t| tags.contains(t.as_str()))
+            {
+                continue;
+            }
+
+            ensure!(
+                available
+                    .insert(tool.name.clone(), (source.clone(), tool.clone()))
+                    .is_none(),
+                "server {name}: duplicate tool {}",
+                tool.name
+            );
+        }
+    }
+    let compile = |selectors: &[String]| -> Result<Vec<Regex>> {
+        selectors
+            .iter()
+            .map(|text| {
+                let re = pattern(text)?;
+                if !available.keys().any(|n| re.is_match(n)) {
+                    if text.contains(['*', '?']) {
+                        tracing::warn!(
+                            server = name,
+                            selector = text,
+                            "Tool pattern matches nothing"
+                        );
+                    } else {
+                        bail!("server {name}: unknown tool selector {text}");
+                    }
+                }
+                Ok(re)
+            })
+            .collect()
+    };
+    let include = compile(&server.include_tools)?;
+    let exclude = compile(&server.exclude_tools)?;
+    let tools: Vec<_> = available
+        .into_iter()
+        .filter(|(n, _)| {
+            (include.is_empty() || include.iter().any(|p| p.is_match(n)))
+                && !exclude.iter().any(|p| p.is_match(n))
+        })
+        .map(|(_, t)| t)
+        .collect();
+    ensure!(
+        !tools.is_empty()
+            || server
+                .source_management
+                .as_ref()
+                .is_some_and(|g| g.accept_sources),
+        "server {name}: no tools selected"
+    );
+    Ok(tools)
+}
+
+fn required_secret(env: &BTreeMap<String, String>, key: &str) -> Result<String> {
+    env.get(key)
+        .filter(|s| !s.trim().is_empty())
+        .cloned()
+        .with_context(|| format!("required environment variable {key} is missing or empty"))
+}
+
+struct InitializedWallets {
+    wallets: BTreeMap<String, PaidClient>,
+    #[cfg(feature = "zcash")]
+    treasury: Option<crate::treasury::Treasury>,
+    #[cfg(feature = "zcash")]
+    funding_runtime: Option<FundingRuntime>,
+    #[cfg(feature = "zcash")]
+    managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
 }
 #[cfg(feature = "zcash")]
 type FundingRuntime = (
