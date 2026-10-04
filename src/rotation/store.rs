@@ -135,6 +135,7 @@ impl TreasuryNetwork {
     }
 }
 pub struct Store {
+    funding_restriction: super::restriction::FundingRestriction,
     network: TreasuryNetwork,
     db: Connection,
     _lock: File,
@@ -318,6 +319,7 @@ impl Store {
             File::open(parent)?.sync_all()?;
         }
         Ok(Self {
+            funding_restriction: Default::default(),
             db,
             _lock: owner,
             key,
@@ -363,6 +365,7 @@ impl Store {
             "state identity/network/schema mismatch"
         );
         let store = Self {
+            funding_restriction: Default::default(),
             db,
             _lock: owner,
             key,
@@ -462,7 +465,17 @@ impl Store {
         }
         Ok(())
     }
+    /// Monotonic for this store owner. A supervised launch must install it again on reopen.
+    /// No setter can restore ordinary funding on an already restricted owner.
+    pub fn deny_new_funding(&mut self) {
+        self.funding_restriction = super::restriction::FundingRestriction::DenyNewFunding;
+        tracing::warn!(
+            "qualification funding restriction installed: zero new jobs and zero new ZEC spending; existing reconciliation remains available"
+        );
+    }
     pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
+        self.funding_restriction
+            .require_new_funding("treasury_preparation")?;
         let status = self.status()?;
         ensure!(!status.outgoing_pending, "treasury_send_pending");
         let observation = status.sync.context("treasury_not_synced")?;
@@ -501,6 +514,8 @@ impl Store {
             tx.commit()?;
             return Ok(id);
         }
+        self.funding_restriction
+            .require_new_funding("pool_bootstrap")?;
         let id = Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO pools(id,name,target) VALUES (?1,?2,?3)",
@@ -588,6 +603,8 @@ impl Store {
     /// Offline role-transition primitive. Managed serving uses `admit` to commit
     /// verified evidence, promotion and the payment reservation together.
     pub fn promote(&mut self, pool: &str, expected: i64) -> Result<i64> {
+        self.funding_restriction
+            .require_new_funding("pool_promotion")?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -654,6 +671,8 @@ impl Store {
             );
             return Ok(());
         }
+        self.funding_restriction
+            .require_new_funding("source_reservation")?;
         if let Some(pool) = pool {
             let enabled: bool =
                 tx.query_row("SELECT enabled FROM pools WHERE id=?1", [pool], |r| {
@@ -732,6 +751,8 @@ impl Store {
             }
             return Ok(revision);
         }
+        self.funding_restriction
+            .require_new_funding("source_preparation_commit")?;
         let next = expected_revision
             .checked_add(1)
             .context("snapshot revision overflow")?;
@@ -1331,6 +1352,15 @@ impl Store {
                     "standby cannot cover payment"
                 ));
             }
+            if let Err(error) = self
+                .funding_restriction
+                .require_new_funding("payment_promotion")
+            {
+                // Preserve trusted reconciliation, but never change roles, generation,
+                // outbox or admission when a replacement allocation is forbidden.
+                tx.commit()?;
+                return Err(error);
+            }
             tx.execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])?;
             tx.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [&ready])?;
             let seq: i64 = tx.query_row(
@@ -1518,3 +1548,7 @@ mod integrity_tests;
 #[cfg(all(test, unix))]
 #[path = "../../tests/support/store_filesystem.rs"]
 mod filesystem_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/funding_restriction.rs"]
+mod funding_restriction_tests;

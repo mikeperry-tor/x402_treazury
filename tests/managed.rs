@@ -1420,3 +1420,161 @@ async fn slow_chain_reconciliation_still_bounds_admission_without_blocking_other
     drop(pool);
     h.close().await;
 }
+
+#[tokio::test]
+async fn qualification_guard_allows_active_calls_but_blocks_replacement_before_signing() {
+    let h = Harness::new().await;
+    h.store
+        .call(|s| {
+            s.deny_new_funding();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    let before = h.store.call(|s| s.status()).await.unwrap();
+    let active = before.pools[0]
+        .addresses
+        .iter()
+        .find(|a| a.role == "ACTIVE")
+        .unwrap();
+    h.f.balances
+        .lock()
+        .unwrap()
+        .insert(active.address.clone(), 2_000_000);
+    h.f.used.store(true, Ordering::SeqCst);
+    // Parallel refusals must not rotate, allocate or sign; confirmed reconciliation survives.
+    let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
+    for result in [a, b] {
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("qualification_funding_denied"), "{error}");
+        assert!(error.contains("limit is zero"), "{error}");
+    }
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    let after = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(after.pools[0].generation, 0);
+    assert_eq!(after.pools[0].addresses.len(), 2);
+    assert_eq!(
+        after.pools[0]
+            .addresses
+            .iter()
+            .find(|a| a.role == "ACTIVE")
+            .unwrap()
+            .id,
+        active.id
+    );
+    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let rows: Vec<String> = db
+        .prepare("SELECT state FROM payment_attempts")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(rows, ["RESOLVED"]);
+    // A cheaper call still uses the original active wallet after the refusal.
+    *h.f.challenge.lock().unwrap() = challenge("1000000");
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    h.close().await;
+}
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn qualification_deployment_installs_guard_before_bootstrap_even_with_auto_fund() {
+    use x402_treazury::rotation::restriction::FundingRestriction;
+    use x402_treazury::{deployment::Deployment, treasury::Treasury};
+    for existing in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let owner = Treasury::create(state.clone(), key.clone(), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        if existing {
+            owner
+                .ensure_pool("research".into(), "5".into())
+                .await
+                .unwrap();
+        }
+        let baseline = owner.status().await.unwrap();
+        let id = baseline.treasury_id.clone();
+        owner.close().await.unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"servers":[{"url":"http://127.0.0.1:1"}],"paths":{"/pay":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let config = format!(
+            r#"version=1
+[treasury]
+id="{id}"
+state_dir="state"
+key_file="key"
+indexer_url_env="INDEXER"
+submission_url_env="SUBMIT"
+daily_input_zec="0.1"
+shield_max_fee_zec="0.001"
+[funding]
+auto_fund=true
+base_rpc_url_env="BASE"
+base_rpc_fallback_url_envs=[]
+[wallets.research]
+mode="zcash_rotation"
+deposit_size="5"
+max_input_zec="0.02"
+max_fee_bps=500
+[sources.api]
+spec="spec.json"
+probe_pricing=false
+[servers.one]
+listen="127.0.0.1:0"
+bearer_token_env="TOKEN"
+wallet="research"
+sources=["api"]
+"#
+        );
+        let path = dir.path().join("servers.toml");
+        std::fs::write(&path, config).unwrap();
+        let env = BTreeMap::from([
+            ("TOKEN".into(), "fixture-token".into()),
+            ("INDEXER".into(), "http://127.0.0.1:1".into()),
+            ("SUBMIT".into(), "http://127.0.0.1:1".into()),
+            ("BASE".into(), "http://127.0.0.1:1".into()),
+        ]);
+        let result = Deployment::load(&path)
+            .await
+            .unwrap()
+            .bind_restricted(&env, FundingRestriction::DenyNewFunding)
+            .await;
+        match result {
+            Ok(running) => {
+                assert!(existing);
+                drop(running);
+            }
+            Err(e) => {
+                assert!(!existing);
+                assert!(
+                    e.to_string().contains("qualification_funding_denied"),
+                    "{e:#}"
+                );
+            }
+        }
+        // Binding starts no workers; all fixtures are local files/unfunded wallets.
+        // Wait for asynchronous owner teardown, then verify no new allocation survived.
+        let reopened = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(store) = Store::open(&state, &key, &id) {
+                    break store;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.status().unwrap().pools).unwrap(),
+            serde_json::to_value(baseline.pools).unwrap()
+        );
+    }
+}

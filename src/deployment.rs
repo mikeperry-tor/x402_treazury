@@ -313,7 +313,10 @@ impl Deployment {
     async fn initialize_wallets(
         &self,
         env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
     ) -> Result<InitializedWallets> {
+        #[cfg(not(feature = "zcash"))]
+        let _ = restriction;
         let secret = |key: &str| required_secret(env, key);
         // Static-only serving does not unlock state, but must not reuse a known
         // managed profile name as a different wallet identity.
@@ -417,6 +420,14 @@ impl Deployment {
                 .await?;
                 owner.configure_sync(sync_settings);
                 let store = owner.store_handle();
+                if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding {
+                    store
+                        .call(|s| {
+                            s.deny_new_funding();
+                            Ok(())
+                        })
+                        .await?;
+                }
                 let managed = self
                     .wallet_resolution
                     .wallets
@@ -583,14 +594,23 @@ impl Deployment {
         servers
     }
 
-    pub async fn bind(mut self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
+    pub async fn bind(self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
+        self.bind_restricted(env, Default::default()).await
+    }
+
+    /// Qualification restrictions only remove authority; they never authorize execution.
+    pub async fn bind_restricted(
+        mut self,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+    ) -> Result<RunningDeployment> {
         let secret = |key: &str| required_secret(env, key);
         // Validate every credential before opening any port.
         let mut tokens = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
             tokens.insert(name.clone(), secret(&cfg.bearer_token_env)?);
         }
-        let initialized = self.initialize_wallets(env).await?;
+        let initialized = self.initialize_wallets(env, restriction).await?;
         let wallets = initialized.wallets;
         #[cfg(feature = "zcash")]
         let treasury = initialized.treasury;

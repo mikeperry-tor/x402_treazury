@@ -348,3 +348,19 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
     assert!(!error.contains("MCP listening"));
     let _released = tokio::net::TcpListener::bind(one).await.unwrap();
 }
+
+#[tokio::test]
+async fn qualification_restriction_requires_serving_meta_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let flag = "--qualification-no-new-funding";
+    assert!(bad(run(tmp.path(), &[flag], &[]).await).contains("--meta-config"));
+    for inspection in ["--check", "--show-config", "--list-tools", "--list-tags"] {
+        let error = bad(run(
+            tmp.path(),
+            &[flag, "--meta-config", "missing.toml", inspection],
+            &[],
+        )
+        .await);
+        assert!(error.contains("cannot be used with"), "{error}");
+    }
+}

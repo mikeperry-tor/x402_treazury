@@ -924,3 +924,38 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
         worker.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn qualification_denial_preserves_quote_and_records_actionable_status() {
+    use x402_treazury::rotation::{base::now, store::funding::FundingPhase};
+    let (_dir, mut worker, task) = fixture().await;
+    let instant = now().unwrap();
+    worker.tick(instant).await.unwrap();
+    let before = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(before.funding_jobs[0].phase, FundingPhase::Quoted);
+    worker
+        .store
+        .call(|s| {
+            s.deny_new_funding();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    worker.tick(instant + 2).await.unwrap();
+    let after = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(after.funding_jobs[0].phase, FundingPhase::Quoted);
+    assert_eq!(
+        after.funding_jobs[0].operation_id,
+        before.funding_jobs[0].operation_id
+    );
+    let reason = after.funding_jobs[0].last_error.as_deref().unwrap();
+    assert!(reason.contains("qualification_funding_denied"), "{reason}");
+    assert!(reason.contains("limit is zero"), "{reason}");
+    assert_eq!(after.snapshot_revision, before.snapshot_revision);
+    assert!(after.treasury_operations.is_empty());
+    assert!(!after.outgoing_pending);
+    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.quotes, 1);
+    drop(worker);
+    task.await.unwrap();
+}

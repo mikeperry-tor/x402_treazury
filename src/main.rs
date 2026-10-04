@@ -18,6 +18,9 @@ use x402_treazury::{
 struct Args {
     #[arg(long)]
     meta_config: Option<std::path::PathBuf>,
+    /// Internal qualification restriction; never enables calls or funding.
+    #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
+    qualification_no_new_funding: bool,
     #[arg(long, conflicts_with = "meta_config")]
     network_config: Option<std::path::PathBuf>,
     #[arg(long, requires = "meta_config")]
@@ -226,7 +229,8 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "show_config",
                         "list_tools",
                         "list_tags",
-                        "env_file"
+                        "env_file",
+                        "qualification_no_new_funding"
                     ]
                     .contains(&id.as_str()),
                     "--meta-config cannot be combined with --{}; configure it in the TOML file",
@@ -319,7 +323,12 @@ async fn run_deployment(
         }
         return Ok(());
     }
-    let running = deployment.bind(env).await?;
+    let restriction = if args.qualification_no_new_funding {
+        x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
+    } else {
+        Default::default()
+    };
+    let running = deployment.bind_restricted(env, restriction).await?;
     for (server, address) in running.addresses() {
         tracing::warn!(server, %address, "MCP listening at /mcp");
     }

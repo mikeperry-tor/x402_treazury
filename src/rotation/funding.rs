@@ -516,6 +516,11 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
     category.into()
 }
 fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
+    if error.downcast_ref::<super::error::AdmissionError>()
+        == Some(&super::error::AdmissionError::FundingRestricted)
+    {
+        return "qualification_funding_denied; new funding limit is zero; preparation paused before calculation; existing active-wallet calls remain available";
+    }
     if error.is::<super::transaction::PreparationDeferred>() {
         return "treasury_preparation_deferred; pre-preparation sync unavailable; no calculation started; retrying";
     }

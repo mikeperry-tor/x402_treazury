@@ -7,6 +7,7 @@ pub enum AdmissionError {
     PaymentPending(&'static str),
     WalletNotReady(&'static str),
     FundingUnavailable(&'static str),
+    FundingRestricted,
     OutcomeUnknown(&'static str),
     ChainRecoveryRequired(&'static str),
 }
@@ -22,6 +23,10 @@ impl std::fmt::Display for AdmissionError {
             Self::PaymentPending(s) => ("payment_pending", s),
             Self::WalletNotReady(s) => ("wallet_not_ready", s),
             Self::FundingUnavailable(s) => ("funding_unavailable", s),
+            Self::FundingRestricted => (
+                "qualification_funding_denied",
+                "new funding limit is zero; no replacement wallet or ZEC spend authorized; adequately funded active-wallet calls remain available",
+            ),
             Self::OutcomeUnknown(s) => ("payment_outcome_unknown", s),
             Self::ChainRecoveryRequired(s) => ("chain_recovery_required", s),
         };
