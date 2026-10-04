@@ -1,0 +1,223 @@
+[
+  {
+    "provider": "agent402",
+    "config": "providers/agent402.toml",
+    "method": "GET",
+    "url": "https://agent402.tools/api/dns?domain=example.com",
+    "body": null
+  },
+  {
+    "provider": "agentfund",
+    "config": "providers/agentfund.toml",
+    "method": "POST",
+    "url": "https://x402.agentfund.net/x402/treasury_yield_curve",
+    "body": {}
+  },
+  {
+    "provider": "agentutility",
+    "config": "providers/agentutility/provider.toml",
+    "method": "POST",
+    "url": "https://x402.agentutility.ai/web-search",
+    "body": {
+      "query": "API documentation",
+      "num_results": 1
+    }
+  },
+  {
+    "provider": "arkham",
+    "config": "providers/arkham.toml",
+    "method": "POST",
+    "url": "https://api.arkm.com/x402/balances/address",
+    "body": {
+      "address": "0x0000000000000000000000000000000000000001"
+    }
+  },
+  {
+    "provider": "botsmith",
+    "config": "providers/botsmith.toml",
+    "method": "GET",
+    "url": "https://x402.botsmith.dev/x/search?query=rust&type=Latest",
+    "body": null
+  },
+  {
+    "provider": "brazilayer",
+    "config": "providers/brazilayer.toml",
+    "method": "GET",
+    "url": "https://api.brazilayer.com/v1/cnpj/situacao/33000167000101",
+    "body": null
+  },
+  {
+    "provider": "concordance",
+    "config": "providers/concordance/provider.toml",
+    "method": "POST",
+    "url": "https://concordancehq.duckdns.org/tools/search",
+    "body": {
+      "query": "Rust"
+    }
+  },
+  {
+    "provider": "deepline",
+    "config": "providers/deepline.toml",
+    "method": "POST",
+    "url": "https://stable-deepline.dev/api/company/enrich",
+    "body": {
+      "domain": "example.com"
+    }
+  },
+  {
+    "provider": "exa",
+    "config": "providers/exa.toml",
+    "method": "POST",
+    "url": "https://api.exa.ai/search",
+    "body": {
+      "query": "Rust language documentation",
+      "numResults": 1
+    }
+  },
+  {
+    "provider": "genuinegood",
+    "config": "providers/genuinegood.toml",
+    "method": "GET",
+    "url": "https://genuinegood.online/v1/grants/search?q=education",
+    "body": null
+  },
+  {
+    "provider": "glassnode",
+    "config": "providers/glassnode/provider.toml",
+    "method": "GET",
+    "url": "https://x402.glassnode.com/v1/metadata/assets",
+    "body": null
+  },
+  {
+    "provider": "google-trends",
+    "config": "providers/google-trends.toml",
+    "method": "GET",
+    "url": "https://google-trends.use.x402atlas.com/trend?keyword=rust&country=us",
+    "body": null
+  },
+  {
+    "provider": "kronos",
+    "config": "providers/kronos.toml",
+    "method": "GET",
+    "url": "https://kronossignals.com/api/v1/forecast/btc",
+    "body": null
+  },
+  {
+    "provider": "locus",
+    "config": "providers/locus/provider.toml",
+    "method": "POST",
+    "url": "https://api.locus.report/api/locus-place-report",
+    "body": {
+      "address": "1 E Edenton St, Raleigh, NC 27601"
+    }
+  },
+  {
+    "provider": "lonestar",
+    "config": "providers/lonestar.toml",
+    "method": "GET",
+    "url": "https://lonestaroracle.xyz/api/aero/pool",
+    "body": null
+  },
+  {
+    "provider": "oneshot",
+    "config": "providers/oneshot.toml",
+    "method": "POST",
+    "url": "https://win.oneshotagent.com/v1/tools/search",
+    "body": {
+      "query": "Rust documentation"
+    }
+  },
+  {
+    "provider": "otto",
+    "config": "providers/otto.toml",
+    "method": "GET",
+    "url": "https://x402.ottoai.services/crypto-news",
+    "body": null
+  },
+  {
+    "provider": "pdl",
+    "config": "providers/pdl.toml",
+    "method": "POST",
+    "url": "https://stablepeopledata.dev/api/pdl/company/enrich",
+    "body": {
+      "website": "example.com"
+    }
+  },
+  {
+    "provider": "regimeshift",
+    "config": "providers/regimeshift.toml",
+    "method": "GET",
+    "url": "https://regimeshift.xyz/api/v1/rate/sofr/usd",
+    "body": null
+  },
+  {
+    "provider": "socialfetch",
+    "config": "providers/socialfetch.toml",
+    "method": "GET",
+    "url": "https://api.socialfetch.dev/v1/twitter/profiles/elonmusk",
+    "body": null
+  },
+  {
+    "provider": "stableenrich",
+    "config": "providers/stableenrich.toml",
+    "method": "POST",
+    "url": "https://stableenrich.dev/api/exa/search",
+    "body": {
+      "query": "Rust documentation",
+      "numResults": 1
+    }
+  },
+  {
+    "provider": "straits",
+    "config": "providers/straits/provider.toml",
+    "method": "GET",
+    "url": "https://straits.live/api/premium/brief",
+    "body": null
+  },
+  {
+    "provider": "x402stock",
+    "config": "providers/x402stock.toml",
+    "method": "GET",
+    "url": "https://x402stock.xyz/api/v1/calendar/fomc",
+    "body": null
+  },
+  {
+    "provider": "x402-list",
+    "config": "providers/x402-list.toml",
+    "method": "GET",
+    "url": "https://x402-list.com/api/v1/best?limit=1",
+    "body": null
+  },
+  {
+    "provider": "exa-contents",
+    "config": "providers/exa.toml",
+    "method": "POST",
+    "url": "https://api.exa.ai/contents",
+    "body": {
+      "urls": [
+        "https://example.com"
+      ]
+    }
+  },
+  {
+    "provider": "google-trends-interest-by-region",
+    "config": "providers/google-trends.toml",
+    "method": "GET",
+    "url": "https://google-trends.use.x402atlas.com/interest-by-region?keyword=rust&country=us",
+    "body": null
+  },
+  {
+    "provider": "google-trends-related-queries",
+    "config": "providers/google-trends.toml",
+    "method": "GET",
+    "url": "https://google-trends.use.x402atlas.com/related-queries?keyword=rust&country=us",
+    "body": null
+  },
+  {
+    "provider": "google-trends-related-topics",
+    "config": "providers/google-trends.toml",
+    "method": "GET",
+    "url": "https://google-trends.use.x402atlas.com/related-topics?keyword=rust&country=us",
+    "body": null
+  }
+]

@@ -1,0 +1,33 @@
+# Copy under ignored target/, correct deployment path, and review the entire call list.
+version = 1
+run_id = "replace_with_unique_run_id"
+deployment = "../../examples/live-qualification.toml"
+# Mandatory absolute Unix time later today UTC. Zero intentionally refuses execution.
+expires_at = 0
+api_budget_usdc = "0.60"
+max_source_zec = "0.0105"
+max_funding_jobs = 6
+timeout_seconds = 120
+
+# Each reservation covers the effective wallet cap ($0.20), not the expected $0.014.
+[[cases]]
+id = "shared_on_a"
+server = "a"
+tool = "shared_twitter_profiles_handle"
+arguments = { handle = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+[[cases]]
+id = "shared_on_b"
+server = "b"
+tool = "shared_twitter_profiles_handle"
+arguments = { handle = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+[[cases]]
+id = "isolated_on_c"
+server = "c"
+tool = "isolated_twitter_profiles_handle"
+arguments = { handle = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
