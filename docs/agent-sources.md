@@ -234,3 +234,20 @@ the conflicting restored set deterministically; owners may remove disabled recor
 
 Removal changes API access only. Wallet balances, reservations, swap/refund records,
 retired keys and background reconciliation remain with their existing wallet profiles.
+
+## Implementation boundaries
+
+`src/discovery/policy.rs` resolves listener authority, targets, named wallet grants
+and limits. `import.rs` handles bounded public-URL retrieval and candidate validation;
+`tools.rs` defines management schemas; `store.rs` owns persistent records/receipts;
+`mod.rs` coordinates accepted mutations. `src/catalog_state.rs` supplies the immutable
+views used by both ordinary and fallback tool execution.
+
+Network fetch and candidate building happen outside serialized publication. Before
+acceptance, recheck revisions, ownership, grants and quotas against current state.
+A persistent mutation commits its registration/receipt before publication; a
+cancelled caller cannot roll back an accepted worker job. On restart, durable
+records rebuild views under current policy. Captured in-flight bindings remain
+usable after an update/remove; subsequent calls use the new view. These boundaries
+are exercised by permission, persistence, crash and concurrent-addition tests;
+see [the testing guide](testing.md) and [coverage evidence](../tests/COVERAGE.md).
