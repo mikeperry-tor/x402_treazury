@@ -73,34 +73,22 @@ pub async fn fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
     fetch_response(policy, client.get(url)).await
 }
 async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Result<Vec<u8>> {
-    tokio::time::timeout(Duration::from_secs(policy.fetch_timeout_seconds), async {
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| anyhow::anyhow!("source_fetch_failed"))?;
-        ensure!(
-            response.status().is_success(),
-            "source_http_{}",
-            response.status().as_u16()
-        );
-        if response
-            .content_length()
-            .is_some_and(|n| n > policy.max_spec_bytes as u64)
-        {
-            return Err(crate::limits::exceeded(
-                "imported spec",
-                "max_spec_bytes",
-                policy.max_spec_bytes,
-            )
-            .context("spec_too_large"));
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| anyhow::anyhow!("source_read_failed"))?
-        {
-            if chunk.len() > policy.max_spec_bytes.saturating_sub(bytes.len()) {
+    tokio::time::timeout(
+        network::global().request_timeout(Duration::from_secs(policy.fetch_timeout_seconds)),
+        async {
+            let mut response = request
+                .send()
+                .await
+                .map_err(|_| anyhow::anyhow!("source_fetch_failed"))?;
+            ensure!(
+                response.status().is_success(),
+                "source_http_{}",
+                response.status().as_u16()
+            );
+            if response
+                .content_length()
+                .is_some_and(|n| n > policy.max_spec_bytes as u64)
+            {
                 return Err(crate::limits::exceeded(
                     "imported spec",
                     "max_spec_bytes",
@@ -108,10 +96,25 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
                 )
                 .context("spec_too_large"));
             }
-            bytes.extend_from_slice(&chunk);
-        }
-        Ok(bytes)
-    })
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| anyhow::anyhow!("source_read_failed"))?
+            {
+                if chunk.len() > policy.max_spec_bytes.saturating_sub(bytes.len()) {
+                    return Err(crate::limits::exceeded(
+                        "imported spec",
+                        "max_spec_bytes",
+                        policy.max_spec_bytes,
+                    )
+                    .context("spec_too_large"));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(bytes)
+        },
+    )
     .await
     .context("source_fetch_timeout")?
 }

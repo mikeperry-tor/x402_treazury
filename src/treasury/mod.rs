@@ -30,6 +30,7 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
+use zingo_netutils::Indexer;
 use zingolib::{
     config::{ClientConfig, WalletConfig},
     lightclient::LightClient,
@@ -474,17 +475,23 @@ impl SyncSession {
         settings: &SyncSettings,
         observation: &mut SyncObservation,
     ) -> Result<()> {
-        let indexer = tokio::time::timeout(
-            Duration::from_secs(30),
+        let mut indexer = tokio::time::timeout(
+            crate::network::global().connection_timeout(Duration::from_secs(30)),
             crate::network::global().grpc(&self.identity, &settings.endpoint),
         )
         .await
         .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
-        self.client.set_indexer(indexer);
-        let info = tokio::time::timeout(Duration::from_secs(15), self.client.info())
-            .await
-            .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
-            .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
+        self.client.set_indexer(indexer.clone());
+        let info = tokio::time::timeout(
+            crate::network::global().request_timeout(Duration::from_secs(15)),
+            indexer.get_lightd_info(
+                crate::network::global()
+                    .request_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
+        .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
         ensure!(
             info.chain_name == self.network.rpc_name(),
             "indexer is not on mainnet"
@@ -493,10 +500,10 @@ impl SyncSession {
             &settings.endpoint,
             &self.identity,
             &self.network.chain(),
-            info.latest_block_height,
+            info.block_height,
         )
         .await?;
-        observation.target_height = Some(info.latest_block_height);
+        observation.target_height = Some(info.block_height);
         self.client
             .sync()
             .await
@@ -519,16 +526,22 @@ impl SyncSession {
                 progress.total_blocks_scanned
             });
         let checked_at = now()?;
-        let info = tokio::time::timeout(Duration::from_secs(15), self.client.info())
-            .await
-            .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
-            .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
+        let info = tokio::time::timeout(
+            crate::network::global().request_timeout(Duration::from_secs(15)),
+            indexer.get_lightd_info(
+                crate::network::global()
+                    .request_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
+        .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
         let height = u64::from(u32::from(result.sync_end_height));
         ensure!(
-            info.chain_name == self.network.rpc_name() && info.latest_block_height == height,
+            info.chain_name == self.network.rpc_name() && info.block_height == height,
             "treasury requires another sync to the current {} tip (wallet={height}, indexer={})",
             self.network.name(),
-            info.latest_block_height
+            info.block_height
         );
         server::check_endpoint(
             &settings.endpoint,

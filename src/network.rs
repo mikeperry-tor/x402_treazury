@@ -33,6 +33,8 @@ pub struct NetworkPolicy {
     pub isolation_namespace: Option<String>,
     pub socks_auth: Option<SocksAuth>,
     pub connect_timeout_seconds: Option<u64>,
+    /// Tor-only floor for a complete request, including connection and body.
+    pub request_timeout_seconds: Option<u64>,
 }
 impl NetworkPolicy {
     pub fn validate(&self) -> Result<()> {
@@ -41,7 +43,8 @@ impl NetworkPolicy {
                 self.socks_endpoint.is_none()
                     && self.isolation_namespace.is_none()
                     && self.socks_auth.is_none()
-                    && self.connect_timeout_seconds.is_none(),
+                    && self.connect_timeout_seconds.is_none()
+                    && self.request_timeout_seconds.is_none(),
                 "Tor settings require network.mode = tor"
             );
         } else {
@@ -62,8 +65,13 @@ impl NetworkPolicy {
                 "invalid isolation namespace (1..128 ASCII letters, digits, underscores or hyphens)"
             );
             ensure!(
-                (1..=300).contains(&self.connect_timeout_seconds.unwrap_or(30)),
+                (1..=300).contains(&self.connect_timeout_seconds.unwrap_or(120)),
                 "network connect timeout must be 1..300 seconds"
+            );
+            ensure!(
+                (1..=86400).contains(&self.request_timeout_seconds.unwrap_or(240))
+                    && self.request_timeout_seconds.unwrap_or(240) >= self.timeout().as_secs(),
+                "network request timeout must be 1..86400 seconds and at least the connect timeout"
             );
         }
         Ok(())
@@ -76,11 +84,11 @@ impl NetworkPolicy {
     fn timeout(&self) -> Duration {
         Duration::from_secs(self.connect_timeout_seconds.unwrap_or(match self.mode {
             Mode::Direct => 15,
-            Mode::Tor => 30,
+            Mode::Tor => 120,
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        serde_json::json!({"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"request_timeout_seconds":self.request_timeout_seconds.or((self.mode == Mode::Tor).then_some(240)),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
@@ -178,6 +186,25 @@ impl NetworkContext {
             grpc: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
+    /// Preserve direct-mode budgets; Tor needs room for circuit/stream setup.
+    /// Callers may request longer deadlines, but not shorten the Tor policy floor.
+    pub fn request_timeout(&self, requested: Duration) -> Duration {
+        if self.policy.mode == Mode::Tor {
+            requested.max(Duration::from_secs(
+                self.policy.request_timeout_seconds.unwrap_or(240),
+            ))
+        } else {
+            requested
+        }
+    }
+    /// For outer connection guards; do not undercut the connector's Tor budget.
+    pub fn connection_timeout(&self, direct: Duration) -> Duration {
+        if self.policy.mode == Mode::Tor {
+            self.policy.timeout()
+        } else {
+            direct
+        }
+    }
     pub fn credentials(&self, id: &IsolationId) -> (String, String) {
         let namespace = self.policy.namespace();
         let token = id.token(namespace);
@@ -217,6 +244,7 @@ impl NetworkContext {
         timeout: Duration,
         public_only: bool,
     ) -> Result<reqwest::Client> {
+        let timeout = self.request_timeout(timeout);
         let parsed = reqwest::Url::parse(url).context("invalid network URL")?;
         ensure!(
             matches!(parsed.scheme(), "http" | "https"),

@@ -11,12 +11,12 @@ fn gate(h: &Harness, count: usize) -> Arc<Barrier> {
     });
     gate
 }
-async fn bounded<T>(future: impl std::future::Future<Output = T>) -> T {
+pub(super) async fn bounded<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(15), future)
         .await
         .expect("concurrency test deadline")
 }
-async fn other_pool(h: &Harness) -> PaidClient {
+pub(super) async fn other_pool(h: &Harness) -> PaidClient {
     let pool = h.store.call(|s| s.ensure_pool("other", "5")).await.unwrap();
     let status = h.store.call(|s| s.status()).await.unwrap();
     for a in &status
@@ -33,7 +33,7 @@ async fn other_pool(h: &Harness) -> PaidClient {
     }
     make_client(h.store.clone(), pool, &h.base)
 }
-fn assert_liabilities(h: &Harness, count: i64, total: i64) {
+pub(super) fn assert_liabilities(h: &Harness, count: i64, total: i64) {
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     let observed: (i64, i64) = db.query_row("SELECT COUNT(*),COALESCE(SUM(CAST(amount AS INTEGER)),0) FROM payment_attempts WHERE state!='RESOLVED'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(observed, (count, total));
@@ -239,7 +239,7 @@ async fn simultaneous_depletion_promotes_once_and_never_replays_posts() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn cancelled_and_timed_out_waiters_preserve_liability_and_other_pool_progress() {
+async fn cancelled_and_rejected_waiters_preserve_liability_and_other_pool_progress() {
     let h = Harness::new().await;
     let other = other_pool(&h).await;
     h.f.hold.store(true, Ordering::SeqCst);
@@ -264,7 +264,7 @@ async fn cancelled_and_timed_out_waiters_preserve_liability_and_other_pool_progr
             .unwrap()
             .unwrap_err()
             .to_string()
-            .contains("admission deadline exceeded")
+            .contains("payment_pending")
     );
     assert!(!submitted.is_finished());
     assert_liabilities(&h, 2, 6_000_000);

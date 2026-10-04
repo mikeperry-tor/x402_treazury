@@ -70,7 +70,7 @@ impl ManagedPool {
             base,
             target: positive_usdc(deposit)?,
             policy,
-            wait: Duration::from_secs(wait_seconds),
+            wait: crate::network::global().request_timeout(Duration::from_secs(wait_seconds)),
             gate: Mutex::new(()),
         })
     }
@@ -124,8 +124,8 @@ impl ManagedPool {
             serde_json::from_value(challenge.clone())
                 .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
-        let (_guard, headers) = tokio::time::timeout(self.wait, async {
-            let guard = self.gate.lock().await;
+        let headers = tokio::time::timeout(self.wait, async {
+            let _guard = self.gate.lock().await;
             let pool = self.pool.clone();
             let query = self.store.call(move |s| s.chain_query(&pool)).await?;
             let view = self.base.view(query).await?;
@@ -177,7 +177,10 @@ impl ManagedPool {
             self.store
                 .call(move |s| s.journal_authorization(&id, &wallet, generation, &hash, auth))
                 .await?;
-            Ok::<_, anyhow::Error>((guard, headers))
+            // The journal now reserves exposure across cancellation, concurrent
+            // admission, reconciliation and rotation. Do not hold the pool gate
+            // while the seller establishes a connection or returns its response.
+            Ok::<_, anyhow::Error>(headers)
         })
         .await
         .map_err(|_| {

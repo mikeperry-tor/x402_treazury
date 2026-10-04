@@ -35,7 +35,7 @@ fn deterministic_tokens_and_strict_policy() {
             ..Default::default()
         }
         .inspection()["connect_timeout_seconds"],
-        30
+        120
     );
     let a = IsolationId::evm("0x00000000000000000000000000000000000000aA").unwrap();
     let b = IsolationId::evm("0x00000000000000000000000000000000000000aa").unwrap();
@@ -463,4 +463,140 @@ fn live_tor_inbound_listeners() {
         assert_eq!(&data, b"qualification");
         stream.write_all(b"accepted").unwrap();
     }
+}
+
+#[test]
+fn tor_budgets_preserve_longer_requests_and_direct_deadlines() {
+    let direct = NetworkContext::new(NetworkPolicy::default()).unwrap();
+    assert_eq!(
+        direct.request_timeout(Duration::from_millis(50)),
+        Duration::from_millis(50)
+    );
+    assert_eq!(
+        direct.connection_timeout(Duration::from_secs(30)),
+        Duration::from_secs(30)
+    );
+    let tor = NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some("127.0.0.1:9150".parse().unwrap()),
+        ..Default::default()
+    };
+    let ctx = NetworkContext::new(tor.clone()).unwrap();
+    assert_eq!(
+        ctx.connection_timeout(Duration::from_secs(15)),
+        Duration::from_secs(120)
+    );
+    assert_eq!(
+        ctx.request_timeout(Duration::from_secs(5)),
+        Duration::from_secs(240)
+    );
+    assert_eq!(
+        ctx.request_timeout(Duration::from_secs(600)),
+        Duration::from_secs(600)
+    );
+    assert_eq!(tor.inspection()["request_timeout_seconds"], 240);
+    for value in [0, 119, 86401] {
+        assert!(
+            NetworkContext::new(NetworkPolicy {
+                request_timeout_seconds: Some(value),
+                ..tor.clone()
+            })
+            .is_err()
+        );
+    }
+    assert!(
+        NetworkContext::new(NetworkPolicy {
+            request_timeout_seconds: Some(240),
+            ..Default::default()
+        })
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn tor_request_floor_covers_headers_and_body_but_still_bounds_downloads() {
+    use axum::{body::Body, response::Response, routing::get};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new()
+        .route(
+            "/headers",
+            get(|| async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                "ok"
+            }),
+        )
+        .route(
+            "/body",
+            get(|| async {
+                Response::new(Body::from_stream(futures_util::stream::once(async {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    Ok::<_, std::io::Error>("ok")
+                })))
+            }),
+        )
+        .route(
+            "/stalled",
+            get(|| async {
+                Response::new(Body::from_stream(futures_util::stream::pending::<
+                    Result<&'static str, std::io::Error>,
+                >()))
+            }),
+        );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let proxy = Socks::start(
+        BTreeMap::from([("budgets.invalid".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let ctx = NetworkContext::new(NetworkPolicy {
+        request_timeout_seconds: Some(1),
+        ..policy(&proxy)
+    })
+    .unwrap();
+    let http = ctx
+        .discovery("http://budgets.invalid", Duration::from_millis(20))
+        .unwrap();
+    for path in ["headers", "body"] {
+        let body = http
+            .get(format!("http://budgets.invalid/{path}"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(body, "ok");
+    }
+    let response = http
+        .get("http://budgets.invalid/stalled")
+        .send()
+        .await
+        .unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(3), response.text())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(error.is_timeout(), "{error}");
+    let direct = NetworkContext::new(NetworkPolicy::default()).unwrap();
+    let url = format!("http://{address}/headers");
+    assert!(
+        direct
+            .discovery(&url, Duration::from_millis(20))
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap_err()
+            .is_timeout()
+    );
+    assert!(
+        proxy
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r.host == "budgets.invalid")
+    );
+    server.abort();
 }

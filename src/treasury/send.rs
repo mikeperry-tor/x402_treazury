@@ -13,6 +13,7 @@ use anyhow::{Context, Result, ensure};
 use std::time::Duration;
 use zcash_keys::address::Address;
 use zcash_protocol::value::Zatoshis;
+use zingo_netutils::Indexer;
 
 impl TransactionPreparer for Treasury {
     async fn prepare(&mut self, request: PrepareRequest) -> Result<PreparedTransaction> {
@@ -69,17 +70,23 @@ impl TransactionPreparer for Treasury {
             .as_mut()
             .context("treasury client unavailable")?;
         let identity = crate::network::IsolationId::treasury(&observed.treasury_id);
-        let indexer = tokio::time::timeout(
-            Duration::from_secs(30),
+        let mut indexer = tokio::time::timeout(
+            crate::network::global().connection_timeout(Duration::from_secs(30)),
             crate::network::global().grpc(&identity, &settings.endpoint),
         )
         .await
         .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
-        client.set_indexer(indexer);
-        let info = tokio::time::timeout(Duration::from_secs(15), client.info())
-            .await
-            .map_err(|_| anyhow::anyhow!("indexer network check timed out"))?
-            .map_err(|_| anyhow::anyhow!("indexer network check failed"))?;
+        client.set_indexer(indexer.clone());
+        let info = tokio::time::timeout(
+            crate::network::global().request_timeout(Duration::from_secs(15)),
+            indexer.get_lightd_info(
+                crate::network::global()
+                    .request_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("indexer network check timed out"))?
+        .map_err(|_| anyhow::anyhow!("indexer network check failed"))?;
         ensure!(
             info.chain_name == self.network.rpc_name(),
             "indexer is not on mainnet"
@@ -88,7 +95,7 @@ impl TransactionPreparer for Treasury {
         ensure!(
             observed.sync.as_ref().is_some_and(|o| o
                 .fresh(now().unwrap_or(u64::MAX), observed.snapshot_revision)
-                && o.height == Some(info.latest_block_height)),
+                && o.height == Some(info.block_height)),
             "treasury requires a fresh sync before calculation"
         );
         let _pause = client

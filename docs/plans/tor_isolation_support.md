@@ -86,7 +86,8 @@ mode = "tor"
 socks_endpoint = "127.0.0.1:9150"
 isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
-connect_timeout_seconds = 30
+connect_timeout_seconds = 120
+request_timeout_seconds = 240
 ```
 
 `mode` accepts `direct` or `tor`; omission means direct. `9150` is an example Tor
@@ -101,9 +102,14 @@ to the exact string `x402_treazury`. Authentication choices are `tor_extended`
 operators with an apparently configured but unused proxy. Validate all policies
 before any spec download, listener startup, wallet sync or funding operation.
 Unknown fields fail. File paths resolve relative to their declaring config file.
-The connect timeout is positive and bounded; retain existing operation deadlines,
-quote-validity checks, cancellation and spending limits. Timeouts may require
-operator tuning for Tor, but never extend a financial deadline automatically.
+The connection budget defaults to 120 seconds. The complete HTTP request budget,
+including body download, is the larger of the caller timeout and the Tor
+`request_timeout_seconds` floor (default 240 seconds). Application-owned outer
+network guards must respect these budgets. Both settings are positive and bounded;
+the request floor must be at least the connection budget. Retain quote-validity
+checks, authorization expiry, cancellation and spending limits. Never extend a
+financial deadline automatically. See `docs/network-egress.md` for the distinction
+between application-owned deadlines and upstream embedded-wallet RPC deadlines.
 
 A separate file containing this same `[network]` table is accepted through
 `--network-config FILE` for standalone source mode, wallet commands and utilities.

@@ -37,6 +37,7 @@ struct Fake {
     challenge: Arc<Mutex<Value>>,
     signed: Arc<Mutex<Vec<Value>>>,
     rpc_calls: Arc<AtomicUsize>,
+    rpc_hold: Arc<AtomicBool>,
     rpc_fault: Arc<Mutex<Option<String>>>,
     confirmed_reads: Arc<AtomicUsize>,
     used: Arc<AtomicBool>,
@@ -60,6 +61,10 @@ async fn rpc(
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     Json(v): Json<Value>,
 ) -> Json<Value> {
+    if f.rpc_hold.swap(false, Ordering::SeqCst) {
+        f.arrived.notify_one();
+        f.release.notified().await;
+    }
     f.rpc_calls.fetch_add(1, Ordering::SeqCst);
     let fault = f.rpc_fault.lock().unwrap().clone().unwrap_or_default();
     let mut result = match v["method"].as_str().unwrap() {
@@ -220,6 +225,7 @@ impl Harness {
             challenge: Arc::new(Mutex::new(challenge("3000000"))),
             signed: Arc::default(),
             rpc_calls: Arc::default(),
+            rpc_hold: Arc::default(),
             rpc_fault: Arc::default(),
             confirmed_reads: Arc::default(),
             used: Arc::default(),
@@ -284,7 +290,7 @@ impl Harness {
         }
     }
 }
-fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
+fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {
     let manager = ManagedPool::new(
         store,
         pool,
@@ -294,7 +300,10 @@ fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
         2,
     )
     .unwrap();
-    PaidClient::managed(Arc::new(manager))
+    Arc::new(manager)
+}
+fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
+    PaidClient::managed(make_pool(store, pool, base))
 }
 #[tokio::test]
 async fn concurrent_calls_reserve_before_send_and_cannot_churn_busy_active() {
@@ -938,7 +947,7 @@ async fn unused_expired_authorization_requires_fresh_chain_evidence_to_release()
     h.close().await;
 }
 #[tokio::test]
-async fn waiting_for_gate_has_a_deadline_and_other_pools_continue() {
+async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
     let h = Harness::new().await;
     let other_id = h.store.call(|s| s.ensure_pool("other", "5")).await.unwrap();
     let status = h.store.call(|s| s.status()).await.unwrap();
@@ -960,7 +969,7 @@ async fn waiting_for_gate_has_a_deadline_and_other_pools_continue() {
     h.f.arrived.notified().await;
     other.execute(h.route()).await.unwrap();
     let error = h.client.execute(h.route()).await.unwrap_err().to_string();
-    assert!(error.contains("deadline"), "{error}");
+    assert!(error.contains("payment_pending"), "{error}");
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     task.abort();
     let _ = task.await;
@@ -1283,3 +1292,130 @@ async fn malformed_base_evidence_never_applies_a_partial_view() {
 
 #[path = "support/concurrency.rs"]
 mod concurrency;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_signed_response_does_not_block_shared_pool_or_reconciliation() {
+    let h = Harness::new().await;
+    let pool = make_pool(h.store.clone(), h.pool.clone(), &h.base);
+    let client = PaidClient::managed(pool.clone());
+    *h.f.challenge.lock().unwrap() = challenge("1000000");
+    h.f.hold.store(true, Ordering::SeqCst);
+    let first_client = client.clone();
+    let route = h.route();
+    let first = tokio::spawn(async move { first_client.execute(route).await });
+    concurrency::bounded(h.f.arrived.notified()).await;
+    assert_eq!(
+        concurrency::bounded(client.execute(h.route()))
+            .await
+            .unwrap(),
+        "paid"
+    );
+    concurrency::bounded(pool.reconcile()).await.unwrap();
+    assert!(!first.is_finished());
+    concurrency::assert_liabilities(&h, 2, 2_000_000);
+    // The first request is still unresolved. Neither a second success nor
+    // background reconciliation makes its reserved balance spendable.
+    *h.f.challenge.lock().unwrap() = challenge("4000000");
+    assert!(
+        concurrency::bounded(client.execute(h.route()))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("payment_pending")
+    );
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    h.f.release.notify_one();
+    concurrency::bounded(pool.reconcile()).await.unwrap();
+    concurrency::assert_liabilities(&h, 2, 2_000_000);
+    assert_eq!(
+        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
+        0
+    );
+    drop(client);
+    drop(pool);
+    h.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn confirmed_payment_can_rotate_while_original_seller_response_is_pending() {
+    let h = Harness::new().await;
+    h.f.hold.store(true, Ordering::SeqCst);
+    let client = h.client.clone();
+    let route = h.route();
+    let first = tokio::spawn(async move { client.execute(route).await });
+    concurrency::bounded(h.f.arrived.notified()).await;
+    let payer = h.f.signed.lock().unwrap()[0]["payload"]["authorization"]["from"]
+        .as_str()
+        .unwrap()
+        .parse::<Address>()
+        .unwrap()
+        .to_string();
+    h.f.used.store(true, Ordering::SeqCst);
+    h.f.balances.lock().unwrap().insert(payer, 0);
+    assert_eq!(
+        concurrency::bounded(h.client.execute(h.route()))
+            .await
+            .unwrap(),
+        "paid"
+    );
+    assert!(!first.is_finished());
+    let status = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(status.pools[0].generation, 1);
+    assert_eq!(status.pools[0].addresses.len(), 3);
+    {
+        let signed = h.f.signed.lock().unwrap();
+        assert_eq!(signed.len(), 2);
+        assert_ne!(
+            signatures::recover_exact(&signed[0]),
+            signatures::recover_exact(&signed[1])
+        );
+    }
+    h.f.release.notify_one();
+    assert_eq!(concurrency::bounded(first).await.unwrap().unwrap(), "paid");
+    concurrency::assert_liabilities(&h, 1, 3_000_000);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(
+        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
+        1
+    );
+    h.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_chain_reconciliation_still_bounds_admission_without_blocking_other_pools() {
+    let h = Harness::new().await;
+    let pool = make_pool(h.store.clone(), h.pool.clone(), &h.base);
+    let client = PaidClient::managed(pool.clone());
+    let other = concurrency::other_pool(&h).await;
+    h.f.rpc_hold.store(true, Ordering::SeqCst);
+    let reconciling = pool.clone();
+    let reconciliation = tokio::spawn(async move { reconciling.reconcile().await });
+    concurrency::bounded(h.f.arrived.notified()).await;
+    assert_eq!(
+        concurrency::bounded(other.execute(h.route()))
+            .await
+            .unwrap(),
+        "paid"
+    );
+    let error = concurrency::bounded(client.execute(h.route()))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("admission deadline exceeded"), "{error}");
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    h.f.release.notify_one();
+    concurrency::bounded(reconciliation).await.unwrap().unwrap();
+    assert_eq!(
+        concurrency::bounded(client.execute(h.route()))
+            .await
+            .unwrap(),
+        "paid"
+    );
+    concurrency::assert_liabilities(&h, 2, 6_000_000);
+    drop(other);
+    drop(client);
+    drop(pool);
+    h.close().await;
+}

@@ -303,9 +303,9 @@ async fn scope_child() {
         crate::network::global()
             .credentials(&IsolationId::discovery("https://api.example.com").unwrap()),
     ];
-    // Spec, help and pricing use different deadlines and therefore distinct pools,
-    // but all three retain the same discovery-origin credential.
-    expected.extend([expected[0].clone(), expected[0].clone()]);
+    // Tor normalizes spec/help/pricing deadlines to the same floor. Public-only
+    // imports still use a separate pool; all discovery keeps the same credential.
+    expected.push(expected[0].clone());
     for key in [1, 2, 3] {
         let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
         expected.push(
@@ -316,7 +316,7 @@ async fn scope_child() {
     let records = proxy.records.lock().unwrap();
     assert_eq!(
         records.len(),
-        6,
+        5,
         "spec/challenge/retry pools should reuse only within identity"
     );
     assert_eq!(

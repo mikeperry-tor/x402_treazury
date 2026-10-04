@@ -14,7 +14,9 @@ use zingo_netutils::{
     GrpcIndexer, Indexer,
     lightwallet_protocol::{BlockId, RawTransaction, TxFilter},
 };
-const TIMEOUT: Duration = Duration::from_secs(15);
+fn request_timeout() -> Duration {
+    crate::network::global().request_timeout(Duration::from_secs(15))
+}
 
 pub struct GrpcSubmission {
     network: crate::rotation::store::TreasuryNetwork,
@@ -47,12 +49,14 @@ impl GrpcSubmission {
         endpoint: &str,
         identity: &crate::network::IsolationId,
     ) -> Result<GrpcIndexer> {
-        let mut client =
-            tokio::time::timeout(TIMEOUT, crate::network::global().grpc(identity, endpoint))
-                .await
-                .map_err(|_| anyhow::anyhow!("treasury connection timed out"))??;
+        let mut client = tokio::time::timeout(
+            crate::network::global().connection_timeout(Duration::from_secs(15)),
+            crate::network::global().grpc(identity, endpoint),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("treasury connection timed out"))??;
         let info = client
-            .get_lightd_info(TIMEOUT)
+            .get_lightd_info(request_timeout())
             .await
             .map_err(|_| anyhow::anyhow!("treasury network check failed"))?;
         ensure!(
@@ -87,12 +91,12 @@ impl TransactionSubmission for GrpcSubmission {
             facts.txid == expected && facts.expiry_height == u32::from(raw.expiry_height()),
             "durable transaction identity mismatch"
         );
-        let result = tokio::time::timeout(TIMEOUT, async {
+        let result = tokio::time::timeout(request_timeout(), async {
             let mut client = self
                 .connect(&self.submission, &transaction.network_identity()?)
                 .await?;
             let tip = client
-                .get_latest_block(TIMEOUT)
+                .get_latest_block(request_timeout())
                 .await
                 .map_err(|_| anyhow::anyhow!("treasury tip unavailable"))?;
             ensure!(
@@ -117,7 +121,7 @@ impl TransactionSubmission for GrpcSubmission {
                         data: transaction.bytes().to_vec(),
                         height: 0,
                     },
-                    TIMEOUT,
+                    request_timeout(),
                 )
                 .await
                 .map_err(|_| anyhow::anyhow!("submission outcome unknown"))
@@ -132,7 +136,7 @@ impl TransactionSubmission for GrpcSubmission {
         let _identity = transaction.network_identity()?;
         let raw = decode(transaction.bytes())?;
         let hash = raw.txid().as_ref().to_vec();
-        let result = tokio::time::timeout(TIMEOUT, async {
+        let result = tokio::time::timeout(request_timeout(), async {
             let mut client = self
                 .connect(&self.indexer, &transaction.network_identity()?)
                 .await?;
@@ -142,7 +146,7 @@ impl TransactionSubmission for GrpcSubmission {
                         hash: hash.clone(),
                         ..Default::default()
                     },
-                    TIMEOUT,
+                    request_timeout(),
                 )
                 .await
             {
@@ -169,7 +173,7 @@ impl TransactionSubmission for GrpcSubmission {
                         height: found.height,
                         hash: vec![],
                     },
-                    TIMEOUT,
+                    request_timeout(),
                 )
                 .await
                 .map_err(|_| anyhow::anyhow!("confirmation block unavailable"))?;
@@ -185,7 +189,7 @@ impl TransactionSubmission for GrpcSubmission {
                         height: found.height,
                         hash: vec![],
                     },
-                    TIMEOUT,
+                    request_timeout(),
                 )
                 .await
                 .map_err(|_| anyhow::anyhow!("confirmation recheck unavailable"))?;
