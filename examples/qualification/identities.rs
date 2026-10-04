@@ -45,7 +45,13 @@ pub async fn export(manifest: &Manifest, output: &Path) -> Result<()> {
         }
     }
     let mut origins = BTreeSet::from(["https://1click.chaindefuser.com".to_owned()]);
-    if let Some(name) = shown["funding"]["base_rpc_url_env"].as_str() {
+    let primary = shown["funding"]["base_rpc_url_env"].as_str();
+    let fallbacks = shown["funding"]["base_rpc_fallback_url_envs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str());
+    for name in primary.into_iter().chain(fallbacks) {
         if let Ok(url) = std::env::var(name) {
             origins.insert(reqwest::Url::parse(&url)?.origin().ascii_serialization());
         } else {

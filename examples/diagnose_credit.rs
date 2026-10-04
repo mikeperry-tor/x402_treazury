@@ -19,6 +19,9 @@ struct Args {
     /// Explicit trusted RPC destination; receives the state's public EVM addresses.
     #[arg(long)]
     rpc_url: String,
+    /// Explicit read-only fallback endpoints, in order; repeat at most twice.
+    #[arg(long)]
+    fallback_rpc_url: Vec<String>,
     #[arg(long, default_value_t=3, value_parser=clap::value_parser!(u32).range(1..=20))]
     rounds: u32,
     /// Maximum simultaneous views; queued views are delayed, never dropped.
@@ -44,7 +47,10 @@ async fn run() -> Result<()> {
     network::install(NetworkPolicy::load(&args.network_config)?)?;
     let state = store::status(&args.state_dir)?;
     anyhow::ensure!(!state.pools.is_empty(), "no pools");
-    let rpc = BaseRpc::new(&args.rpc_url, 12, 120)?;
+    let urls = std::iter::once(args.rpc_url)
+        .chain(args.fallback_rpc_url)
+        .collect::<Vec<_>>();
+    let rpc = BaseRpc::with_fallbacks(&urls, 12, 120)?;
     let limit = std::sync::Arc::new(tokio::sync::Semaphore::new(args.concurrency as usize));
     eprintln!(
         "Read-only diagnostic: {} rounds, at most {} concurrent views; all queued views will be reported",

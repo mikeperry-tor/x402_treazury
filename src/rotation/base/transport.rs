@@ -46,6 +46,20 @@ impl std::fmt::Display for RpcFailure {
 impl Error for RpcFailure {}
 
 impl RpcFailure {
+    pub(super) fn view_timeout() -> Self {
+        Self::new("verification", "timeout", "complete view deadline", None)
+    }
+    pub(super) fn can_failover(&self) -> bool {
+        if self.tls || matches!(self.protocol, Some("invalid_http" | "request_error")) {
+            return false;
+        }
+        matches!(self.http, Some(403 | 408 | 429 | 500 | 502 | 503 | 504))
+            || matches!(self.code, Some(-32005 | -32016 | -32601))
+            || matches!(
+                self.category,
+                "timeout" | "connect" | "transport" | "body transport"
+            )
+    }
     fn new(
         method: &'static str,
         category: &'static str,

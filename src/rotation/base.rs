@@ -63,6 +63,7 @@ pub struct PendingAuthorization {
     pub nonce: String,
     pub valid_before: u64,
 }
+#[derive(Clone)]
 pub struct ChainQuery {
     pub wallets: Vec<(String, String)>,
     pub pending: Vec<PendingAuthorization>,
@@ -79,6 +80,7 @@ pub struct BaseRpc {
     url: reqwest::Url,
     confirmations: u64,
     max_age: u64,
+    fallbacks: Vec<BaseRpc>,
 }
 pub fn now() -> Result<u64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
@@ -104,7 +106,29 @@ impl BaseRpc {
             url: secure_endpoint(url)?,
             confirmations,
             max_age,
+            fallbacks: vec![],
         })
+    }
+    /// Only operator-selected endpoints; every attempt constructs a whole chain view.
+    pub fn with_fallbacks(urls: &[String], confirmations: u64, max_age: u64) -> Result<Self> {
+        ensure!(
+            !urls.is_empty() && urls.len() <= 3,
+            "configure one to three Base RPC endpoints; list is never truncated"
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for url in urls {
+            ensure!(
+                seen.insert(secure_endpoint(url)?.to_string()),
+                "duplicate Base RPC endpoint"
+            );
+        }
+        let mut endpoints = urls
+            .iter()
+            .map(|url| Self::new(url, confirmations, max_age))
+            .collect::<Result<Vec<_>>>()?;
+        let mut primary = endpoints.remove(0);
+        primary.fallbacks = endpoints;
+        Ok(primary)
     }
     fn for_address(&self, address: &str) -> Result<Self> {
         Ok(Self {
@@ -116,6 +140,7 @@ impl BaseRpc {
             url: self.url.clone(),
             confirmations: self.confirmations,
             max_age: self.max_age,
+            fallbacks: vec![],
         })
     }
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
@@ -161,13 +186,39 @@ impl BaseRpc {
         Ok(U256::from_str_radix(&s[2..], 16)?)
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
-        let started = std::time::Instant::now();
-        let result = self.view_inner(query).await;
-        if let Err(error) = &result {
-            tracing::warn!(category = %safe_diagnostic(error), elapsed_ms = started.elapsed().as_millis() as u64,
-                "Base credit/payment chain verification failed");
+        let budget = crate::network::global().request_timeout(Duration::from_secs(15));
+        let count = self.fallbacks.len() + 1;
+        for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
+            let started = std::time::Instant::now();
+            let result = tokio::time::timeout(budget, endpoint.view_inner(query.clone()))
+                .await
+                .unwrap_or_else(|_| Err(transport::RpcFailure::view_timeout().into()));
+            match result {
+                Ok(view) => {
+                    if index > 0 {
+                        tracing::warn!(
+                            provider_index = index + 1,
+                            provider_count = count,
+                            "Base verification succeeded on configured fallback; complete view reverified; Tor policy unchanged"
+                        );
+                    }
+                    return Ok(view);
+                }
+                Err(error) => {
+                    let failover = index + 1 < count
+                        && error
+                            .downcast_ref::<RpcFailure>()
+                            .is_some_and(RpcFailure::can_failover);
+                    tracing::warn!(category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
+                        failover, view_budget_seconds = budget.as_secs(), elapsed_ms = started.elapsed().as_millis() as u64,
+                        "Base credit/payment chain verification failed; partial view discarded; only configured read-only fallback permitted");
+                    if !failover {
+                        return Err(error);
+                    }
+                }
+            }
         }
-        result
+        unreachable!("primary Base RPC endpoint always exists")
     }
     async fn view_inner(&self, query: ChainQuery) -> Result<ChainView> {
         ensure!(

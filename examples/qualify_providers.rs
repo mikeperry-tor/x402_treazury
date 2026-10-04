@@ -608,10 +608,21 @@ async fn run() -> Result<()> {
             let name = shown["funding"]["base_rpc_url_env"]
                 .as_str()
                 .context("missing RPC environment name")?;
-            let url =
-                std::env::var(name).context("set the configured Base RPC environment variable")?;
-            let rpc = x402_treazury::rotation::base::BaseRpc::new(
-                &url,
+            let fallbacks = shown["funding"]["base_rpc_fallback_url_envs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|v| v.as_str().context("invalid RPC environment name"))
+                .collect::<Result<Vec<_>>>()?;
+            let urls = std::iter::once(name)
+                .chain(fallbacks)
+                .map(|name| {
+                    std::env::var(name)
+                        .context("set every configured Base RPC environment variable")
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let rpc = x402_treazury::rotation::base::BaseRpc::with_fallbacks(
+                &urls,
                 shown["funding"]["base_confirmations"]
                     .as_u64()
                     .context("missing confirmations")?,

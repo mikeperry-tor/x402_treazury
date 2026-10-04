@@ -111,6 +111,25 @@ fn money_is_exact_and_tagged_profiles_reject_cross_mode_fields() {
 }
 
 #[test]
+fn rpc_fallback_configuration_is_explicit_bounded_and_unique() {
+    use x402_treazury::rotation::config::FundingConfig;
+    for (fallbacks, valid) in [
+        ("[]", true),
+        ("['SECOND','THIRD']", true),
+        ("['BASE']", false),
+        ("['SECOND','SECOND']", false),
+        ("['SECOND','THIRD','FOURTH']", false),
+        ("['not an env name']", false),
+    ] {
+        let f: FundingConfig = toml::from_str(&format!(
+            "base_rpc_url_env='BASE'\nbase_rpc_fallback_url_envs={fallbacks}"
+        ))
+        .unwrap();
+        assert_eq!(f.validate().is_ok(), valid, "{fallbacks}");
+    }
+}
+
+#[test]
 fn public_funding_is_explicit_and_needs_no_near_credentials() {
     use x402_treazury::rotation::config::FundingConfig;
     for mode in ["public", "basic", "advanced"] {

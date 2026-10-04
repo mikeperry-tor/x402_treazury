@@ -402,8 +402,12 @@ impl Deployment {
                 if let Some(key) = &f.near_api_key_env {
                     secret(key)?;
                 }
-                let base = BaseRpc::new(
-                    &secret(&f.base_rpc_url_env)?,
+                let urls = std::iter::once(&f.base_rpc_url_env)
+                    .chain(&f.base_rpc_fallback_url_envs)
+                    .map(|name| secret(name))
+                    .collect::<Result<Vec<_>>>()?;
+                let base = BaseRpc::with_fallbacks(
+                    &urls,
                     f.base_confirmations,
                     f.base_max_block_age_seconds,
                 )?;

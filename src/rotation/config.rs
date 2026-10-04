@@ -184,6 +184,8 @@ pub struct FundingConfig {
     pub auto_fund: bool,
     pub near_user_session_env: Option<String>,
     pub base_rpc_url_env: String,
+    #[serde(default)]
+    pub base_rpc_fallback_url_envs: Vec<String>,
     #[serde(default = "base_confirmations")]
     pub base_confirmations: u64,
     #[serde(default = "block_age")]
@@ -203,6 +205,15 @@ pub struct FundingConfig {
 impl FundingConfig {
     pub fn validate(&self) -> Result<()> {
         env_name(&self.base_rpc_url_env)?;
+        ensure!(
+            self.base_rpc_fallback_url_envs.len() <= 2,
+            "at most two Base RPC fallbacks; list is never truncated"
+        );
+        let mut names = std::collections::BTreeSet::from([&self.base_rpc_url_env]);
+        for name in &self.base_rpc_fallback_url_envs {
+            env_name(name)?;
+            ensure!(names.insert(name), "duplicate Base RPC environment name");
+        }
         if let Some(s) = &self.near_user_session_env {
             env_name(s)?;
         }
