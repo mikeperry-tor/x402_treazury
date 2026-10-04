@@ -13,7 +13,7 @@ async fn full_manifest_resolves_scope_arguments_coverage_and_budget_offline() {
     );
     manifest.expires_at = 2000;
     manifest.validate(1000).unwrap();
-    assert_eq!(manifest.cases.len(), 48);
+    assert_eq!(manifest.cases.len(), 50);
     let reserved: u64 = manifest
         .cases
         .iter()
