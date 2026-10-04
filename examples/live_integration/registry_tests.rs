@@ -44,6 +44,7 @@ impl Fixture {
             source_dirty: false,
             resolved_config: config,
             qualification: "configuration_only".into(),
+            catalogs: None,
         };
         Self {
             _dir: dir,

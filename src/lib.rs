@@ -30,3 +30,5 @@ pub mod limits;
 pub mod output;
 
 pub mod supervision;
+
+pub mod build_identity;

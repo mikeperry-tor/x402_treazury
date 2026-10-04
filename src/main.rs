@@ -36,6 +36,8 @@ struct Args {
     network_config: Option<std::path::PathBuf>,
     #[arg(long, requires = "meta_config")]
     check: bool,
+    #[arg(long, hide=true, requires="meta_config", conflicts_with_all=["check","show_config","list_tools","list_tags","route_tool","qualification_unsigned","qualification_parent_stdin","qualification_no_new_funding"])]
+    qualification_snapshot: bool,
     #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
     show_config: bool,
     #[arg(long)]
@@ -97,6 +99,17 @@ async fn main() -> std::process::ExitCode {
     }
 }
 async fn run() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("build-info") {
+        ensure!(
+            std::env::args_os().count() == 2,
+            "build-info accepts no arguments"
+        );
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&x402_treazury::build_identity::current())?
+        );
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("wallet") {
         return x402_treazury::wallet_cli::run().await;
     }
@@ -243,7 +256,8 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "env_file",
                         "qualification_no_new_funding",
                         "qualification_unsigned",
-                        "qualification_parent_stdin"
+                        "qualification_parent_stdin",
+                        "qualification_snapshot"
                     ]
                     .contains(&id.as_str()),
                     "--meta-config cannot be combined with --{}; configure it in the TOML file",
@@ -296,7 +310,7 @@ async fn run_deployment(
     let mut parent =
         x402_treazury::supervision::Parent::from_stdin(args.qualification_parent_stdin)?;
     let loading = async {
-        if args.list_tags || args.list_tools || args.check {
+        if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
             x402_treazury::deployment::Deployment::load(path).await
         } else {
             x402_treazury::deployment::Deployment::load_for_serving(path).await
@@ -306,6 +320,15 @@ async fn run_deployment(
         result = loading => result?,
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog startup; no server started"); }
     };
+    if args.qualification_snapshot {
+        let snapshot = serde_json::to_vec(&deployment.qualification_snapshot())?;
+        ensure!(
+            snapshot.len() <= 16 * 1024 * 1024,
+            "qualification snapshot exceeds 16777216-byte limit; narrow the source catalogs"
+        );
+        println!("{}", std::str::from_utf8(&snapshot)?);
+        return Ok(());
+    }
     if args.list_tags {
         println!(
             "{}",

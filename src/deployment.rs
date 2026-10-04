@@ -278,6 +278,11 @@ impl Deployment {
             config_path: path.to_owned(),
         })
     }
+    /// Credential-free qualification snapshot, returned only by an explicit CLI inspection.
+    pub fn qualification_snapshot(&self) -> serde_json::Value {
+        let sources: BTreeMap<_,_> = self.sources.iter().map(|(id, s)| (id.clone(), serde_json::json!({"settings":s.config,"document":s.document,"base_url":s.base_url}))).collect();
+        serde_json::json!({"version":1,"deployment":self.config,"sources":sources,"inventory":self.inventory()})
+    }
     pub fn wallet_summary(&self) -> &WalletSummary {
         &self.wallet_resolution.summary
     }

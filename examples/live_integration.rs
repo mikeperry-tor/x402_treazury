@@ -7,8 +7,12 @@ mod manifest;
 mod planner;
 #[path = "live_integration/preparation.rs"]
 mod preparation;
+#[path = "live_integration/process.rs"]
+mod process;
 #[path = "live_integration/registry.rs"]
 mod registry;
+#[path = "live_integration/schema.rs"]
+mod schema;
 #[cfg(test)]
 #[path = "live_integration/tests.rs"]
 mod tests;
@@ -31,6 +35,13 @@ enum Command {
     },
     /// Archive an offline plan/config/binary identity; not yet executable qualification.
     Prepare {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+    /// Freeze catalogs and validate arguments through the pinned unsigned executable.
+    PrepareCatalogs {
         #[arg(long)]
         state_dir: PathBuf,
         #[arg(long)]
@@ -113,6 +124,19 @@ async fn execute(command: Command) -> Result<u8> {
             let input = manifest::Manifest::load(&manifest).await?;
             let mut registry = registry::Registry::open(&state_dir, false)?;
             let (plan, pins) = preparation::collect(&input, &state_dir).await?;
+            registry.prepare(&plan, &pins, now)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&registry.report(Some(&input.run_id), now)?)?
+            );
+        }
+        Command::PrepareCatalogs {
+            state_dir,
+            manifest,
+        } => {
+            let input = manifest::Manifest::load(&manifest).await?;
+            let mut registry = registry::Registry::open(&state_dir, false)?;
+            let (plan, pins) = preparation::collect_catalogs(&input, &state_dir).await?;
             registry.prepare(&plan, &pins, now)?;
             println!(
                 "{}",

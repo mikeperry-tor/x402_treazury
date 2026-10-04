@@ -62,6 +62,8 @@ pub struct Pins {
     pub resolved_config: Value,
     /// M2 records configuration only. Catalog/schema qualification is required before execution.
     pub qualification: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalogs: Option<super::preparation::CatalogPins>,
 }
 impl Pins {
     fn validate(&self) -> Result<()> {
@@ -225,9 +227,13 @@ impl Registry {
             "plan and pinned configuration disagree"
         );
         ensure!(
-            pins.qualification == "configuration_only",
-            "M2 cannot certify catalog/execution readiness"
+            (pins.qualification == "configuration_only" && pins.catalogs.is_none())
+                || (pins.qualification == "catalogs_prepared" && pins.catalogs.is_some()),
+            "invalid catalog qualification state"
         );
+        if let Some(catalogs) = &pins.catalogs {
+            catalogs.verify(m, pins)?;
+        }
         let tx = self.db.transaction()?;
         let treasury: String = tx.query_row("SELECT treasury FROM identity", [], |r| r.get(0))?;
         ensure!(treasury == m.treasury_id, "prepared run treasury mismatch");
@@ -277,8 +283,8 @@ impl Registry {
             }
         }
         tx.execute(
-            "INSERT INTO events(run,kind,detail,at) VALUES(?1,'prepared','configuration_only',?2)",
-            params![m.run_id, now],
+            "INSERT INTO events(run,kind,detail,at) VALUES(?1,'prepared',?2,?3)",
+            params![m.run_id, pins.qualification, now],
         )?;
         tx.commit()?;
         Ok(())

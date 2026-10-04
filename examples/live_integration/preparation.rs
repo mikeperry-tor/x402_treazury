@@ -29,6 +29,7 @@ pub async fn collect(manifest: &Manifest, state: &Path) -> Result<(Plan, Pins)> 
         source_dirty: !dirty.is_empty(),
         resolved_config: config,
         qualification: "configuration_only".into(),
+        catalogs: None,
     };
     Ok((plan, pins))
 }
@@ -58,3 +59,7 @@ fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>> {
     ensure!(child.wait()?.success(), "cannot record checkout evidence");
     Ok(out)
 }
+
+#[path = "preparation_catalogs.rs"]
+mod catalogs;
+pub use catalogs::{CatalogPins, collect_catalogs};
