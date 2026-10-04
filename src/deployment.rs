@@ -5,6 +5,9 @@ use crate::{
     server::{Server, http_app},
 };
 use anyhow::{Context, Result, bail, ensure};
+mod startup;
+pub use startup::StartupConfig;
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -20,6 +23,8 @@ use tokio_util::sync::CancellationToken;
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     pub version: u32,
+    #[serde(default)]
+    pub startup: StartupConfig,
     #[serde(default)]
     pub network: crate::network::NetworkPolicy,
     pub treasury: Option<TreasuryConfig>,
@@ -109,6 +114,7 @@ pub(crate) fn pattern(text: &str) -> Result<Regex> {
 }
 impl MetaConfig {
     fn validate(&self) -> Result<Resolution> {
+        self.startup.validate()?;
         self.network.validate()?;
         crate::discovery::policy::validate(self)?;
         ensure!(
@@ -237,7 +243,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -259,17 +265,7 @@ impl Deployment {
             t.resolve(path);
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
-        let mut sources = BTreeMap::new();
-        for (id, source) in &config.sources {
-            let used = config
-                .servers
-                .values()
-                .any(|server| server.sources.contains(id));
-            sources.insert(
-                id.clone(),
-                Source::load(id, source, path, warn && used).await?,
-            );
-        }
+        let sources = startup::load(&config, path, warn).await?;
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
             selected.insert(name.clone(), select_listener_tools(name, server, &sources)?);
@@ -509,6 +505,8 @@ impl Deployment {
     }
 
     async fn discover_prices(&mut self) -> Result<()> {
+        let started = std::time::Instant::now();
+        tracing::info!(target: "x402_treazury::startup", "Startup pricing discovery started; serving waits for discovery");
         for (id, source) in &self.sources {
             let selected: Vec<_> = self
                 .selected
@@ -520,6 +518,9 @@ impl Deployment {
             if selected.is_empty() {
                 continue;
             }
+            let source_started = std::time::Instant::now();
+            tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
+                "Startup pricing source started");
             let prices = crate::pricing::process_cache()
                 .discover(
                     &source.config,
@@ -528,6 +529,8 @@ impl Deployment {
                     &source.base_url,
                 )
                 .await?;
+            tracing::info!(target: "x402_treazury::startup", source = id, prices = prices.len(),
+                elapsed_ms = source_started.elapsed().as_millis() as u64, "Startup pricing source finished");
             let tools: BTreeMap<_, _> = catalog::build_tools_with_prices(
                 &source.config,
                 &source.document,
@@ -543,6 +546,7 @@ impl Deployment {
                 }
             }
         }
+        tracing::info!(target: "x402_treazury::startup", elapsed_ms = started.elapsed().as_millis() as u64, "Startup pricing discovery finished");
         Ok(())
     }
 
@@ -659,55 +663,6 @@ impl Deployment {
             funding_runtime,
             #[cfg(feature = "zcash")]
             managed_pools,
-        })
-    }
-}
-impl Source {
-    async fn load(id: &str, source: &SourceConfig, path: &Path, warn: bool) -> Result<Self> {
-        let mut cfg = crate::config::resolve(source.provider.clone(), path)
-            .await
-            .with_context(|| format!("source {id}"))?
-            .settings;
-        if warn {
-            crate::provider_status::warn(id, &cfg);
-        }
-        if cfg.prefix.is_none() {
-            cfg.prefix = Some(id.to_owned());
-        }
-        let http = crate::network::discovery(
-            if cfg.spec.starts_with("http") {
-                &cfg.spec
-            } else {
-                "https://local.invalid"
-            },
-            Duration::from_secs_f64(cfg.timeout),
-        )?;
-        let document = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes)
-            .await
-            .with_context(|| format!("source {id}: loading spec"))?;
-        let base_url = cfg
-            .base_url
-            .clone()
-            .or_else(|| {
-                document
-                    .pointer("/servers/0/url")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
-            })
-            .with_context(|| format!("source {id}: base_url required"))?;
-        let parsed = reqwest::Url::parse(&base_url)?;
-        ensure!(
-            matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
-            "source {id}: base_url must be HTTP(S)"
-        );
-        let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
-            .with_context(|| format!("source {id}: catalog generation"))?;
-        Ok(Self {
-            tools,
-            base_url,
-            instructions: cfg.instructions_text.clone(),
-            config: cfg,
-            document,
         })
     }
 }

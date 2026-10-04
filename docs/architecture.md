@@ -25,7 +25,10 @@ for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
 source overrides, listener defaults and optional automatic assignment. Static
-sources load eagerly before serving. Startup pricing discovery runs after tool
+sources load before serving through a rolling queue, defaulting to 16 active loads
+(`startup.catalog_concurrency`, 1..64). Any failure cancels unfinished loads; source
+completion order cannot change the final sorted inventory. All declared sources
+are loaded, including those unused by listeners. Progress/timings go to stderr. Startup pricing discovery runs after tool
 selection, uses unsigned eligible GETs and caches both success and failure for
 the process lifetime. TTL expiry never initiates a refresh. Lazy help fetches on
 first invocation; successful content is cached, failed initialization can retry,

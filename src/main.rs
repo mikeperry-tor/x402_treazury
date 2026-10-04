@@ -94,7 +94,7 @@ async fn run() -> Result<()> {
     validate_meta_arguments(&args, &matches)?;
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter("warn")
+        .with_env_filter("warn,x402_treazury::startup=info")
         .init();
     if args.show_config {
         return show_config(&args, &matches).await;
