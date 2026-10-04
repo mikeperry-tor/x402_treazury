@@ -16,7 +16,8 @@ struct Args {
     network_config: PathBuf,
     #[arg(long)]
     state_dir: PathBuf,
-    #[arg(long, default_value = "https://mainnet.base.org")]
+    /// Explicit trusted RPC destination; receives the state's public EVM addresses.
+    #[arg(long)]
     rpc_url: String,
     #[arg(long, default_value_t=3, value_parser=clap::value_parser!(u32).range(1..=20))]
     rounds: u32,
