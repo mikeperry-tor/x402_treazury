@@ -220,11 +220,44 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            axum::Router::new().route("/", axum::routing::post(rpc)),
+            axum::Router::new()
+                .route("/", axum::routing::post(rpc))
+                .route(
+                    "/forbidden",
+                    axum::routing::post(|| async {
+                        (axum::http::StatusCode::FORBIDDEN, "secret upstream body")
+                    }),
+                )
+                .route(
+                    "/limited",
+                    axum::routing::post(|| async {
+                        (
+                            axum::http::StatusCode::TOO_MANY_REQUESTS,
+                            "secret upstream body",
+                        )
+                    }),
+                ),
         )
         .await
         .unwrap()
     });
+    let unchanged = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
+    for (path, code) in [("forbidden", "403"), ("limited", "429")] {
+        backend.base = super::super::base::BaseRpc::new(&format!("{url}/{path}"), 12, 120).unwrap();
+        let error = backend
+            .credit(&job)
+            .await
+            .unwrap_err()
+            .context("base_credit_unverified");
+        let category = safe_error(&error, &FundingPhase::VerifyingCredit);
+        assert!(category.contains(code), "{category}");
+        assert!(category.contains("retaining reservations"));
+        assert!(!category.contains("secret"));
+        assert_eq!(
+            unchanged,
+            serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
+        );
+    }
     backend.base = super::super::base::BaseRpc::new(&url, 12, 120).unwrap();
     let before = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
     let mut missing = job.clone();

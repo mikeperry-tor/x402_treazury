@@ -692,6 +692,7 @@ fn funding_capacity_and_reservation_agree_across_days_and_reduced_limits() {
     s.reserve("next-day", None, 3, 80, 100).unwrap();
 }
 
+#[cfg(feature = "zcash")]
 #[test]
 fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     use x402_treazury::rotation::near::Quote;

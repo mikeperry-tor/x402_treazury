@@ -99,6 +99,9 @@ impl<B: FundingBackend> FundingWorker<B> {
             .as_ref()
             .err()
             .map(|error| safe_error(error, &job.phase));
+        if let Some(category) = &error {
+            tracing::warn!(phase = ?job.phase, category, "funding step deferred or failed");
+        }
         let streak = if error.is_some() {
             job.error_streak.saturating_add(1)
         } else {
@@ -125,7 +128,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                         FundingPhase::RecoveryRequired,
                     )?;
                 }
-                s.defer_funding(&id, next, error, quote_attempt)?;
+                s.defer_funding(&id, next, error.as_deref(), quote_attempt)?;
                 Ok(())
             })
             .await
@@ -206,7 +209,15 @@ impl<B: FundingBackend> FundingWorker<B> {
         self.transition(job, Preparing).await?;
         // The adapter commits PREPARED with bytes+snapshot. A crash/error
         // with only PREPARING requires guarded recovery, never another send.
-        self.backend.prepare(job, &quote).await?;
+        if let Err(error) = self.backend.prepare(job, &quote).await {
+            if error.is::<super::transaction::PreparationDeferred>() {
+                let id = job.id.clone();
+                self.store
+                    .call(move |s| s.defer_unstarted_preparation(&id))
+                    .await?;
+            }
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -394,7 +405,11 @@ impl FundingBackend for Backend {
     }
     async fn credit(&mut self, job: &FundingJob) -> Result<()> {
         let pool = job.pool_id.clone();
-        let query = self.store.call(move |s| s.chain_query(&pool)).await?;
+        let query = self
+            .store
+            .call(move |s| s.chain_query(&pool))
+            .await
+            .context(super::base::VerificationStage("funding credit query"))?;
         let view = self.base.view(query).await?;
         let balance = view
             .balances
@@ -412,6 +427,7 @@ impl FundingBackend for Backend {
                 )
             })
             .await
+            .context(super::base::VerificationStage("funding credit persistence"))
     }
     fn max_attempts(&self, job: &FundingJob) -> u32 {
         self.policy(job).map(|(_, n)| n).unwrap_or(1)
@@ -420,7 +436,19 @@ impl FundingBackend for Backend {
 
 /// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
 /// quote addresses or arbitrary error prose into the public journal.
-fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
+fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
+    if error.is::<super::base::RpcFailure>() || error.is::<super::base::VerificationStage>() {
+        return format!(
+            "base_credit_unverified; {}; check configured Base RPC access and rate limits; retaining reservations",
+            super::base::safe_diagnostic(error)
+        );
+    }
+    safe_error_category(error, phase).into()
+}
+fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
+    if error.is::<super::transaction::PreparationDeferred>() {
+        return "treasury_preparation_deferred; pre-preparation sync unavailable; no calculation started; retrying";
+    }
     for cause in error.chain() {
         match cause.to_string().as_str() {
             "near_http_401" | "near_http_403" => {

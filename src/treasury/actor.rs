@@ -82,6 +82,7 @@ impl Treasury {
                             let result = match self.sync_once(&stop).await {
                                 Ok(()) if !stop.is_cancelled() => self.prepare(request).await,
                                 Ok(()) => Err(anyhow::anyhow!("treasury stopping")),
+                                Err(error) if self.healthy => Err(error.context(crate::rotation::transaction::PreparationDeferred)),
                                 Err(error) => Err(error),
                             };
                             let _ = reply.send(result);
@@ -222,6 +223,59 @@ mod tests {
             restored.close().await.unwrap();
         }
     }
+    #[tokio::test]
+    async fn failed_sync_returns_typed_unstarted_response_without_reservation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut treasury = Treasury::create(
+            dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))
+        ).await.unwrap();
+        treasury.configure_sync(
+            super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
+        );
+        let id = treasury.status().await.unwrap().treasury_id;
+        let (handle, commands) = channel();
+        let stop = CancellationToken::new();
+        let request = PrepareRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            pool_id: None,
+            daily_limit_zatoshis: 200000,
+            deadline: u64::MAX,
+            recipient: "not-used-before-sync".into(),
+            amount_zatoshis: 1,
+            max_fee_zatoshis: 10000,
+            max_input_zatoshis: 20000,
+        };
+        let (send, reply) = oneshot::channel();
+        handle
+            .sender
+            .send(Command::Prepare(request, send))
+            .await
+            .unwrap();
+        let task = tokio::spawn(treasury.run_commands(commands, NoSubmission, stop.clone()));
+        let result = reply.await.unwrap();
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .is::<crate::rotation::transaction::PreparationDeferred>()
+        );
+        stop.cancel();
+        task.await.unwrap().unwrap();
+        let restored = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+            .await
+            .unwrap();
+        assert!(
+            restored
+                .status()
+                .await
+                .unwrap()
+                .treasury_operations
+                .is_empty()
+        );
+        restored.close().await.unwrap();
+    }
+
     #[tokio::test]
     async fn cancellation_before_queue_admission_leaves_no_command() {
         let (handle, commands) = channel();

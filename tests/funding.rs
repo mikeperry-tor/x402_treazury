@@ -15,6 +15,7 @@ struct Fake {
     swap_status: fn() -> SwapStatus,
     credit_calls: usize,
     funds_available: bool,
+    defer_prepare: bool,
     quote_deadline: u64,
     quotes: usize,
     minimum: Option<String>,
@@ -42,6 +43,9 @@ impl FundingBackend for Fake {
         })
     }
     async fn prepare(&mut self, j: &FundingJob, quote: &Quote) -> Result<()> {
+        if self.defer_prepare {
+            return Err(x402_treazury::rotation::transaction::PreparationDeferred.into());
+        }
         assert_eq!(quote.request["amount"], j.target);
         let id = j.operation_id.clone();
         let pool = j.pool_id.clone();
@@ -169,6 +173,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             swap_status: || SwapStatus::Success,
             credit_calls: 0,
             funds_available: true,
+            defer_prepare: false,
             quote_deadline: u64::MAX,
             quotes: 0,
             minimum: None,
@@ -253,6 +258,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             swap_status: || SwapStatus::Success,
             credit_calls: 0,
             funds_available: true,
+            defer_prepare: false,
             quote_deadline: u64::MAX,
             quotes: 0,
             minimum: None,
@@ -317,6 +323,7 @@ async fn fixture() -> (
             swap_status: || SwapStatus::Success,
             credit_calls: 0,
             funds_available: true,
+            defer_prepare: false,
             quote_deadline: u64::MAX,
             quotes: 0,
             minimum: None,
@@ -631,6 +638,79 @@ async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
             .len(),
         1
     );
+    drop(worker);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_send() {
+    use x402_treazury::rotation::store::funding::FundingPhase;
+    let (_dir, mut worker, task) = fixture().await;
+    let now = x402_treazury::rotation::base::now().unwrap();
+    worker.tick(now).await.unwrap();
+    let original = worker
+        .store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    worker.backend.defer_prepare = true;
+    for i in 1..=2 {
+        worker.tick(now + i * 10).await.unwrap();
+        let status = worker.store.call(|s| s.status()).await.unwrap();
+        let job = &status.funding_jobs[0];
+        assert_eq!(job.phase, FundingPhase::Quoted);
+        assert_eq!(job.operation_id, original.operation_id);
+        assert!(
+            job.last_error
+                .as_ref()
+                .unwrap()
+                .contains("no calculation started")
+        );
+        assert!(status.treasury_operations.is_empty());
+    }
+    worker.backend.defer_prepare = false;
+    worker.tick(now + 100).await.unwrap();
+    assert_eq!(worker.backend.quotes, 1);
+    assert_eq!(worker.backend.sends, 0);
+    let status = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(status.treasury_operations.len(), 1);
+    let job = status.funding_jobs[0].id.clone();
+    assert!(
+        worker
+            .store
+            .call(move |s| s.defer_unstarted_preparation(&job))
+            .await
+            .is_err(),
+        "durable preparation must not be rewound"
+    );
+    drop(worker);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() {
+    use x402_treazury::rotation::store::funding::FundingPhase;
+    let (_dir, mut worker, task) = fixture().await;
+    let now = x402_treazury::rotation::base::now().unwrap();
+    worker.tick(now).await.unwrap();
+    worker
+        .store
+        .call(move |s| {
+            let job = s.funding_jobs()?.remove(0);
+            s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)?;
+            s.defer_funding(&job.id, now, Some("preparation_fixture_failure"), false)
+        })
+        .await
+        .unwrap();
+    worker.tick(now + 10).await.unwrap();
+    let status = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(status.funding_jobs[0].phase, FundingPhase::RecoveryRequired);
+    assert_eq!(
+        status.funding_jobs[0].last_error.as_deref(),
+        Some("preparation_fixture_failure")
+    );
+    assert_eq!(worker.backend.sends, 0);
+    assert!(status.treasury_operations.is_empty());
     drop(worker);
     task.await.unwrap();
 }

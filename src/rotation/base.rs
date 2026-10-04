@@ -8,6 +8,67 @@ use std::{
     collections::BTreeMap,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+/// Contains only fixed method/category names and numeric codes, never upstream prose.
+#[derive(Debug)]
+pub(crate) struct RpcFailure {
+    method: &'static str,
+    category: &'static str,
+    http: Option<u16>,
+    code: Option<i64>,
+}
+impl std::fmt::Display for RpcFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Base RPC {}: {}", self.method, self.category)?;
+        if let Some(status) = self.http {
+            write!(f, "; HTTP {status}")?;
+        }
+        if let Some(code) = self.code {
+            write!(f, "; RPC code {code}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for RpcFailure {}
+#[derive(Debug)]
+pub(crate) struct VerificationStage(pub &'static str);
+impl std::fmt::Display for VerificationStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for VerificationStage {}
+pub fn safe_diagnostic(error: &anyhow::Error) -> String {
+    let stage = error
+        .downcast_ref::<VerificationStage>()
+        .map_or("chain view", |s| s.0);
+    format!("{stage}: {}", safe_reason(error))
+}
+fn safe_reason(error: &anyhow::Error) -> String {
+    if let Some(rpc) = error.downcast_ref::<RpcFailure>() {
+        return rpc.to_string();
+    }
+    for cause in error.chain() {
+        let message = cause.to_string();
+        if matches!(
+            message.as_str(),
+            "wrong Base chain"
+                | "invalid confirmed block"
+                | "Base view changed during reconciliation"
+                | "stale Base block"
+                | "invalid contract result length"
+                | "invalid authorizationState result"
+                | "missing Base RPC result"
+                | "invalid block hash"
+                | "invalid RPC quantity"
+                | "insufficient Base confirmations"
+                | "Base block is in the future"
+        ) {
+            return message;
+        }
+    }
+    "Base chain verification failed; unclassified validation error".into()
+}
+
 #[derive(Clone, Debug)]
 pub struct Anchor {
     pub height: u64,
@@ -76,28 +137,58 @@ impl BaseRpc {
             max_age: self.max_age,
         })
     }
-    async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+    async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
+        let failure = |category, http, code| RpcFailure {
+            method,
+            category,
+            http,
+            code,
+        };
         let response = self
             .http
             .post(self.url.clone())
             .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
             .send()
             .await
-            .map_err(|_| anyhow::anyhow!("base_rpc_unavailable"))?;
-        ensure!(response.status().is_success(), "base_rpc_unavailable");
+            .map_err(|e| {
+                failure(
+                    if e.is_timeout() {
+                        "timeout"
+                    } else if e.is_connect() {
+                        "connect"
+                    } else {
+                        "transport"
+                    },
+                    None,
+                    None,
+                )
+            })?;
+        let status = response.status().as_u16();
+        ensure!(
+            response.status().is_success(),
+            failure("HTTP rejection", Some(status), None)
+        );
         let value: Value = response
             .json()
             .await
-            .map_err(|_| anyhow::anyhow!("invalid Base RPC response"))?;
+            .map_err(|_| failure("invalid JSON body", Some(status), None))?;
         ensure!(
-            value.get("error").is_none() && value["id"] == 1 && value["jsonrpc"] == "2.0",
-            "Base RPC request failed"
+            value.get("error").is_none(),
+            failure(
+                "RPC rejection",
+                Some(status),
+                value["error"]["code"].as_i64()
+            )
+        );
+        ensure!(
+            value["id"] == 1 && value["jsonrpc"] == "2.0",
+            failure("invalid envelope", Some(status), None)
         );
         value
             .get("result")
             .filter(|v| !v.is_null())
             .cloned()
-            .context("missing Base RPC result")
+            .ok_or_else(|| failure("missing result", Some(status), None).into())
     }
     async fn block(&self, tag: &str) -> Result<(Anchor, u64)> {
         let v = self
@@ -131,6 +222,15 @@ impl BaseRpc {
         Ok(U256::from_str_radix(&s[2..], 16)?)
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
+        let started = std::time::Instant::now();
+        let result = self.view_inner(query).await;
+        if let Err(error) = &result {
+            tracing::warn!(category = %safe_diagnostic(error), elapsed_ms = started.elapsed().as_millis() as u64,
+                "Base credit/payment chain verification failed");
+        }
+        result
+    }
+    async fn view_inner(&self, query: ChainQuery) -> Result<ChainView> {
         ensure!(
             quantity(&self.rpc("eth_chainId", json!([])).await?)? == 8453,
             "wrong Base chain"
@@ -142,14 +242,20 @@ impl BaseRpc {
                 AdmissionError::ChainRecoveryRequired("confirmed anchor changed")
             );
         }
-        let (latest, timestamp) = self.block("latest").await?;
+        let (latest, timestamp) = self
+            .block("latest")
+            .await
+            .context(VerificationStage("latest block"))?;
         let clock = now()?;
         validate_timestamp(timestamp, clock, self.max_age)?;
         let height = latest
             .height
             .checked_sub(self.confirmations)
             .context("insufficient Base confirmations")?;
-        let (confirmed, confirmed_time) = self.block(&format!("0x{height:x}")).await?;
+        let (confirmed, confirmed_time) = self
+            .block(&format!("0x{height:x}"))
+            .await
+            .context(VerificationStage("confirmed block"))?;
         ensure!(
             confirmed.height == height
                 && confirmed_time <= timestamp
@@ -161,8 +267,14 @@ impl BaseRpc {
             let address: Address = address.parse()?;
             let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
             let scoped = self.for_address(&address.to_string())?;
-            let stable = scoped.call(data.clone(), &confirmed).await?;
-            let current = scoped.call(data, &latest).await?;
+            let stable = scoped
+                .call(data.clone(), &confirmed)
+                .await
+                .context(VerificationStage("confirmed balance"))?;
+            let current = scoped
+                .call(data, &latest)
+                .await
+                .context(VerificationStage("latest balance"))?;
             balances.insert(id, stable.min(current));
         }
         let mut released = Vec::new();
@@ -179,7 +291,8 @@ impl BaseRpc {
             let used = self
                 .for_address(&auth.payer)?
                 .call(data, &confirmed)
-                .await?;
+                .await
+                .context(VerificationStage("authorization nonce"))?;
             ensure!(used <= U256::from(1), "invalid authorizationState result");
             if used == U256::from(1) || confirmed_time > auth.valid_before {
                 released.push(auth.id);
@@ -220,6 +333,47 @@ fn validate_timestamp(timestamp: u64, clock: u64, max_age: u64) -> Result<()> {
 }
 #[cfg(test)]
 mod tests {
+    #[derive(Clone, Default)]
+    struct Logs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Logs {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[tokio::test]
+    async fn rpc_failures_report_codes_without_upstream_secrets_in_errors_or_logs() {
+        use super::*;
+        use axum::{Router, http::StatusCode, routing::post};
+        use tracing::instrument::WithSubscriber;
+        for (status, body, expected) in [
+            (403, "private-address secret-token".to_owned(), "HTTP 403"),
+            (429, "private-address secret-token".to_owned(), "HTTP 429"),
+            (200, json!({"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"private-address secret-token"}}).to_string(), "RPC code -32005"),
+            (200, "private-address secret-token".to_owned(), "invalid JSON body"),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/secret-url", listener.local_addr().unwrap());
+            let app = Router::new().route("/secret-url",post(move || {let body=body.clone();async move {(StatusCode::from_u16(status).unwrap(),body)}}));
+            let server = tokio::spawn(async move {axum::serve(listener,app).await.unwrap()});
+            let logs = Logs::default();
+            let writer = logs.clone();
+            let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false).with_writer(move ||writer.clone()).finish();
+            let rpc = BaseRpc::new(&url,12,120).unwrap();
+            let error = rpc.view(ChainQuery{wallets:vec![],pending:vec![],anchor:None}).with_subscriber(subscriber).await.err().unwrap();
+            let public = safe_diagnostic(&error);
+            let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+            for text in [&public, &logged, &error.to_string()] {
+                assert!(text.contains(expected), "{text}");
+                for secret in ["private-address","secret-token","secret-url"] { assert!(!text.contains(secret), "{text}"); }
+            }
+            assert!(logged.contains("Base credit/payment chain verification failed"));
+            server.abort();
+        }
+    }
     #[test]
     fn timestamp_boundaries_are_exact() {
         for (stamp, allowed) in [

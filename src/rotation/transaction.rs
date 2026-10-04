@@ -8,6 +8,17 @@ use zeroize::Zeroizing;
 
 pub const MIN_QUOTE_VALIDITY_SECONDS: u64 = 300;
 
+/// Issued only when the treasury command failed before invoking the preparer.
+/// It is not evidence that an interrupted calculation is safe to repeat.
+#[derive(Debug)]
+pub struct PreparationDeferred;
+impl std::fmt::Display for PreparationDeferred {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("treasury_preparation_deferred: pre-preparation sync unavailable; no calculation started")
+    }
+}
+impl std::error::Error for PreparationDeferred {}
+
 pub struct PrepareRequest {
     pub operation_id: String,
     pub pool_id: Option<String>,

@@ -60,6 +60,34 @@ pub struct FundingJob {
     pub last_error: Option<String>,
 }
 impl Store {
+    /// Called only after a typed response proving the preparer was never invoked.
+    /// Absence of bytes by itself is not authority to repeat preparation.
+    pub fn defer_unstarted_preparation(&mut self, job: &str) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let (operation, phase): (String, String) = tx.query_row(
+            "SELECT operation_id,phase FROM funding_progress WHERE job_id=?1",
+            [job],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        ensure!(
+            serde_json::from_str::<FundingPhase>(&phase)? == FundingPhase::Preparing,
+            "preparation is not pending"
+        );
+        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)", [&operation], |r| r.get(0))?;
+        ensure!(
+            !touched,
+            "preparation has durable effects; recovery required"
+        );
+        tx.execute(
+            "UPDATE funding_progress SET phase=?2 WHERE job_id=?1",
+            params![job, serde_json::to_string(&FundingPhase::Quoted)?],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Operator-only reset. Any signed bytes (even resolved ones) forbid it.
     /// Old encrypted bindings remain archived; the next attempt gets a new ID
     /// and a freshly derived refund address, never another send of old intent.
@@ -167,6 +195,7 @@ impl Store {
     }
     /// A provisional allocation can grow to the validated bridge minimum only
     /// when its first quote commits; wallet and job targets change atomically.
+    #[cfg(feature = "zcash")]
     pub fn save_funding_quote_with_target(
         &mut self,
         id: &str,
@@ -246,11 +275,12 @@ impl Store {
     ) -> Result<()> {
         ensure!(expected.permits(&next), "invalid funding transition");
         let changed = self.db.execute(
-            "UPDATE funding_progress SET phase=?3,last_error=NULL WHERE job_id=?1 AND phase=?2 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",
+            "UPDATE funding_progress SET phase=?3,last_error=CASE WHEN ?4 THEN last_error ELSE NULL END WHERE job_id=?1 AND phase=?2 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",
             params![
                 id,
                 serde_json::to_string(&expected)?,
-                serde_json::to_string(&next)?
+                serde_json::to_string(&next)?,
+                next == FundingPhase::RecoveryRequired
             ],
         )?;
         ensure!(changed == 1, "funding phase conflict");
@@ -294,7 +324,7 @@ impl Store {
         quote_attempt: bool,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        ensure!(tx.execute("UPDATE funding_progress SET next_poll=?2,last_error=?3,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
+        ensure!(tx.execute("UPDATE funding_progress SET next_poll=?2,last_error=CASE WHEN phase='\"RECOVERY_REQUIRED\"' THEN COALESCE(?3,last_error) ELSE ?3 END,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
         tx.execute("INSERT INTO funding_health(job_id,error_streak) VALUES (?1,?2) ON CONFLICT(job_id) DO UPDATE SET error_streak=CASE WHEN excluded.error_streak=0 THEN 0 ELSE MIN(error_streak+1,32) END",params![id,u32::from(error.is_some())])?;
         tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND f.state='COMPLETE' AND o.submission='CONFIRMED')",[id])?;
         tx.commit()?;

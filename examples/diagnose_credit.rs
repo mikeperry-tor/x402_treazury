@@ -1,0 +1,88 @@
+//! Read-only Base verification against public wallet identities from an existing
+//! state directory. Never opens the encryption key, signs, funds, or updates state.
+use anyhow::{Context, Result};
+use clap::Parser;
+use std::{path::PathBuf, time::Duration};
+use x402_treazury::{
+    network::{self, NetworkPolicy},
+    rotation::{
+        base::{BaseRpc, ChainQuery, safe_diagnostic},
+        store,
+    },
+};
+#[derive(Parser)]
+struct Args {
+    #[arg(long)]
+    network_config: PathBuf,
+    #[arg(long)]
+    state_dir: PathBuf,
+    #[arg(long, default_value = "https://mainnet.base.org")]
+    rpc_url: String,
+    #[arg(long, default_value_t=3, value_parser=clap::value_parser!(u32).range(1..=20))]
+    rounds: u32,
+    /// Maximum simultaneous views; queued views are delayed, never dropped.
+    #[arg(long, default_value_t=4, value_parser=clap::value_parser!(u32).range(1..=16))]
+    concurrency: u32,
+}
+#[tokio::main]
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("diagnose-credit: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+async fn run() -> Result<()> {
+    let args = Args::parse();
+    network::install(NetworkPolicy::load(&args.network_config)?)?;
+    let state = store::status(&args.state_dir)?;
+    anyhow::ensure!(!state.pools.is_empty(), "no pools");
+    let rpc = BaseRpc::new(&args.rpc_url, 12, 120)?;
+    let limit = std::sync::Arc::new(tokio::sync::Semaphore::new(args.concurrency as usize));
+    eprintln!(
+        "Read-only diagnostic: {} rounds, at most {} concurrent views; all queued views will be reported",
+        args.rounds, args.concurrency
+    );
+    let mut failed = 0usize;
+    for round in 0..args.rounds {
+        let mut tasks = tokio::task::JoinSet::new();
+        // Two independent background views plus overlapping funding credit checks.
+        for (index, pool) in state.pools.iter().enumerate() {
+            for lane in 0..2 {
+                let query = ChainQuery {
+                    wallets: pool
+                        .addresses
+                        .iter()
+                        .map(|w| (w.id.clone(), w.address.clone()))
+                        .collect(),
+                    pending: vec![],
+                    anchor: None,
+                };
+                let rpc = rpc.clone();
+                let limit = limit.clone();
+                tasks.spawn(async move {
+                    let _permit = limit.acquire_owned().await.expect("diagnostic semaphore closed");
+                    let started=std::time::Instant::now();
+                    let result=rpc.view(query).await;
+                    let outcome=match result {Ok(v)=>serde_json::json!({"verified_block":v.anchor.height,"balances":v.balances.values().map(ToString::to_string).collect::<Vec<_>>()}),Err(e)=>serde_json::json!({"error":safe_diagnostic(&e)})};
+                    serde_json::json!({"round":round,"pool_index":index,"lane":lane,"elapsed_ms":started.elapsed().as_millis(),"outcome":outcome})
+                });
+            }
+        }
+        while let Some(result) = tasks.join_next().await {
+            let result = result.context("diagnostic task failed")?;
+            failed += usize::from(result["outcome"].get("error").is_some());
+            println!("{result}");
+        }
+        if round + 1 < args.rounds {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+    anyhow::ensure!(
+        failed == 0,
+        "{failed} read-only verification views failed; see the complete JSON records above"
+    );
+    Ok(())
+}
