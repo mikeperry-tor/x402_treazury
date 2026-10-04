@@ -1,4 +1,6 @@
 //! Opt-in, conservative funded MCP driver. Never starts funding or retries a call.
+#[path = "qualification/catalogs.rs"]
+mod catalogs;
 #[path = "qualification/identities.rs"]
 mod identities;
 #[path = "qualification/ledger.rs"]
@@ -38,6 +40,13 @@ struct Args {
 enum Command {
     /// Fetch catalogs without keys/payments, pin definitions/config, create immutable budget ledger.
     Prepare,
+    /// Capture independent catalogs with explicit reviewed qualification fallbacks; no wallet access.
+    FreezeCatalogs {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        evidence_dir: PathBuf,
+    },
     /// One selected batch (at most two calls). Never auto-resumes a previously attempted case.
     Execute {
         #[arg(long, required = true)]
@@ -558,6 +567,10 @@ async fn run() -> Result<()> {
             .join(&manifest.deployment);
     }
     match args.command {
+        Command::FreezeCatalogs {
+            output,
+            evidence_dir,
+        } => catalogs::freeze(&manifest, &output, &evidence_dir).await?,
         Command::CheckBase => {
             let shown = settings(&manifest).await?;
             let table = x402_treazury::config::read_table(&manifest.deployment).await?;
