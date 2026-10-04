@@ -490,6 +490,19 @@ fn near_diagnostic(error: &anyhow::Error) -> String {
 /// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
 /// quote addresses or arbitrary error prose into the public journal.
 fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
+    if error
+        .downcast_ref::<super::base::VerificationStage>()
+        .is_some_and(|stage| stage.0 == "funding credit persistence")
+    {
+        let reason = error.chain().find_map(|cause| match cause.to_string().as_str() {
+            "insufficient confirmed credit" => Some("confirmed balance is below the funding target; waiting for independent Base credit"),
+            "credit verification requires an allocated candidate" => Some("candidate role changed during verification; inspect wallet status for concurrent completion"),
+            _ => None,
+        }).unwrap_or("local credit state could not be committed; inspect wallet status and local storage");
+        return format!(
+            "base_credit_unverified; funding credit persistence: {reason}; retaining reservations"
+        );
+    }
     if error.is::<super::base::RpcFailure>() || error.is::<super::base::VerificationStage>() {
         return format!(
             "base_credit_unverified; {}; check configured Base RPC access and rate limits; retaining reservations",

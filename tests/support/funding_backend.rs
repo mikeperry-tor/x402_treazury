@@ -283,6 +283,36 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
 }
 
 #[test]
+fn credit_persistence_diagnostics_do_not_misidentify_local_failures_as_rpc_errors() {
+    for (reason, expected) in [
+        (
+            "insufficient confirmed credit",
+            "confirmed balance is below the funding target",
+        ),
+        (
+            "credit verification requires an allocated candidate",
+            "candidate role changed during verification",
+        ),
+        (
+            "secret sqlite path and private wallet identifier",
+            "local credit state could not be committed",
+        ),
+    ] {
+        let error = anyhow::anyhow!(reason)
+            .context(super::super::base::VerificationStage(
+                "funding credit persistence",
+            ))
+            .context("base_credit_unverified");
+        let public = safe_error(&error, &FundingPhase::VerifyingCredit);
+        assert!(public.contains(expected), "{public}");
+        assert!(public.contains("retaining reservations"));
+        assert!(!public.contains("RPC"));
+        assert!(!public.contains("secret"));
+        assert!(!public.contains("private"));
+    }
+}
+
+#[test]
 fn near_diagnostics_preserve_stage_and_safe_categories_only() {
     for (reason, expected) in [
         ("near_http_503", "HTTP 503"),
