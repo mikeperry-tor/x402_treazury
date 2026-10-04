@@ -9,6 +9,7 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
+use tracing::Instrument;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -18,7 +19,7 @@ pub struct StartupConfig {
 impl Default for StartupConfig {
     fn default() -> Self {
         Self {
-            catalog_concurrency: 16,
+            catalog_concurrency: 2,
         }
     }
 }
@@ -140,6 +141,7 @@ impl Source {
         tracing::info!(target: "x402_treazury::startup", source = id, phase = progress.phase,
             "Loading catalog document");
         let document = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes)
+            .instrument(tracing::info_span!(target: "x402_treazury::startup", "catalog_download", source = id))
             .await
             .with_context(|| format!("source {id}: loading spec"))?;
         tracing::info!(target: "x402_treazury::startup", source = id,

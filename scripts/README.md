@@ -90,3 +90,7 @@ The helper's syntax probes are an explicit development-tool check:
 cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity
 cargo clippy --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity --all-targets -- -D warnings
 ```
+
+The opt-in `measure_startup_tor.py` runner compares unsigned startup time and
+per-process peak RSS through an existing, warmed Tor SOCKS endpoint. It retains
+the daemon and its learning state; see [startup qualification](../tests/STARTUP.md).

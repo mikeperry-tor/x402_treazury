@@ -25,7 +25,7 @@ for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
 source overrides, listener defaults and optional automatic assignment. Static
-sources load before serving through a rolling queue, defaulting to 16 active loads
+sources load before serving through a rolling queue, defaulting to 2 active loads
 (`startup.catalog_concurrency`, 1..64). Any failure cancels unfinished loads; source
 completion order cannot change the final sorted inventory. All declared sources
 are loaded, including those unused by listeners. Progress/timings go to stderr. Startup pricing discovery runs after tool

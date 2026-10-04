@@ -50,6 +50,27 @@ reliability_note = "Dated evidence: paid response lost"
 }
 
 #[test]
+fn slow_pricing_warning_is_visible_before_catalog_io_and_inspection_is_quiet() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("slow-pricing.toml");
+    std::fs::write(&path, "spec = 'missing.json'\nreliability_tags = ['slow_pricing', 'slow_pricing']\nreliability_note = 'Pricing discovery was slow'\n").unwrap();
+    let result = run(&path, false, &[]);
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    let log = String::from_utf8(result.stderr).unwrap();
+    assert_eq!(log.matches("Provider reliability observation:").count(), 1);
+    assert!(
+        log.contains("Unsigned pricing discovery has shown long response waits"),
+        "{log}"
+    );
+    assert!(log.contains("Pricing discovery was slow"), "{log}");
+    let shown = run(&path, false, &["--show-config"]);
+    assert!(shown.status.success());
+    assert!(String::from_utf8_lossy(&shown.stdout).contains("slow_pricing"));
+    assert!(!String::from_utf8_lossy(&shown.stderr).contains("Provider reliability"));
+}
+
+#[test]
 fn metadata_preserves_tools_and_only_bound_sources_warn_once() {
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());

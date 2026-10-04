@@ -504,7 +504,9 @@ impl Deployment {
         })
     }
 
-    async fn discover_prices(&mut self) -> Result<()> {
+    /// Prepare unsigned startup prices without binding listeners or opening wallets.
+    /// Uses the process cache; repeated calls never refresh completed attempts.
+    pub async fn discover_prices(&mut self) -> Result<()> {
         let started = std::time::Instant::now();
         tracing::info!(target: "x402_treazury::startup", request_concurrency = crate::pricing::CONCURRENCY, "Startup pricing discovery started; serving waits for discovery");
         let mut pending = Vec::new();

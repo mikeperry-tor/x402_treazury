@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum ReliabilityTag {
+    SlowPricing,
     UpstreamTimeout,
     UpstreamRateLimited,
     IntermittentResponseBody,
@@ -18,6 +19,10 @@ pub enum ReliabilityTag {
 impl ReliabilityTag {
     fn warning(self) -> (&'static str, &'static str) {
         match self {
+            Self::SlowPricing => (
+                "slow_pricing",
+                "Unsigned pricing discovery has shown long response waits and may delay startup. This tag does not describe catalog or paid-call performance.",
+            ),
             Self::UpstreamTimeout => (
                 "upstream_timeout",
                 "Provider has returned upstream timeout errors, including inside successful HTTP responses.",

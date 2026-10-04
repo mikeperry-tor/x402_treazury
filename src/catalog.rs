@@ -240,18 +240,26 @@ pub async fn load_json_with_limit(
     limit: usize,
 ) -> Result<Value> {
     let bytes = if source.starts_with("https://") || source.starts_with("http://") {
-        crate::limits::read(
-            http.get(source)
-                .send()
-                .await
-                .map_err(reqwest::Error::without_url)?
-                .error_for_status()
-                .map_err(reqwest::Error::without_url)?,
-            limit,
-            "static URL spec",
-            "max_spec_bytes",
-        )
-        .await?
+        let started = std::time::Instant::now();
+        let response = http
+            .get(source)
+            .send()
+            .await
+            .map_err(reqwest::Error::without_url)
+            .context("requesting catalog response headers")?
+            .error_for_status()
+            .map_err(reqwest::Error::without_url)?;
+        tracing::info!(target: "x402_treazury::startup",
+            headers_ms = started.elapsed().as_millis() as u64,
+            "Catalog response headers received; reading body");
+        let body_started = std::time::Instant::now();
+        let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
+            .await
+            .context("reading catalog response body")?;
+        tracing::info!(target: "x402_treazury::startup",
+            body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
+            "Catalog response body complete");
+        bytes
     } else {
         tokio::fs::read(source)
             .await

@@ -147,31 +147,31 @@ async fn rolling_slots_and_inventory_match_serial_loading() {
     assert_eq!(inventory, serde_json::to_value(serial.inventory()).unwrap());
 }
 #[tokio::test]
-async fn default_limit_is_sixteen_and_abort_drops_active_requests() {
-    let mut fixture = Fixture::new(17, None).await;
+async fn default_limit_is_two_and_abort_drops_active_requests() {
+    let mut fixture = Fixture::new(3, None).await;
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
         &format!("http://{}", fixture.address),
-        17,
+        3,
         None,
         "",
     );
     assert_eq!(
         Deployment::show_config(&path).await.unwrap()["startup"]["catalog_concurrency"],
-        16
+        2
     );
     let task = tokio::spawn(async move { Deployment::load(&path).await });
     let mut seen = Vec::new();
-    for _ in 0..16 {
+    for _ in 0..2 {
         seen.push(fixture.next().await);
     }
     seen.sort();
-    assert_eq!(seen, (0..16).collect::<Vec<_>>());
+    assert_eq!(seen, (0..2).collect::<Vec<_>>());
     assert!(fixture.arrivals.try_recv().is_err());
     task.abort();
     assert!(matches!(task.await, Err(error) if error.is_cancelled()));
-    for _ in 0..16 {
+    for _ in 0..2 {
         tokio::time::timeout(Duration::from_secs(5), fixture.cancelled.recv())
             .await
             .unwrap()
@@ -353,6 +353,8 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
     let log = String::from_utf8(output.stderr).unwrap();
     for message in [
         "Catalog load started",
+        "Catalog response headers received; reading body",
+        "Catalog response body complete",
         "Catalog fetch/parse finished",
         "Catalog generation finished",
         "Catalog ready",
@@ -361,5 +363,8 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
         assert!(log.contains(message), "missing {message}: {log}");
     }
     assert!(log.contains("elapsed_ms"));
+    assert!(log.contains("headers_ms"));
+    assert!(log.contains("body_ms"));
+    assert!(log.contains("catalog_download"));
     assert!(!log.contains(&fixture.address.to_string()));
 }
