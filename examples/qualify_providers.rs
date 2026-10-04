@@ -230,9 +230,15 @@ fn observe(shown: &Value, manifest: &Manifest, possible_new_jobs: usize) -> Resu
         .unwrap_or(0);
     let mut source_exposure = 0u64;
     for op in &state.treasury_operations {
+        // EXPIRED is written only by guarded recovery after canonical absence,
+        // synced invalidation and proof that the original inputs are unspent.
+        // A passed wall-clock deadline alone must never release exposure.
         source_exposure = source_exposure
-            .checked_add(op.facts.amount_zatoshis)
-            .and_then(|n| n.checked_add(op.facts.fee_zatoshis))
+            .checked_add(operation_exposure(
+                &op.submission,
+                op.facts.amount_zatoshis,
+                op.facts.fee_zatoshis,
+            )?)
             .context("source exposure overflow")?;
     }
     for job in &state.funding_jobs {
@@ -270,6 +276,13 @@ fn observe(shown: &Value, manifest: &Manifest, possible_new_jobs: usize) -> Resu
         "roles":p.addresses.iter().map(|a|json!({"role":a.role,"target":a.target,"balance":a.confirmed_balance})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "note":"Balances and job states are observations, not settlement certification"}),
     )
+}
+fn operation_exposure(submission: &str, amount: u64, fee: u64) -> Result<u64> {
+    if submission == "EXPIRED" {
+        Ok(0)
+    } else {
+        amount.checked_add(fee).context("source exposure overflow")
+    }
 }
 async fn prepare(manifest: &Manifest, manifest_hash: &str) -> Result<()> {
     manifest.validate(now()?)?;
@@ -859,6 +872,31 @@ mod safety_tests {
         let mut wrong = shown.clone();
         wrong["treasury"]["id"] = json!("wrong");
         assert!(observe(&wrong, &m, 0).is_err());
+    }
+    #[test]
+    fn only_proven_expired_operations_release_source_exposure() {
+        // Confirmed history remains spent; prepared/unknown broadcasts remain
+        // liabilities. Unknown future states must also fail conservatively.
+        for phase in [
+            "PREPARED",
+            "BROADCAST_REQUESTED",
+            "BROADCAST",
+            "UNKNOWN",
+            "CONFIRMED",
+            "unrecognized",
+        ] {
+            assert_eq!(operation_exposure(phase, 152316, 15000).unwrap(), 167316);
+            assert!(operation_exposure(phase, u64::MAX, 1).is_err());
+        }
+        assert_eq!(operation_exposure("EXPIRED", 152316, 15000).unwrap(), 0);
+        // The live scenario: four settled deposits, one pending refill and
+        // one archived unspent transaction must fit the original cap including
+        // a potential next job, without raising that cap.
+        let settled = 670210u64;
+        let pending = operation_exposure("PREPARED", 152000, 15000).unwrap();
+        let archived = operation_exposure("EXPIRED", 152316, 15000).unwrap();
+        assert!(settled + pending + archived + 200000 <= 1050000);
+        assert!(settled + pending + archived + 400000 > 1050000);
     }
     #[tokio::test]
     async fn real_mcp_paid_handshake_stays_single_after_driver_crash() {
