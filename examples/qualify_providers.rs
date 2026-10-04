@@ -1,6 +1,9 @@
 //! Opt-in, conservative funded MCP driver. Never starts funding or retries a call.
 #[path = "qualification/ledger.rs"]
 mod ledger;
+#[cfg(test)]
+#[path = "qualification/manifest_tests.rs"]
+mod manifest_tests;
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};

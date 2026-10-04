@@ -1,0 +1,296 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "botsmith",
+    "version": "1.0.0",
+    "description": "Pay-per-call HTTP APIs for agents. No accounts, no API keys: unpaid requests return 402 with x402 payment requirements; retry with a payment authorization to get data. Free machine-readable catalog at /catalog."
+  },
+  "servers": [
+    {
+      "url": "https://x402.botsmith.dev"
+    }
+  ],
+  "paths": {
+    "/x/search": {
+      "get": {
+        "operationId": "search",
+        "summary": "Search X (Twitter) posts with full advanced-search syntax (from:, since:, until:, exact phrases, boolean operators). Returns up to 20 posts per call as clean JSON with metrics and entities, plus a cursor for the next page. No X account or API key needed.",
+        "tags": [
+          "Social Signal"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "tweets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "ISO 8601"
+                          },
+                          "lang": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "author": {
+                            "type": "object",
+                            "properties": {
+                              "handle": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "name": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "handle",
+                              "name",
+                              "id"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "metrics": {
+                            "type": "object",
+                            "properties": {
+                              "likes": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "retweets": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "replies": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "quotes": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "views": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "likes",
+                              "retweets",
+                              "replies",
+                              "quotes",
+                              "views"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "hashtags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "links": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Expanded outbound URLs"
+                          },
+                          "mentions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Mentioned handles"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "url",
+                          "text",
+                          "createdAt",
+                          "lang",
+                          "author",
+                          "metrics",
+                          "hashtags",
+                          "links",
+                          "mentions"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Up to 20 matching posts"
+                    },
+                    "hasNextPage": {
+                      "type": "boolean"
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tweets",
+                    "hasNextPage",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: $0.02 in USDC via x402 (network eip155:8453)"
+          }
+        },
+        "x-x402": {
+          "price": "$0.02",
+          "network": "eip155:8453",
+          "payTo": "0xcb9b3F94387389e38EF2A7b3C0B851FB8325d7e9"
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400,
+              "description": "Search query, e.g. \"x402 from:coinbase since:2026-07-01\""
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "default": "Latest",
+              "description": "Sort by recency or engagement",
+              "type": "string",
+              "enum": [
+                "Latest",
+                "Top"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Pagination cursor from a previous call",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9+/=_-]{1,400}$"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

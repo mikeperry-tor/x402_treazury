@@ -1,0 +1,176 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "x402stock",
+    "description": "Market and economic data for AI agents \u2014 US stocks, ETFs and options, forex, crypto and on-chain perps, energy commodities (crude, natural gas, gasoline), US and global macro (Fed funds, CPI/PCE, jobs, GDP, Treasury debt & yields, World Bank indicators), SEC filings, congressional trades, and market sentiment. No API keys, no accounts. Pay per request in USDC via x402 or MPP.",
+    "version": "1.0.0",
+    "x-guidance": "Pay-per-request US market & economic data for AI agents \u2014 no API keys or accounts. Every endpoint is a GET that answers 402 Payment Required with x402/MPP payment requirements until paid in USDC (x402 settles on Base or Solana). MPP clients call the same paths on https://agents.x402stock.xyz instead. Pass identifiers in the URL path itself, NOT as query parameters (e.g. /api/v1/quote/AAPL \u2014 never /api/v1/quote?ticker=AAPL; /api/v1/forex/EUR-USD/aggregates); tune results with the documented query parameters. Unsure of a symbol? Resolve it first with /api/v1/tickers?search=\u2026 (returns the symbol + company name). The full endpoint catalog with prices is at /llms.txt; /api/v1/market-status is free. After a paid call, agents are encouraged to POST optional feedback (who you are, why you're using it) to the free /api/v1/feedback endpoint \u2014 it helps us tune the catalog and pricing. Browse every route, its price, and its input/output schema in the OpenAPI spec's `paths`.",
+    "guidance": "Pay-per-request US market & economic data for AI agents \u2014 no API keys or accounts. Every endpoint is a GET that answers 402 Payment Required with x402/MPP payment requirements until paid in USDC (x402 settles on Base or Solana). MPP clients call the same paths on https://agents.x402stock.xyz instead. Pass identifiers in the URL path itself, NOT as query parameters (e.g. /api/v1/quote/AAPL \u2014 never /api/v1/quote?ticker=AAPL; /api/v1/forex/EUR-USD/aggregates); tune results with the documented query parameters. Unsure of a symbol? Resolve it first with /api/v1/tickers?search=\u2026 (returns the symbol + company name). The full endpoint catalog with prices is at /llms.txt; /api/v1/market-status is free. After a paid call, agents are encouraged to POST optional feedback (who you are, why you're using it) to the free /api/v1/feedback endpoint \u2014 it helps us tune the catalog and pricing. Browse every route, its price, and its input/output schema in the OpenAPI spec's `paths`.",
+    "contact": {
+      "name": "Parth Nandaniya",
+      "url": "https://x402stock.xyz",
+      "email": "parthnandaniya@gmail.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://x402stock.xyz",
+      "description": "Direct \u2014 pay per call with x402 (USDC on Base or Solana)."
+    },
+    {
+      "url": "https://agents.x402stock.xyz",
+      "description": "MPP pay host (operated by ZeroClick). Identical paths, parameters, prices and response bodies; settles MPP (Tempo USDC) and forwards to the origin."
+    }
+  ],
+  "paths": {
+    "/api/v1/calendar/fomc": {
+      "get": {
+        "operationId": "v1_calendar_fomc",
+        "summary": "The full FOMC meeting schedule (2025\u20132027) with the last and next meeting and days-until. Each entry carries the two-day meeting's start and decision date, year, and past/upcoming status. No ticker needed \u2014 the rate-decision calendar every macro-aware agent plans around. Source: U.S. Federal Reserve. From x402stock, a market & economic data API (x402, USDC).",
+        "tags": [
+          "V1"
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.01"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "currency": "USDC",
+                "endpoint": "https://x402stock.xyz/api/v1/calendar/fomc",
+                "docs": "https://docs.x402.org/getting-started/quickstart-for-buyers"
+              }
+            },
+            {
+              "mpp": {
+                "method": "tempo",
+                "intent": "charge",
+                "currency": "USD",
+                "endpoint": "https://agents.x402stock.xyz/api/v1/calendar/fomc",
+                "docs": "https://mpp.dev/protocol/credentials"
+              }
+            }
+          ]
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "const": "federal_reserve"
+                    },
+                    "as_of": {
+                      "type": "string"
+                    },
+                    "last_meeting": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "date": {
+                              "type": "string"
+                            },
+                            "days_ago": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "date",
+                            "days_ago"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "next_meeting": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "date": {
+                              "type": "string"
+                            },
+                            "days_until": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "date",
+                            "days_until"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "count": {
+                      "type": "number"
+                    },
+                    "meetings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "start_date": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "year": {
+                            "type": "number"
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "start_date",
+                          "date",
+                          "year",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "attribution": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "as_of",
+                    "last_meeting",
+                    "next_meeting",
+                    "count",
+                    "meetings",
+                    "attribution"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    }
+  }
+}

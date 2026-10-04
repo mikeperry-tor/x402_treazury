@@ -1,0 +1,713 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Google Trends SEO Keyword Data",
+    "version": "1.0.0",
+    "description": "![x402 Atlas](data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48ZyBzdHJva2U9IiMxRTQwQUYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI0IDdWMjhNMjQgMjhMOCA0Mk0yNCAyOEw0MCA0MiIgc3Ryb2tlLXdpZHRoPSIyLjEiLz48cGF0aCBkPSJNMjQgN0w4IDQyTTI0IDdMNDAgNDJNMTUgMjhIMzMiIHN0cm9rZS13aWR0aD0iMi43Ii8+PC9nPjxnIGZpbGw9IiMxRTQwQUYiPjxjaXJjbGUgY3g9IjgiIGN5PSI0MiIgcj0iMy4yIi8+PGNpcmNsZSBjeD0iNDAiIGN5PSI0MiIgcj0iMy4yIi8+PGNpcmNsZSBjeD0iMTUiIGN5PSIyOCIgcj0iMy4yIi8+PGNpcmNsZSBjeD0iMzMiIGN5PSIyOCIgcj0iMy4yIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyOCIgcj0iMi45Ii8+PC9nPjxjaXJjbGUgY3g9IjI0IiBjeT0iNyIgcj0iNC4yIiBmaWxsPSIjMTRCOEE2Ii8+PC9zdmc+)\n\n**Google Trends SEO Keyword Data** is an independently documented x402 Atlas bridge at https://google-trends.use.x402atlas.com.\nThis document describes only this bridge; it does not aggregate routes, schemas,\nor content from any other bridge.\n\n## How payment works\n\nPaid operations use the [x402 payment protocol](https://x402.org) and settle in\nUSDC. Atlas supports deployments on Base, Polygon, and Arbitrum, plus configured\nSolana networks. This bridge currently advertises Arbitrum One (`eip155:42161`), Base (`eip155:8453`), Polygon (`eip155:137`), Solana mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`).\n\n1. Send the HTTP request without a payment signature.\n2. Read the `402 Payment Required` response. Its `accepts` entries are the\n   authoritative network, asset, amount, and recipient options for that call.\n3. Select an option, sign it with an x402-compatible wallet or SDK, and repeat\n   the request with the `PAYMENT-SIGNATURE` header. The successful response is\n   returned after verification and settlement.\n\nTypeScript clients can automate the challenge, signing, and retry flow with\n[`x402-fetch`](https://www.npmjs.com/package/x402-fetch) or\n[`x402-axios`](https://www.npmjs.com/package/x402-axios). Fund a dedicated\nwallet only with the working USDC balance it needs and keep that key separate\nfrom treasury accounts.\n\n## Pricing\n\nAtlas route prices start at $0.005 per successful call. This bridge's fallback\nprice is $0.005; operations below state their exact configured price in\n`x-x402` and `x-payment-info`. The live `402` challenge remains authoritative.\n\n## Worked payment example\n\nRequest one documented operation without a signature to inspect its live terms:\n\n```bash\ncurl -i 'https://google-trends.use.x402atlas.com/interest-by-region?country=us&keyword=bitcoin'\n# HTTP/1.1 402 Payment Required\n# Read accepts[].network, asset, amount, and payTo from this response.\n```\n\nSign one accepted option and repeat the identical request with the\n`PAYMENT-SIGNATURE` header. Do not invent or cache payment terms; read them from\nthe current challenge.\n\n## Use this API\n\n- Interactive reference: https://google-trends.use.x402atlas.com/docs\n- OpenAPI 3.1 specification: https://google-trends.use.x402atlas.com/openapi.json\n- Agent-readable route corpus: https://google-trends.use.x402atlas.com/llms.txt\n- Endpoint index: https://google-trends.use.x402atlas.com/index.json\n\nUse the operation schemas and examples below to construct requests. Copy the\nserver URL, path, method, parameters, and request body from the operation you\nwant to call. Path and query examples are concrete and can be used directly.\n\n## Atlas response metadata\n\nSuccessful JSON responses include an additive top-level `_atlas` block, kept\nseparate from the bridge's data fields. `_atlas.docs` links this bridge's\n`/llms.txt` corpus. `_atlas.related` suggests adjacent APIs, each with a callable\n`url`, its own `docs` link, and a short `summary`. Suppress this block by sending\n`X-Atlas-Meta: none` or by adding `?_atlas=0` to the request.\n\n## Errors and compatibility\n\nValidation failures use HTTP `400`. Paid operations may return `402` before\ndispatch. Upstream and internal failures use the documented `5xx` responses.\nClients should rely on documented fields and tolerate additive response fields,\nincluding `_atlas` unless they explicitly opt out.\n\n## Protocol reference\n\n- x402 protocol and SDKs: https://x402.org",
+    "x-guidance": "Use the operation schemas and examples to construct requests. Paid operations return an HTTP 402 challenge with the authoritative payment terms."
+  },
+  "servers": [
+    {
+      "url": "https://google-trends.use.x402atlas.com"
+    }
+  ],
+  "paths": {
+    "/interest-by-region": {
+      "get": {
+        "description": "Google Trends interest broken down by geographic region for a concise seed `keyword` within a `country` (`keyword` is required; `country` \u2014 alias `geo` \u2014 is an ISO-3166 alpha-2 code like `us`, case-insensitive, defaults to `US`). This analyzes aggregate Google Trends data: it does not search the web, answer a question, or follow an instruction. Use an established term with meaningful search interest; highly specific or low-volume phrases can return an empty `regions` list. Returns `{ keyword, country, queried_at, regions }`, where `regions` contains `{ region, value }` and `value` is the 0\u2013100 relative search popularity across that country's subregions. Use it for geo-targeting, local SEO, market research, and regional demand mapping; for a global timeline use `/trend`, and for idea generation use `/related-queries` or `/related-topics`.\n\n**Price:** 0.03 per call.",
+        "operationId": "google-trends_GET_interest_by_region",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; also accepted as geo; defaults to US",
+            "schema": {
+              "default": "US",
+              "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; also accepted as geo; defaults to US",
+              "maxLength": 8,
+              "type": "string"
+            },
+            "example": "us"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": true,
+            "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+            "schema": {
+              "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+              "maxLength": 100,
+              "type": "string"
+            },
+            "example": "bitcoin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "country": {
+                      "description": "Echoed country code, lower-cased",
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "regions": {
+                      "description": "Interest broken down by subregion within the country",
+                      "items": {
+                        "properties": {
+                          "region": {
+                            "description": "Subregion name",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative search-popularity index (0-100)",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "region",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "country",
+                    "queried_at",
+                    "regions"
+                  ],
+                  "type": "object"
+                },
+                "example": {
+                  "country": "us",
+                  "keyword": "bitcoin",
+                  "queried_at": "2026-06-05T12:00:00Z",
+                  "regions": [
+                    {
+                      "region": "California",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error \u2014 the request was rejected before the handler ran.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required. The response carries an x402 payment challenge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402Payment": []
+          }
+        ],
+        "summary": "Google Trends interest by region for a keyword \u2014 search popularity by geography for geo-targeting, local SEO and market research.",
+        "tags": [
+          "Google Trends SEO Keyword Data"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.03",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-x402": {
+          "discoverable": true,
+          "enabled": true,
+          "paid": true,
+          "price": "0.03",
+          "service_name": "Google Trends SEO Keyword Data"
+        }
+      }
+    },
+    "/related-queries": {
+      "get": {
+        "description": "Google Trends related search *queries* for a concise seed `keyword` within a `country` (`keyword` is required; `country` \u2014 alias `geo` \u2014 is an ISO-3166 alpha-2 code like `us`, case-insensitive, defaults to `US`). This analyzes aggregate Google Trends data: it does not search the web, answer a question, or follow an instruction. Use an established term with meaningful search interest, such as `bitcoin` or `electric vehicles`; highly specific or low-volume phrases can return empty `top` and `rising` lists. Returns `{ keyword, country, queried_at, top, rising }`, where both lists contain `{ term, value }` \u2014 `value` is a 0\u2013100 popularity score for `top` and a growth index for `rising`. Use the results for keyword research, query expansion, content ideas, and demand discovery; for higher-level entities/subjects use `/related-topics`, and for a global timeline use `/trend`.\n\n**Price:** 0.03 per call.",
+        "operationId": "google-trends_GET_related_queries",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; also accepted as geo; defaults to US",
+            "schema": {
+              "default": "US",
+              "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; also accepted as geo; defaults to US",
+              "maxLength": 8,
+              "type": "string"
+            },
+            "example": "us"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": true,
+            "description": "Concise Google Trends seed term with meaningful search interest (for example bitcoin or electric vehicles); not a question, instruction, or web-search request",
+            "schema": {
+              "description": "Concise Google Trends seed term with meaningful search interest (for example bitcoin or electric vehicles); not a question, instruction, or web-search request",
+              "maxLength": 100,
+              "type": "string"
+            },
+            "example": "solana"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "country": {
+                      "description": "Echoed country code, lower-cased",
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "rising": {
+                      "description": "Related queries with the fastest growth",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related search query",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "top": {
+                      "description": "Top related queries by popularity (0-100)",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related search query",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "country",
+                    "queried_at",
+                    "top",
+                    "rising"
+                  ],
+                  "type": "object"
+                },
+                "example": {
+                  "country": "us",
+                  "keyword": "solana",
+                  "queried_at": "2026-06-05T12:00:00Z",
+                  "rising": [
+                    {
+                      "term": "solana etf",
+                      "value": 250
+                    }
+                  ],
+                  "top": [
+                    {
+                      "term": "solana price",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error \u2014 the request was rejected before the handler ran.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required. The response carries an x402 payment challenge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402Payment": []
+          }
+        ],
+        "summary": "Google Trends related search queries for a keyword by country \u2014 top & rising terms for SEO keyword research, query expansion and content ideas.",
+        "tags": [
+          "Google Trends SEO Keyword Data"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.03",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-x402": {
+          "discoverable": true,
+          "enabled": true,
+          "paid": true,
+          "price": "0.03",
+          "service_name": "Google Trends SEO Keyword Data"
+        }
+      }
+    },
+    "/related-topics": {
+      "get": {
+        "description": "Google Trends related *topics* for a concise seed `keyword` within a `country` (`keyword` is required; `country` \u2014 alias `geo` \u2014 is an ISO-3166 alpha-2 code like `us`, case-insensitive, defaults to `US`). This analyzes aggregate Google Trends data: it does not search the web, answer a question, or follow an instruction. Use an established term with meaningful search interest; highly specific or low-volume phrases can return empty `top` and `rising` lists. Returns `{ keyword, country, queried_at, top, rising }`, where both lists contain `{ term, value }` \u2014 `value` is a 0\u2013100 popularity score for `top` and a growth index for `rising`. Use the results for content ideas, topic discovery, SEO research, and market research. Topics are higher-level subjects/entities rather than literal search strings; for exact related searches use `/related-queries`, and for a global timeline use `/trend`.\n\n**Price:** 0.03 per call.",
+        "operationId": "google-trends_GET_related_topics",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; defaults to US",
+            "schema": {
+              "default": "US",
+              "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; defaults to US",
+              "maxLength": 8,
+              "type": "string"
+            },
+            "example": "us"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": true,
+            "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+            "schema": {
+              "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+              "maxLength": 100,
+              "type": "string"
+            },
+            "example": "bitcoin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "country": {
+                      "description": "Echoed country code, lower-cased",
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "rising": {
+                      "description": "Related topics with the fastest growth",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related topic label",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "top": {
+                      "description": "Top related topics by popularity (0-100)",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related topic label",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "country",
+                    "queried_at",
+                    "top",
+                    "rising"
+                  ],
+                  "type": "object"
+                },
+                "example": {
+                  "country": "us",
+                  "keyword": "bitcoin",
+                  "queried_at": "2026-06-05T12:00:00Z",
+                  "rising": [
+                    {
+                      "term": "Spot ETF",
+                      "value": 180
+                    }
+                  ],
+                  "top": [
+                    {
+                      "term": "Cryptocurrency",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error \u2014 the request was rejected before the handler ran.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required. The response carries an x402 payment challenge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402Payment": []
+          }
+        ],
+        "summary": "Google Trends related topics for a keyword by country \u2014 top & rising topics for SEO content research, trend discovery and market analysis.",
+        "tags": [
+          "Google Trends SEO Keyword Data"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.03",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-x402": {
+          "discoverable": true,
+          "enabled": true,
+          "paid": true,
+          "price": "0.03",
+          "service_name": "Google Trends SEO Keyword Data"
+        }
+      }
+    },
+    "/trend": {
+      "get": {
+        "description": "Worldwide Google Trends interest-over-time for one concise seed `keyword` (required) \u2014 this route takes no `country` and is always global. This analyzes aggregate Google Trends data: it does not search the web, answer a question, or follow an instruction. Use an established term with meaningful search interest; highly specific or low-volume phrases can return an empty `series`. Returns `{ keyword, queried_at, series }`, where `series` is a monthly timeline of `{ date, value }` (ISO `YYYY-MM-DD` dates; `value` is the 0\u2013100 relative search-popularity index). Use it for keyword research, demand-trend discovery, content planning, and seasonality analysis; for geographic research use `/interest-by-region`, and for idea generation use `/related-queries` or `/related-topics`.\n\n**Price:** 0.05 per call.",
+        "operationId": "google-trends_GET_trend",
+        "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": true,
+            "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+            "schema": {
+              "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+              "maxLength": 100,
+              "type": "string"
+            },
+            "example": "bitcoin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "series": {
+                      "description": "Monthly interest-over-time points, worldwide",
+                      "items": {
+                        "properties": {
+                          "date": {
+                            "description": "ISO date (YYYY-MM-DD)",
+                            "format": "date",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative search-popularity index",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "queried_at",
+                    "series"
+                  ],
+                  "type": "object"
+                },
+                "example": {
+                  "keyword": "bitcoin",
+                  "queried_at": "2026-06-05T12:00:00Z",
+                  "series": [
+                    {
+                      "date": "2026-05-01",
+                      "value": 78
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error \u2014 the request was rejected before the handler ran.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required. The response carries an x402 payment challenge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402Payment": []
+          }
+        ],
+        "summary": "Google Trends interest over time for a keyword \u2014 worldwide search popularity as a monthly series for keyword research, SEO & demand trend analysis.",
+        "tags": [
+          "Google Trends SEO Keyword Data"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.05",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-x402": {
+          "discoverable": true,
+          "enabled": true,
+          "paid": true,
+          "price": "0.05",
+          "service_name": "Google Trends SEO Keyword Data"
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "PaymentRequired": {
+        "description": "x402 payment-required envelope. The exact shape comes from the x402 SDK and includes per-network accepted payment options. See https://x402.org for the canonical schema.",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "x402Payment": {
+        "description": "Pay the route via x402 (https://x402.org). The 402 response carries the payment challenge; resubmit with a PAYMENT-SIGNATURE header.",
+        "scheme": "x402",
+        "type": "http"
+      }
+    }
+  }
+}
