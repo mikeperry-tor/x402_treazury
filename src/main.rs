@@ -21,6 +21,17 @@ struct Args {
     /// Internal qualification restriction; never enables calls or funding.
     #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
     qualification_no_new_funding: bool,
+    /// Internal keyless serving mode for supervised unsigned qualification.
+    #[arg(
+        long,
+        hide = true,
+        requires = "qualification_parent_stdin",
+        conflicts_with = "env_file"
+    )]
+    qualification_unsigned: bool,
+    /// Internal lifetime channel: EOF on piped stdin initiates deliberate shutdown.
+    #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
+    qualification_parent_stdin: bool,
     #[arg(long, conflicts_with = "meta_config")]
     network_config: Option<std::path::PathBuf>,
     #[arg(long, requires = "meta_config")]
@@ -230,7 +241,9 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "list_tools",
                         "list_tags",
                         "env_file",
-                        "qualification_no_new_funding"
+                        "qualification_no_new_funding",
+                        "qualification_unsigned",
+                        "qualification_parent_stdin"
                     ]
                     .contains(&id.as_str()),
                     "--meta-config cannot be combined with --{}; configure it in the TOML file",
@@ -280,10 +293,18 @@ async fn run_deployment(
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
 ) -> Result<()> {
-    let deployment = if args.list_tags || args.list_tools || args.check {
-        x402_treazury::deployment::Deployment::load(path).await?
-    } else {
-        x402_treazury::deployment::Deployment::load_for_serving(path).await?
+    let mut parent =
+        x402_treazury::supervision::Parent::from_stdin(args.qualification_parent_stdin)?;
+    let loading = async {
+        if args.list_tags || args.list_tools || args.check {
+            x402_treazury::deployment::Deployment::load(path).await
+        } else {
+            x402_treazury::deployment::Deployment::load_for_serving(path).await
+        }
+    };
+    let deployment = tokio::select! {
+        result = loading => result?,
+        closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog startup; no server started"); }
     };
     if args.list_tags {
         println!(
@@ -328,7 +349,17 @@ async fn run_deployment(
     } else {
         Default::default()
     };
-    let running = deployment.bind_restricted(env, restriction).await?;
+    let binding = async {
+        if args.qualification_unsigned {
+            deployment.bind_unsigned(env).await
+        } else {
+            deployment.bind_restricted(env, restriction).await
+        }
+    };
+    let running = tokio::select! {
+        result = binding => result?,
+        closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during binding; startup cancelled"); }
+    };
     for (server, address) in running.addresses() {
         tracing::warn!(server, %address, "MCP listening at /mcp");
     }
@@ -337,6 +368,12 @@ async fn run_deployment(
     tokio::pin!(serving);
     let result = tokio::select! {
         result = &mut serving => result,
+        closed = parent.closed() => {
+            shutdown.cancel();
+            let result = serving.await;
+            closed?;
+            result
+        }
         signal = shutdown_signal() => {
             shutdown.cancel();
             let result = serving.await;

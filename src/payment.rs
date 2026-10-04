@@ -65,6 +65,7 @@ impl Payer {
 }
 #[derive(Clone)]
 pub struct PaidClient {
+    unsigned_only: bool,
     transport: crate::network::HttpPolicy,
     public_only: bool,
     timeout: std::time::Duration,
@@ -76,6 +77,7 @@ pub struct PaidClient {
 impl PaidClient {
     pub fn new(payer: Payer) -> Self {
         Self {
+            unsigned_only: false,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -87,6 +89,7 @@ impl PaidClient {
     }
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
+            unsigned_only: false,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -94,6 +97,19 @@ impl PaidClient {
             timeout: std::time::Duration::from_secs(60),
             payer: None,
             managed: Some(pool),
+        }
+    }
+    /// Keyless qualification client. Challenges are never parsed for signing or retried.
+    pub fn unsigned() -> Self {
+        Self {
+            unsigned_only: true,
+            transport: Default::default(),
+            public_only: false,
+            max_response_bytes: crate::limits::RESPONSE_BYTES,
+            max_help_bytes: crate::limits::HELP_BYTES,
+            timeout: std::time::Duration::from_secs(60),
+            payer: None,
+            managed: None,
         }
     }
     pub fn with_transport(mut self, transport: crate::network::HttpPolicy) -> Self {
@@ -165,14 +181,19 @@ impl PaidClient {
                 Some(pool) => Some(pool.candidate().await?),
                 None => None,
             };
-            let address = candidate
-                .as_ref()
-                .map(|c| c.address.as_str())
-                .or_else(|| payer.as_ref().map(|p| p.address.as_str()))
-                .context("network_identity_missing: payer")?;
+            let identity = if self.unsigned_only {
+                crate::network::IsolationId::discovery(request.url().as_str())?
+            } else {
+                let address = candidate
+                    .as_ref()
+                    .map(|c| c.address.as_str())
+                    .or_else(|| payer.as_ref().map(|p| p.address.as_str()))
+                    .context("network_identity_missing: payer")?;
+                crate::network::IsolationId::evm(address)?
+            };
             let factory = crate::network::global();
             let http = factory.http_policy(
-                &crate::network::IsolationId::evm(address)?,
+                &identity,
                 request.url().as_str(),
                 self.timeout,
                 self.public_only,
@@ -190,6 +211,15 @@ impl PaidClient {
                 .map_err(reqwest::Error::without_url)?;
             crate::network::log_http(&response, "payment_challenge");
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+                if self.unsigned_only {
+                    tracing::warn!(
+                        code = "qualification_payment_denied",
+                        "unsigned-only qualification refused HTTP 402; no signing key loaded and no paid retry sent"
+                    );
+                    bail!(
+                        "qualification_payment_denied: unsigned-only mode; HTTP 402 received; no payment signed or retried"
+                    );
+                }
                 response = self.bound_challenge(response).await?;
                 if let Some(pool) = &self.managed {
                     match pool

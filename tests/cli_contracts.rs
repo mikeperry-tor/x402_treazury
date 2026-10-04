@@ -364,3 +364,39 @@ async fn qualification_restriction_requires_serving_meta_config() {
         assert!(error.contains("cannot be used with"), "{error}");
     }
 }
+
+#[tokio::test]
+async fn unsigned_qualification_cannot_use_stdio_or_dotenv_or_inspection_modes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let unsigned = "--qualification-unsigned";
+    assert!(bad(run(tmp.path(), &[unsigned], &[]).await).contains("--qualification-parent-stdin"));
+    for additional in ["--list-tools", "--show-config", "--check"] {
+        let error = bad(run(
+            tmp.path(),
+            &[
+                "--meta-config",
+                "missing.toml",
+                unsigned,
+                "--qualification-parent-stdin",
+                additional,
+            ],
+            &[],
+        )
+        .await);
+        assert!(error.contains("cannot be used with"), "{error}");
+    }
+    let error = bad(run(
+        tmp.path(),
+        &[
+            "--meta-config",
+            "missing.toml",
+            unsigned,
+            "--qualification-parent-stdin",
+            "--env-file",
+            "must-not-be-read",
+        ],
+        &[],
+    )
+    .await);
+    assert!(error.contains("cannot be used with"), "{error}");
+}

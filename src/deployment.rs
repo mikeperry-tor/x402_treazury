@@ -600,9 +600,28 @@ impl Deployment {
 
     /// Qualification restrictions only remove authority; they never authorize execution.
     pub async fn bind_restricted(
+        self,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+    ) -> Result<RunningDeployment> {
+        self.bind_mode(env, restriction, false).await
+    }
+
+    /// Keyless qualification only; no treasury/store/signers or agent mutations are opened.
+    pub async fn bind_unsigned(self, env: &BTreeMap<String, String>) -> Result<RunningDeployment> {
+        self.bind_mode(
+            env,
+            crate::rotation::restriction::FundingRestriction::DenyNewFunding,
+            true,
+        )
+        .await
+    }
+
+    async fn bind_mode(
         mut self,
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
+        unsigned: bool,
     ) -> Result<RunningDeployment> {
         let secret = |key: &str| required_secret(env, key);
         // Validate every credential before opening any port.
@@ -610,7 +629,48 @@ impl Deployment {
         for (name, cfg) in &self.config.servers {
             tokens.insert(name.clone(), secret(&cfg.bearer_token_env)?);
         }
-        let initialized = self.initialize_wallets(env, restriction).await?;
+        let initialized = if unsigned {
+            ensure!(
+                self.config.source_management.is_none()
+                    && self
+                        .config
+                        .servers
+                        .values()
+                        .all(|s| s.source_management.is_none()),
+                "unsigned qualification forbids agent source management"
+            );
+            ensure!(
+                !self
+                    .wallet_resolution
+                    .wallets
+                    .values()
+                    .any(WalletConfig::managed),
+                "unsigned qualification forbids managed wallet profiles"
+            );
+            ensure!(
+                !self.config.funding.as_ref().is_some_and(|f| f.auto_fund),
+                "unsigned qualification forbids auto_fund"
+            );
+            tracing::warn!(
+                "unsigned-only qualification: no signing keys or treasury state opened; all payment challenges will be refused"
+            );
+            InitializedWallets {
+                wallets: self
+                    .wallet_resolution
+                    .wallets
+                    .keys()
+                    .map(|name| (name.clone(), PaidClient::unsigned()))
+                    .collect(),
+                #[cfg(feature = "zcash")]
+                treasury: None,
+                #[cfg(feature = "zcash")]
+                funding_runtime: None,
+                #[cfg(feature = "zcash")]
+                managed_pools: Vec::new(),
+            }
+        } else {
+            self.initialize_wallets(env, restriction).await?
+        };
         let wallets = initialized.wallets;
         #[cfg(feature = "zcash")]
         let treasury = initialized.treasury;

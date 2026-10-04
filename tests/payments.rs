@@ -640,3 +640,26 @@ async fn agentutility_captured_v2_challenge_signs_base_with_static_payer() {
     drop(signed);
     task.abort();
 }
+
+#[tokio::test]
+async fn unsigned_client_never_signs_valid_v1_v2_or_zero_amount_challenges() {
+    let v1 = json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","maxAmountRequired":"1","resource":"http://localhost/pay","description":"fixture","mimeType":"text/plain","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"asset":USDC,"extra":{"name":"USD Coin","version":"2"}}]});
+    for c in [
+        v1,
+        challenge("exact", "0"),
+        challenge("exact", "1"),
+        challenge("upto", "1"),
+    ] {
+        let gate = gate(c);
+        let (url, task) = start(gate.clone()).await;
+        let client = PaidClient::unsigned().with_download_limits(1, 1);
+        let result = client.clone().execute(route(url)).await.unwrap_err();
+        assert!(
+            result.to_string().contains("qualification_payment_denied"),
+            "{result}"
+        );
+        assert_eq!(gate.count.load(Ordering::SeqCst), 1);
+        assert!(gate.signed.lock().unwrap().is_empty());
+        task.abort();
+    }
+}
