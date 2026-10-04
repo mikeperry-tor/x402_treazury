@@ -94,6 +94,9 @@ impl Process {
             output: [out, err],
         })
     }
+    pub fn exited(&mut self) -> Result<bool> {
+        Ok(self.child.try_wait()?.is_some())
+    }
     pub async fn wait(
         mut self,
         timeout: Duration,

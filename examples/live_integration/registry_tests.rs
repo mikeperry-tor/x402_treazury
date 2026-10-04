@@ -420,3 +420,25 @@ sources=["api"]
     );
     assert!(!dir.join("NEVER_READ_KEY").exists());
 }
+
+#[test]
+fn execution_deadline_and_authority_do_not_reset_on_resume() {
+    let f = Fixture::new();
+    let mut r = f.open();
+    f.prepare(&mut r);
+    let end = r.begin_execution(&f.manifest.run_id, 10).unwrap();
+    assert_eq!(end, 910);
+    assert_eq!(r.begin_execution(&f.manifest.run_id, 20).unwrap(), end);
+    assert!(r.begin_execution(&f.manifest.run_id, 19).is_err());
+    assert!(r.begin_execution(&f.manifest.run_id, end).is_err());
+    drop(r);
+    let mut replacement = f.auth.clone();
+    replacement.id = "new_authority".into();
+    let mut r = Registry::authorize(&f.state, &replacement, 30).unwrap();
+    assert!(r.begin_execution(&f.manifest.run_id, 30).is_err());
+    assert!(
+        r.reserve_batch(&f.manifest.run_id, "revoked", &["call".into()], 30)
+            .is_err()
+    );
+    assert_eq!(reserved(&r), 0);
+}

@@ -51,6 +51,15 @@ impl Registry {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let authority: String = tx.query_row(
+            "SELECT id FROM authorizations ORDER BY seq DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            authority == m.registry_authorization,
+            "run authority has changed; no new dispatch allowed"
+        );
         let ceiling: i64 = tx.query_row(
             "SELECT api FROM authorizations ORDER BY seq DESC LIMIT 1",
             [],
@@ -153,6 +162,45 @@ impl Registry {
         ensure!(tx.execute("UPDATE cases SET execution=?3,result_hash=?4,settlement='PENDING' WHERE run=?1 AND id=?2 AND execution='DISPATCHING'",params![run,id,execution,body.map(files::hash)])?==1,"only dispatched cases can finish; result is immutable");
         // Settlement is deliberately unknown. A body/error cannot prove debit or unused authorization.
         tx.commit()?;
+        Ok(())
+    }
+}
+
+impl Registry {
+    pub fn uncertain_unsigned(&mut self, run: &str, id: &str) -> Result<()> {
+        let manifest = self.manifest(run)?;
+        ensure!(
+            manifest
+                .cases
+                .iter()
+                .find(|c| c.id == id)
+                .is_some_and(|c| c.unsigned),
+            "unsigned result requires an unsigned case"
+        );
+        self.finish(run, id, Outcome::TransportUncertain, None)?;
+        ensure!(self.db.execute("UPDATE cases SET settlement='NOT_SIGNED' WHERE run=?1 AND id=?2 AND execution='TRANSPORT_UNCERTAIN'", params![run,id])? == 1, "unsigned uncertainty state changed");
+        Ok(())
+    }
+    pub fn finish_unsigned(
+        &mut self,
+        run: &str,
+        id: &str,
+        body: &[u8],
+        passed: bool,
+    ) -> Result<()> {
+        let manifest = self.manifest(run)?;
+        ensure!(
+            manifest
+                .cases
+                .iter()
+                .find(|c| c.id == id)
+                .is_some_and(|c| c.unsigned),
+            "unsigned result requires an unsigned case"
+        );
+        self.finish(run, id, Outcome::ResponseSaved, Some(body))?;
+        // The keyless executable contract establishes NOT_SIGNED, not the seller body.
+        ensure!(self.db.execute("UPDATE cases SET execution='COMPLETED',semantic=?3,settlement='NOT_SIGNED' WHERE run=?1 AND id=?2 AND execution='RESPONSE_SAVED'",
+            params![run,id,if passed { "PASSED" } else { "FAILED" }])? == 1, "unsigned completion state changed");
         Ok(())
     }
 }

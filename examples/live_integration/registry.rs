@@ -340,6 +340,78 @@ impl Registry {
         tx.commit()?;
         Ok(diff)
     }
+    pub fn begin_execution(&mut self, run: &str, now: i64) -> Result<i64> {
+        let m = self.manifest(run)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let auth: String = tx.query_row(
+            "SELECT id FROM authorizations ORDER BY seq DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            auth == m.registry_authorization,
+            "run authority changed; execution refused"
+        );
+        let latest: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(at),0) FROM events WHERE run=?1",
+            [run],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            now >= latest,
+            "wall clock moved backwards; execution refused"
+        );
+        let start: Option<i64> = tx.query_row(
+            "SELECT MIN(at) FROM events WHERE run=?1 AND kind='execution_started'",
+            [run],
+            |r| r.get(0),
+        )?;
+        let start = start.unwrap_or(now);
+        let end = start
+            .checked_add(i64::try_from(m.limits.run_seconds)?)
+            .context("execution deadline overflow")?;
+        ensure!(now < end, "run execution deadline expired");
+        tx.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES(?1,?2,'{}',?3)",
+            params![
+                run,
+                if start == now {
+                    "execution_started"
+                } else {
+                    "execution_resumed"
+                },
+                now
+            ],
+        )?;
+        tx.commit()?;
+        Ok(end)
+    }
+    pub fn pins(&self, run: &str) -> Result<Pins> {
+        let (raw, digest): (String, String) = self.db.query_row(
+            "SELECT payload,digest FROM pins WHERE run=?1 ORDER BY revision DESC LIMIT 1",
+            [run],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        ensure!(files::hash(&raw) == digest, "registry pin digest mismatch");
+        Ok(serde_json::from_str(&raw)?)
+    }
+    pub fn event(&self, run: &str, kind: &str, detail: &Value, now: i64) -> Result<()> {
+        ensure!(now >= 0 && identifier(kind), "invalid registry event");
+        self.db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES(?1,?2,?3,?4)",
+            params![run, kind, bounded_json(detail)?, now],
+        )?;
+        Ok(())
+    }
+    pub fn execution_state(&self, run: &str, id: &str) -> Result<String> {
+        Ok(self.db.query_row(
+            "SELECT execution FROM cases WHERE run=?1 AND id=?2",
+            params![run, id],
+            |r| r.get(0),
+        )?)
+    }
     pub fn manifest(&self, run: &str) -> Result<Manifest> {
         Ok(serde_json::from_str(&self.db.query_row::<String, _, _>(
             "SELECT manifest FROM runs WHERE id=?1",
@@ -387,7 +459,27 @@ impl Registry {
         if let Some(id) = run {
             let _ = self.manifest(id)?;
         }
-        let report = json!({"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":false,"funding_permits_available":false,"baseline":"immutable private evidence; live reconciliation required","next_step":"catalog/schema qualification and supervised execution are not implemented"});
+        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished') ORDER BY seq LIMIT 50001")?;
+        let runtime_events = events
+            .query_map([run], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ensure!(
+            runtime_events.len() <= 50000,
+            "report exceeds 50000 runtime events; select a single run"
+        );
+        let runtime_events = runtime_events.into_iter().map(|(run,kind,detail,at)| Ok(json!({"run":run,"kind":kind,"detail":serde_json::from_str::<Value>(&detail)?,"at":at}))).collect::<Result<Vec<_>>>()?;
+        let execution_available = match run {
+            Some(id) => self.pins(id)?.catalogs.is_some(),
+            None => false,
+        };
+        let report = json!({"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"qualification_scope":if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":false,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare-catalogs is required before unsigned execution" }});
         bounded_json(&report)?;
         Ok(report)
     }

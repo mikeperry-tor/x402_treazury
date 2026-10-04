@@ -1,4 +1,6 @@
 //! Explicit opt-in qualification tooling. Planning never opens wallets or networks.
+#[path = "live_integration/execution.rs"]
+mod execution;
 #[path = "live_integration/files.rs"]
 mod files;
 #[path = "live_integration/manifest.rs"]
@@ -68,6 +70,13 @@ enum Command {
     },
     /// Report case eligibility only; never dispatches reserved/interrupted work.
     Resume {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        run: String,
+    },
+    /// Supervise prepared, unsigned MCP cases; reserved cases are never replayed.
+    Run {
         #[arg(long)]
         state_dir: PathBuf,
         #[arg(long)]
@@ -180,6 +189,9 @@ async fn execute(command: Command) -> Result<u8> {
                 "{}",
                 serde_json::to_string_pretty(&registry.report(run.as_deref(), now)?)?
             );
+        }
+        Command::Run { state_dir, run } => {
+            return execution::run(&state_dir, &run).await;
         }
         Command::Resume { state_dir, run } => {
             let registry = registry::Registry::open(&state_dir, true)?;
