@@ -128,6 +128,15 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
     let snapshot = counts.lock().unwrap().clone();
     assert_eq!(snapshot.len(), 5);
     assert!(snapshot.values().all(|n| *n == 1));
+    // An alias with different protocol permissions gets its own one-shot entries.
+    cfg.probe_ttl_seconds = 3600.0;
+    for (http1, tls12) in [(true, false), (false, true)] {
+        cfg.allow_http1 = http1;
+        cfg.allow_tls12 = tls12;
+        assert_eq!(cache.discover(&cfg, &root, &tools, &base).await.unwrap(), a);
+        assert_eq!(cache.discover(&cfg, &root, &tools, &base).await.unwrap(), a);
+    }
+    assert!(counts.lock().unwrap().values().all(|n| *n == 3));
     task.abort();
 }
 

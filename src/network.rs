@@ -152,8 +152,28 @@ impl IsolationId {
         alloy_primitives::hex::encode(hash.finalize())
     }
 }
+/// Provider HTTPS defaults; infrastructure clients retain their existing policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HttpPolicy {
+    pub allow_http1: bool,
+    pub allow_tls12: bool,
+}
+impl HttpPolicy {
+    const COMPATIBLE: Self = Self {
+        allow_http1: true,
+        allow_tls12: true,
+    };
+}
+
+/// Only protocol metadata: never log URLs, credentials or payment headers.
+pub fn log_http(response: &reqwest::Response, stage: &str) {
+    tracing::info!(target: "x402_treazury::network", stage,
+        http_version = ?response.version(), "HTTP response protocol");
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct HttpKey {
+    transport: HttpPolicy,
     public_only: bool,
     runtime: Option<tokio::runtime::Id>,
     identity: IsolationId,
@@ -226,7 +246,7 @@ impl NetworkContext {
         self
     }
     pub fn http(&self, id: &IsolationId, url: &str, timeout: Duration) -> Result<reqwest::Client> {
-        self.http_policy(id, url, timeout, false)
+        self.http_policy(id, url, timeout, false, HttpPolicy::COMPATIBLE)
     }
     pub fn http_public(
         &self,
@@ -235,15 +255,19 @@ impl NetworkContext {
         timeout: Duration,
     ) -> Result<reqwest::Client> {
         public_url(url)?;
-        self.http_policy(id, url, timeout, true)
+        self.http_policy(id, url, timeout, true, HttpPolicy::COMPATIBLE)
     }
-    fn http_policy(
+    pub fn http_policy(
         &self,
         id: &IsolationId,
         url: &str,
         timeout: Duration,
         public_only: bool,
+        transport: HttpPolicy,
     ) -> Result<reqwest::Client> {
+        if public_only {
+            public_url(url)?;
+        }
         let timeout = self.request_timeout(timeout);
         let parsed = reqwest::Url::parse(url).context("invalid network URL")?;
         ensure!(
@@ -251,6 +275,7 @@ impl NetworkContext {
             "unsupported network URL scheme"
         );
         let key = HttpKey {
+            transport,
             public_only,
             runtime: tokio::runtime::Handle::try_current().ok().map(|h| h.id()),
             identity: id.clone(),
@@ -267,6 +292,14 @@ impl NetworkContext {
             .timeout(timeout)
             .connect_timeout(self.policy.timeout())
             .redirect(reqwest::redirect::Policy::none());
+        if parsed.scheme() == "https" {
+            if !transport.allow_http1 {
+                builder = builder.http2_prior_knowledge();
+            }
+            if !transport.allow_tls12 {
+                builder = builder.min_tls_version(reqwest::tls::Version::TLS_1_3);
+            }
+        }
         if public_only && self.policy.mode == Mode::Direct {
             let resolver = PublicResolver::default();
             #[cfg(test)]
@@ -322,6 +355,13 @@ pub(crate) fn install_test_context(context: NetworkContext) {
         NETWORK.set(Arc::new(context)).is_ok(),
         "test policy already installed"
     );
+}
+pub fn provider_discovery(
+    url: &str,
+    timeout: Duration,
+    policy: HttpPolicy,
+) -> Result<reqwest::Client> {
+    global().http_policy(&IsolationId::discovery(url)?, url, timeout, false, policy)
 }
 pub fn discovery(url: &str, timeout: Duration) -> Result<reqwest::Client> {
     global().discovery(url, timeout)
@@ -540,3 +580,7 @@ mod public_destination_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "network_http_tests.rs"]
+mod http_tests;

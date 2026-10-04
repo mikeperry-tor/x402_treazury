@@ -28,7 +28,7 @@ before listener selection and binding. A remote spec failure aborts startup.
 The first observed load failure cancels pending futures; inventory ordering is
 still deterministic. Phase timings, ready counts and ten-second waiting updates
 go to stderr. Compatible remote aliases already share downloads and parsed documents within
-a load; keys include exact URL, requested timeout, byte limit and discovery
+a load; keys include exact URL, requested timeout, byte limit, transport policy and discovery
 identity. Local files and separate loads remain independent. Background publication
 is not implemented.
 Serving also waits for configured startup pricing discovery, with rolling work

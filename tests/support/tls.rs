@@ -31,9 +31,21 @@ impl axum::serve::Listener for Listener {
     }
 }
 pub async fn serve(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    serve_with(
+        app,
+        &[&rustls::version::TLS13, &rustls::version::TLS12],
+        &[b"h2", b"http/1.1"],
+    )
+    .await
+}
+pub async fn serve_with(
+    app: axum::Router,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+    alpn: &[&[u8]],
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let provider = tokio_rustls::rustls::crypto::ring::default_provider();
     let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
-        .with_safe_default_protocol_versions()
+        .with_protocol_versions(versions)
         .unwrap()
         .with_no_client_auth()
         .with_single_cert(
@@ -44,7 +56,7 @@ pub async fn serve(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<()
                 .into(),
         )
         .unwrap();
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    config.alpn_protocols = alpn.iter().map(|v| v.to_vec()).collect();
     let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = tcp.local_addr().unwrap();
     let task = tokio::spawn(async move {

@@ -30,7 +30,7 @@ sources load before serving through a rolling queue, defaulting to 2 active load
 completion order cannot change the final sorted inventory. All declared sources
 are loaded, including those unused by listeners. Remote aliases share fetching
 and immutable parsed JSON within a load only for the same exact URL, requested
-timeout, byte limit and discovery identity. Filters, overrides, base URLs and
+timeout, byte limit, transport policy and discovery identity. Filters, overrides, base URLs and
 wallet bindings remain per alias. Local files and later loads do not reuse this
 cache. Progress/timings go to stderr. Startup pricing discovery runs after tool
 selection, uses unsigned eligible GETs and caches both success and failure for

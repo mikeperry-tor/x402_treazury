@@ -551,6 +551,7 @@ impl Deployment {
                         t.clone(),
                         wallets[&self.wallet_resolution.bindings[name][id].wallet]
                             .clone()
+                            .with_transport(source.config.transport())
                             .with_timeout(Duration::from_secs_f64(source.config.timeout))
                             .with_download_limits(
                                 source.config.max_response_bytes,

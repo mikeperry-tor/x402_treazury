@@ -353,6 +353,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
     assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 4);
     let log = String::from_utf8(output.stderr).unwrap();
     for message in [
+        "HTTP response protocol",
         "Catalog load started",
         "Catalog response headers received; reading body",
         "Catalog response body complete",
@@ -436,7 +437,12 @@ async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
 
 #[tokio::test]
 async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits() {
-    for setting in ["timeout=2", "max_spec_bytes=1"] {
+    for setting in [
+        "timeout=2",
+        "max_spec_bytes=1",
+        "allow_http1=true",
+        "allow_tls12=true",
+    ] {
         let mut fixture = Fixture::new(1, None).await;
         let dir = tempfile::tempdir().unwrap();
         let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 1);

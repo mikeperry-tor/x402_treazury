@@ -94,7 +94,7 @@ async fn run() -> Result<()> {
     validate_meta_arguments(&args, &matches)?;
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter("warn,x402_treazury::startup=info")
+        .with_env_filter("warn,x402_treazury::startup=info,x402_treazury::network=info")
         .init();
     if args.show_config {
         return show_config(&args, &matches).await;
@@ -120,13 +120,14 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if !args.list_tools && !args.list_tags && !args.check && args.route_tool.is_none() {
         x402_treazury::provider_status::warn(cfg.name.as_deref().unwrap_or("standalone"), &cfg);
     }
-    let http = x402_treazury::network::discovery(
+    let http = x402_treazury::network::provider_discovery(
         if cfg.spec.starts_with("http") {
             &cfg.spec
         } else {
             "https://local.invalid"
         },
         Duration::from_secs_f64(cfg.timeout),
+        cfg.transport(),
     )?;
     let root = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes).await?;
     if args.list_tags {
@@ -184,6 +185,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     let mut server = Server::new(
         tools,
         PaidClient::new(payer)
+            .with_transport(cfg.transport())
             .with_timeout(Duration::from_secs_f64(cfg.timeout))
             .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes),
         base,

@@ -49,6 +49,8 @@ pub struct Config {
     pub response_mappings: BTreeMap<String, crate::output::ResponseMapping>,
     #[serde(skip_serializing_if = "crate::output::ImageLimits::is_default")]
     pub image_limits: crate::output::ImageLimits,
+    pub allow_http1: bool,
+    pub allow_tls12: bool,
     pub timeout: f64,
     pub max_response_bytes: usize,
     pub max_help_bytes: usize,
@@ -77,6 +79,15 @@ pub struct Config {
     pub max_description_chars: Option<usize>,
 }
 
+impl Config {
+    pub fn transport(&self) -> crate::network::HttpPolicy {
+        crate::network::HttpPolicy {
+            allow_http1: self.allow_http1,
+            allow_tls12: self.allow_tls12,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -84,6 +95,8 @@ impl Default for Config {
             reliability_note: String::new(),
             response_mappings: BTreeMap::new(),
             image_limits: Default::default(),
+            allow_http1: false,
+            allow_tls12: false,
             timeout: 30.0,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -252,6 +265,7 @@ pub async fn load_json_with_limit(
         tracing::info!(target: "x402_treazury::startup",
             headers_ms = started.elapsed().as_millis() as u64,
             "Catalog response headers received; reading body");
+        crate::network::log_http(&response, "catalog");
         let body_started = std::time::Instant::now();
         let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
             .await

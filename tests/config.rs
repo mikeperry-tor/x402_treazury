@@ -13,6 +13,8 @@ spec = "catalog.json"
 prefix = "stable"
 tags = ["A", "B"]
 timeout = 90
+allow_http1 = true
+allow_tls12 = true
 max_response_bytes = 100
 max_help_bytes = 50
 max_spec_bytes = 200
@@ -27,6 +29,7 @@ description = "Old"
         r#"extends = "../provider.toml"
 tags = []
 timeout = 42
+allow_http1 = false
 max_help_bytes = 80
 [overrides.stable_new]
 description = "New"
@@ -34,6 +37,13 @@ description = "New"
     )
     .unwrap();
     let resolved = config::resolve(source, &deployment).await.unwrap();
+    assert!(!resolved.settings.allow_http1);
+    assert!(resolved.settings.allow_tls12);
+    assert!(resolved.origins["allow_tls12"].ends_with("provider.toml"));
+    assert_eq!(
+        resolved.origins["allow_http1"],
+        deployment.display().to_string()
+    );
     assert!(resolved.settings.tags.is_empty());
     assert_eq!(resolved.settings.timeout, 42.0);
     assert_eq!(resolved.settings.max_response_bytes, 100);
@@ -94,6 +104,8 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
         "spec = 'api.json'\nmax_spec_bytes = 0",
         "spec = 'api.json'\nmax_response_bytes = -1",
         "config = 'old.json'",
+        "spec = 'api.json'\nallow_http1 = 'yes'",
+        "spec = 'api.json'\nallow_tls12 = 1",
         "spec = 'api.json'\nprobe_methods = ['POST']",
     ] {
         std::fs::write(&path, invalid).unwrap();

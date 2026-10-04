@@ -29,13 +29,18 @@ impl BoundTool {
             Ok(crate::output::ToolOutput::text(
                 self.help
                     .get_or_try_init(|| async {
-                        let response = crate::network::discovery(url, self.client.timeout())?
-                            .get(url)
-                            .send()
-                            .await
-                            .map_err(reqwest::Error::without_url)?
-                            .error_for_status()
-                            .map_err(reqwest::Error::without_url)?;
+                        let response = crate::network::provider_discovery(
+                            url,
+                            self.client.timeout(),
+                            self.client.transport(),
+                        )?
+                        .get(url)
+                        .send()
+                        .await
+                        .map_err(reqwest::Error::without_url)?
+                        .error_for_status()
+                        .map_err(reqwest::Error::without_url)?;
+                        crate::network::log_http(&response, "help");
                         let bytes = crate::limits::read(
                             response,
                             self.client.max_help_bytes(),

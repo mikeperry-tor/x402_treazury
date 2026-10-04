@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, OnceCell, Semaphore};
 type Entry = Arc<OnceCell<(Instant, Option<String>)>>;
 #[derive(Default)]
 pub struct PricingCache {
-    entries: Mutex<BTreeMap<String, Entry>>,
+    entries: Mutex<BTreeMap<(String, crate::network::HttpPolicy), Entry>>,
 }
 static CACHE: OnceLock<PricingCache> = OnceLock::new();
 pub(crate) const CONCURRENCY: usize = 16;
@@ -46,12 +46,18 @@ pub fn validate(cfg: &Config) -> Result<()> {
     Ok(())
 }
 impl PricingCache {
-    async fn get(&self, url: String, http: reqwest::Client, ttl: f64) -> Option<String> {
+    async fn get(
+        &self,
+        url: String,
+        http: reqwest::Client,
+        ttl: f64,
+        policy: crate::network::HttpPolicy,
+    ) -> Option<String> {
         let cell = self
             .entries
             .lock()
             .await
-            .entry(url.clone())
+            .entry((url.clone(), policy))
             .or_default()
             .clone();
         let (created, line) = cell
@@ -59,6 +65,7 @@ impl PricingCache {
                 let _permit = LIMIT.acquire().await.expect("probe semaphore open");
                 let result = async {
                     let response = http.get(&url).send().await.ok()?;
+                    crate::network::log_http(&response, "pricing");
                     if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
                         return None;
                     }
@@ -98,8 +105,16 @@ impl PricingCache {
         base: &str,
     ) -> Result<(&'a ToolSpec, Option<String>)> {
         let url = tool.route(base, &serde_json::Map::new())?.url;
-        let http = crate::network::discovery(&url, Duration::from_secs_f64(cfg.probe_timeout))?;
-        Ok((tool, self.get(url, http, cfg.probe_ttl_seconds).await))
+        let http = crate::network::provider_discovery(
+            &url,
+            Duration::from_secs_f64(cfg.probe_timeout),
+            cfg.transport(),
+        )?;
+        Ok((
+            tool,
+            self.get(url, http, cfg.probe_ttl_seconds, cfg.transport())
+                .await,
+        ))
     }
     pub async fn discover(
         &self,

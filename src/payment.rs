@@ -65,6 +65,7 @@ impl Payer {
 }
 #[derive(Clone)]
 pub struct PaidClient {
+    transport: crate::network::HttpPolicy,
     public_only: bool,
     timeout: std::time::Duration,
     max_response_bytes: usize,
@@ -75,6 +76,7 @@ pub struct PaidClient {
 impl PaidClient {
     pub fn new(payer: Payer) -> Self {
         Self {
+            transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -85,6 +87,7 @@ impl PaidClient {
     }
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
+            transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -92,6 +95,13 @@ impl PaidClient {
             payer: None,
             managed: Some(pool),
         }
+    }
+    pub fn with_transport(mut self, transport: crate::network::HttpPolicy) -> Self {
+        self.transport = transport;
+        self
+    }
+    pub fn transport(&self) -> crate::network::HttpPolicy {
+        self.transport
     }
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = timeout;
@@ -161,16 +171,12 @@ impl PaidClient {
                 .or_else(|| payer.as_ref().map(|p| p.address.as_str()))
                 .context("network_identity_missing: payer")?;
             let factory = crate::network::global();
-            let build = if self.public_only {
-                crate::network::NetworkContext::http_public
-            } else {
-                crate::network::NetworkContext::http
-            };
-            let http = build(
-                factory,
+            let http = factory.http_policy(
                 &crate::network::IsolationId::evm(address)?,
                 request.url().as_str(),
                 self.timeout,
+                self.public_only,
+                self.transport,
             )?;
             let unsigned = request
                 .try_clone()
@@ -182,6 +188,7 @@ impl PaidClient {
                 .execute(unsigned)
                 .await
                 .map_err(reqwest::Error::without_url)?;
+            crate::network::log_http(&response, "payment_challenge");
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 response = self.bound_challenge(response).await?;
                 if let Some(pool) = &self.managed {
@@ -229,6 +236,7 @@ impl PaidClient {
                     paid_submission = true;
                 }
             }
+            crate::network::log_http(&response, "payment_result");
             break response;
         };
         let result = self.response_output(response, paid_submission).await;

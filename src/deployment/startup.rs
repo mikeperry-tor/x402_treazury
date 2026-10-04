@@ -13,7 +13,13 @@ use std::{
 use tokio::sync::OnceCell;
 use tracing::Instrument;
 
-type DownloadKey = (String, Duration, usize, crate::network::IsolationId);
+type DownloadKey = (
+    String,
+    Duration,
+    usize,
+    crate::network::IsolationId,
+    crate::network::HttpPolicy,
+);
 type Document = Arc<serde_json::Value>;
 
 /// One deployment load, one immutable network policy/runtime. Retain parsed remote
@@ -39,6 +45,7 @@ impl Downloads {
             Duration::from_secs_f64(cfg.timeout),
             cfg.max_spec_bytes,
             crate::network::IsolationId::discovery(&cfg.spec)?,
+            cfg.transport(),
         );
         let cell = {
             let mut entries = self.0.lock().expect("catalog download map poisoned");
@@ -180,13 +187,14 @@ impl Source {
         if cfg.prefix.is_none() {
             cfg.prefix = Some(id.to_owned());
         }
-        let http = crate::network::discovery(
+        let http = crate::network::provider_discovery(
             if cfg.spec.starts_with("http") {
                 &cfg.spec
             } else {
                 "https://local.invalid"
             },
             Duration::from_secs_f64(cfg.timeout),
+            cfg.transport(),
         )?;
         progress.phase = "fetch_parse";
         let fetch_started = Instant::now();

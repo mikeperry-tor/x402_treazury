@@ -1,6 +1,8 @@
 {
   "providers/agentfund.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": null,
     "exclude": [],
     "exclude_tags": [],
@@ -35,6 +37,8 @@
   },
   "providers/arkham.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://api.arkm.com/x402",
     "exclude": [
       "/chains",
@@ -71,6 +75,8 @@
   },
   "providers/botsmith.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": null,
     "exclude": [],
     "exclude_tags": [],
@@ -103,6 +109,8 @@
   },
   "providers/brazilayer.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://api.brazilayer.com",
     "exclude": [],
     "exclude_tags": [],
@@ -198,6 +206,8 @@
   },
   "providers/concordance/provider.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://concordancehq.duckdns.org",
     "exclude": [],
     "exclude_tags": [],
@@ -248,6 +258,8 @@
   },
   "providers/deepline.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://stable-deepline.dev",
     "exclude": [],
     "exclude_tags": [],
@@ -278,6 +290,8 @@
   },
   "providers/genuinegood.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://genuinegood.online",
     "exclude": [
       "/v1/grants/pass"
@@ -310,6 +324,8 @@
   },
   "providers/glassnode/provider.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://x402.glassnode.com",
     "exclude": [],
     "exclude_tags": [],
@@ -340,6 +356,8 @@
   },
   "providers/google-trends.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://google-trends.use.x402atlas.com",
     "exclude": [],
     "exclude_tags": [],
@@ -368,6 +386,8 @@
   },
   "providers/kronos.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://kronossignals.com",
     "exclude": [],
     "exclude_tags": [],
@@ -411,6 +431,8 @@
   },
   "providers/locus/provider.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://api.locus.report",
     "exclude": [],
     "exclude_tags": [],
@@ -442,6 +464,8 @@
   },
   "providers/lonestar.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://lonestaroracle.xyz/api",
     "exclude": [
       "/agri/feed",
@@ -502,6 +526,8 @@
   },
   "providers/otto.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": null,
     "exclude": [
       "/full-auto"
@@ -538,6 +564,8 @@
   },
   "providers/pdl.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://stablepeopledata.dev",
     "exclude": [],
     "exclude_tags": [],
@@ -593,6 +621,8 @@
   },
   "providers/regimeshift.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://regimeshift.xyz/api",
     "exclude": [],
     "exclude_tags": [],
@@ -664,6 +694,8 @@
   },
   "providers/socialfetch.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://api.socialfetch.dev",
     "exclude": [
       "/v1/whoami",
@@ -710,6 +742,8 @@
   },
   "providers/straits/provider.toml": {
     "additional_properties": false,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://straits.live",
     "exclude": [],
     "exclude_tags": [],
@@ -812,6 +846,8 @@
   },
   "providers/x402stock.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://x402stock.xyz",
     "exclude": [
       "/api/v1/fed-funds",
@@ -887,6 +923,8 @@
   },
   "providers/x402-list.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://x402-list.com/api/v1",
     "exclude": [],
     "exclude_tags": [],
@@ -928,6 +966,8 @@
   },
   "providers/exa.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://api.exa.ai",
     "exclude": [],
     "exclude_tags": [],
@@ -979,6 +1019,8 @@
   },
   "providers/oneshot.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://win.oneshotagent.com",
     "exclude": [],
     "exclude_tags": [],
@@ -1023,6 +1065,8 @@
   },
   "providers/stableenrich.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://stableenrich.dev",
     "exclude": [],
     "exclude_tags": [],
@@ -1101,6 +1145,8 @@
   },
   "providers/agent402.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://agent402.tools",
     "exclude": [],
     "exclude_tags": [],
@@ -1744,6 +1790,8 @@
   },
   "providers/agentutility/provider.toml": {
     "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
     "base_url": "https://x402.agentutility.ai",
     "exclude": [],
     "exclude_tags": [],

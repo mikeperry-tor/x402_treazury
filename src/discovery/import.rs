@@ -65,10 +65,12 @@ pub fn endpoint(policy: &Policy, url: &str) -> Result<reqwest::Url> {
 }
 pub async fn fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
     endpoint(policy, url)?;
-    let client = network::global().http_public(
+    let client = network::global().http_policy(
         &IsolationId::discovery(url)?,
         url,
         Duration::from_secs(policy.fetch_timeout_seconds),
+        true,
+        Default::default(),
     )?;
     fetch_response(policy, client.get(url)).await
 }
@@ -80,6 +82,7 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
                 .send()
                 .await
                 .map_err(|_| anyhow::anyhow!("source_fetch_failed"))?;
+            network::log_http(&response, "agent_import");
             ensure!(
                 response.status().is_success(),
                 "source_http_{}",
@@ -120,7 +123,11 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
 }
 #[cfg(test)]
 pub async fn fixture_fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
-    let client = network::discovery(url, Duration::from_secs(policy.fetch_timeout_seconds))?;
+    let client = network::provider_discovery(
+        url,
+        Duration::from_secs(policy.fetch_timeout_seconds),
+        Default::default(),
+    )?;
     fetch_response(policy, client.get(url)).await
 }
 
