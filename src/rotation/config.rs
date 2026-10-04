@@ -4,6 +4,14 @@ use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+pub const DEFAULT_BASE_RPC_URLS: [&str; 3] = [
+    "https://base-rpc.publicnode.com",
+    "https://base.drpc.org",
+    "https://mainnet.base.org",
+];
+fn base_rpc_env() -> String {
+    "BASE_RPC_URL".into()
+}
 fn cap() -> String {
     "1.00".into()
 }
@@ -183,9 +191,10 @@ pub struct FundingConfig {
     #[serde(default)]
     pub auto_fund: bool,
     pub near_user_session_env: Option<String>,
+    #[serde(default = "base_rpc_env")]
     pub base_rpc_url_env: String,
     #[serde(default)]
-    pub base_rpc_fallback_url_envs: Vec<String>,
+    pub base_rpc_fallback_url_envs: Option<Vec<String>>,
     #[serde(default = "base_confirmations")]
     pub base_confirmations: u64,
     #[serde(default = "block_age")]
@@ -203,14 +212,64 @@ pub struct FundingConfig {
     pub quote_deadline_seconds: u64,
 }
 impl FundingConfig {
+    /// Runtime resolution shared by serving and qualification. Inspection never reads env.
+    pub fn base_rpc_urls(
+        &self,
+        mut lookup: impl FnMut(&str) -> Option<String>,
+    ) -> Result<Vec<String>> {
+        self.validate()?;
+        let required = |name: &str, lookup: &mut dyn FnMut(&str) -> Option<String>| {
+            lookup(name)
+                .filter(|v| !v.trim().is_empty())
+                .with_context(|| {
+                    format!("required environment variable {name} is missing or empty")
+                })
+        };
+        let primary = match lookup(&self.base_rpc_url_env) {
+            Some(value) if !value.trim().is_empty() => value,
+            None if self.base_rpc_url_env == "BASE_RPC_URL" => DEFAULT_BASE_RPC_URLS[0].into(),
+            _ => anyhow::bail!("configured Base RPC environment variable is missing or empty"),
+        };
+        let mut urls = vec![primary];
+        if let Some(names) = &self.base_rpc_fallback_url_envs {
+            for name in names {
+                urls.push(required(name, &mut lookup)?);
+            }
+        } else {
+            let primary = super::base::secure_endpoint(&urls[0])?;
+            for fallback in &DEFAULT_BASE_RPC_URLS[1..] {
+                if super::base::secure_endpoint(fallback)? != primary {
+                    urls.push((*fallback).into());
+                }
+            }
+        }
+        let mut unique = std::collections::BTreeSet::new();
+        for url in &urls {
+            ensure!(
+                unique.insert(super::base::secure_endpoint(url)?.to_string()),
+                "duplicate Base RPC endpoint"
+            );
+        }
+        Ok(urls)
+    }
+    pub fn base_rpc_policy(&self) -> serde_json::Value {
+        serde_json::json!({
+            "primary_env":self.base_rpc_url_env,
+            "primary_default":(self.base_rpc_url_env == "BASE_RPC_URL").then_some(DEFAULT_BASE_RPC_URLS[0]),
+            "fallback_defaults":self.base_rpc_fallback_url_envs.is_none().then_some(&DEFAULT_BASE_RPC_URLS[1..]),
+            "fallback_envs":self.base_rpc_fallback_url_envs,
+        })
+    }
     pub fn validate(&self) -> Result<()> {
         env_name(&self.base_rpc_url_env)?;
         ensure!(
-            self.base_rpc_fallback_url_envs.len() <= 2,
+            self.base_rpc_fallback_url_envs
+                .as_ref()
+                .is_none_or(|v| v.len() <= 2),
             "at most two Base RPC fallbacks; list is never truncated"
         );
         let mut names = std::collections::BTreeSet::from([&self.base_rpc_url_env]);
-        for name in &self.base_rpc_fallback_url_envs {
+        for name in self.base_rpc_fallback_url_envs.iter().flatten() {
             env_name(name)?;
             ensure!(names.insert(name), "duplicate Base RPC environment name");
         }

@@ -43,6 +43,10 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
         dir.path().join("state/treasury").to_str().unwrap()
     );
     assert_eq!(shown["funding"]["base_rpc_url_env"], "BASE_RPC");
+    assert_eq!(
+        shown["base_rpc_policy"]["fallback_defaults"],
+        serde_json::json!(["https://base.drpc.org", "https://mainnet.base.org"])
+    );
     assert!(!dir.path().join("state").exists());
     std::fs::write(
         dir.path().join("spec.json"),
@@ -127,6 +131,52 @@ fn rpc_fallback_configuration_is_explicit_bounded_and_unique() {
         .unwrap();
         assert_eq!(f.validate().is_ok(), valid, "{fallbacks}");
     }
+}
+
+#[test]
+fn default_rpc_resolution_and_explicit_overrides_are_unambiguous() {
+    use x402_treazury::rotation::config::{DEFAULT_BASE_RPC_URLS, FundingConfig};
+    let parse = |text: &str| toml::from_str::<FundingConfig>(text).unwrap();
+    assert_eq!(
+        parse("").base_rpc_urls(|_| None).unwrap(),
+        DEFAULT_BASE_RPC_URLS
+    );
+    assert_eq!(
+        parse("base_rpc_fallback_url_envs=[]")
+            .base_rpc_urls(|_| None)
+            .unwrap(),
+        vec![DEFAULT_BASE_RPC_URLS[0]]
+    );
+    let custom = parse("base_rpc_url_env='PRIVATE'\nbase_rpc_fallback_url_envs=['BACKUP']");
+    assert_eq!(
+        custom
+            .base_rpc_urls(|name| Some(format!("https://{}.invalid", name.to_lowercase())))
+            .unwrap(),
+        vec!["https://private.invalid", "https://backup.invalid"]
+    );
+    assert!(custom.base_rpc_urls(|_| None).is_err());
+    assert!(
+        custom
+            .base_rpc_urls(|_| Some("https://same.invalid".into()))
+            .is_err()
+    );
+    assert!(parse("").base_rpc_urls(|_| Some("".into())).is_err());
+    assert_eq!(
+        parse("")
+            .base_rpc_urls(|_| Some("https://base.drpc.org/".into()))
+            .unwrap(),
+        vec!["https://base.drpc.org/", "https://mainnet.base.org"]
+    );
+    assert!(
+        parse("base_rpc_url_env='MISSING'")
+            .base_rpc_urls(|_| None)
+            .is_err()
+    );
+    assert!(
+        parse("base_rpc_fallback_url_envs=['MISSING']")
+            .base_rpc_urls(|_| None)
+            .is_err()
+    );
 }
 
 #[test]

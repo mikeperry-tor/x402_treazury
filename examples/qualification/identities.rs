@@ -45,19 +45,11 @@ pub async fn export(manifest: &Manifest, output: &Path) -> Result<()> {
         }
     }
     let mut origins = BTreeSet::from(["https://1click.chaindefuser.com".to_owned()]);
-    let primary = shown["funding"]["base_rpc_url_env"].as_str();
-    let fallbacks = shown["funding"]["base_rpc_fallback_url_envs"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_str());
-    for name in primary.into_iter().chain(fallbacks) {
-        if let Ok(url) = std::env::var(name) {
+    if !shown["funding"].is_null() {
+        let funding: x402_treazury::rotation::config::FundingConfig =
+            serde_json::from_value(shown["funding"].clone())?;
+        for url in funding.base_rpc_urls(|name| std::env::var(name).ok())? {
             origins.insert(reqwest::Url::parse(&url)?.origin().ascii_serialization());
-        } else {
-            eprintln!(
-                "Base RPC discovery identity omitted: set the configured {name} environment variable when exporting the final map. Unknown streams will fail verification."
-            );
         }
     }
     for source in shown["sources"]

@@ -605,22 +605,9 @@ async fn run() -> Result<()> {
                 .clone()
                 .try_into()?;
             x402_treazury::network::install(policy)?;
-            let name = shown["funding"]["base_rpc_url_env"]
-                .as_str()
-                .context("missing RPC environment name")?;
-            let fallbacks = shown["funding"]["base_rpc_fallback_url_envs"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|v| v.as_str().context("invalid RPC environment name"))
-                .collect::<Result<Vec<_>>>()?;
-            let urls = std::iter::once(name)
-                .chain(fallbacks)
-                .map(|name| {
-                    std::env::var(name)
-                        .context("set every configured Base RPC environment variable")
-                })
-                .collect::<Result<Vec<_>>>()?;
+            let funding: x402_treazury::rotation::config::FundingConfig =
+                serde_json::from_value(shown["funding"].clone())?;
+            let urls = funding.base_rpc_urls(|name| std::env::var(name).ok())?;
             let rpc = x402_treazury::rotation::base::BaseRpc::with_fallbacks(
                 &urls,
                 shown["funding"]["base_confirmations"]

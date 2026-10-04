@@ -237,7 +237,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -402,10 +402,12 @@ impl Deployment {
                 if let Some(key) = &f.near_api_key_env {
                     secret(key)?;
                 }
-                let urls = std::iter::once(&f.base_rpc_url_env)
-                    .chain(&f.base_rpc_fallback_url_envs)
-                    .map(|name| secret(name))
-                    .collect::<Result<Vec<_>>>()?;
+                let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
+                tracing::warn!(
+                    provider_count = urls.len(),
+                    default_fallbacks = f.base_rpc_fallback_url_envs.is_none(),
+                    "Base RPC policy active; verification may disclose wallet addresses to fallback providers; see --show-config base_rpc_policy"
+                );
                 let base = BaseRpc::with_fallbacks(
                     &urls,
                     f.base_confirmations,

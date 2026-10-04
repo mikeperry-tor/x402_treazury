@@ -16,9 +16,9 @@ struct Args {
     network_config: PathBuf,
     #[arg(long)]
     state_dir: PathBuf,
-    /// Explicit trusted RPC destination; receives the state's public EVM addresses.
+    /// Explicit primary (no implicit fallbacks when supplied). Omit for PublicNode/dRPC/Base defaults.
     #[arg(long)]
-    rpc_url: String,
+    rpc_url: Option<String>,
     /// Explicit read-only fallback endpoints, in order; repeat at most twice.
     #[arg(long)]
     fallback_rpc_url: Vec<String>,
@@ -47,10 +47,25 @@ async fn run() -> Result<()> {
     network::install(NetworkPolicy::load(&args.network_config)?)?;
     let state = store::status(&args.state_dir)?;
     anyhow::ensure!(!state.pools.is_empty(), "no pools");
-    let urls = std::iter::once(args.rpc_url)
-        .chain(args.fallback_rpc_url)
-        .collect::<Vec<_>>();
+    let urls = if let Some(primary) = args.rpc_url {
+        std::iter::once(primary)
+            .chain(args.fallback_rpc_url)
+            .collect::<Vec<_>>()
+    } else {
+        anyhow::ensure!(
+            args.fallback_rpc_url.is_empty(),
+            "--fallback-rpc-url requires --rpc-url; default list is otherwise PublicNode/dRPC/Base"
+        );
+        x402_treazury::rotation::config::DEFAULT_BASE_RPC_URLS
+            .iter()
+            .map(|s| (*s).into())
+            .collect()
+    };
     let rpc = BaseRpc::with_fallbacks(&urls, 12, 120)?;
+    eprintln!(
+        "Read-only RPC policy: {} endpoints; wallet-address queries may use configured fallbacks",
+        urls.len()
+    );
     let limit = std::sync::Arc::new(tokio::sync::Semaphore::new(args.concurrency as usize));
     eprintln!(
         "Read-only diagnostic: {} rounds, at most {} concurrent views; all queued views will be reported",

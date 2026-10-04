@@ -701,6 +701,7 @@ daily_input_zec="0.1"
 shield_max_fee_zec="0.001"
 [funding]
 base_rpc_url_env="BASE"
+base_rpc_fallback_url_envs=[]
 [wallets.research]
 mode="zcash_rotation"
 max_input_zec="0.02"
