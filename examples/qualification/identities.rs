@@ -45,6 +45,15 @@ pub async fn export(manifest: &Manifest, output: &Path) -> Result<()> {
         }
     }
     let mut origins = BTreeSet::from(["https://1click.chaindefuser.com".to_owned()]);
+    if let Some(name) = shown["funding"]["base_rpc_url_env"].as_str() {
+        if let Ok(url) = std::env::var(name) {
+            origins.insert(reqwest::Url::parse(&url)?.origin().ascii_serialization());
+        } else {
+            eprintln!(
+                "Base RPC discovery identity omitted: set the configured {name} environment variable when exporting the final map. Unknown streams will fail verification."
+            );
+        }
+    }
     for source in shown["sources"]
         .as_object()
         .context("missing sources")?

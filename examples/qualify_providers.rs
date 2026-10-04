@@ -47,6 +47,8 @@ enum Command {
     },
     /// Report reservations and read-only treasury observations, without network calls.
     Report,
+    /// Read-only Base chain/freshness check through the deployment's network policy.
+    CheckBase,
     /// Export private Tor identity bindings from public state/config; no keys or network access.
     Identities {
         #[arg(long)]
@@ -556,6 +558,41 @@ async fn run() -> Result<()> {
             .join(&manifest.deployment);
     }
     match args.command {
+        Command::CheckBase => {
+            let shown = settings(&manifest).await?;
+            let table = x402_treazury::config::read_table(&manifest.deployment).await?;
+            let policy: NetworkPolicy = table
+                .get("network")
+                .context("missing network")?
+                .clone()
+                .try_into()?;
+            x402_treazury::network::install(policy)?;
+            let name = shown["funding"]["base_rpc_url_env"]
+                .as_str()
+                .context("missing RPC environment name")?;
+            let url =
+                std::env::var(name).context("set the configured Base RPC environment variable")?;
+            let rpc = x402_treazury::rotation::base::BaseRpc::new(
+                &url,
+                shown["funding"]["base_confirmations"]
+                    .as_u64()
+                    .context("missing confirmations")?,
+                shown["funding"]["base_max_block_age_seconds"]
+                    .as_u64()
+                    .context("missing block freshness limit")?,
+            )?;
+            let view = rpc
+                .view(x402_treazury::rotation::base::ChainQuery {
+                    wallets: vec![],
+                    pending: vec![],
+                    anchor: None,
+                })
+                .await?;
+            println!(
+                "{}",
+                json!({"chain_id":8453,"confirmed_height":view.anchor.height,"confirmed_hash":view.anchor.hash,"read_only":true})
+            );
+        }
         Command::Identities { output } => identities::export(&manifest, &output).await?,
         Command::Prepare => prepare(&manifest, &digest).await?,
         Command::Execute { case, allow_paid } => {
