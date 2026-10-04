@@ -10,6 +10,17 @@ spec.loader.exec_module(qualification)
 
 
 class CircuitEvidenceTests(unittest.TestCase):
+    def test_listener_profile_preserves_outbound_restriction(self):
+        profile = qualification.client_profile(9150, [8381, 8382, 8383])
+        self.assertEqual(profile.count('network-outbound'), 1)
+        self.assertIn('(deny network*)', profile)
+        self.assertEqual(profile.count('network-inbound'), 3)
+        self.assertEqual(profile.count('network-bind'), 3)
+        self.assertNotIn('remote tcp "localhost:8381"', profile)
+        for ports in ([9150], [8381, 8381], [0], [65536], ['8381'], [True]):
+            with self.assertRaises(ValueError):
+                qualification.client_profile(9150, ports)
+
     def setUp(self):
         labels = ["evm_a", "evm_b", "treasury", "discovery"]
         self.log = "\n".join("TOR_IDENTITY " + json.dumps(dict(label=label, user="user", password=label)) for label in labels)

@@ -151,6 +151,47 @@ def terminate(process):
             process.wait(timeout=10)
 
 
+def client_profile(socks_port, mcp_ports=()):
+    ports = [socks_port, *mcp_ports]
+    if any(type(p) is not int or not 1 <= p <= 65535 for p in ports):
+        raise ValueError("SOCKS/MCP ports must be integers in 1..65535")
+    if len(set(ports)) != len(ports):
+        raise ValueError("SOCKS/MCP ports must be distinct")
+    rules = ['(version 1)', '(allow default)', '(deny network*)',
+             f'(allow network-outbound (remote tcp "localhost:{socks_port}"))']
+    for port in mcp_ports:
+        rules.extend([f'(allow network-bind (local tcp "localhost:{port}"))',
+                      f'(allow network-inbound (local tcp "localhost:{port}"))'])
+    return '\n'.join(rules) + '\n'
+
+
+def check_inbound(binary, profile, ports, environment, out):
+    command = ['/usr/bin/sandbox-exec', '-f', str(profile), str(binary), '--exact',
+               'live_tor_inbound_listeners', '--ignored', '--nocapture']
+    with (out / 'inbound.log').open('w') as log:
+        child = subprocess.Popen(command, env={**environment, 'TOR_MCP_PORTS': ','.join(map(str, ports))},
+                                 stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 20
+            for port in ports:
+                while True:
+                    try:
+                        connection = socket.create_connection(('127.0.0.1', port), timeout=1)
+                        break
+                    except OSError:
+                        if child.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError('confined listener did not start; see inbound.log')
+                        time.sleep(0.1)
+                with connection:
+                    connection.settimeout(5)
+                    connection.sendall(b'qualification')
+                    if connection.recv(64) != b'accepted':
+                        raise RuntimeError('confined listener response mismatch')
+            if child.wait(timeout=10) != 0:
+                raise RuntimeError('confined listener test failed; see inbound.log')
+        finally:
+            terminate(child)
+    return {'status': 'passed', 'ports': ports, 'command': command}
 class Probes:
     def __init__(self):
         self.sockets = []
@@ -201,6 +242,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tor", type=Path, required=True)
     parser.add_argument("--test-binary", type=Path, required=True)
+    parser.add_argument("--mcp-port", type=int, action="append", default=[],
+                        help="also qualify inbound-only loopback listener allowance (repeatable)")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("this runner implements macOS sandbox-exec; other OS policies require separate qualification")
@@ -254,9 +297,11 @@ def main():
             time.sleep(1)
         control.command("SETEVENTS STREAM CIRC")
         profile = out / "client.sb"
-        profile.write_text(f'(version 1)\n(allow default)\n(deny network*)\n(allow network-outbound (remote tcp "localhost:{socks.rsplit(":", 1)[1]}"))\n')
+        profile.write_text(client_profile(int(socks.rsplit(':', 1)[1]), args.mcp_port))
         probes = Probes()
         environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "RUST_BACKTRACE": "0", "TOR_SMOKE_SOCKS": socks, **probes.env}
+        if args.mcp_port:
+            result['phases']['inbound'] = check_inbound(binary, profile, args.mcp_port, environment, out)
 
         def run(name, test, sandbox, extra=None, timeout=600):
             print(f"Running {name}", flush=True)

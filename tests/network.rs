@@ -441,3 +441,26 @@ async fn live_tor_proxy_unavailable() {
 fn live_tor_egress_controls() {
     live_tor::egress_controls();
 }
+
+#[cfg(feature = "zcash")]
+#[test]
+#[ignore = "requires the external confined listener qualification observer"]
+fn live_tor_inbound_listeners() {
+    use std::io::{Read, Write};
+    let listeners: Vec<_> = std::env::var("TOR_MCP_PORTS")
+        .expect("set TOR_MCP_PORTS")
+        .split(',')
+        .map(|p| std::net::TcpListener::bind(("127.0.0.1", p.parse::<u16>().unwrap())).unwrap())
+        .collect();
+    assert!(!listeners.is_empty());
+    for listener in listeners {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut data = [0; 13];
+        stream.read_exact(&mut data).unwrap();
+        assert_eq!(&data, b"qualification");
+        stream.write_all(b"accepted").unwrap();
+    }
+}

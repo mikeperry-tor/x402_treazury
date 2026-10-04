@@ -1,4 +1,6 @@
 //! Opt-in, conservative funded MCP driver. Never starts funding or retries a call.
+#[path = "qualification/identities.rs"]
+mod identities;
 #[path = "qualification/ledger.rs"]
 mod ledger;
 #[cfg(test)]
@@ -45,6 +47,11 @@ enum Command {
     },
     /// Report reservations and read-only treasury observations, without network calls.
     Report,
+    /// Export private Tor identity bindings from public state/config; no keys or network access.
+    Identities {
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -549,6 +556,7 @@ async fn run() -> Result<()> {
             .join(&manifest.deployment);
     }
     match args.command {
+        Command::Identities { output } => identities::export(&manifest, &output).await?,
         Command::Prepare => prepare(&manifest, &digest).await?,
         Command::Execute { case, allow_paid } => {
             execute(&manifest, &digest, &case, allow_paid).await?
