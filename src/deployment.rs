@@ -70,7 +70,7 @@ pub struct ListenerConfig {
 }
 struct Source {
     config: Config,
-    document: serde_json::Value,
+    document: std::sync::Arc<serde_json::Value>,
     tools: Vec<ToolSpec>,
     base_url: String,
     instructions: Option<String>,

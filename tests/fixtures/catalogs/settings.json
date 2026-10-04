@@ -396,7 +396,7 @@
     "probe_methods": [
       "GET"
     ],
-    "probe_pricing": true,
+    "probe_pricing": false,
     "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://kronossignals.com/api/openapi.json",

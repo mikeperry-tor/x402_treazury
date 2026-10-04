@@ -48,7 +48,7 @@ impl Fixture {
                     let text = String::from_utf8(request).unwrap();
                     let id: usize = text.split_whitespace().nth(1).unwrap().trim_start_matches('/').parse().unwrap();
                     let body = if bad == Some(id) { b"invalid".to_vec() } else {
-                        serde_json::to_vec(&serde_json::json!({"openapi":"3.0.0","servers":[{"url":"https://api.example"}],"paths":{"/read":{"get":{"summary":"Read","responses":{}}}}})).unwrap()
+                        serde_json::to_vec(&serde_json::json!({"openapi":"3.0.0","servers":[{"url":"https://api.example"}],"paths":{"/read":{"get":{"summary":"Read","responses":{}}},"/other":{"get":{"summary":"Other","responses":{}}}}})).unwrap()
                     };
                     socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
                     arrived.send(id).await.unwrap();
@@ -270,10 +270,11 @@ async fn tor_catalog_child() {
     };
     let dir = tempfile::tempdir().unwrap();
     let network = format!("[network]\nmode='tor'\nsocks_endpoint='{}'", proxy.address);
-    let path = config(dir.path(), "http://a.test", 3, Some(3), &network);
+    let path = config(dir.path(), "http://a.test", 4, Some(4), &network);
     let text = std::fs::read_to_string(&path)
         .unwrap()
-        .replace("http://a.test/2", "http://b.test/2");
+        .replace("http://a.test/2", "http://b.test/2")
+        .replace("http://a.test/3", "http://a.test/0");
     std::fs::write(&path, text).unwrap();
     let task = tokio::spawn(async move { Deployment::load(&path).await });
     for _ in 0..3 {
@@ -349,7 +350,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
         String::from_utf8_lossy(&output.stderr)
     );
     let inventory: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 4);
     let log = String::from_utf8(output.stderr).unwrap();
     for message in [
         "Catalog load started",
@@ -367,4 +368,129 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
     assert!(log.contains("body_ms"));
     assert!(log.contains("catalog_download"));
     assert!(!log.contains(&fixture.address.to_string()));
+}
+
+fn alias_config(
+    dir: &std::path::Path,
+    origin: &str,
+    count: usize,
+    limit: usize,
+) -> std::path::PathBuf {
+    let path = config(dir, origin, count, Some(limit), "");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    for id in 1..count {
+        text = text.replace(&format!("{origin}/{id}"), &format!("{origin}/0"));
+    }
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+#[tokio::test]
+async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
+    let mut fixture = Fixture::new(1, None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 4, 2);
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace(
+            "[sources.s01]",
+            "[sources.s01]\nwallet='other'\nbase_url='https://other.invalid'",
+        )
+        .replace("[sources.s02]", "[sources.s02]\nexclude=['/read']")
+        + "\n[wallets.other]\nmode='static'\nprivate_key_env='UNUSED_OTHER_KEY'\n[sources.s01.overrides.s01_read]\ndescription='Authored alias description'\n";
+    std::fs::write(&path, text).unwrap();
+    let task = tokio::spawn(async move {
+        let mut deployment = Deployment::load(&path).await.unwrap();
+        let before = serde_json::to_value(deployment.inventory()).unwrap();
+        deployment.discover_prices().await.unwrap(); // Disabled: unchanged definitions, including overrides.
+        assert_eq!(
+            before,
+            serde_json::to_value(deployment.inventory()).unwrap()
+        );
+        before
+    });
+    assert_eq!(fixture.next().await, 0);
+    fixture.release(0);
+    let inventory = task.await.unwrap();
+    assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 7);
+    assert!(
+        inventory[0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["name"] != "s02_read")
+    );
+    assert_eq!(
+        inventory[0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "s01_read")
+            .unwrap()["description"],
+        "Authored alias description"
+    );
+    assert_eq!(inventory[0]["wallet_bindings"]["s01"]["wallet"], "other");
+    assert_eq!(inventory[0]["wallet_bindings"]["s00"]["wallet"], "w");
+    assert!(fixture.arrivals.try_recv().is_err()); // Includes aliases scheduled after the first fetch completed.
+}
+
+#[tokio::test]
+async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits() {
+    for setting in ["timeout=2", "max_spec_bytes=1"] {
+        let mut fixture = Fixture::new(1, None).await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 1);
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("[sources.s01]", &format!("[sources.s01]\n{setting}"));
+        std::fs::write(&path, text).unwrap();
+        let task = tokio::spawn(async move { Deployment::load(&path).await });
+        assert_eq!(fixture.next().await, 0);
+        fixture.release(0);
+        assert_eq!(fixture.next().await, 0);
+        fixture.release(0);
+        let result = task.await.unwrap();
+        if setting.starts_with("max_spec") {
+            let message = format!("{:#}", result.err().unwrap());
+            assert!(message.contains("max_spec_bytes=1"), "{message}");
+        } else {
+            assert!(result.is_ok());
+        }
+    }
+}
+
+#[tokio::test]
+async fn shared_fetch_cancellation_closes_request_and_next_load_fetches_again() {
+    let mut fixture = Fixture::new(1, None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 2);
+    let task_path = path.clone();
+    let task = tokio::spawn(async move { Deployment::load(&task_path).await });
+    assert_eq!(fixture.next().await, 0);
+    task.abort();
+    assert!(matches!(task.await, Err(error) if error.is_cancelled()));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), fixture.cancelled.recv())
+            .await
+            .unwrap(),
+        Some(0)
+    );
+    assert!(fixture.arrivals.try_recv().is_err());
+    let task = tokio::spawn(async move { Deployment::load(&path).await });
+    assert_eq!(fixture.next().await, 0);
+    fixture.release(0);
+    assert!(task.await.unwrap().is_ok());
+    assert!(fixture.arrivals.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn malformed_shared_catalog_fails_startup_without_alias_retry() {
+    let mut fixture = Fixture::new(1, Some(0)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 2);
+    let task = tokio::spawn(async move { Deployment::load(&path).await });
+    assert_eq!(fixture.next().await, 0);
+    fixture.release(0);
+    assert!(task.await.unwrap().is_err());
+    assert!(fixture.arrivals.try_recv().is_err());
 }

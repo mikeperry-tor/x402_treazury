@@ -119,6 +119,7 @@ async fn representative_startup_replay() {
             let start = Instant::now();
             let deployment = Deployment::load(&path).await.unwrap();
             let elapsed = start.elapsed();
+            assert_eq!(replay.catalogs.load(Ordering::SeqCst), cases.len());
             let inventory = serde_json::to_value(deployment.inventory()).unwrap();
             if let Some(expected) = &baseline {
                 assert_eq!(expected, &inventory);
@@ -173,7 +174,8 @@ async fn representative_startup_replay() {
         }
         let mut pending = stream::iter(jobs).buffer_unordered(concurrency);
         while pending.next().await.is_some() {}
-        assert_eq!(replay.probes.load(Ordering::SeqCst), 86);
+        // Kronos startup discovery is disabled; its 20 fixture probes are omitted.
+        assert_eq!(replay.probes.load(Ordering::SeqCst), 66);
         println!(
             "{}",
             json!({"stage":"pricing_total", "source_concurrency":concurrency,

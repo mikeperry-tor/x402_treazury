@@ -28,9 +28,14 @@ source overrides, listener defaults and optional automatic assignment. Static
 sources load before serving through a rolling queue, defaulting to 2 active loads
 (`startup.catalog_concurrency`, 1..64). Any failure cancels unfinished loads; source
 completion order cannot change the final sorted inventory. All declared sources
-are loaded, including those unused by listeners. Progress/timings go to stderr. Startup pricing discovery runs after tool
+are loaded, including those unused by listeners. Remote aliases share fetching
+and immutable parsed JSON within a load only for the same exact URL, requested
+timeout, byte limit and discovery identity. Filters, overrides, base URLs and
+wallet bindings remain per alias. Local files and later loads do not reuse this
+cache. Progress/timings go to stderr. Startup pricing discovery runs after tool
 selection, uses unsigned eligible GETs and caches both success and failure for
-the process lifetime. TTL expiry never initiates a refresh. Lazy help fetches on
+the process lifetime. Empty price results reuse the original tools instead of
+regenerating identical definitions. TTL expiry never initiates a refresh. Lazy help fetches on
 first invocation; successful content is cached, failed initialization can retry,
 and simultaneous requests for the same resource coalesce. These caches are
 independent of fresh payment challenges.

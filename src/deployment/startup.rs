@@ -7,9 +7,58 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     path::Path,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tokio::sync::OnceCell;
 use tracing::Instrument;
+
+type DownloadKey = (String, Duration, usize, crate::network::IsolationId);
+type Document = Arc<serde_json::Value>;
+
+/// One deployment load, one immutable network policy/runtime. Retain parsed remote
+/// documents only for this load; aliases still generate/filter/bind independently.
+#[derive(Default)]
+struct Downloads(Mutex<BTreeMap<DownloadKey, Arc<OnceCell<Document>>>>);
+impl Downloads {
+    async fn load(
+        &self,
+        id: &str,
+        cfg: &catalog::Config,
+        http: &reqwest::Client,
+    ) -> Result<Document> {
+        if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {
+            return Ok(Arc::new(
+                catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes).await?,
+            ));
+        }
+        // Exact URL (including query), requested timeout and byte limit are deliberately
+        // conservative. Never let a permissive alias bypass another alias's policy.
+        let key = (
+            cfg.spec.clone(),
+            Duration::from_secs_f64(cfg.timeout),
+            cfg.max_spec_bytes,
+            crate::network::IsolationId::discovery(&cfg.spec)?,
+        );
+        let cell = {
+            let mut entries = self.0.lock().expect("catalog download map poisoned");
+            if entries.contains_key(&key) {
+                tracing::info!(target: "x402_treazury::startup", source = id,
+                    "Sharing compatible catalog download or parsed document");
+            }
+            entries.entry(key).or_default().clone()
+        };
+        // No detached tasks: cancellation drops the initializer and its HTTP request.
+        let document = cell
+            .get_or_try_init(|| async {
+                Ok::<_, anyhow::Error>(Arc::new(
+                    catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes).await?,
+                ))
+            })
+            .await?;
+        Ok(document.clone())
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -59,10 +108,11 @@ pub(super) async fn load(
     let total = config.sources.len();
     let limit = config.startup.catalog_concurrency;
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, "Loading catalogs; startup waits for all sources");
+    let downloads = Downloads::default();
     let mut loads = Vec::with_capacity(total);
     for (id, source) in &config.sources {
         let used = config.servers.values().any(|s| s.sources.contains(id));
-        loads.push(load_one(id, source, path, warn && used));
+        loads.push(load_one(id, source, path, warn && used, &downloads));
     }
     let mut pending = stream::iter(loads).buffer_unordered(limit);
     let mut sources = BTreeMap::new();
@@ -93,6 +143,7 @@ async fn load_one(
     source: &SourceConfig,
     path: &Path,
     warn: bool,
+    downloads: &Downloads,
 ) -> Result<(String, Source)> {
     let mut progress = Progress {
         source: id,
@@ -101,7 +152,7 @@ async fn load_one(
         finished: false,
     };
     tracing::info!(target: "x402_treazury::startup", source = id, "Catalog load started");
-    let result = Source::load(id, source, path, warn, &mut progress).await;
+    let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
     progress.finished = true;
     if result.is_err() {
         tracing::warn!(target: "x402_treazury::startup", source = id, phase = progress.phase,
@@ -117,6 +168,7 @@ impl Source {
         path: &Path,
         warn: bool,
         progress: &mut Progress<'_>,
+        downloads: &Downloads,
     ) -> Result<Self> {
         let mut cfg = crate::config::resolve(source.provider.clone(), path)
             .await
@@ -140,7 +192,7 @@ impl Source {
         let fetch_started = Instant::now();
         tracing::info!(target: "x402_treazury::startup", source = id, phase = progress.phase,
             "Loading catalog document");
-        let document = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes)
+        let document = downloads.load(id, &cfg, &http)
             .instrument(tracing::info_span!(target: "x402_treazury::startup", "catalog_download", source = id))
             .await
             .with_context(|| format!("source {id}: loading spec"))?;
@@ -196,6 +248,11 @@ pub(super) async fn price_source<'a>(
             .discover(&source.config, &source.document, &selected, &source.base_url).await?;
         tracing::info!(target: "x402_treazury::startup", source = id, prices = prices.len(),
             elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
+        if prices.is_empty() {
+            tracing::info!(target: "x402_treazury::startup", source = id,
+                "No discovered prices; reusing original tool definitions");
+            return Ok((id, source.tools.iter().cloned().map(|t| (t.name.clone(), t)).collect()));
+        }
         let rebuild_started = Instant::now();
         let tools = catalog::build_tools_with_prices(
             &source.config, &source.document, source.config.prefix.as_deref().unwrap(), &prices,

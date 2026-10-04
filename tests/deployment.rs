@@ -800,3 +800,56 @@ async fn pricing_sources_progress_together_before_inventory_publication() {
     server.await.unwrap().unwrap();
     vendor.abort();
 }
+
+#[tokio::test]
+async fn empty_pricing_results_preserve_authored_inventory_and_do_not_reprobe() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/read",
+        get(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                "free response"
+            }
+        }),
+    );
+    let vendor = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("spec.json"), json!({"servers":[{"url":base}],"paths":{"/read":{"get":{"summary":"Vendor guidance","parameters":[{"name":"q","in":"query","schema":{"type":"string"}}]}}}}).to_string()).unwrap();
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(
+        &path,
+        r#"version=1
+[sources.alpha]
+spec='spec.json'
+[sources.alpha.overrides.alpha_read]
+description='Authored guidance stays intact'
+[wallets.unused]
+mode='static'
+private_key_env='UNUSED'
+[servers.test]
+listen='127.0.0.1:0'
+bearer_token_env='UNUSED'
+wallet='unused'
+sources=['alpha']
+"#,
+    )
+    .unwrap();
+    let mut deployment = Deployment::load(&path).await.unwrap();
+    let original = serde_json::to_value(deployment.inventory()).unwrap();
+    for _ in 0..2 {
+        deployment.discover_prices().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(deployment.inventory()).unwrap(),
+            original
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+    vendor.abort();
+}

@@ -4,6 +4,8 @@ reliability_note = "Unsigned pricing discovery can dominate startup; slow_pricin
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://kronossignals.com/api/openapi.json"
 name = "Kronos Crypto Data"
+# Slow auxiliary discovery must not delay startup; live paid challenges still enforce costs.
+probe_pricing = false
 base_url = "https://kronossignals.com"
 prefix = "kronos"
 include = ["/api/v1"]
