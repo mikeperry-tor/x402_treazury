@@ -44,7 +44,7 @@ impl Drop for Progress<'_> {
         if !self.finished {
             tracing::warn!(target: "x402_treazury::startup", source = self.source,
                 phase = self.phase, elapsed_ms = self.started.elapsed().as_millis() as u64,
-                "Catalog load cancelled; no partial inventory published");
+                "Startup source work cancelled; no partial inventory published");
         }
     }
 }
@@ -173,4 +173,39 @@ impl Source {
             document,
         })
     }
+}
+
+/// Discover/rebuild a source without mutating any published listener inventory.
+pub(super) async fn price_source<'a>(
+    id: &'a str,
+    source: &Source,
+    selected: Vec<catalog::ToolSpec>,
+) -> Result<(&'a str, BTreeMap<String, catalog::ToolSpec>)> {
+    let mut progress = Progress {
+        source: id,
+        phase: "pricing",
+        started: Instant::now(),
+        finished: false,
+    };
+    tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
+        "Startup pricing source started");
+    let result = async {
+        let prices = crate::pricing::process_cache()
+            .discover(&source.config, &source.document, &selected, &source.base_url).await?;
+        tracing::info!(target: "x402_treazury::startup", source = id, prices = prices.len(),
+            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
+        let rebuild_started = Instant::now();
+        let tools = catalog::build_tools_with_prices(
+            &source.config, &source.document, source.config.prefix.as_deref().unwrap(), &prices,
+        )?.into_iter().map(|t| (t.name.clone(), t)).collect();
+        tracing::info!(target: "x402_treazury::startup", source = id,
+            elapsed_ms = rebuild_started.elapsed().as_millis() as u64, "Startup pricing descriptions rebuilt");
+        Ok((id, tools))
+    }.await;
+    progress.finished = true;
+    if result.is_err() {
+        tracing::warn!(target: "x402_treazury::startup", source = id,
+            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing failed; aborting startup");
+    }
+    result
 }

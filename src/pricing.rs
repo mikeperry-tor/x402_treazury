@@ -2,6 +2,7 @@
 use crate::catalog::{Config, ToolSpec, operations};
 use anyhow::{Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use futures_util::{StreamExt, stream};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -16,7 +17,8 @@ pub struct PricingCache {
     entries: Mutex<BTreeMap<String, Entry>>,
 }
 static CACHE: OnceLock<PricingCache> = OnceLock::new();
-static LIMIT: Semaphore = Semaphore::const_new(4);
+pub(crate) const CONCURRENCY: usize = 16;
+static LIMIT: Semaphore = Semaphore::const_new(CONCURRENCY);
 pub fn process_cache() -> &'static PricingCache {
     CACHE.get_or_init(PricingCache::default)
 }
@@ -89,6 +91,16 @@ impl PricingCache {
             None
         }
     }
+    async fn probe<'a>(
+        &self,
+        cfg: &Config,
+        tool: &'a ToolSpec,
+        base: &str,
+    ) -> Result<(&'a ToolSpec, Option<String>)> {
+        let url = tool.route(base, &serde_json::Map::new())?.url;
+        let http = crate::network::discovery(&url, Duration::from_secs_f64(cfg.probe_timeout))?;
+        Ok((tool, self.get(url, http, cfg.probe_ttl_seconds).await))
+    }
     pub async fn discover(
         &self,
         cfg: &Config,
@@ -130,27 +142,18 @@ impl PricingCache {
         }
         candidates.truncate(cfg.probe_max_endpoints);
         let mut lines = BTreeMap::new();
-        // Each batch bounds per-source concurrency; LIMIT bounds the whole process.
-        for batch in candidates.chunks(cfg.probe_concurrency.min(4)) {
-            let mut pending = Vec::new();
-            for tool in batch {
-                let url = tool.route(base, &serde_json::Map::new())?.url;
-                let http =
-                    crate::network::discovery(&url, Duration::from_secs_f64(cfg.probe_timeout))?;
-                pending.push((tool, self.get(url, http, cfg.probe_ttl_seconds)));
-            }
-            // Scoped futures: wait for the entire batch, without detached tasks.
-            // Dropping discovery cancels unfinished probes; completed cache entries remain.
-            let results = futures_util::future::join_all(
-                pending
-                    .into_iter()
-                    .map(|(tool, probe)| async move { (tool, probe.await) }),
-            )
-            .await;
-            for (tool, line) in results {
-                if let Some(line) = line {
-                    lines.insert((tool.method.clone(), tool.path.clone()), line);
-                }
+        // Rolling per-source slots share the process-wide request semaphore.
+        // Futures are scoped: cancellation drops probes, retaining completed cache entries.
+        let mut probes = Vec::with_capacity(candidates.len());
+        for tool in candidates {
+            probes.push(self.probe(cfg, tool, base));
+        }
+        let mut pending =
+            stream::iter(probes).buffer_unordered(cfg.probe_concurrency.min(CONCURRENCY));
+        while let Some(result) = pending.next().await {
+            let (tool, line) = result?;
+            if let Some(line) = line {
+                lines.insert((tool.method.clone(), tool.path.clone()), line);
             }
         }
         Ok(lines)

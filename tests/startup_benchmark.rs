@@ -20,7 +20,6 @@ use x402_treazury::{
 };
 #[derive(Deserialize)]
 struct Case {
-    name: String,
     provider: String,
     spec: Option<String>,
 }
@@ -132,43 +131,55 @@ async fn representative_startup_replay() {
             );
         }
     }
-    let cache = PricingCache::default();
-    let start = Instant::now();
-    for index in &selected {
-        let (settings, doc) = &inputs[*index];
-        let endpoint = format!("{base}/api/{index}");
-        let mut settings = settings.clone();
-        settings.base_url = Some(endpoint.clone());
-        let tools =
-            catalog::build_tools(&settings, doc, settings.prefix.as_deref().unwrap_or("api"))
+    use futures_util::{StreamExt, stream};
+    for concurrency in [1, 16] {
+        let cache = PricingCache::default();
+        replay.probes.store(0, Ordering::SeqCst);
+        let start = Instant::now();
+        let mut jobs = Vec::new();
+        for index in &selected {
+            let cache = &cache;
+            let inputs = &inputs;
+            let base = &base;
+            jobs.push(async move {
+                let (settings, doc) = &inputs[*index];
+                let endpoint = format!("{base}/api/{index}");
+                let mut settings = settings.clone();
+                settings.base_url = Some(endpoint.clone());
+                let tools = catalog::build_tools(
+                    &settings,
+                    doc,
+                    settings.prefix.as_deref().unwrap_or("api"),
+                )
                 .unwrap();
-        // Check every possible probe destination before running the production discovery function.
-        for tool in tools
-            .iter()
-            .filter(|t| t.method == "GET" && t.help_url.is_none() && !t.path.contains('{'))
-        {
-            assert!(
-                tool.route(&endpoint, &serde_json::Map::new())
-                    .unwrap()
-                    .url
-                    .starts_with(&format!("{base}/")),
-                "non-loopback probe refused"
-            );
+                // Check every possible probe destination before running the production discovery function.
+                for tool in tools
+                    .iter()
+                    .filter(|t| t.method == "GET" && t.help_url.is_none() && !t.path.contains('{'))
+                {
+                    assert!(
+                        tool.route(&endpoint, &serde_json::Map::new())
+                            .unwrap()
+                            .url
+                            .starts_with(&format!("{base}/")),
+                        "non-loopback probe refused"
+                    );
+                }
+                cache
+                    .discover(&settings, doc, &tools, &endpoint)
+                    .await
+                    .unwrap();
+            });
         }
-        let before = replay.probes.load(Ordering::SeqCst);
-        let source_started = Instant::now();
-        cache
-            .discover(&settings, doc, &tools, &endpoint)
-            .await
-            .unwrap();
+        let mut pending = stream::iter(jobs).buffer_unordered(concurrency);
+        while pending.next().await.is_some() {}
+        assert_eq!(replay.probes.load(Ordering::SeqCst), 86);
         println!(
             "{}",
-            json!({"stage":"pricing_source","provider":cases[*index].name,"enabled":settings.probe_pricing,"requests":replay.probes.load(Ordering::SeqCst)-before,"elapsed_ms":source_started.elapsed().as_millis()})
+            json!({"stage":"pricing_total", "source_concurrency":concurrency,
+            "elapsed_ms":start.elapsed().as_millis(), "requests":replay.probes.load(Ordering::SeqCst),
+            "delay_per_request_ms":100})
         );
     }
-    println!(
-        "{}",
-        json!({"stage":"pricing_total","elapsed_ms":start.elapsed().as_millis(),"requests":replay.probes.load(Ordering::SeqCst),"delay_per_request_ms":100})
-    );
     server.abort();
 }

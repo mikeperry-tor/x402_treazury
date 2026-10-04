@@ -17,8 +17,11 @@ use x402_treazury::{
     pricing::PricingCache,
 };
 
+static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
+    let _guard = TEST_LOCK.lock().await;
     let counts = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
     async fn handler(
         State(counts): State<Arc<Mutex<BTreeMap<String, usize>>>>,
@@ -130,6 +133,7 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
 
 #[tokio::test]
 async fn probes_are_bounded_optional_and_validate_get_only() {
+    let _guard = TEST_LOCK.lock().await;
     let cfg = Config {
         probe_pricing: false,
         ..Default::default()
@@ -169,8 +173,9 @@ async fn probes_are_bounded_optional_and_validate_get_only() {
 
 #[tokio::test]
 async fn observed_global_and_source_bounds_caps_and_full_url_cache_keys() {
+    let _guard = TEST_LOCK.lock().await;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    for (sources, bound, expected_active) in [(1, 1, 1), (1, 2, 2), (2, 3, 4)] {
+    for (sources, bound, expected_active) in [(1, 1, 1), (1, 2, 2), (6, 3, 16)] {
         let active = Arc::new(AtomicUsize::new(0));
         let maximum = Arc::new(AtomicUsize::new(0));
         let permits = Arc::new(tokio::sync::Semaphore::new(0));
@@ -262,6 +267,7 @@ async fn observed_global_and_source_bounds_caps_and_full_url_cache_keys() {
 
 #[tokio::test]
 async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
+    let _guard = TEST_LOCK.lock().await;
     use std::sync::atomic::{AtomicUsize, Ordering};
     let hits = Arc::new(AtomicUsize::new(0));
     let entered = Arc::new(tokio::sync::Notify::new());
@@ -303,8 +309,8 @@ async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
         ..Default::default()
     };
     let tools = build_tools(&cfg, &root, "t").unwrap();
-    // Repeated interrupted initializers would exhaust the four permits if leaked.
-    for _ in 0..5 {
+    // Repeated interrupted initializers would exhaust the sixteen permits if leaked.
+    for _ in 0..17 {
         let (cache, cfg, root, tools, base) = (
             cache.clone(),
             Config {
@@ -329,7 +335,7 @@ async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(hits.load(Ordering::SeqCst), 6);
+    assert_eq!(hits.load(Ordering::SeqCst), 18);
     assert!(
         cache
             .discover(&cfg, &root, &tools, &base)
@@ -337,17 +343,18 @@ async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(hits.load(Ordering::SeqCst), 6);
+    assert_eq!(hits.load(Ordering::SeqCst), 18);
     let legacy = json!({"paths":{"/legacy":{"get":{}}}});
     let tools = build_tools(&cfg, &legacy, "legacy").unwrap();
     let lines = cache.discover(&cfg, &legacy, &tools, &base).await.unwrap();
     assert!(lines[&("GET".into(), "/legacy".into())].contains("$0.000007"));
-    assert_eq!(hits.load(Ordering::SeqCst), 7);
+    assert_eq!(hits.load(Ordering::SeqCst), 19);
     vendor.abort();
 }
 
 #[tokio::test]
-async fn batches_wait_for_slowest_probe_and_cancel_without_losing_completed_cache() {
+async fn rolling_probes_pass_stalled_member_and_cancel_without_losing_completed_cache() {
+    let _guard = TEST_LOCK.lock().await;
     let slow = Arc::new(tokio::sync::Semaphore::new(0));
     let (arrived, mut arrivals) = tokio::sync::mpsc::unbounded_channel();
     let gate = slow.clone();
@@ -410,11 +417,22 @@ async fn batches_wait_for_slowest_probe_and_cancel_without_losing_completed_cach
     .unwrap()
     .unwrap();
     assert_eq!(completed.len(), 1);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), arrivals.recv())
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
             .await
-            .is_err(),
-        "next batch started before the slow member completed"
+            .unwrap()
+            .unwrap(),
+        "/c",
+        "a free slot must start /c while /b is still blocked"
+    );
+    // Establish /c has also entered the cache before cancellation.
+    assert_eq!(
+        cache
+            .discover(&cfg, &root, &tools[2..], &base)
+            .await
+            .unwrap()
+            .len(),
+        1
     );
     first.abort();
     assert!(first.await.unwrap_err().is_cancelled());
@@ -429,13 +447,6 @@ async fn batches_wait_for_slowest_probe_and_cancel_without_losing_completed_cach
     );
     // Release both server handlers: the cancelled client's request may still be present.
     slow.add_permits(2);
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
-            .await
-            .unwrap()
-            .unwrap(),
-        "/c"
-    );
     let lines = tokio::time::timeout(Duration::from_secs(5), restarted)
         .await
         .unwrap()

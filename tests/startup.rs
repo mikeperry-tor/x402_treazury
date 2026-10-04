@@ -281,9 +281,30 @@ async fn tor_catalog_child() {
         fixture.release(id);
     }
     task.await.unwrap().unwrap();
+    // Pricing uses the same production discovery factory concurrently, including
+    // multiple paths sharing one origin. Unsigned 200s are cached as no price.
+    let pricing = tokio::spawn(async {
+        let cache = x402_treazury::pricing::PricingCache::default();
+        let cfg = x402_treazury::catalog::Config::default();
+        let a = serde_json::json!({"paths":{"/0":{"get":{}},"/1":{"get":{}}}});
+        let b = serde_json::json!({"paths":{"/2":{"get":{}}}});
+        let ta = x402_treazury::catalog::build_tools(&cfg, &a, "a").unwrap();
+        let tb = x402_treazury::catalog::build_tools(&cfg, &b, "b").unwrap();
+        let (a, b) = tokio::join!(
+            cache.discover(&cfg, &a, &ta, "http://a.test"),
+            cache.discover(&cfg, &b, &tb, "http://b.test")
+        );
+        assert!(a.unwrap().is_empty());
+        assert!(b.unwrap().is_empty());
+    });
+    for _ in 0..3 {
+        let id = fixture.next().await;
+        fixture.release(id);
+    }
+    pricing.await.unwrap();
     let context = NetworkContext::new(policy).unwrap();
     let records = proxy.records.lock().unwrap();
-    assert_eq!(records.len(), 3);
+    assert_eq!(records.len(), 6);
     for record in records.iter() {
         assert_eq!(record.address_type, 3);
         let expected = context
@@ -291,8 +312,8 @@ async fn tor_catalog_child() {
         assert_eq!((&record.user, &record.password), (&expected.0, &expected.1));
     }
     let a: Vec<_> = records.iter().filter(|r| r.host == "a.test").collect();
-    assert_eq!(a.len(), 2);
-    assert_eq!(a[0].password, a[1].password);
+    assert_eq!(a.len(), 4);
+    assert!(a.iter().all(|r| r.password == a[0].password));
     assert_ne!(
         a[0].password,
         records

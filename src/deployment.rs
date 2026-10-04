@@ -506,7 +506,8 @@ impl Deployment {
 
     async fn discover_prices(&mut self) -> Result<()> {
         let started = std::time::Instant::now();
-        tracing::info!(target: "x402_treazury::startup", "Startup pricing discovery started; serving waits for discovery");
+        tracing::info!(target: "x402_treazury::startup", request_concurrency = crate::pricing::CONCURRENCY, "Startup pricing discovery started; serving waits for discovery");
+        let mut pending = Vec::new();
         for (id, source) in &self.sources {
             let selected: Vec<_> = self
                 .selected
@@ -515,31 +516,17 @@ impl Deployment {
                 .filter(|(s, _)| s == id)
                 .map(|(_, t)| t.clone())
                 .collect();
-            if selected.is_empty() {
-                continue;
+            if !selected.is_empty() {
+                pending.push(startup::price_source(id, source, selected));
             }
-            let source_started = std::time::Instant::now();
-            tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
-                "Startup pricing source started");
-            let prices = crate::pricing::process_cache()
-                .discover(
-                    &source.config,
-                    &source.document,
-                    &selected,
-                    &source.base_url,
-                )
-                .await?;
-            tracing::info!(target: "x402_treazury::startup", source = id, prices = prices.len(),
-                elapsed_ms = source_started.elapsed().as_millis() as u64, "Startup pricing source finished");
-            let tools: BTreeMap<_, _> = catalog::build_tools_with_prices(
-                &source.config,
-                &source.document,
-                source.config.prefix.as_deref().unwrap(),
-                &prices,
-            )?
-            .into_iter()
-            .map(|t| (t.name.clone(), t))
-            .collect();
+        }
+        use futures_util::{StreamExt, TryStreamExt, stream};
+        let completed: Vec<_> = stream::iter(pending)
+            .buffer_unordered(crate::pricing::CONCURRENCY)
+            .try_collect()
+            .await?;
+        // Apply only after every source succeeds; completion order cannot change inventory.
+        for (id, tools) in completed {
             for (s, t) in self.selected.values_mut().flatten() {
                 if s == id {
                     *t = tools[&t.name].clone();

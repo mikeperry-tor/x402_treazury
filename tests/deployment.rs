@@ -684,3 +684,119 @@ include_tools=['beta_pay']
     task.await.unwrap().unwrap();
     vendor.abort();
 }
+
+#[tokio::test]
+async fn pricing_sources_progress_together_before_inventory_publication() {
+    use std::time::Duration;
+    let gates = Arc::new([
+        tokio::sync::Semaphore::new(0),
+        tokio::sync::Semaphore::new(0),
+    ]);
+    let (arrived, mut arrivals) = tokio::sync::mpsc::unbounded_channel();
+    let vendor_gates = gates.clone();
+    let app = Router::new().fallback(get(move |uri: OriginalUri, headers: HeaderMap| {
+        let gates = vendor_gates.clone();
+        let arrived = arrived.clone();
+        async move {
+            assert!(!headers.contains_key("payment-signature"));
+            let id = if uri.path().starts_with("/alpha") {
+                0
+            } else {
+                1
+            };
+            arrived.send(id).unwrap();
+            gates[id].acquire().await.unwrap().forget();
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [(
+                    "payment-required",
+                    STANDARD
+                        .encode(json!({"accepts":[{"amount":"1000","asset":"USDC"}]}).to_string()),
+                )],
+            )
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let vendor = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["alpha", "beta"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            json!({
+                "servers":[{"url":format!("{base}/{name}")}],
+                "paths":{"/pay":{"get":{"summary":"Pay"}}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+    let path = write_config(
+        dir.path(),
+        &configuration().replace("exclude_tools = [\"alpha_hidden\"]", "exclude_tools = []"),
+    );
+    let deployment = Deployment::load(&path).await.unwrap();
+    let pending = tokio::spawn(async move { deployment.bind(&env()).await });
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        seen.push(
+            tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    seen.sort();
+    assert_eq!(
+        seen,
+        [0, 1],
+        "both sources must probe before either responds"
+    );
+    gates[1].add_permits(1);
+    assert!(
+        !pending.is_finished(),
+        "startup must still await the other source"
+    );
+    gates[0].add_permits(1);
+    let running = tokio::time::timeout(Duration::from_secs(5), pending)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let addresses = running.addresses();
+    let stop = CancellationToken::new();
+    let server = tokio::spawn(running.serve(stop.clone()));
+    let http = reqwest::Client::new();
+    for (name, address) in addresses {
+        let result = rpc(
+            &http,
+            address,
+            if name == "research" {
+                "research-secret"
+            } else {
+                "beta-secret"
+            },
+            "tools/list",
+            json!({}),
+        )
+        .await;
+        let tools = result["result"]["tools"].as_array().unwrap();
+        let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(
+            names,
+            if name == "research" {
+                vec!["alpha_pay", "beta_pay"]
+            } else {
+                vec!["beta_pay"]
+            }
+        );
+        assert!(
+            tools
+                .iter()
+                .all(|t| t["description"].as_str().unwrap().contains("$0.001"))
+        );
+    }
+    stop.cancel();
+    server.await.unwrap().unwrap();
+    vendor.abort();
+}
