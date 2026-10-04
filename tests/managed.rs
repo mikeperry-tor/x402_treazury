@@ -432,12 +432,8 @@ async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
         let h = Harness::new().await;
         *h.f.challenge.lock().unwrap() = challenge.clone();
         let result = h.client.execute(h.route()).await;
-        if name == "agent402" {
-            assert!(result.is_err(), "{name}");
-            assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0, "{name}");
-            assert!(h.f.signed.lock().unwrap().is_empty(), "{name}");
-        } else {
-            assert_eq!(result.unwrap(), "paid", "{name}");
+        assert_eq!(result.unwrap(), "paid", "{name}");
+        {
             let signed = h.f.signed.lock().unwrap();
             assert_eq!(signed.len(), 1, "{name}");
             assert!(
@@ -462,6 +458,35 @@ async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
         }
         h.close().await;
     }
+}
+#[tokio::test]
+async fn output_schema_is_opaque_metadata_and_invalid_shapes_fail_before_admission() {
+    let h = Harness::new().await;
+    for schema in [json!(null), json!("object"), json!([]), json!(1)] {
+        let mut c = challenge("1");
+        c["accepts"][0]["outputSchema"] = schema;
+        *h.f.challenge.lock().unwrap() = c;
+        assert!(h.client.execute(h.route()).await.is_err());
+    }
+    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0);
+    assert!(h.f.signed.lock().unwrap().is_empty());
+    for schema in [
+        json!(true),
+        json!(false),
+        json!({"$ref": "http://127.0.0.1:1/must-not-fetch", "amount": "0",
+            "assetTransferMethod": "permit2", "extra": {"name": "fake"}}),
+    ] {
+        let mut c = challenge("1");
+        c["accepts"][0]["outputSchema"] = schema.clone();
+        *h.f.challenge.lock().unwrap() = c;
+        assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+        let signed = h.f.signed.lock().unwrap();
+        let payload = signed.last().unwrap();
+        assert_eq!(payload["accepted"]["outputSchema"], schema);
+        assert_eq!(payload["payload"]["authorization"]["value"], "1");
+        assert_eq!(payload["accepted"]["extra"]["name"], "USD Coin");
+    }
+    h.close().await;
 }
 #[tokio::test]
 async fn informational_metadata_cannot_override_payment_safety() {
@@ -511,6 +536,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
         "envelope",
     ] {
         let mut c = challenge("1");
+        c["accepts"][0]["outputSchema"] = json!({"type": "object"});
         match kind {
             "v1" => c["x402Version"] = json!(1),
             "upto" => c["accepts"][0]["scheme"] = json!("upto"),

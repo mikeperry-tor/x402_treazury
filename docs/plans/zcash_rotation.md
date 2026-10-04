@@ -46,7 +46,7 @@ sequenceDiagram
 ```
 
 Bootstrap funds two distinct addresses before declaring the pool ready: roughly
-10 USDC worth of ZEC plus fees per pool at the default deposit size. Across
+2 USDC worth of ZEC plus fees per pool at the default $1 deposit size. Across
 configured pools, initial funding is twice the sum of their deposit sizes plus
 fees; treasury balance and aggregate limits may delay some pools. Each pool
 becomes ready independently. Restart restores the same pools and reconciles

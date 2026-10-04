@@ -36,7 +36,7 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
     let path = dir.path().join("servers.toml");
     std::fs::write(&path, config()).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
-    assert_eq!(shown["wallets"]["research"]["deposit_size"], "5.00");
+    assert_eq!(shown["wallets"]["research"]["deposit_size"], "1.00");
     assert_eq!(shown["wallets"]["research"]["wait_seconds"], 30);
     assert_eq!(
         shown["treasury"]["state_dir"],

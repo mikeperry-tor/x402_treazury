@@ -53,7 +53,7 @@ Seven additional lazy help URLs were verified in the provider audit; six affect
 these golden catalogs (botsmith is covered by settings and the help-contract test).
 Those six golden changes add only help tools, leaving all API contracts unchanged.
 `provider_payment_challenges.json` captures ten unsigned live challenges from
-2026-10-03 and 2026-10-04: Agent402 pins refusal of unsupported offer metadata;
+2026-10-03 and 2026-10-04: Agent402 pins preservation of offer `outputSchema`;
 Exa Search/Contents and all four Google Trends routes pin exact preservation of
 reviewed informational fields through signing. Locus, Otto and SocialFetch also
 pin signing with top-level extensions omitted. Seller

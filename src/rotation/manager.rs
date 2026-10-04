@@ -246,12 +246,20 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
                         | "amount"
                         | "payTo"
                         | "maxTimeoutSeconds"
+                        | "outputSchema"
                         | "extra"
                         | "assetTransferMethod"
                         | "flow"
                         | "extensions"
                 ))),
                 "unknown offer metadata"
+            );
+            // Descriptive JSON Schema only: preserve it, but never resolve references,
+            // evaluate it, or use its contents as payment terms.
+            ensure!(
+                raw.get("outputSchema")
+                    .is_none_or(|v| v.is_object() || v.is_boolean()),
+                "malformed output schema metadata"
             );
             ensure!(
                 raw["scheme"] == "exact"
