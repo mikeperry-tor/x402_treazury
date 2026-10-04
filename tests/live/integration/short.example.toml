@@ -1,0 +1,54 @@
+# Copy to a private directory and supply reviewed deployment/state references.
+# Zero window and placeholder UUID deliberately prevent execution.
+version = 1
+run_id = "replace_with_unique_run_id"
+treasury_id = "replace_with_treasury_uuid"
+deployment = "./deployment.local.toml"
+binary = "../../../target/debug/treazury"
+evidence_dir = "../../../target/live-integration/replace_with_unique_run_id"
+registry_authorization = "replace_with_authorization_id"
+[start]
+mode = "funded_pools"
+pools = ["test_pool"]
+[network]
+tor_mode = "owned"
+tor_binary = "/replace/with/installed/tor"
+confinement = "macos_sandbox"
+require_isolation_evidence = true
+[limits]
+api_reservation_usdc = "0.014"
+new_funding_jobs = 0
+source_exposure_zec = "0"
+max_in_flight = 2
+run_seconds = 3600
+phase_seconds = 1800
+call_seconds = 300
+cleanup_seconds = 900
+result_bytes = 16777216
+[catalog]
+execution = "frozen"
+record_live_discovery = true
+[[windows]]
+id = "main"
+not_before = 0
+not_after = 0
+
+# Each reservation must cover the configured wallet cap, not merely the quoted fee.
+
+[[cases]]
+id = "profile_1"
+server = "b"
+source = "socialfetch"
+tool = "socialfetch_twitter_profiles_handle"
+arguments = { handle = "rustlang" }
+reserve_usdc = "0.014"
+reviewed_read_only = true
+
+[[phases]]
+id = "main"
+window = "main"
+cases = ["profile_1"]
+pools = ["test_pool"]
+required = true
+[phases.scenario]
+kind = "smoke"
