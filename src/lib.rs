@@ -6,6 +6,7 @@ pub mod network;
 pub mod payment;
 pub mod pricing;
 pub mod provider_status;
+pub mod qualification;
 pub mod rotation;
 pub mod server;
 #[cfg(feature = "zcash")]

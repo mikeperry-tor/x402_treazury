@@ -12,6 +12,8 @@ use std::{
     fs::File,
     path::{Path, PathBuf},
 };
+#[path = "registry_application.rs"]
+mod application;
 #[path = "registry_baseline.rs"]
 mod baseline;
 #[path = "registry_cases.rs"]
@@ -340,8 +342,32 @@ impl Registry {
         tx.commit()?;
         Ok(diff)
     }
+    pub fn application_binding(
+        &self,
+        run: &str,
+        session: &str,
+        config_sha256: String,
+        expires_at: i64,
+    ) -> Result<x402_treazury::qualification::Binding> {
+        ensure!(identifier(session), "invalid application session ID");
+        let pin_digest = self.db.query_row(
+            "SELECT digest FROM pins WHERE run=?1 ORDER BY revision DESC LIMIT 1",
+            [run],
+            |r| r.get(0),
+        )?;
+        Ok(x402_treazury::qualification::Binding {
+            version: 1,
+            run: run.into(),
+            session: session.into(),
+            registry: self.root.join("registry.sqlite"),
+            pin_digest,
+            config_sha256,
+            expires_at,
+        })
+    }
     pub fn begin_execution(&mut self, run: &str, now: i64) -> Result<i64> {
         let m = self.manifest(run)?;
+        self.db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS application_claim_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_claim';")?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -459,7 +485,7 @@ impl Registry {
         if let Some(id) = run {
             let _ = self.manifest(id)?;
         }
-        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished') ORDER BY seq LIMIT 50001")?;
+        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_claim','application_finished') ORDER BY seq LIMIT 50001")?;
         let runtime_events = events
             .query_map([run], |r| {
                 Ok((
@@ -479,7 +505,15 @@ impl Registry {
             Some(id) => self.pins(id)?.catalogs.is_some(),
             None => false,
         };
-        let report = json!({"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"qualification_scope":if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":false,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare-catalogs is required before unsigned execution" }});
+        let application_evidence = if execution_available {
+            match self.application_evidence(run.context("run missing")?) {
+                Ok(value) => value,
+                Err(error) => json!({"status":"invalid_or_incomplete","reason":error.to_string()}),
+            }
+        } else {
+            Value::Null
+        };
+        let report = json!({"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"application_evidence":application_evidence,"qualification_scope":if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":false,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare-catalogs is required before unsigned execution" }});
         bounded_json(&report)?;
         Ok(report)
     }

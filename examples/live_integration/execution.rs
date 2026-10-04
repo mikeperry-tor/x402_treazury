@@ -103,6 +103,24 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
         .directory
         .join(format!("session-{}", uuid::Uuid::new_v4()));
     files::create_dir(&session)?;
+    let binding = registry.application_binding(
+        run,
+        session
+            .file_name()
+            .context("session name missing")?
+            .to_str()
+            .context("session name must be UTF8")?,
+        files::hash_file(&frozen)?,
+        end,
+    )?;
+    let binding_file = session.join("binding.json");
+    files::publish(&binding_file, &serde_json::to_vec(&binding)?)?;
+    registry.event(
+        run,
+        "application_session",
+        &serde_json::to_value(&binding)?,
+        now()?,
+    )?;
     let mut child = Process::launch(
         &manifest.binary,
         &[
@@ -111,6 +129,8 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
             "--qualification-unsigned".into(),
             "--qualification-parent-stdin".into(),
             "--qualification-no-new-funding".into(),
+            "--qualification-binding".into(),
+            binding_file.to_string_lossy().into_owned(),
         ],
         &environment,
         &catalogs.directory,
@@ -138,7 +158,12 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
         .await?;
     save_process(&session, &evidence)?;
     registry.event(run, "child_finished", &json!({"success":evidence.success,"forced_kill":evidence.forced_kill,"valid_output":evidence.valid_output()}), now()?)?;
-    let report = registry.report(Some(run), now()?)?;
+    let application = registry.application_evidence(run);
+    let mut report = registry.report(Some(run), now()?)?;
+    report["application_evidence"] = match &application {
+        Ok(value) => value.clone(),
+        Err(_) => json!({"status":"invalid_or_incomplete"}),
+    };
     files::publish(
         &session.join("results.json"),
         &serde_json::to_vec_pretty(&report)?,
@@ -147,6 +172,7 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
         evidence.success && !evidence.forced_kill && evidence.valid_output(),
         "child did not finish with complete evidence; see private process record"
     );
+    application?;
     if let Err(error) = outcome {
         eprintln!("qualification incomplete: {error:#}");
         println!(
@@ -177,6 +203,7 @@ async fn signal_stop(stop: CancellationToken) {
 }
 fn summarize(registry: &Registry, m: &Manifest) -> Result<u8> {
     let report = registry.report(Some(&m.run_id), now()?)?;
+    registry.application_evidence(&m.run_id)?;
     let cases = report["cases"].as_array().context("report cases missing")?;
     let complete = cases.iter().all(|c| c["execution"] == "COMPLETED");
     let passed = cases

@@ -202,12 +202,19 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        let result = match self
-            .invoke_output(&request.name, &request.arguments.unwrap_or_default())
+        let arguments = request.arguments.unwrap_or_default();
+        let claim = crate::qualification::claim(&self.name, &request.name, &arguments, &context.id)
             .await
-        {
+            .map_err(|error| {
+                tracing::warn!("qualification application admission refused: {error:#}");
+                McpError::invalid_request(
+                    format!("qualification admission refused: {error:#}"),
+                    None,
+                )
+            })?;
+        let result = match self.invoke_output(&request.name, &arguments).await {
             Ok(output) => {
                 let structured = if request.name.starts_with("treazury_")
                     && request.name != "treazury_tool_call"
@@ -222,6 +229,18 @@ impl ServerHandler for Server {
             }
             Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("{e:#}"))]),
         };
+        if let Some(claim) = claim {
+            claim
+                .finish(result.is_error.unwrap_or(false))
+                .await
+                .map_err(|error| {
+                    tracing::error!("qualification application evidence incomplete: {error:#}");
+                    McpError::internal_error(
+                        "qualification application evidence incomplete; case remains reserved",
+                        None,
+                    )
+                })?;
+        }
         Ok(result.into())
     }
 }

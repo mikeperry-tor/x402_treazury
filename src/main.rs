@@ -38,6 +38,9 @@ struct Args {
     check: bool,
     #[arg(long, hide=true, requires="meta_config", conflicts_with_all=["check","show_config","list_tools","list_tags","route_tool","qualification_unsigned","qualification_parent_stdin","qualification_no_new_funding"])]
     qualification_snapshot: bool,
+    /// Internal private binding for registry-reviewed unsigned cases.
+    #[arg(long, hide = true, requires = "qualification_unsigned")]
+    qualification_binding: Option<std::path::PathBuf>,
     #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
     show_config: bool,
     #[arg(long)]
@@ -257,7 +260,8 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "qualification_no_new_funding",
                         "qualification_unsigned",
                         "qualification_parent_stdin",
-                        "qualification_snapshot"
+                        "qualification_snapshot",
+                        "qualification_binding"
                     ]
                     .contains(&id.as_str()),
                     "--meta-config cannot be combined with --{}; configure it in the TOML file",
@@ -309,6 +313,9 @@ async fn run_deployment(
 ) -> Result<()> {
     let mut parent =
         x402_treazury::supervision::Parent::from_stdin(args.qualification_parent_stdin)?;
+    if let Some(binding) = &args.qualification_binding {
+        x402_treazury::qualification::install(binding, path)?;
+    }
     let loading = async {
         if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
             x402_treazury::deployment::Deployment::load(path).await

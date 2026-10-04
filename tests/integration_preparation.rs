@@ -246,6 +246,16 @@ async fn runner_executes_concurrent_keyless_cases_once_and_retains_failures() {
             .all(|c| c["execution"] == "COMPLETED" && c["settlement"] == "NOT_SIGNED")
     );
     assert_eq!(report["api_reserved_atomic"], 0);
+    assert_eq!(r.application_evidence(&m.run_id).unwrap()["claims"], 2);
+    let db = rusqlite::Connection::open(state.join("live-integration/registry.sqlite")).unwrap();
+    db.execute("DELETE FROM events WHERE kind='application_finished'", [])
+        .unwrap();
+    assert!(
+        r.application_evidence(&m.run_id)
+            .unwrap_err()
+            .to_string()
+            .contains("lacks application completion")
+    );
     server.abort();
 }
 
