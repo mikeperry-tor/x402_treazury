@@ -281,3 +281,40 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     drop(store);
     worker.await.unwrap();
 }
+
+#[test]
+fn near_diagnostics_preserve_stage_and_safe_categories_only() {
+    for (reason, expected) in [
+        ("near_http_503", "HTTP 503"),
+        ("near_http_429", "HTTP 429"),
+        ("near_unavailable: timeout", "request timeout"),
+        ("near_unavailable: connect", "connection failure"),
+        ("near_unavailable: transport", "request transport failure"),
+        (
+            "near_response_failed: body transport",
+            "response body transport failure",
+        ),
+        ("invalid NEAR JSON", "invalid JSON response"),
+        ("quote overhead limit", "fee/overhead cap exceeded"),
+        ("quote input limit", "input cap exceeded"),
+        ("quote output mismatch", "output target mismatch"),
+        (
+            "quote binding mismatch: secret-recipient",
+            "quote binding mismatch",
+        ),
+        ("near_http_503 secret-token", "validation or internal error"),
+    ] {
+        let error = anyhow::anyhow!(reason).context(NearStage("quote"));
+        let public = safe_error(&error, &FundingPhase::Allocated);
+        assert!(
+            public.contains(expected) && public.contains("NEAR quote"),
+            "{public}"
+        );
+        assert!(!public.contains("secret"), "{public}");
+    }
+    let error = anyhow::anyhow!("invalid token catalog").context(NearStage("asset catalog"));
+    assert!(
+        safe_error(&error, &FundingPhase::Allocated)
+            .contains("NEAR asset catalog: invalid asset catalog")
+    );
+}

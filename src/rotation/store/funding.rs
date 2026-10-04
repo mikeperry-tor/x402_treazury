@@ -59,6 +59,20 @@ pub struct FundingJob {
     pub next_poll: u64,
     pub last_error: Option<String>,
 }
+/// Clear obsolete destination-funding errors in the same credit transaction.
+pub(super) fn complete_job(tx: &rusqlite::Connection, wallet: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
+        [wallet],
+    )?;
+    tx.execute("UPDATE funding_progress SET last_error=CASE WHEN last_error LIKE 'source_reconciliation_failed;%' THEN last_error ELSE NULL END WHERE job_id IN (SELECT id FROM funding_jobs WHERE wallet_id=?1)", [wallet])?;
+    tx.execute("UPDATE funding_health SET error_streak=0 WHERE job_id IN (SELECT f.id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1 AND j.last_error IS NULL)", [wallet])?;
+    Ok(())
+}
+fn completed_error(error: Option<&str>) -> Option<&str> {
+    // Destination credit does not establish source confirmation.
+    error.filter(|e| e.starts_with("source_reconciliation_failed;"))
+}
 impl Store {
     /// Called only after a typed response proving the preparer was never invoked.
     /// Absence of bytes by itself is not authority to repeat preparation.
@@ -324,6 +338,16 @@ impl Store {
         quote_attempt: bool,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
+        let complete: bool = tx.query_row(
+            "SELECT state='COMPLETE' FROM funding_jobs WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        let error = if complete {
+            completed_error(error)
+        } else {
+            error
+        };
         ensure!(tx.execute("UPDATE funding_progress SET next_poll=?2,last_error=CASE WHEN phase='\"RECOVERY_REQUIRED\"' THEN COALESCE(?3,last_error) ELSE ?3 END,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
         tx.execute("INSERT INTO funding_health(job_id,error_streak) VALUES (?1,?2) ON CONFLICT(job_id) DO UPDATE SET error_streak=CASE WHEN excluded.error_streak=0 THEN 0 ELSE MIN(error_streak+1,32) END",params![id,u32::from(error.is_some())])?;
         tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND f.state='COMPLETE' AND o.submission='CONFIRMED')",[id])?;
@@ -366,10 +390,17 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
         let (started_at,error_streak,timed_out): (Option<i64>,u32,bool) = if version >= 9 {
             db.query_row("SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?.unwrap_or((None,0,false))
         } else {(None,0,false)};
+        let parsed_phase: FundingPhase = serde_json::from_str(&phase)?;
+        // Also normalize historical completed rows for read-only wallet status.
+        let last_error = if parsed_phase == FundingPhase::Complete {
+            completed_error(last_error.as_deref()).map(str::to_owned)
+        } else {
+            last_error
+        };
         let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
             started_at: started_at.map(u64::try_from).transpose()?,
-            error_streak,
+            error_streak: if parsed_phase == FundingPhase::Complete && last_error.is_none() { 0 } else { error_streak },
             timed_out,
             id,
             pool_id,

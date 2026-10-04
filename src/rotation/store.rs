@@ -557,10 +557,7 @@ impl Store {
             "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
             params![balance.to_string(), block_hash, height, wallet],
         )?;
-        tx.execute(
-            "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
-            [wallet],
-        )?;
+        funding::complete_job(&tx, wallet)?;
         let bootstrapped: bool =
             tx.query_row("SELECT bootstrapped FROM pools WHERE id=?1", [&pool], |r| {
                 r.get(0)
@@ -1313,7 +1310,9 @@ impl Store {
                 .optional()?;
             let Some(ready) = ready else {
                 tx.commit()?;
-                anyhow::bail!(AdmissionError::FundingUnavailable("standby not ready"));
+                anyhow::bail!(AdmissionError::FundingUnavailable(
+                    "standby not ready; refill pending; inspect wallet status for funding errors and fund/sync the Zcash treasury if needed; no payment signed"
+                ));
             };
             if view.balances[&ready].saturating_sub(reserved(&ready)?) < cost {
                 tx.commit()?;
@@ -1482,10 +1481,7 @@ fn apply_chain_view(
             ],
         )?;
         if role == "ALLOCATED" && *balance >= amount(target)? {
-            tx.execute(
-                "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
-                [id],
-            )?;
+            funding::complete_job(tx, id)?;
             if bootstrapped {
                 tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [id])?;
             }

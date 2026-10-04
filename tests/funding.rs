@@ -422,6 +422,10 @@ async fn insufficient_treasury_waits_and_only_unprepared_quotes_refresh_with_a_b
             .contains("insufficient_spendable")
     );
     assert!(status.treasury_operations.is_empty());
+    let message = status.funding_jobs[0].last_error.as_deref().unwrap();
+    assert!(message.contains("refill paused before transaction preparation"));
+    assert!(message.contains("existing funded wallets remain usable"));
+    assert_eq!(worker.backend.sends, 0);
     worker.backend.funds_available = true;
     for i in 2..8 {
         worker.tick(now + i * 1000).await.unwrap();
@@ -713,4 +717,118 @@ async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() 
     assert!(status.treasury_operations.is_empty());
     drop(worker);
     task.await.unwrap();
+}
+
+#[test]
+fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
+    use x402_treazury::rotation::base::{Anchor, ChainView};
+    for via_view in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = s.ensure_pool("a", "5").unwrap();
+        let jobs = s.funding_jobs().unwrap();
+        for j in &jobs {
+            s.defer_funding(
+                &j.id,
+                100,
+                Some("base_credit_unverified; stale failure"),
+                false,
+            )
+            .unwrap();
+        }
+        if via_view {
+            s.reconcile_pool(
+                &pool,
+                ChainView {
+                    anchor: Anchor {
+                        height: 1,
+                        hash: format!("0x{:064x}", 1),
+                    },
+                    balances: jobs
+                        .iter()
+                        .map(|j| {
+                            (
+                                j.wallet_id.clone(),
+                                alloy_primitives::U256::from(5_000_000u64),
+                            )
+                        })
+                        .collect(),
+                    released: vec![],
+                },
+            )
+            .unwrap();
+        } else {
+            for j in &jobs {
+                s.record_credit(&j.wallet_id, "5000000", "block", 1)
+                    .unwrap();
+            }
+        }
+        assert!(
+            s.funding_jobs()
+                .unwrap()
+                .iter()
+                .all(|j| j.last_error.is_none() && j.error_streak == 0)
+        );
+        // Simulate a persisted completed row written by the older implementation.
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute("UPDATE funding_progress SET last_error='funding_quote_failed; historical' WHERE job_id=?1", [&jobs[0].id]).unwrap();
+        assert!(s.funding_jobs().unwrap()[0].last_error.is_none());
+        // A quote/credit response can finish after a separate reconciliation credits the wallet.
+        s.defer_funding(
+            &jobs[0].id,
+            200,
+            Some("funding_quote_failed; late result"),
+            true,
+        )
+        .unwrap();
+        assert!(s.funding_jobs().unwrap()[0].last_error.is_none());
+        s.defer_funding(
+            &jobs[0].id,
+            201,
+            Some("source_reconciliation_failed; retain reservation"),
+            false,
+        )
+        .unwrap();
+        assert!(
+            s.funding_jobs().unwrap()[0]
+                .last_error
+                .as_deref()
+                .unwrap()
+                .contains("source_reconciliation_failed")
+        );
+        s.defer_funding(&jobs[0].id, 202, None, false).unwrap();
+        assert!(s.funding_jobs().unwrap()[0].last_error.is_none());
+        s.ensure_pool("b", "5").unwrap();
+        let pending = s
+            .funding_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|j| j.pool_name == "b")
+            .unwrap();
+        s.defer_funding(
+            &pending.id,
+            203,
+            Some("source_reconciliation_failed; retain reservation"),
+            false,
+        )
+        .unwrap();
+        s.record_credit(&pending.wallet_id, "5000000", "block", 1)
+            .unwrap();
+        assert!(
+            s.funding_jobs()
+                .unwrap()
+                .into_iter()
+                .find(|j| j.id == pending.id)
+                .unwrap()
+                .last_error
+                .unwrap()
+                .starts_with("source_reconciliation_failed;")
+        );
+    }
 }

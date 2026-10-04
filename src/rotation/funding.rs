@@ -309,7 +309,11 @@ impl FundingBackend for Backend {
     async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
         let (limits, _) = self.policy(job)?;
         let refund = self.treasury.refund_address(job.id.clone()).await?;
-        let assets = self.near.assets().await?;
+        let assets = self
+            .near
+            .assets()
+            .await
+            .context(NearStage("asset catalog"))?;
         let instant = now()?;
         let request = super::near::request(
             &assets,
@@ -326,6 +330,7 @@ impl FundingBackend for Backend {
         self.near
             .quote_with_minimum(request, &limits, instant)
             .await
+            .context(NearStage("quote"))
     }
     async fn prepare(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         let (limits, _) = self.policy(job)?;
@@ -434,6 +439,54 @@ impl FundingBackend for Backend {
     }
 }
 
+#[derive(Debug)]
+struct NearStage(&'static str);
+impl std::fmt::Display for NearStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NEAR {}", self.0)
+    }
+}
+impl std::error::Error for NearStage {}
+
+fn near_diagnostic(error: &anyhow::Error) -> String {
+    for cause in error.chain() {
+        let text = cause.to_string();
+        if let Some(code) = text.strip_prefix("near_http_")
+            && code.len() == 3
+            && code.bytes().all(|b| b.is_ascii_digit())
+            && let Ok(code @ 100..=599) = code.parse::<u16>()
+        {
+            return format!("HTTP {code}");
+        }
+        let category = match text.as_str() {
+            "near_unavailable: timeout" => "request timeout",
+            "near_unavailable: connect" => "connection failure",
+            "near_unavailable: transport" => "request transport failure",
+            "near_response_failed: timeout" => "response body timeout",
+            "near_response_failed: body transport" => "response body transport failure",
+            "invalid NEAR JSON" => "invalid JSON response",
+            "quote input limit" => "input cap exceeded",
+            "quote overhead limit" | "platform fee exceeds overhead cap" => {
+                "fee/overhead cap exceeded"
+            }
+            "quote deadline too close" => "quote deadline too close",
+            "near_bridge_minimum_not_increasing" => "invalid bridge minimum",
+            "required asset missing or ambiguous" => "required asset missing or ambiguous",
+            "invalid token catalog" => "invalid asset catalog",
+            "quote output mismatch" => "output target mismatch",
+            "missing deposit" => "missing deposit address",
+            "invalid transparent address" => "invalid deposit address",
+            _ if text.starts_with("near_response_too_large:") => {
+                "response rejected: fixed 2000000-byte limit exceeded"
+            }
+            _ if text.starts_with("quote binding mismatch:") => "quote binding mismatch",
+            _ => continue,
+        };
+        return category.into();
+    }
+    "validation or internal error; response not accepted".into()
+}
+
 /// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
 /// quote addresses or arbitrary error prose into the public journal.
 fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
@@ -443,7 +496,11 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
             super::base::safe_diagnostic(error)
         );
     }
-    safe_error_category(error, phase).into()
+    let category = safe_error_category(error, phase);
+    if let Some(stage) = error.downcast_ref::<NearStage>() {
+        return format!("{category}; NEAR {}: {}", stage.0, near_diagnostic(error));
+    }
+    category.into()
 }
 fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
     if error.is::<super::transaction::PreparationDeferred>() {
@@ -465,7 +522,7 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "treasury_budget_exceeded; wait for budget or review daily_input_zec";
             }
             "treasury_insufficient_spendable_funds" => {
-                return "treasury_insufficient_spendable_funds; fund and sync the shielded treasury";
+                return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
             }
             "quote_refresh_exhausted" => {
                 return "quote_refresh_exhausted; review deadlines and recover-unprepared explicitly";

@@ -96,10 +96,18 @@ impl NearClient {
         )
     }
     async fn response(&self, request: reqwest::RequestBuilder) -> Result<Value> {
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| anyhow::anyhow!("near_unavailable"))?;
+        let mut response = request.send().await.map_err(|error| {
+            anyhow::anyhow!(
+                "near_unavailable: {}",
+                if error.is_timeout() {
+                    "timeout"
+                } else if error.is_connect() {
+                    "connect"
+                } else {
+                    "transport"
+                }
+            )
+        })?;
         let status = response.status();
         ensure!(
             status.is_success() || status.as_u16() == 400,
@@ -107,11 +115,16 @@ impl NearClient {
             status.as_u16()
         );
         let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| anyhow::anyhow!("near_response_failed"))?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            anyhow::anyhow!(
+                "near_response_failed: {}",
+                if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "body transport"
+                }
+            )
+        })? {
             if chunk.len() > 2_000_000usize.saturating_sub(bytes.len()) {
                 tracing::warn!(
                     limit_bytes = 2_000_000,
