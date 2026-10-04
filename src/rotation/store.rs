@@ -548,6 +548,17 @@ impl Store {
             [wallet],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
+        let completed: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_jobs WHERE wallet_id=?1 AND state='COMPLETE')",
+            [wallet],
+            |r| r.get(0),
+        )?;
+        if completed {
+            // Background reconciliation may have completed funding, promoted the
+            // wallet, or observed later spending while this RPC view was in flight.
+            // The durable completion wins; never overwrite newer balances/roles.
+            return Ok(());
+        }
         ensure!(
             role == "ALLOCATED",
             "credit verification requires an allocated candidate"

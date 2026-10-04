@@ -832,3 +832,95 @@ fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
         );
     }
 }
+
+#[tokio::test]
+async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wallets() {
+    use x402_treazury::rotation::base::{Anchor, ChainView};
+    use x402_treazury::rotation::store::funding::FundingPhase;
+    for promote_again in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = s.ensure_pool("a", "5").unwrap();
+        for j in s.funding_jobs().unwrap() {
+            s.record_credit(&j.wallet_id, "5000000", "boot", 1).unwrap();
+        }
+        s.promote(&pool, 0).unwrap();
+        let job = s
+            .funding_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|j| j.phase != FundingPhase::Complete)
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(s);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let late_store = store.clone();
+        let wallet = job.wallet_id.clone();
+        let late_credit = tokio::spawn(async move {
+            // Pause at the real boundary: the RPC view was started, persistence has not run.
+            started.send(()).unwrap();
+            released.await.unwrap();
+            late_store
+                .call(move |s| s.record_credit(&wallet, "1", "old-in-flight-block", 2))
+                .await
+        });
+        ready.await.unwrap();
+        let p = pool.clone();
+        store
+            .call(move |s| {
+                let query = s.chain_query(&p)?;
+                s.reconcile_pool(
+                    &p,
+                    ChainView {
+                        anchor: Anchor {
+                            height: 3,
+                            hash: format!("0x{:064x}", 3),
+                        },
+                        balances: query
+                            .wallets
+                            .iter()
+                            .map(|(id, _)| (id.clone(), alloy_primitives::U256::from(5_000_000)))
+                            .collect(),
+                        released: vec![],
+                    },
+                )?;
+                if promote_again {
+                    s.promote(&p, 1)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let before = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
+        release.send(()).unwrap();
+        late_credit.await.unwrap().unwrap();
+        assert_eq!(
+            before,
+            serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
+        );
+        let jobs = store.call(|s| s.funding_jobs()).await.unwrap();
+        let completed = jobs.iter().find(|j| j.id == job.id).unwrap();
+        assert_eq!(completed.phase, FundingPhase::Complete);
+        assert!(completed.last_error.is_none());
+        // Still-unfunded candidates must not gain readiness from a low balance.
+        if let Some(pending) = jobs.iter().find(|j| j.phase != FundingPhase::Complete) {
+            let wallet = pending.wallet_id.clone();
+            assert!(
+                store
+                    .call(move |s| s.record_credit(&wallet, "1", "fresh", 4))
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("insufficient confirmed credit")
+            );
+        }
+        drop(store);
+        worker.await.unwrap();
+    }
+}
