@@ -559,6 +559,19 @@
     "has_body": false
   },
   {
+    "name": "kronos_help",
+    "description": "Read Kronos's API guide, asset coverage, signal interpretation and pricing. Fetched on demand and cached for this process. Follow the selected tool schemas; guide examples may describe a broader catalog.",
+    "method": "GET",
+    "path": "https://kronossignals.com/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://kronossignals.com/llms.txt"
+  },
+  {
     "name": "kronos_implied_prob_asset",
     "description": "Returns the options market's probability that BTC or ETH is above each of up to 25 prices at a target time, backed out of the Deribit option book: a skew-inclusive call-spread digital on the mark-IV smile, with total variance interpolated in time between listed expiries. It is the fair value of a prediction-market crypto threshold contract (Kalshi, Polymarket) — compare probability_above with the contract's YES price. Risk-neutral, not a forecast. Malformed input is refused with a free 400 before any payment. $0.02 USDC via x402. BTC and ETH only. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
     "method": "GET",

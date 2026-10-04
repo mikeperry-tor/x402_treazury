@@ -40,6 +40,19 @@
     "has_body": false
   },
   {
+    "name": "regimeshift_help",
+    "description": "Read RegimeShift's API quickstart, fetched on demand and cached for this process. The guide includes escrow and intent workflows; it does not authorize wallet operations. Treazury handles payment. SSE streaming is not supported; use the JSON response mode for intent matching.",
+    "method": "GET",
+    "path": "https://regimeshift.xyz/api/quickstart.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://regimeshift.xyz/api/quickstart.txt"
+  },
+  {
     "name": "regimeshift_intent_borrow",
     "description": "Free — no payment required. Submit a borrower intent (wallet, USDC principal wanted vs WETH collateral, max rate, max duration); matching runs synchronously and returns a match payload when a compatible lender is found.",
     "method": "POST",

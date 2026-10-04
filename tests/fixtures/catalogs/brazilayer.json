@@ -716,6 +716,19 @@
     "has_body": false
   },
   {
+    "name": "brazilayer_help",
+    "description": "Read Brazilayer's API guide, response conventions, coverage and pricing. Fetched on demand and cached for this process. Treazury handles payment; the live challenge and configured spend cap are authoritative.",
+    "method": "GET",
+    "path": "https://api.brazilayer.com/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://api.brazilayer.com/llms.txt"
+  },
+  {
     "name": "brazilayer_integridade_amostra",
     "description": "Free — no payment required. Free sample screening response (real sanctioned company)",
     "method": "GET",

@@ -14,7 +14,7 @@ fn fixture() -> (Config, Value) {
 fn platform_tags_names_pricing_and_routing_preserve_versions() {
     let (mut cfg, root) = fixture();
     let all = build_tools(&cfg, &root, "socialfetch").unwrap();
-    assert_eq!(all.len(), 237);
+    assert_eq!(all.len(), 238);
     assert!(all.iter().all(|t| !t.name.starts_with("socialfetch_v1_")));
     assert!(
         all.iter()
@@ -46,7 +46,7 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
     );
     cfg.tags = vec!["LinkedIn".into()];
     let linkedin = build_tools(&cfg, &root, "socialfetch").unwrap();
-    assert_eq!(linkedin.len(), 41);
+    assert_eq!(linkedin.len(), 42);
     assert_eq!(
         linkedin
             .iter()
@@ -55,10 +55,10 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
         28
     );
     cfg.include = vec!["/v1".into()];
-    assert_eq!(build_tools(&cfg, &root, "socialfetch").unwrap().len(), 13);
+    assert_eq!(build_tools(&cfg, &root, "socialfetch").unwrap().len(), 14);
     cfg.tags = vec!["Twitter".into(), "YouTube".into()];
     cfg.exclude_tags.push("YouTube".into());
-    assert_eq!(build_tools(&cfg, &root, "socialfetch").unwrap().len(), 29);
+    assert_eq!(build_tools(&cfg, &root, "socialfetch").unwrap().len(), 30);
     cfg.tags = vec!["twitter".into()];
     assert!(build_tools(&cfg, &root, "socialfetch").is_err());
     let counts = tag_counts(&root).unwrap();
@@ -136,5 +136,6 @@ include_tools = ["socialfetch_twitter_*"]
         .unwrap();
     assert!(output.status.success());
     let tools: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(tools.len(), 29);
+    assert_eq!(tools.len(), 30);
+    assert!(tools.iter().any(|t| t["name"] == "socialfetch_help"));
 }

@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 834);
+    assert_eq!(total, 840);
 }
 
 #[tokio::test]
@@ -66,7 +66,7 @@ async fn directory_exact_allowlist_excludes_new_write_and_subroutes() {
     doc["paths"]["/services/new-admin-action"] =
         serde_json::json!({"get":{"description":"new route"}});
     let tools = catalog::build_tools(&cfg, &doc, "x402_list").unwrap();
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 6);
     assert!(tools.iter().all(|t| t.method == "GET"));
     let details = tools.iter().find(|t| t.path == "/services/{slug}").unwrap();
     let route = details
@@ -506,4 +506,46 @@ async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
     assert!(output.text.contains("Copernicus fixture"));
     assert!(output.text.contains("2025-05-15"));
     assert!(!output.text.contains(png));
+}
+
+#[tokio::test]
+async fn added_help_tools_build_offline_without_changing_api_routes() {
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for provider in [
+        "botsmith",
+        "brazilayer",
+        "kronos",
+        "otto",
+        "regimeshift",
+        "socialfetch",
+        "x402-list",
+    ] {
+        let mut cfg = config::load(&root.join(format!("providers/{provider}.toml")))
+            .await
+            .unwrap()
+            .settings;
+        // Inventory generation never loads the remote help document. Keep a tiny
+        // local operation independent of each provider's real selection filters.
+        cfg.include.clear();
+        cfg.exclude.clear();
+        cfg.include_operations.clear();
+        cfg.tags.clear();
+        cfg.exclude_tags.clear();
+        let doc = serde_json::json!({"paths":{"/fixture":{"get":{"summary":"Fixture"}}}});
+        let tools = catalog::build_tools(&cfg, &doc, cfg.prefix.as_deref().unwrap()).unwrap();
+        assert_eq!(tools.len(), 2, "{provider}");
+        assert_eq!(tools[0].path, "/fixture");
+        let help = &tools[1];
+        assert_eq!(help.help_url, cfg.help_url);
+        assert!(
+            help.input_schema["properties"]
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(help.param_routes.is_empty());
+        assert!(!help.has_body);
+        assert!(help.description.contains("cached for this process"));
+    }
 }

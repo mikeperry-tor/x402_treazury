@@ -9,3 +9,8 @@ exclude_tags = ["Auth", "Monitors", "System"]
 pricing_key = "x-socialfetch-credits-pricing"
 probe_pricing = false
 instructions_text = "SocialFetch social and web data via x402 USDC on Base. Select platforms using OpenAPI tags (for example Twitter, YouTube, LinkedIn). Prices are quoted in credits, approximately $0.014 USDC per credit; follow each tool description for base costs and usage-dependent surcharges. The payment challenge is authoritative. LinkedIn includes both API versions: tools with socialfetch_linkedin_ use v1, and socialfetch_v2_linkedin_ use v2. Parameter names and HTTP paths preserve their original casing. Slow transcript/search requests may need a 90-second timeout."
+
+help_url = "https://www.socialfetch.dev/llms.txt"
+
+[overrides.socialfetch_help]
+description = "Read Social Fetch's API usage guide, fetched on demand and cached for this process. The guide describes its API-key product and broader monitor/webhook workflows; this integration uses the x402 host and selected tools with Treazury-managed payment, without a vendor API key. Preserve lookupStatus, partial-result and provenance fields."

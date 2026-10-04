@@ -283,9 +283,34 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
             ensure!(
                 extra.keys().all(|k| matches!(
                     k.as_str(),
-                    "name" | "version" | "assetTransferMethod" | "flow" | "facilitatorAddress"
+                    "name"
+                        | "version"
+                        | "assetTransferMethod"
+                        | "flow"
+                        | "facilitatorAddress"
+                        | "breakdown"
+                        | "totalUsd"
+                        | "acceptId"
+                        | "merchant"
+                        | "tier"
                 )),
                 "unknown payment metadata"
+            );
+            // Reviewed vendor annotations are echoed unchanged, never used to select a
+            // signing mechanism or compute the reservation. Atomic `amount` is authoritative.
+            ensure!(
+                ["acceptId", "merchant", "tier"]
+                    .iter()
+                    .all(|key| extra.get(*key).is_none_or(Value::is_string))
+                    && extra
+                        .get("totalUsd")
+                        .is_none_or(|v| v.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0))
+                    && extra
+                        .get("breakdown")
+                        .is_none_or(|v| v.as_object().is_some_and(|m| m
+                            .values()
+                            .all(|v| v.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)))),
+                "malformed informational payment metadata"
             );
             ensure!(
                 extra.get("name").is_some_and(|v| v == "USD Coin")

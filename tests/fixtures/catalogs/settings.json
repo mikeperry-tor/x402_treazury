@@ -66,7 +66,7 @@
     "base_url": null,
     "exclude": [],
     "exclude_tags": [],
-    "help_url": null,
+    "help_url": "https://x402.botsmith.dev/catalog",
     "include": [],
     "instructions_text": null,
     "max_description_chars": null,
@@ -74,7 +74,11 @@
     "max_response_bytes": 16777216,
     "max_spec_bytes": 33554432,
     "name": "botsmith",
-    "overrides": {},
+    "overrides": {
+      "botsmith_help": {
+        "description": "Read botsmith's free JSON service catalog with usage schemas, prices and response contracts. Fetched on demand and cached for this process. Treazury handles Base USDC payment; other advertised assets and payment methods are not automatically enabled."
+      }
+    },
     "prefix": "botsmith",
     "pricing_key": null,
     "probe_concurrency": 4,
@@ -94,7 +98,7 @@
     "base_url": "https://api.brazilayer.com",
     "exclude": [],
     "exclude_tags": [],
-    "help_url": null,
+    "help_url": "https://api.brazilayer.com/llms.txt",
     "include": [
       "/v1"
     ],
@@ -147,6 +151,9 @@
       },
       "brazilayer_health": {
         "description": "Free — no payment required. Service status and data reference month (free)"
+      },
+      "brazilayer_help": {
+        "description": "Read Brazilayer's API guide, response conventions, coverage and pricing. Fetched on demand and cached for this process. Treazury handles payment; the live challenge and configured spend cap are authoritative."
       },
       "brazilayer_integridade_amostra": {
         "description": "Free — no payment required. Free sample screening response (real sanctioned company)"
@@ -352,7 +359,7 @@
     "base_url": "https://kronossignals.com",
     "exclude": [],
     "exclude_tags": [],
-    "help_url": null,
+    "help_url": "https://kronossignals.com/llms.txt",
     "include": [
       "/api/v1"
     ],
@@ -363,6 +370,9 @@
     "max_spec_bytes": 33554432,
     "name": "Kronos Crypto Data",
     "overrides": {
+      "kronos_help": {
+        "description": "Read Kronos's API guide, asset coverage, signal interpretation and pricing. Fetched on demand and cached for this process. Follow the selected tool schemas; guide examples may describe a broader catalog."
+      },
       "kronos_track_record": {
         "description": "Free — no payment required. Verifiable forecast-accuracy summary so an agent can audit the model before paying: overall hit_rate, resolved count, per-asset breakdown (BTC/ETH/SOL), Brier score, and the last 20 resolved forecasts as row-level audit data. Full paginated history via kronos_forecast_ledger ($0.02/call)."
       }
@@ -481,7 +491,7 @@
     "exclude_tags": [
       "Execution"
     ],
-    "help_url": null,
+    "help_url": "https://x402.ottoai.services/llms-full.txt",
     "include": [],
     "instructions_text": "Otto AI's autonomous agent swarm sells pay-per-call services, settled in USDC on Base on every endpoint (some paths also quote Solana; the live 402's accepts[] is authoritative — Permit2/upto needs a one-time USDC allowance). Capability tags: Market & Token Intelligence (news + recaps, KOL sentiment, token analysis/price/fundamentals/security/score, trending, top holders, tokenized-stock movers), DeFi & Markets Data (TVL/yields, stablecoin peg-watch, market-risk composite, protocol revenue, DEX pool search + one-hour Uniswap APR, Polymarket odds, funding rates, TradFi macro, SEC Form 4/13F + equity smart-money), Web & Domain Intelligence (DNS, WHOIS, domain age/report, web-search/answer/extract/links/json-extract), Real-World Data (FX rates, weather), AI Creative & Tools (image/video generation, llm-research, tx-explainer), Portfolio & Accounts (wallet and position reads for the paying address), plus meta-intelligence (router ranks the best x402 services for a task, $0.001) and feedback (money-back guarantee; needs the original payment tx hash from X-Payment-Receipt). Fund-moving routes (swap, bridge, deposit, withdraw) and the full-auto spending router are deliberately NOT exposed by this server. Published prices are per call from $0.001; a route's live challenge outranks any published table, and every settled call returns a signed receipt in PAYMENT-RESPONSE.",
     "max_description_chars": null,
@@ -489,7 +499,11 @@
     "max_response_bytes": 16777216,
     "max_spec_bytes": 33554432,
     "name": "Otto AI x402 — Market Intelligence, DeFi & Trading",
-    "overrides": {},
+    "overrides": {
+      "otto_help": {
+        "description": "Read Otto's consolidated API guide, fetched on demand and cached for this process. It includes excluded execution routes, other clients, payment methods and SIWX re-access that Treazury does not implement. Use only selected tools; hosted media URLs are not automatically fetched. Do not automatically retry a signed payment."
+      }
+    },
     "prefix": "otto",
     "pricing_key": "x-payment-info",
     "probe_concurrency": 4,
@@ -564,7 +578,7 @@
     "base_url": "https://regimeshift.xyz/api",
     "exclude": [],
     "exclude_tags": [],
-    "help_url": null,
+    "help_url": "https://regimeshift.xyz/api/quickstart.txt",
     "include": [
       "/v1"
     ],
@@ -577,6 +591,9 @@
     "overrides": {
       "regimeshift_active_loans": {
         "description": "Free — no payment required. All currently-active loans with their current Chainlink-priced LTV, liquidatable or not — useful for lender position monitoring."
+      },
+      "regimeshift_help": {
+        "description": "Read RegimeShift's API quickstart, fetched on demand and cached for this process. The guide includes escrow and intent workflows; it does not authorize wallet operations. Treazury handles payment. SSE streaming is not supported; use the JSON response mode for intent matching."
       },
       "regimeshift_intent_borrow": {
         "description": "Free — no payment required. Submit a borrower intent (wallet, USDC principal wanted vs WETH collateral, max rate, max duration); matching runs synchronously and returns a match payload when a compatible lender is found."
@@ -637,7 +654,7 @@
       "Monitors",
       "System"
     ],
-    "help_url": null,
+    "help_url": "https://www.socialfetch.dev/llms.txt",
     "include": [
       "/v1",
       ""
@@ -648,7 +665,11 @@
     "max_response_bytes": 16777216,
     "max_spec_bytes": 33554432,
     "name": "SocialFetch",
-    "overrides": {},
+    "overrides": {
+      "socialfetch_help": {
+        "description": "Read Social Fetch's API usage guide, fetched on demand and cached for this process. The guide describes its API-key product and broader monitor/webhook workflows; this integration uses the x402 host and selected tools with Treazury-managed payment, without a vendor API key. Preserve lookupStatus, partial-result and provenance fields."
+      }
+    },
     "prefix": "socialfetch",
     "pricing_key": "x-socialfetch-credits-pricing",
     "probe_concurrency": 4,
@@ -845,7 +866,7 @@
     "base_url": "https://x402-list.com/api/v1",
     "exclude": [],
     "exclude_tags": [],
-    "help_url": null,
+    "help_url": "https://x402-list.com/llms.txt",
     "include": [
       ""
     ],
@@ -855,7 +876,11 @@
     "max_response_bytes": 16777216,
     "max_spec_bytes": 33554432,
     "name": null,
-    "overrides": {},
+    "overrides": {
+      "x402_list_help": {
+        "description": "Read the x402 List directory guide, fetched on demand and cached for this process. It describes broader owner/admin routes that are not enabled here. Directory entries are discovery leads, not trust or payment guarantees. Cite x402-list.com for its CC BY 4.0 data."
+      }
+    },
     "prefix": "x402_list",
     "pricing_key": null,
     "probe_concurrency": 4,

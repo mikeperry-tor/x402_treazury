@@ -1,0 +1,3230 @@
+{
+  "agent402": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://agent402.tools/api/dns",
+      "description": "Live DNS lookup for a domain: returns name, type and records[]. Supported record types: A, AAAA (addresses as strings), MX ({exchange, priority} objects), TXT (each record an array of its strings), NS and CNAME (hostnames). For SPF, DMARC or a full mail-security read use spf-check, dmarc-check or email-deliverability.",
+      "mimeType": "application/json",
+      "serviceName": "DNS lookup",
+      "tags": [
+        "network",
+        "dns",
+        "domains",
+        "networking",
+        "agents"
+      ],
+      "iconUrl": "https://agent402.tools/favicon.ico"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "records": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "records"
+          ]
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:137",
+        "amount": "1000",
+        "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42161",
+        "amount": "1000",
+        "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:143",
+        "amount": "1000",
+        "asset": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:43114",
+        "amount": "1000",
+        "asset": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:1329",
+        "amount": "1000",
+        "asset": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:10",
+        "amount": "2000",
+        "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:4663",
+        "amount": "1000",
+        "asset": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "Global Dollar",
+          "version": "1"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42220",
+        "amount": "1000",
+        "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "upto",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0xaBF4FAbd7c416fB67202E5f9002389Fc75e2a9D0",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2",
+          "assetTransferMethod": "permit2",
+          "facilitatorAddress": "0xE72f0Af4CF41356d433723547F1412cA27FBB1B8"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "amount": "1000",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "payTo": "J7aN3PLJnTCF5qpEnvJHJsnCjcGuqC2rYtEM8Gv3xwg",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "feePayer": "GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "stellar:pubnet",
+        "amount": "10000",
+        "asset": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+        "payTo": "GDNJXCKW7ZM7GEEVP674TWPU26YJNBQ2FI4ZIPRKTPTNUEJMDHFJWWRL",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "areFeesSponsored": true
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=",
+        "amount": "1000",
+        "asset": "31566704",
+        "payTo": "C7IIHG7SPLPZ5H7ZT6HW3UV2OQMQQE6Y2HBNGZXSLRJULE42BEE2OY2XIE",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "tag": "x402-global-challenge",
+          "feePayer": "ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "queryParams": {
+              "name": "example.com",
+              "type": "A"
+            },
+            "method": "GET"
+          },
+          "output": {
+            "type": "json",
+            "example": {
+              "name": "example.com",
+              "type": "A",
+              "records": [
+                "93.184.215.14"
+              ]
+            }
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "GET"
+                  ]
+                },
+                "queryParams": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Domain name, e.g. example.com"
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Record type (default A)"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "type",
+                    "records"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      },
+      "builder-code": {
+        "info": {
+          "a": "bc_b4aw4uzd"
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$",
+              "description": "App builder code"
+            },
+            "w": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$",
+              "description": "Wallet builder code"
+            },
+            "s": {
+              "type": "array",
+              "maxItems": 11,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,32}$"
+              },
+              "description": "Service builder codes"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "payment-identifier": {
+        "info": {
+          "required": false
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          "required": [
+            "required"
+          ]
+        }
+      }
+    }
+  },
+  "exa": {
+    "x402Version": 2,
+    "resource": {
+      "url": "https://api.exa.ai/search",
+      "description": "Exa /search endpoint",
+      "mimeType": "application/json"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "7000",
+        "payTo": "0x6d6E695b09861467c7d462f5AAF31cF3540B9192",
+        "maxTimeoutSeconds": 60,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "name": "USD Coin",
+          "version": "2",
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "legacy"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "amount": "7000",
+        "payTo": "12Ec2cJmfR1C9uwejzxcuMhUgEC7wDrLgm1wBvvR5w9E",
+        "maxTimeoutSeconds": 60,
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "extra": {
+          "feePayer": "GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb",
+          "name": "USD Coin",
+          "version": "2",
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "solana-usdc-mainnet"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "7000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 604900,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee",
+          "minValiditySeconds": 604800,
+          "assets": [
+            {
+              "symbol": "USDC",
+              "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "decimals": 6
+            }
+          ],
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "base-usdc-gateway"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:480",
+        "amount": "7000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 604900,
+        "asset": "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee",
+          "minValiditySeconds": 604800,
+          "assets": [
+            {
+              "symbol": "USDC",
+              "address": "0x79a02482a880bce3f13e09da970dc34db4cd24d1",
+              "decimals": 6
+            }
+          ],
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "worldchain-usdc-gateway"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:5042",
+        "amount": "7000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 604900,
+        "asset": "0x3600000000000000000000000000000000000000",
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee",
+          "minValiditySeconds": 604800,
+          "assets": [
+            {
+              "symbol": "USDC",
+              "address": "0x3600000000000000000000000000000000000000",
+              "decimals": 6
+            }
+          ],
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "arc-usdc-gateway"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:5042",
+        "amount": "7000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 3600,
+        "asset": "0x3600000000000000000000000000000000000000",
+        "extra": {
+          "assetTransferMethod": "eip3009",
+          "name": "USDC",
+          "version": "2",
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "arc-usdc-circle"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "7000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 3600,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "assetTransferMethod": "eip3009",
+          "name": "USD Coin",
+          "version": "2",
+          "breakdown": {
+            "search": 0.006999999999999999
+          },
+          "totalUsd": 0.006999999999999999,
+          "acceptId": "base-usdc-circle"
+        }
+      }
+    ],
+    "error": "Payment required to access this resource",
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "bodyType": "json",
+            "body": {
+              "query": "example search query",
+              "numResults": 10,
+              "type": "auto"
+            },
+            "method": "POST"
+          },
+          "output": {
+            "type": "json",
+            "example": {
+              "results": [
+                {
+                  "url": "https://example.com",
+                  "title": "Example",
+                  "score": 0.99
+                }
+              ]
+            }
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "POST"
+                  ]
+                },
+                "bodyType": {
+                  "type": "string",
+                  "enum": [
+                    "json",
+                    "form-data",
+                    "text"
+                  ]
+                },
+                "body": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "description": "Search query"
+                    },
+                    "numResults": {
+                      "type": "number",
+                      "description": "Number of results to return (max 10 for x402)"
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Search type: auto, keyword, neural, deep-lite, deep, deep-reasoning"
+                    },
+                    "contents": {
+                      "type": "object",
+                      "description": "Content fields to include: text, highlights, summary"
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "bodyType",
+                "body",
+                "method"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      },
+      "agentkit": {
+        "info": {
+          "version": "1",
+          "statement": "Verify your agent is backed by a real human to access Exa",
+          "domain": "api.exa.ai",
+          "uri": "https://api.exa.ai/search",
+          "nonce": "03bea35e9ab0600940f9b6efbea2b12e",
+          "issuedAt": "2026-10-03T23:32:43.865Z",
+          "resources": [
+            "https://api.exa.ai/search"
+          ]
+        },
+        "supportedChains": [
+          {
+            "chainId": "eip155:480",
+            "type": "eip191"
+          },
+          {
+            "chainId": "eip155:480",
+            "type": "eip1271"
+          }
+        ],
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "address": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string",
+              "format": "uri"
+            },
+            "version": {
+              "type": "string"
+            },
+            "chainId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expirationTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "notBefore": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain",
+            "address",
+            "uri",
+            "version",
+            "chainId",
+            "type",
+            "nonce",
+            "issuedAt",
+            "signature"
+          ]
+        },
+        "_options": {
+          "statement": "Verify your agent is backed by a real human to access Exa",
+          "mode": {
+            "type": "free-trial",
+            "uses": 100
+          },
+          "network": "eip155:480"
+        }
+      }
+    }
+  },
+  "google-trends": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://google-trends.use.x402atlas.com/trend?keyword=rust",
+      "description": "Google Trends interest over time for a keyword \u2014 worldwide search popularity as a monthly series for keyword research, SEO & demand trend analysis.",
+      "mimeType": "application/json",
+      "serviceName": "Google Trends SEO Keyword Data",
+      "tags": [
+        "google-trends",
+        "interest-over-time",
+        "keyword-research",
+        "search-trends",
+        "search-volume",
+        "seo",
+        "trend-analysis"
+      ]
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "50000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:137",
+        "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "amount": "50000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42161",
+        "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "amount": "50000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amount": "50000",
+        "payTo": "ASt6xvRyQ7ntERsmcYVMdLqZvz1GEN8Fzexzq62tXrNQ",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "feePayer": "GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb",
+          "merchant": "x402Atlas",
+          "tier": "standard"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "category": "marketing",
+        "info": {
+          "input": {
+            "method": "GET",
+            "queryParams": {
+              "keyword": "bitcoin"
+            },
+            "type": "http"
+          },
+          "output": {
+            "example": {
+              "keyword": "bitcoin",
+              "queried_at": "2026-06-05T12:00:00Z",
+              "series": [
+                {
+                  "date": "2026-05-01",
+                  "value": 78
+                }
+              ]
+            },
+            "type": "json"
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "enum": [
+                    "GET"
+                  ],
+                  "type": "string"
+                },
+                "queryParams": {
+                  "properties": {
+                    "keyword": {
+                      "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+                      "maxLength": 100,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "keyword"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "const": "http",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "type": "object"
+            },
+            "output": {
+              "properties": {
+                "example": {
+                  "properties": {
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "series": {
+                      "description": "Monthly interest-over-time points, worldwide",
+                      "items": {
+                        "properties": {
+                          "date": {
+                            "description": "ISO date (YYYY-MM-DD)",
+                            "format": "date",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative search-popularity index",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "queried_at",
+                    "series"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "input"
+          ],
+          "type": "object"
+        },
+        "tags": [
+          "google-trends",
+          "interest-over-time",
+          "keyword-research",
+          "search-trends",
+          "search-volume",
+          "seo",
+          "trend-analysis"
+        ]
+      }
+    }
+  },
+  "locus": {
+    "x402Version": 2,
+    "error": "PAYMENT-SIGNATURE header is required",
+    "resource": {
+      "url": "https://api.locus.report/api/locus-place-report",
+      "description": "Public-record report for a street address or ZIP after free preflight. After settlement or seller-escrow, locus_parcel_financials may show the cited assessor owner-of-record for the same exact parcel, not a contact. Canonical storage remains owner-free; no valuation or screening. npx @velinussage/locus-agent-skill add.",
+      "mimeType": "application/json"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "50000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 180,
+        "extra": {
+          "assetTransferMethod": "eip3009",
+          "name": "USD Coin",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:1",
+        "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:43114",
+        "asset": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42161",
+        "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:10",
+        "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:137",
+        "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:130",
+        "asset": "0x078D782b760474a361dDA0AF3839290b0EF57AD6",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:146",
+        "asset": "0x29219dd400f2Bf60E5a23d13Be72B486D4038894",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:480",
+        "asset": "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:1329",
+        "asset": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:999",
+        "asset": "0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:5042",
+        "asset": "0x3600000000000000000000000000000000000000",
+        "amount": "50000",
+        "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+        "maxTimeoutSeconds": 604900,
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "method": "POST",
+            "bodyType": "json",
+            "body": {
+              "address": "1 E Edenton St, Raleigh, NC 27601"
+            }
+          },
+          "output": {
+            "type": "json",
+            "example": {
+              "id": "example",
+              "generatedAt": "2026-01-15T00:00:00.000Z",
+              "query": {
+                "radiusMeters": 1,
+                "lookbackDays": 1,
+                "requestedAt": "example"
+              },
+              "summary": "example",
+              "recordCounts": {},
+              "signals": [
+                "example"
+              ],
+              "sections": [
+                "example"
+              ],
+              "records": [
+                {
+                  "id": "example",
+                  "category": "incident",
+                  "title": "example",
+                  "locationPrecision": "exact",
+                  "tags": [
+                    "example"
+                  ],
+                  "source": {
+                    "sourceName": "example"
+                  }
+                }
+              ],
+              "caveats": [
+                "example"
+              ]
+            }
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "POST",
+                    "PUT",
+                    "PATCH"
+                  ]
+                },
+                "bodyType": {
+                  "type": "string",
+                  "enum": [
+                    "json",
+                    "form-data",
+                    "text"
+                  ]
+                },
+                "body": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "zip": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "latitude": {
+                      "type": "number",
+                      "minimum": -90,
+                      "maximum": 90
+                    },
+                    "longitude": {
+                      "type": "number",
+                      "minimum": -180,
+                      "maximum": 180
+                    },
+                    "jurisdiction": {
+                      "type": "string",
+                      "enum": [
+                        "chicago",
+                        "raleigh"
+                      ]
+                    },
+                    "radiusMeters": {
+                      "type": "number",
+                      "maximum": 50000,
+                      "exclusiveMinimum": 0
+                    },
+                    "lookbackDays": {
+                      "type": "integer",
+                      "maximum": 3650,
+                      "exclusiveMinimum": 0
+                    },
+                    "records": {
+                      "type": "array",
+                      "maxItems": 200,
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "sourceAdapters": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "chicago-crimes",
+                          "raleigh-permits",
+                          "raleigh-ask",
+                          "raleigh-nibrs"
+                        ]
+                      }
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "reasoning",
+                        "adapters-only"
+                      ]
+                    },
+                    "reportPrefs": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "goal": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "projectType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "decisionStage": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "focusAreas": {
+                          "type": "array",
+                          "maxItems": 8,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          }
+                        },
+                        "questions": {
+                          "type": "array",
+                          "maxItems": 3,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        }
+                      }
+                    },
+                    "reportType": {
+                      "type": "string",
+                      "enum": [
+                        "site_feasibility",
+                        "property_due_diligence",
+                        "pre_development_analysis"
+                      ]
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "required": [
+                        "address"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "zip"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "method",
+                "bodyType",
+                "body"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      },
+      "locus.freePreflight": {
+        "version": 2,
+        "coverageBeforeCharge": true,
+        "unsupportedReturnsFreeDiagnostic": true,
+        "toolsListUrl": "https://api.locus.report/tools/list",
+        "toolsCallUrl": "https://api.locus.report/tools/call",
+        "recommendedTool": "locus_coverage_check",
+        "laneTool": "locus_lane_availability",
+        "mcpUrl": "https://mcp.locus.report/mcp",
+        "skillUrl": "https://api.locus.report/.well-known/skill.md",
+        "skillInstall": "npx @velinussage/locus-agent-skill add"
+      },
+      "builder-code": {
+        "info": {
+          "a": "bc_vz5zyuko"
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$",
+              "description": "App builder code"
+            },
+            "w": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$",
+              "description": "Wallet builder code"
+            },
+            "s": {
+              "type": "array",
+              "maxItems": 11,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,32}$"
+              },
+              "description": "Service builder codes"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "offer-receipt": {
+        "info": {
+          "offers": [
+            {
+              "format": "eip712",
+              "acceptIndex": 0,
+              "payload": {
+                "version": 1,
+                "resourceUrl": "https://api.locus.report/api/locus-place-report",
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "payTo": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+                "amount": "50000",
+                "validUntil": 1791070547
+              },
+              "signature": "0x2b80385b8ffa65af132a638970fb6a5ffed7dd7273456ce3a37193e5725b0aa44aaab7edd0644c54be5a5465c828b75995e59e2b5eb554fc6c8b6fe12fccaaea1c"
+            }
+          ]
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "offers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "type": "string"
+                  },
+                  "acceptIndex": {
+                    "type": "integer"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "type": "integer"
+                      },
+                      "resourceUrl": {
+                        "type": "string"
+                      },
+                      "scheme": {
+                        "type": "string"
+                      },
+                      "network": {
+                        "type": "string"
+                      },
+                      "asset": {
+                        "type": "string"
+                      },
+                      "payTo": {
+                        "type": "string"
+                      },
+                      "amount": {
+                        "type": "string"
+                      },
+                      "validUntil": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "resourceUrl",
+                      "scheme",
+                      "network",
+                      "asset",
+                      "payTo",
+                      "amount"
+                    ]
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "format",
+                  "signature"
+                ]
+              }
+            }
+          },
+          "required": [
+            "offers"
+          ]
+        }
+      }
+    }
+  },
+  "otto": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://x402.ottoai.services/crypto-news",
+      "description": "Importance-ranked crypto headlines with per-article source links and publish times, plus a sentiment-scored market brief. Regenerated hourly; meta carries the snapshot's age and a fresh/stale verdict.",
+      "mimeType": "application/json",
+      "serviceName": "Otto AI",
+      "tags": [
+        "crypto news",
+        "market news",
+        "sentiment analysis",
+        "breaking headlines"
+      ],
+      "iconUrl": "https://x402.ottoai.services/assets/otto-icon.png"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0x0E84dDEdAaE6A779c462C22a59F301EC31B6b808",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0x0E84dDEdAaE6A779c462C22a59F301EC31B6b808",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2",
+          "assetTransferMethod": "permit2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "amount": "1000",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "payTo": "6XcSfqJHr9vNW2vbiRaMqUYVm7shDgLepca54wUTDPN5",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "feePayer": "Hc3sdEAsCGQcpgfivywog9uwtk8gUBUZgsxdME1EJy88"
+        }
+      }
+    ],
+    "extensions": {
+      "offer-receipt": {
+        "info": {
+          "offers": [
+            {
+              "format": "eip712",
+              "acceptIndex": 0,
+              "payload": {
+                "version": 1,
+                "resourceUrl": "https://x402.ottoai.services/crypto-news",
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "payTo": "0x0E84dDEdAaE6A779c462C22a59F301EC31B6b808",
+                "amount": "1000",
+                "validUntil": 1791070668
+              },
+              "signature": "0xad2a0d8a035726f3e44dfc90b45e55122450c799eef23e78ef592532a220929c65a5d17fbc578f7998e4133d957989269b49c652f97034aaf95dd4fdc913362b1b"
+            },
+            {
+              "format": "eip712",
+              "acceptIndex": 1,
+              "payload": {
+                "version": 1,
+                "resourceUrl": "https://x402.ottoai.services/crypto-news",
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "payTo": "0x0E84dDEdAaE6A779c462C22a59F301EC31B6b808",
+                "amount": "1000",
+                "validUntil": 1791070668
+              },
+              "signature": "0xad2a0d8a035726f3e44dfc90b45e55122450c799eef23e78ef592532a220929c65a5d17fbc578f7998e4133d957989269b49c652f97034aaf95dd4fdc913362b1b"
+            },
+            {
+              "format": "eip712",
+              "acceptIndex": 2,
+              "payload": {
+                "version": 1,
+                "resourceUrl": "https://x402.ottoai.services/crypto-news",
+                "scheme": "exact",
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "payTo": "6XcSfqJHr9vNW2vbiRaMqUYVm7shDgLepca54wUTDPN5",
+                "amount": "1000",
+                "validUntil": 1791070668
+              },
+              "signature": "0x09776ca8a3aecfa4e9d1a02cbd9c4a309bf37a025984cbc977981bb9e0028e4f74ea742bbb77008ed3cf5b7fd4d362fa89d85c37602ad50ad551c3e85598edb51c"
+            }
+          ]
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "offers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "type": "string"
+                  },
+                  "acceptIndex": {
+                    "type": "integer"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "type": "integer"
+                      },
+                      "resourceUrl": {
+                        "type": "string"
+                      },
+                      "scheme": {
+                        "type": "string"
+                      },
+                      "network": {
+                        "type": "string"
+                      },
+                      "asset": {
+                        "type": "string"
+                      },
+                      "payTo": {
+                        "type": "string"
+                      },
+                      "amount": {
+                        "type": "string"
+                      },
+                      "validUntil": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "resourceUrl",
+                      "scheme",
+                      "network",
+                      "asset",
+                      "payTo",
+                      "amount"
+                    ]
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "format",
+                  "signature"
+                ]
+              }
+            }
+          },
+          "required": [
+            "offers"
+          ]
+        }
+      },
+      "otto-content-receipt": {},
+      "builder-code": {
+        "info": {
+          "a": "bc_hc2dhq09"
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$",
+              "description": "App builder code"
+            },
+            "w": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,32}$",
+              "description": "Wallet builder code"
+            },
+            "s": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,32}$"
+              },
+              "description": "Service builder codes"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "sign-in-with-x": {
+        "info": {
+          "domain": "x402.ottoai.services",
+          "uri": "https://x402.ottoai.services/crypto-news",
+          "version": "1",
+          "nonce": "b2d1166fecc5ef62339f42646143530b",
+          "issuedAt": "2026-10-03T23:32:48.117Z",
+          "resources": [
+            "https://x402.ottoai.services/crypto-news"
+          ],
+          "statement": "Sign in to access Otto AI market intelligence"
+        },
+        "supportedChains": [
+          {
+            "chainId": "eip155:8453",
+            "type": "eip191"
+          },
+          {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "type": "ed25519"
+          }
+        ],
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "address": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string",
+              "format": "uri"
+            },
+            "version": {
+              "type": "string"
+            },
+            "chainId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expirationTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "notBefore": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain",
+            "address",
+            "uri",
+            "version",
+            "chainId",
+            "type",
+            "nonce",
+            "issuedAt",
+            "signature"
+          ]
+        }
+      },
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "queryParams": {},
+            "method": "GET"
+          },
+          "output": {
+            "type": "json",
+            "example": {
+              "status": "success",
+              "data": {
+                "report": "Latest crypto news...",
+                "headlines": [
+                  {
+                    "rank": 1,
+                    "title": "Bitcoin ETFs notch best month of 2026 as BTC gains 25% in August",
+                    "whyItMatters": "ETF flows are the strongest near-term driver of institutional participation.",
+                    "url": "https://cointelegraph.com/markets/bitcoin-etf-best-month-2026-btc-up-25-august",
+                    "publishedAt": "2026-09-02T07:59:43.000Z",
+                    "source": "Cointelegraph",
+                    "match": "exact"
+                  }
+                ]
+              },
+              "meta": {
+                "generatedAt": "2026-08-10T12:00:00.000Z",
+                "degraded": false,
+                "sourceHealth": {
+                  "crypto-news-cache": "ok"
+                },
+                "dataAsOf": "2026-08-10T08:00:00.000Z",
+                "stalenessSec": 1739,
+                "freshness": "fresh"
+              }
+            }
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "GET"
+                  ]
+                },
+                "queryParams": {
+                  "type": "object",
+                  "properties": {}
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "success",
+                        "failed"
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "description": "News report object on success, error string on failure",
+                      "properties": {
+                        "report": {
+                          "type": "string"
+                        },
+                        "headlines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "Ranked story. url/publishedAt/source are null when no source article matched by exact title \u2014 never a guessed link. match: exact|null. sourceTitle appears only when the publisher worded it differently.",
+                            "properties": {
+                              "rank": {
+                                "type": "number"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "whyItMatters": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "url": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "publishedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "source": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "sourceTitle": {
+                                "type": "string"
+                              },
+                              "match": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "exact",
+                                  null
+                                ]
+                              }
+                            },
+                            "required": [
+                              "rank",
+                              "title",
+                              "whyItMatters",
+                              "url",
+                              "publishedAt",
+                              "source",
+                              "match"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "report",
+                        "headlines"
+                      ]
+                    },
+                    "meta": {
+                      "type": "object",
+                      "description": "Freshness. generatedAt = when we built this response. stalenessSec = age of our cached snapshot, absent on live pass-throughs. dataAsOf = vintage of the observations. degraded = an older good version was served.",
+                      "properties": {
+                        "generatedAt": {
+                          "type": "string"
+                        },
+                        "stalenessSec": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "degraded": {
+                          "type": "boolean"
+                        },
+                        "sourceHealth": {
+                          "type": "object"
+                        },
+                        "dataAsOf": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Vintage of the observations, as upstream declared it."
+                        },
+                        "freshness": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "fresh",
+                            "stale",
+                            null
+                          ],
+                          "description": "'stale' means past this route's advertised cadence \u2014 still served, never withheld."
+                        }
+                      },
+                      "required": [
+                        "generatedAt",
+                        "degraded",
+                        "sourceHealth"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "data",
+                    "meta"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      }
+    }
+  },
+  "socialfetch": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://api.socialfetch.dev/v1/twitter/profiles/elonmusk",
+      "description": "Get an X (Twitter) profile by handle or numeric user id.",
+      "mimeType": "application/json",
+      "serviceName": "SocialFetch",
+      "tags": [
+        "Twitter",
+        "social-data"
+      ]
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "14000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0x02C2fCAfCe36B4AAdB39625866Bc6B1699d83043",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "queryParams": {},
+            "pathParams": {
+              "handle": "elonmusk"
+            },
+            "method": "GET"
+          },
+          "output": {
+            "type": "json",
+            "example": {
+              "data": {
+                "lookupStatus": "found",
+                "profile": {
+                  "platform": "twitter",
+                  "handle": "NASA",
+                  "displayName": "NASA",
+                  "bio": "Making the seemingly impossible, possible. \u2728",
+                  "avatarUrl": "https://pbs.twimg.com/profile_images/1321163587679784960/0ZxKlEKB_400x400.jpg",
+                  "bannerUrl": "https://pbs.twimg.com/profile_banners/11348282/1788992290/1500x500",
+                  "verified": false,
+                  "blueVerified": true,
+                  "profileUrl": "https://x.com/NASA",
+                  "privateAccount": false,
+                  "platformUserId": "11348282",
+                  "accountCreatedAt": "2007-12-19T20:20:32.000Z",
+                  "_truncated": true
+                },
+                "metrics": {
+                  "followers": 92390102,
+                  "following": 117,
+                  "tweets": 74284,
+                  "favourites": 16987,
+                  "listedCount": 96930,
+                  "mediaCount": 28139
+                }
+              },
+              "meta": {
+                "requestId": "req_example_twitter_profile",
+                "creditsCharged": 1,
+                "version": "v1"
+              }
+            }
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "GET"
+                  ]
+                },
+                "queryParams": {
+                  "type": "object",
+                  "properties": {
+                    "by": {
+                      "description": "Treat the path value as a handle or a numeric user id. Defaults to id when the value is all digits.",
+                      "type": "string",
+                      "enum": [
+                        "id",
+                        "handle"
+                      ]
+                    }
+                  }
+                },
+                "pathParams": {
+                  "type": "object",
+                  "properties": {
+                    "handle": {
+                      "description": "X (Twitter) profile handle without the leading @, or a numeric user id.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "handle"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ]
+        },
+        "routeTemplate": "/v1/twitter/profiles/:handle"
+      },
+      "payment-identifier": {
+        "info": {
+          "required": false
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          "required": [
+            "required"
+          ]
+        }
+      }
+    }
+  },
+  "exa-contents": {
+    "x402Version": 2,
+    "resource": {
+      "url": "https://api.exa.ai/contents",
+      "description": "Exa /contents endpoint",
+      "mimeType": "application/json"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "payTo": "0x6d6E695b09861467c7d462f5AAF31cF3540B9192",
+        "maxTimeoutSeconds": 60,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "name": "USD Coin",
+          "version": "2",
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "legacy"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "amount": "1000",
+        "payTo": "12Ec2cJmfR1C9uwejzxcuMhUgEC7wDrLgm1wBvvR5w9E",
+        "maxTimeoutSeconds": 60,
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "extra": {
+          "feePayer": "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM",
+          "name": "USD Coin",
+          "version": "2",
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "solana-usdc-mainnet"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 604900,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee",
+          "minValiditySeconds": 604800,
+          "assets": [
+            {
+              "symbol": "USDC",
+              "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "decimals": 6
+            }
+          ],
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "base-usdc-gateway"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:480",
+        "amount": "1000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 604900,
+        "asset": "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee",
+          "minValiditySeconds": 604800,
+          "assets": [
+            {
+              "symbol": "USDC",
+              "address": "0x79a02482a880bce3f13e09da970dc34db4cd24d1",
+              "decimals": 6
+            }
+          ],
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "worldchain-usdc-gateway"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:5042",
+        "amount": "1000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 604900,
+        "asset": "0x3600000000000000000000000000000000000000",
+        "extra": {
+          "name": "GatewayWalletBatched",
+          "version": "1",
+          "verifyingContract": "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee",
+          "minValiditySeconds": 604800,
+          "assets": [
+            {
+              "symbol": "USDC",
+              "address": "0x3600000000000000000000000000000000000000",
+              "decimals": 6
+            }
+          ],
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "arc-usdc-gateway"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:5042",
+        "amount": "1000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 3600,
+        "asset": "0x3600000000000000000000000000000000000000",
+        "extra": {
+          "assetTransferMethod": "eip3009",
+          "name": "USDC",
+          "version": "2",
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "arc-usdc-circle"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "1000",
+        "payTo": "0xB98eF29eb2be19Ae646A8FC0248255B90A332dbC",
+        "maxTimeoutSeconds": 3600,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "assetTransferMethod": "eip3009",
+          "name": "USD Coin",
+          "version": "2",
+          "breakdown": {
+            "text": 0.001
+          },
+          "totalUsd": 0.001,
+          "acceptId": "base-usdc-circle"
+        }
+      }
+    ],
+    "error": "Payment required to access this resource",
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "bodyType": "json",
+            "body": {
+              "urls": [
+                "https://example.com"
+              ],
+              "text": true
+            },
+            "method": "POST"
+          },
+          "output": {
+            "type": "json",
+            "example": {
+              "results": [
+                {
+                  "url": "https://example.com",
+                  "title": "Example",
+                  "text": "Page content..."
+                }
+              ]
+            }
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "POST"
+                  ]
+                },
+                "bodyType": {
+                  "type": "string",
+                  "enum": [
+                    "json",
+                    "form-data",
+                    "text"
+                  ]
+                },
+                "body": {
+                  "type": "object",
+                  "properties": {
+                    "ids": {
+                      "type": "array",
+                      "description": "Array of Exa document IDs to retrieve content for"
+                    },
+                    "urls": {
+                      "type": "array",
+                      "description": "Array of URLs to retrieve content for"
+                    },
+                    "text": {
+                      "type": "boolean",
+                      "description": "Include full text content"
+                    },
+                    "highlights": {
+                      "type": "boolean",
+                      "description": "Include text highlights"
+                    },
+                    "summary": {
+                      "type": "boolean",
+                      "description": "Include AI summary"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "bodyType",
+                "body",
+                "method"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      },
+      "agentkit": {
+        "info": {
+          "version": "1",
+          "statement": "Verify your agent is backed by a real human to access Exa",
+          "domain": "api.exa.ai",
+          "uri": "https://api.exa.ai/contents",
+          "nonce": "93a6d2db501cb2d444d1295f0d62ae2b",
+          "issuedAt": "2026-10-04T00:52:14.199Z",
+          "resources": [
+            "https://api.exa.ai/contents"
+          ]
+        },
+        "supportedChains": [
+          {
+            "chainId": "eip155:480",
+            "type": "eip191"
+          },
+          {
+            "chainId": "eip155:480",
+            "type": "eip1271"
+          }
+        ],
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "address": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string",
+              "format": "uri"
+            },
+            "version": {
+              "type": "string"
+            },
+            "chainId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expirationTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "notBefore": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain",
+            "address",
+            "uri",
+            "version",
+            "chainId",
+            "type",
+            "nonce",
+            "issuedAt",
+            "signature"
+          ]
+        },
+        "_options": {
+          "statement": "Verify your agent is backed by a real human to access Exa",
+          "mode": {
+            "type": "free-trial",
+            "uses": 100
+          },
+          "network": "eip155:480"
+        }
+      }
+    }
+  },
+  "google-trends-interest-by-region": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://google-trends.use.x402atlas.com/interest-by-region?keyword=rust&country=us",
+      "description": "Google Trends interest by region for a keyword \u2014 search popularity by geography for geo-targeting, local SEO and market research.",
+      "mimeType": "application/json",
+      "serviceName": "Google Trends SEO Keyword Data",
+      "tags": [
+        "google-trends",
+        "interest-by-region",
+        "geo-targeting",
+        "keyword-research",
+        "seo",
+        "regional-demand",
+        "market-research"
+      ]
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:137",
+        "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42161",
+        "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amount": "30000",
+        "payTo": "ASt6xvRyQ7ntERsmcYVMdLqZvz1GEN8Fzexzq62tXrNQ",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "feePayer": "GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb",
+          "merchant": "x402Atlas",
+          "tier": "standard"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "category": "marketing",
+        "info": {
+          "input": {
+            "method": "GET",
+            "queryParams": {
+              "country": "us",
+              "keyword": "bitcoin"
+            },
+            "type": "http"
+          },
+          "output": {
+            "example": {
+              "country": "us",
+              "keyword": "bitcoin",
+              "queried_at": "2026-06-05T12:00:00Z",
+              "regions": [
+                {
+                  "region": "California",
+                  "value": 100
+                }
+              ]
+            },
+            "type": "json"
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "enum": [
+                    "GET"
+                  ],
+                  "type": "string"
+                },
+                "queryParams": {
+                  "properties": {
+                    "country": {
+                      "default": "US",
+                      "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; also accepted as geo; defaults to US",
+                      "maxLength": 8,
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+                      "maxLength": 100,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "keyword"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "const": "http",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "type": "object"
+            },
+            "output": {
+              "properties": {
+                "example": {
+                  "properties": {
+                    "country": {
+                      "description": "Echoed country code, lower-cased",
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "regions": {
+                      "description": "Interest broken down by subregion within the country",
+                      "items": {
+                        "properties": {
+                          "region": {
+                            "description": "Subregion name",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative search-popularity index (0-100)",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "region",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "country",
+                    "queried_at",
+                    "regions"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "input"
+          ],
+          "type": "object"
+        },
+        "tags": [
+          "google-trends",
+          "interest-by-region",
+          "geo-targeting",
+          "keyword-research",
+          "seo",
+          "regional-demand",
+          "market-research"
+        ]
+      }
+    }
+  },
+  "google-trends-related-queries": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://google-trends.use.x402atlas.com/related-queries?keyword=rust&country=us",
+      "description": "Google Trends related search queries for a keyword by country \u2014 top & rising terms for SEO keyword research, query expansion and content ideas.",
+      "mimeType": "application/json",
+      "serviceName": "Google Trends SEO Keyword Data",
+      "tags": [
+        "google-trends",
+        "related-queries",
+        "keyword-research",
+        "seo",
+        "search-trends",
+        "keyword-ideas",
+        "query-expansion"
+      ]
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:137",
+        "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42161",
+        "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amount": "30000",
+        "payTo": "ASt6xvRyQ7ntERsmcYVMdLqZvz1GEN8Fzexzq62tXrNQ",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "feePayer": "GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb",
+          "merchant": "x402Atlas",
+          "tier": "standard"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "category": "marketing",
+        "info": {
+          "input": {
+            "method": "GET",
+            "queryParams": {
+              "country": "us",
+              "keyword": "solana"
+            },
+            "type": "http"
+          },
+          "output": {
+            "example": {
+              "country": "us",
+              "keyword": "solana",
+              "queried_at": "2026-06-05T12:00:00Z",
+              "rising": [
+                {
+                  "term": "solana etf",
+                  "value": 250
+                }
+              ],
+              "top": [
+                {
+                  "term": "solana price",
+                  "value": 100
+                }
+              ]
+            },
+            "type": "json"
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "enum": [
+                    "GET"
+                  ],
+                  "type": "string"
+                },
+                "queryParams": {
+                  "properties": {
+                    "country": {
+                      "default": "US",
+                      "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; also accepted as geo; defaults to US",
+                      "maxLength": 8,
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Concise Google Trends seed term with meaningful search interest (for example bitcoin or electric vehicles); not a question, instruction, or web-search request",
+                      "maxLength": 100,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "keyword"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "const": "http",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "type": "object"
+            },
+            "output": {
+              "properties": {
+                "example": {
+                  "properties": {
+                    "country": {
+                      "description": "Echoed country code, lower-cased",
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "rising": {
+                      "description": "Related queries with the fastest growth",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related search query",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "top": {
+                      "description": "Top related queries by popularity (0-100)",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related search query",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "country",
+                    "queried_at",
+                    "top",
+                    "rising"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "input"
+          ],
+          "type": "object"
+        },
+        "tags": [
+          "google-trends",
+          "related-queries",
+          "keyword-research",
+          "seo",
+          "search-trends",
+          "keyword-ideas",
+          "query-expansion"
+        ]
+      }
+    }
+  },
+  "google-trends-related-topics": {
+    "x402Version": 2,
+    "error": "Payment required",
+    "resource": {
+      "url": "https://google-trends.use.x402atlas.com/related-topics?keyword=rust&country=us",
+      "description": "Google Trends related topics for a keyword by country \u2014 top & rising topics for SEO content research, trend discovery and market analysis.",
+      "mimeType": "application/json",
+      "serviceName": "Google Trends SEO Keyword Data",
+      "tags": [
+        "google-trends",
+        "related-topics",
+        "keyword-research",
+        "seo",
+        "trending-topics",
+        "market-research",
+        "content-ideas"
+      ]
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:137",
+        "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:42161",
+        "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "amount": "30000",
+        "payTo": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "merchant": "x402Atlas",
+          "name": "USD Coin",
+          "tier": "standard",
+          "version": "2"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amount": "30000",
+        "payTo": "ASt6xvRyQ7ntERsmcYVMdLqZvz1GEN8Fzexzq62tXrNQ",
+        "maxTimeoutSeconds": 300,
+        "extra": {
+          "feePayer": "GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb",
+          "merchant": "x402Atlas",
+          "tier": "standard"
+        }
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "category": "marketing",
+        "info": {
+          "input": {
+            "method": "GET",
+            "queryParams": {
+              "country": "us",
+              "keyword": "bitcoin"
+            },
+            "type": "http"
+          },
+          "output": {
+            "example": {
+              "country": "us",
+              "keyword": "bitcoin",
+              "queried_at": "2026-06-05T12:00:00Z",
+              "rising": [
+                {
+                  "term": "Spot ETF",
+                  "value": 180
+                }
+              ],
+              "top": [
+                {
+                  "term": "Cryptocurrency",
+                  "value": 100
+                }
+              ]
+            },
+            "type": "json"
+          }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "enum": [
+                    "GET"
+                  ],
+                  "type": "string"
+                },
+                "queryParams": {
+                  "properties": {
+                    "country": {
+                      "default": "US",
+                      "description": "ISO-3166 alpha-2 country code, e.g. US, GB, DE, JP (213 countries supported); case-insensitive; defaults to US",
+                      "maxLength": 8,
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Concise Google Trends seed term with meaningful search interest; not a question, instruction, or web-search request",
+                      "maxLength": 100,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "keyword"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "const": "http",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "method"
+              ],
+              "type": "object"
+            },
+            "output": {
+              "properties": {
+                "example": {
+                  "properties": {
+                    "country": {
+                      "description": "Echoed country code, lower-cased",
+                      "type": "string"
+                    },
+                    "keyword": {
+                      "description": "Echoed search keyword",
+                      "type": "string"
+                    },
+                    "queried_at": {
+                      "description": "UTC timestamp the upstream was queried",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "rising": {
+                      "description": "Related topics with the fastest growth",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related topic label",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "top": {
+                      "description": "Top related topics by popularity (0-100)",
+                      "items": {
+                        "properties": {
+                          "term": {
+                            "description": "Related topic label",
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "Relative popularity or growth score",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "term",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keyword",
+                    "country",
+                    "queried_at",
+                    "top",
+                    "rising"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "input"
+          ],
+          "type": "object"
+        },
+        "tags": [
+          "google-trends",
+          "related-topics",
+          "keyword-research",
+          "seo",
+          "trending-topics",
+          "market-research",
+          "content-ideas"
+        ]
+      }
+    }
+  }
+}

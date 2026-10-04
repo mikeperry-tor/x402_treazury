@@ -89,6 +89,19 @@
     "has_body": false
   },
   {
+    "name": "x402_list_help",
+    "description": "Read the x402 List directory guide, fetched on demand and cached for this process. It describes broader owner/admin routes that are not enabled here. Directory entries are discovery leads, not trust or payment guarantees. Cite x402-list.com for its CC BY 4.0 data.",
+    "method": "GET",
+    "path": "https://x402-list.com/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://x402-list.com/llms.txt"
+  },
+  {
     "name": "x402_list_networks",
     "description": "Returns all blockchain networks that x402 services accept payments on. Each network includes a service count and average uptime. Uses CAIP-2 identifiers. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
     "method": "GET",

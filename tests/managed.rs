@@ -422,6 +422,75 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
     assert!(logs.contains("stripping advertised x402 extension"));
     assert!(!logs.contains("private-extension-value"));
 }
+// Captured unsigned challenges: top-level extension omission is deliberately
+// separate from rejecting unreviewed metadata inside payment offers.
+#[tokio::test]
+async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
+    let fixtures: BTreeMap<String, Value> =
+        serde_json::from_str(include_str!("fixtures/provider_payment_challenges.json")).unwrap();
+    for (name, challenge) in fixtures {
+        let h = Harness::new().await;
+        *h.f.challenge.lock().unwrap() = challenge.clone();
+        let result = h.client.execute(h.route()).await;
+        if name == "agent402" {
+            assert!(result.is_err(), "{name}");
+            assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0, "{name}");
+            assert!(h.f.signed.lock().unwrap().is_empty(), "{name}");
+        } else {
+            assert_eq!(result.unwrap(), "paid", "{name}");
+            let signed = h.f.signed.lock().unwrap();
+            assert_eq!(signed.len(), 1, "{name}");
+            assert!(
+                signed[0]["extensions"]
+                    .as_object()
+                    .is_none_or(|m| m.is_empty()),
+                "{name}"
+            );
+            assert_eq!(signed[0]["accepted"]["network"], "eip155:8453");
+            assert_eq!(signed[0]["accepted"]["extra"]["name"], "USD Coin");
+            assert!(
+                challenge["accepts"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&signed[0]["accepted"]),
+                "{name}: offer metadata must survive SDK serialization unchanged"
+            );
+            assert_eq!(
+                signed[0]["payload"]["authorization"]["value"],
+                signed[0]["accepted"]["amount"]
+            );
+        }
+        h.close().await;
+    }
+}
+#[tokio::test]
+async fn informational_metadata_cannot_override_payment_safety() {
+    let h = Harness::new().await;
+    for (key, value) in [
+        ("merchant", json!({"name": "vendor"})),
+        ("tier", json!(false)),
+        ("acceptId", json!(42)),
+        ("totalUsd", json!("0.01")),
+        ("breakdown", json!({"search": -1})),
+        ("unknownMechanism", json!("new")),
+        ("assetTransferMethod", json!("permit2")),
+        ("name", json!("GatewayWalletBatched")),
+    ] {
+        let mut c = challenge("1");
+        c["accepts"][0]["extra"]["merchant"] = json!("x402Atlas");
+        c["accepts"][0]["extra"][key] = value;
+        *h.f.challenge.lock().unwrap() = c;
+        assert!(h.client.execute(h.route()).await.is_err(), "{key}");
+    }
+    let mut c = challenge("5000001");
+    c["accepts"][0]["extra"]["totalUsd"] = json!(0);
+    c["accepts"][0]["extra"]["breakdown"] = json!({"search": 0});
+    *h.f.challenge.lock().unwrap() = c;
+    assert!(h.client.execute(h.route()).await.is_err());
+    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0);
+    assert!(h.f.signed.lock().unwrap().is_empty());
+    h.close().await;
+}
 #[tokio::test]
 async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
     let h = Harness::new().await;

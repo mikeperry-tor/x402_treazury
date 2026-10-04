@@ -2,3 +2,8 @@
 spec = "https://x402.botsmith.dev/openapi.json"
 name = "botsmith"
 prefix = "botsmith"
+
+help_url = "https://x402.botsmith.dev/catalog"
+
+[overrides.botsmith_help]
+description = "Read botsmith's free JSON service catalog with usage schemas, prices and response contracts. Fetched on demand and cached for this process. Treazury handles Base USDC payment; other advertised assets and payment methods are not automatically enabled."

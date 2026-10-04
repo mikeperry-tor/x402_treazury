@@ -2,7 +2,7 @@
 
 The 14 legacy tool catalogs were captured from the independent Python implementation
 before its retirement and verified against Rust. Together with the reviewed Rust
-x402-list, Exa, OneShot, StableEnrich, Agent402 and AgentUtility catalogs, the 20 fixtures pin 834 tool names, full descriptions, schemas,
+x402-list, Exa, OneShot, StableEnrich, Agent402 and AgentUtility catalogs, the 20 fixtures pin 840 tool names, full descriptions, schemas,
 methods, paths, parameter routes and help URLs. Settings snapshots cover all 24
 bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
@@ -47,4 +47,15 @@ tags, marks 282 aliases and adds a curated research tag. The provider allows 525
 operations; its golden covers 15 research tools plus help. Tests also cover all
 eligible tools, tag subsets, required-only schema alternatives and satellite image
 metadata. A captured unpaid search challenge pins static signing compatibility and
-managed refusal of its bazaar/builder-code extensions; no live funds were used.
+managed omission of its bazaar/builder-code extensions; no live funds were used.
+
+Seven additional lazy help URLs were verified in the provider audit; six affect
+these golden catalogs (botsmith is covered by settings and the help-contract test).
+Those six golden changes add only help tools, leaving all API contracts unchanged.
+`provider_payment_challenges.json` captures ten unsigned live challenges from
+2026-10-03 and 2026-10-04: Agent402 pins refusal of unsupported offer metadata;
+Exa Search/Contents and all four Google Trends routes pin exact preservation of
+reviewed informational fields through signing. Locus, Otto and SocialFetch also
+pin signing with top-level extensions omitted. Seller
+signatures and auth nonces are public fixture evidence, not buyer credentials;
+no live settlement or authentication success is implied.

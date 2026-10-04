@@ -2113,6 +2113,19 @@
     "has_body": false
   },
   {
+    "name": "socialfetch_help",
+    "description": "Read Social Fetch's API usage guide, fetched on demand and cached for this process. The guide describes its API-key product and broader monitor/webhook workflows; this integration uses the x402 host and selected tools with Treazury-managed payment, without a vendor API key. Preserve lookupStatus, partial-result and provenance fields.",
+    "method": "GET",
+    "path": "https://www.socialfetch.dev/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://www.socialfetch.dev/llms.txt"
+  },
+  {
     "name": "socialfetch_instagram_audio_audioid_reels",
     "description": "List Instagram Reels that use a specific audio track, with track metadata, tagged users, and coauthors when Instagram exposes them. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
     "method": "GET",

@@ -6,6 +6,8 @@ prefix = "brazilayer"
 include = ["/v1"]
 instructions_text = "Official Brazilian registry and market data: Receita Federal CNPJ registry, CVM fund disclosures, BACEN authorizations, PNCP tenders, sanctions lists, EUDR deforestation, commodity/macros feeds. Response keys use Portuguese legal terms (razao_social, situacao_cadastral, ...). Paid calls settle x402 USDC on Base; each tool states its price ($0.001–$0.10 per call). Validate a CNPJ free with brazilayer_ferramentas_cnpj__valor_ before any paid lookup — an invalid CNPJ never resolves anywhere. The twelve *_amostra tools are free shape samples of each dataset. brazilayer_cnpj_busca and brazilayer_cnpj_socio__busca require at least one filter; result totals cap at the string \"10000+\". brazilayer_pacotes__brasil bundles the 13 parameter-free endpoints in one call for $0.09."
 
+help_url = "https://api.brazilayer.com/llms.txt"
+
 [overrides]
 
 [overrides.brazilayer_health]
@@ -68,3 +70,6 @@ nome = "Person or entity name (full-text, accent-insensitive); at least 3 charac
 
 [overrides.brazilayer_integridade_consulta_cnpj]
 description = "Screens a Brazilian company against CEIS, CNEP, CEPIM, the slave-labor\nblacklist (MTE) and leniency agreements. Legal-entity records only.\nSources updated daily. Price: $0.01 per call (vendor summary)."
+
+[overrides.brazilayer_help]
+description = "Read Brazilayer's API guide, response conventions, coverage and pricing. Fetched on demand and cached for this process. Treazury handles payment; the live challenge and configured spend cap are authoritative."

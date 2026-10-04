@@ -7,6 +7,8 @@ include = ["/v1"]
 pricing_key = "x-payment-info"
 instructions_text = "RegimeShift on Base mainnet: Agent-SOFR USD short-rate benchmark, variance-aware max-LTV, and ETH/BTC volatility risk premium at $0.001/call each (x402 USDC), plus a free on-chain RFQ clearinghouse. Typical flow: read regimeshift_rate_sofr_usd and regimeshift_risk_max_ltv, POST a lend/borrow intent (free), then long-poll regimeshift_intent_intent_id_match (run this server with --timeout 320 so the up-to-300s poll survives) or watch the intents/matches endpoints; matched quotes carry EIP-712 payloads ready for on-chain originate() via InterAgentRepoV4."
 
+help_url = "https://regimeshift.xyz/api/quickstart.txt"
+
 [overrides]
 
 [overrides.regimeshift_intent_lend]
@@ -39,3 +41,6 @@ description = "Free — no payment required. Active loans with on-chain LTV ≥ 
 
 [overrides.regimeshift_loans_registry]
 description = "Free — no payment required. Full lifecycle of every V4 loan reconstructed from on-chain event logs: the last limit originated loans (~14h lookback, 30s cache) with status, counterparties, principal/collateral, rate, LTV and originate/close tx hashes."
+
+[overrides.regimeshift_help]
+description = "Read RegimeShift's API quickstart, fetched on demand and cached for this process. The guide includes escrow and intent workflows; it does not authorize wallet operations. Treazury handles payment. SSE streaming is not supported; use the JSON response mode for intent matching."

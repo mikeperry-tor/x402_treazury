@@ -608,6 +608,20 @@
     "has_body": true
   },
   {
+    "name": "otto_help",
+    "description": "Read Otto's consolidated API guide, fetched on demand and cached for this process. It includes excluded execution routes, other clients, payment methods and SIWX re-access that Treazury does not implement. Use only selected tools; hosted media URLs are not automatically fetched. Do not automatically retry a signed payment.",
+    "method": "GET",
+    "path": "https://x402.ottoai.services/llms-full.txt",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://x402.ottoai.services/llms-full.txt"
+  },
+  {
     "name": "otto_hl_transaction_history",
     "description": "Hyperliquid perpetual trading history: fills, funding payments, and realized PnL per position. Price: $0.001 per call (vendor spec).",
     "method": "GET",
