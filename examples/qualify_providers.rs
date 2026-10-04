@@ -8,6 +8,8 @@ mod ledger;
 #[cfg(test)]
 #[path = "qualification/manifest_tests.rs"]
 mod manifest_tests;
+#[path = "qualification/timeouts.rs"]
+mod timeouts;
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -40,6 +42,8 @@ struct Args {
 enum Command {
     /// Fetch catalogs without keys/payments, pin definitions/config, create immutable budget ledger.
     Prepare,
+    /// Once, before any activity: audited 120s/240s Tor and 900s driver timeout amendment.
+    AmendTimeouts,
     /// Capture independent catalogs with explicit reviewed qualification fallbacks; no wallet access.
     FreezeCatalogs {
         #[arg(long)]
@@ -116,7 +120,8 @@ impl Manifest {
             "run must expire later in this UTC day; no daily-budget rollover"
         );
         ensure!(
-            (1..=300).contains(&self.timeout_seconds) && (1..=100).contains(&self.max_funding_jobs),
+            (1..=1800).contains(&self.timeout_seconds)
+                && (1..=100).contains(&self.max_funding_jobs),
             "invalid time/funding limits"
         );
         ensure!(
@@ -608,6 +613,7 @@ async fn run() -> Result<()> {
         }
         Command::Identities { output } => identities::export(&manifest, &output).await?,
         Command::Prepare => prepare(&manifest, &digest).await?,
+        Command::AmendTimeouts => timeouts::amend(&args.manifest, &manifest, &digest).await?,
         Command::Execute { case, allow_paid } => {
             execute(&manifest, &digest, &case, allow_paid).await?
         }

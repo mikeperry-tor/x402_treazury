@@ -13,7 +13,7 @@ pub struct Ledger {
     db: Connection,
     _lock: File,
 }
-fn regular(path: &Path) -> Result<()> {
+pub(super) fn regular(path: &Path) -> Result<()> {
     if path.exists() || path.is_symlink() {
         let m = std::fs::symlink_metadata(path)?;
         ensure!(
@@ -96,6 +96,45 @@ impl Ledger {
             |r| r.get(0),
         )?)?)
     }
+    pub fn require_unstarted(&self) -> Result<()> {
+        let attempts: i64 = self
+            .db
+            .query_row("SELECT count(*) FROM attempts", [], |r| r.get(0))?;
+        let amendments: i64 = self.db.query_row(
+            "SELECT count(*) FROM events WHERE kind='timeout_amendment'",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            attempts == 0 && amendments == 0,
+            "timeout amendment requires no attempts and cannot be repeated"
+        );
+        Ok(())
+    }
+    pub fn amend_timeouts(&mut self, expected: &Value, replacement: &Value) -> Result<()> {
+        self.require_unstarted()?;
+        ensure!(
+            self.prepared()? == *expected,
+            "pins changed during amendment"
+        );
+        let mut allowed = expected.clone();
+        allowed["manifest"]["timeout_seconds"] = serde_json::json!(900);
+        allowed["manifest_hash"] = replacement["manifest_hash"].clone();
+        allowed["resolved_config_hash"] = replacement["resolved_config_hash"].clone();
+        ensure!(
+            allowed == *replacement,
+            "amendment changes non-timeout pins"
+        );
+        let tx = self.db.transaction()?;
+        tx.execute(
+            "UPDATE run SET prepared=?1 WHERE id=1",
+            [replacement.to_string()],
+        )?;
+        tx.execute("INSERT INTO events(kind,detail) VALUES('timeout_amendment',?1)",
+            [json!({"before":expected,"after":replacement,"reason":"operator requested longer Tor budgets before funding"}).to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }
     pub fn reserve(&mut self, id: &str, amount: u64) -> Result<()> {
         ensure!(amount <= i64::MAX as u64, "reservation overflow");
         let tx = self
@@ -173,6 +212,29 @@ mod tests {
         l.reserve("b", 40).unwrap();
         assert_eq!(l.report().unwrap()["reserved_atomic"], 100);
         assert!(Ledger::create(&p, &json!({}), 1000).is_err());
+    }
+    #[test]
+    fn timeout_amendment_keeps_budget_and_refuses_activity_repetition_or_case_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let old = json!({"manifest":{"timeout_seconds":120,"api_budget_usdc":"1","expires_at":50},"cases":{"a":{}},"manifest_hash":"old","resolved_config_hash":"old"});
+        let mut new = old.clone();
+        new["manifest"]["timeout_seconds"] = json!(900);
+        new["manifest_hash"] = json!("new");
+        let mut l = Ledger::create(&tmp.path().join("one"), &old, 100).unwrap();
+        let mut bad = new.clone();
+        bad["manifest"]["expires_at"] = json!(500);
+        assert!(l.amend_timeouts(&old, &bad).is_err());
+        bad = new.clone();
+        bad["cases"]["b"] = json!({});
+        assert!(l.amend_timeouts(&old, &bad).is_err());
+        l.amend_timeouts(&old, &new).unwrap();
+        assert_eq!(l.report().unwrap()["budget_atomic"], 100);
+        assert_eq!(l.report().unwrap()["reserved_atomic"], 0);
+        assert!(l.amend_timeouts(&new, &new).is_err());
+        let mut active = Ledger::create(&tmp.path().join("two"), &old, 100).unwrap();
+        active.reserve("a", 1).unwrap();
+        assert!(active.amend_timeouts(&old, &new).is_err());
+        assert_eq!(active.prepared().unwrap(), old);
     }
     #[test]
     fn overflow_and_links_fail_closed() {
