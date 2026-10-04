@@ -41,6 +41,10 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reliability_tags: Vec<crate::provider_status::ReliabilityTag>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub reliability_note: String,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub response_mappings: BTreeMap<String, crate::output::ResponseMapping>,
     #[serde(skip_serializing_if = "crate::output::ImageLimits::is_default")]
@@ -76,6 +80,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            reliability_tags: vec![],
+            reliability_note: String::new(),
             response_mappings: BTreeMap::new(),
             image_limits: Default::default(),
             timeout: 30.0,

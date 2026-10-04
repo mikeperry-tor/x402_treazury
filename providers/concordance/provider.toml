@@ -1,3 +1,6 @@
+reliability_tags = ["questionable_result_relevance"]
+reliability_note = "Search results may report a matched_query different from the requested query; verify relevance independently of delivery and payment. Tor causation is not established."
+
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "openapi.json"
 name = "Concordance"

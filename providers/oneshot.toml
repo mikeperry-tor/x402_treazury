@@ -1,3 +1,6 @@
+reliability_tags = ["catalog_http_403"]
+reliability_note = "Catalog access and unsigned API requests have returned HTTP 403 while help remained available. Tor causation is not established."
+
 # Synchronous search only. Async tools need wallet-bound polling/auth support.
 spec = "https://win.oneshotagent.com/openapi.json"
 name = "OneShot"

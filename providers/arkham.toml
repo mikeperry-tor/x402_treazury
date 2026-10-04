@@ -1,3 +1,6 @@
+reliability_tags = ["intermittent_response_body"]
+reliability_note = "A signed balance request can lose its response body after payment settles. Do not replay an uncertain paid request. Tor causation is not established."
+
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://api.arkm.com/x402/openapi.json"
 name = "Arkham Intel (x402)"

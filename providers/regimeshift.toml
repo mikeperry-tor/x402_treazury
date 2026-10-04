@@ -1,3 +1,6 @@
+reliability_tags = ["intermittent_catalog_connection", "intermittent_help_connection", "degraded_upstream_data"]
+reliability_note = "Catalog/help timeouts and partially degraded paid results have occurred. Inspect per-upstream errors separately from useful data. Tor causation is not established."
+
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://regimeshift.xyz/openapi.json"
 name = "RegimeShift"

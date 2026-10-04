@@ -241,6 +241,13 @@ impl Deployment {
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
+        Self::load_with_warnings(path, false).await
+    }
+    /// Warn for listener-bound sources before catalog I/O, including failed fetches.
+    pub async fn load_for_serving(path: &Path) -> Result<Self> {
+        Self::load_with_warnings(path, true).await
+    }
+    async fn load_with_warnings(path: &Path, warn: bool) -> Result<Self> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
         if let Some(p) = &mut config.source_management {
@@ -254,7 +261,14 @@ impl Deployment {
         crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut sources = BTreeMap::new();
         for (id, source) in &config.sources {
-            sources.insert(id.clone(), Source::load(id, source, path).await?);
+            let used = config
+                .servers
+                .values()
+                .any(|server| server.sources.contains(id));
+            sources.insert(
+                id.clone(),
+                Source::load(id, source, path, warn && used).await?,
+            );
         }
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
@@ -643,11 +657,14 @@ impl Deployment {
     }
 }
 impl Source {
-    async fn load(id: &str, source: &SourceConfig, path: &Path) -> Result<Self> {
+    async fn load(id: &str, source: &SourceConfig, path: &Path, warn: bool) -> Result<Self> {
         let mut cfg = crate::config::resolve(source.provider.clone(), path)
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        if warn {
+            crate::provider_status::warn(id, &cfg);
+        }
         if cfg.prefix.is_none() {
             cfg.prefix = Some(id.to_owned());
         }

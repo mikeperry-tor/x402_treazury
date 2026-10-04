@@ -1,3 +1,6 @@
+reliability_tags = ["upstream_timeout"]
+reliability_note = "Paid treasury_yield_curve can return nested upstream timeout errors despite outer HTTP/MCP success. Tor causation is not established."
+
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://x402.agentfund.net/openapi.json"
 name = "AgentFund US Economic, SEC & On-Chain Data"

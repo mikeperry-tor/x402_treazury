@@ -117,6 +117,9 @@ async fn run() -> Result<()> {
 
 async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()> {
     let cfg = standalone_config(&args, &env).await?;
+    if !args.list_tools && !args.list_tags && !args.check && args.route_tool.is_none() {
+        x402_treazury::provider_status::warn(cfg.name.as_deref().unwrap_or("standalone"), &cfg);
+    }
     let http = x402_treazury::network::discovery(
         if cfg.spec.starts_with("http") {
             &cfg.spec
@@ -271,7 +274,11 @@ async fn run_deployment(
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
 ) -> Result<()> {
-    let deployment = x402_treazury::deployment::Deployment::load(path).await?;
+    let deployment = if args.list_tags || args.list_tools || args.check {
+        x402_treazury::deployment::Deployment::load(path).await?
+    } else {
+        x402_treazury::deployment::Deployment::load_for_serving(path).await?
+    };
     if args.list_tags {
         println!(
             "{}",

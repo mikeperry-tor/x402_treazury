@@ -1,3 +1,6 @@
+reliability_tags = ["intermittent_catalog_connection", "intermittent_help_connection"]
+reliability_note = "Unsigned pricing discovery can dominate startup; slow_pricing applies specifically to that stage. Pricing probes are disabled by default. Tor causation is not established."
+
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://kronossignals.com/api/openapi.json"
 name = "Kronos Crypto Data"

@@ -27,7 +27,11 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402.agentfund.net/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "reliability_tags": [
+      "upstream_timeout"
+    ],
+    "reliability_note": "Paid treasury_yield_curve can return nested upstream timeout errors despite outer HTTP/MCP success. Tor causation is not established."
   },
   "providers/arkham.toml": {
     "additional_properties": null,
@@ -59,7 +63,11 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "https://api.arkm.com/x402/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "reliability_tags": [
+      "intermittent_response_body"
+    ],
+    "reliability_note": "A signed balance request can lose its response body after payment settles. Do not replay an uncertain paid request. Tor causation is not established."
   },
   "providers/botsmith.toml": {
     "additional_properties": null,
@@ -232,7 +240,11 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "providers/concordance/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "reliability_tags": [
+      "questionable_result_relevance"
+    ],
+    "reliability_note": "Search results may report a matched_query different from the requested query; verify relevance independently of delivery and payment. Tor causation is not established."
   },
   "providers/deepline.toml": {
     "additional_properties": false,
@@ -389,7 +401,12 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "https://kronossignals.com/api/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "reliability_tags": [
+      "intermittent_catalog_connection",
+      "intermittent_help_connection"
+    ],
+    "reliability_note": "Unsigned pricing discovery can dominate startup; slow_pricing applies specifically to that stage. Pricing probes are disabled by default. Tor causation is not established."
   },
   "providers/locus/provider.toml": {
     "additional_properties": null,
@@ -636,7 +653,13 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "https://regimeshift.xyz/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "reliability_tags": [
+      "intermittent_catalog_connection",
+      "intermittent_help_connection",
+      "degraded_upstream_data"
+    ],
+    "reliability_note": "Catalog/help timeouts and partially degraded paid results have occurred. Inspect per-upstream errors separately from useful data. Tor causation is not established."
   },
   "providers/socialfetch.toml": {
     "additional_properties": null,
@@ -991,7 +1014,11 @@
     "probe_ttl_seconds": 3600.0,
     "spec": "https://win.oneshotagent.com/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "timeout": 30.0,
+    "reliability_tags": [
+      "catalog_http_403"
+    ],
+    "reliability_note": "Catalog access and unsigned API requests have returned HTTP 403 while help remained available. Tor causation is not established."
   },
   "providers/stableenrich.toml": {
     "additional_properties": null,
@@ -2318,6 +2345,10 @@
     "tags": [
       "treazury-research"
     ],
-    "timeout": 90.0
+    "timeout": 90.0,
+    "reliability_tags": [
+      "upstream_rate_limited"
+    ],
+    "reliability_note": "Paid web_search can return HTTP 424 for an upstream HTTP 429. Tor causation is not established."
   }
 }
