@@ -10,7 +10,7 @@ wallet daemon, Python payment coordinator, or wallet RPC protocol.
 
 A single Zcash treasury funds one or more named virtual EVM wallets. Each virtual
 wallet is a durable rotation pool, exposed as an entry in TOML `wallets`, with
-its own `deposit_size` in native Base USDC (decimal string, default **5.00**),
+its own `deposit_size` in native Base USDC (decimal string, default **2.00**),
 per-payment cap, active address and fully funded standby. Managed funding uses
 explicitly configured public or confidential ZEC-to-USDC swaps. Public mode is
 the initial demo path, without NEAR signup or application commissions. Each deployment source may select a virtual
@@ -300,10 +300,10 @@ atomic local commit; it does not make a blockchain submission atomic.
 | --- | --- |
 | `instance` | Schema version, stable instance/treasury UUIDs, networks, Base token and Zcash account; reject changed identity/network/account |
 | `pools` | UUID, UNIQUE profile name, enabled/retired state, configured deposit size, bootstrap flag, current generation and readiness; retain rows when configuration removes a profile |
-| `wallets` | UUID, pool foreign key, per-pool allocation sequence, globally UNIQUE address, encrypted EVM key, immutable allocation target, role, balance block hash/height; UNIQUE `(pool_id, allocation_sequence)` and partial UNIQUE indexes on `pool_id` for ACTIVE and READY roles |
+| `wallets` | UUID, pool foreign key, per-pool allocation sequence, globally UNIQUE address, encrypted EVM key, allocation floor, raised only when its first valid quote commits, role, balance block hash/height; UNIQUE `(pool_id, allocation_sequence)` and partial UNIQUE indexes on `pool_id` for ACTIVE and READY roles |
 | `treasury_snapshots` | Monotonic revision, encrypted wallet bytes, network/birthday/account metadata, committed sync anchor and derived refund-address range |
 | `treasury_operations` | UNIQUE operation ID, phase parameter hashes, pool foreign key (nullable only for treasury maintenance), purpose, encrypted raw transaction(s), txid, expiry, fee, state, last evidence; one unresolved outgoing operation at most |
-| `funding_jobs` | Pool and candidate foreign keys with enforced matching ownership, attempt number, UNIQUE treasury operation ID, quote/deposit/refund binding, immutable target and funding-policy snapshot, status, deadline, next poll and bounded retry count; one current job per candidate |
+| `funding_jobs` | Pool and candidate foreign keys with enforced matching ownership, attempt number, UNIQUE treasury operation ID, quote/deposit/refund binding, quote-bound target and funding-policy snapshot, status, deadline, next poll and bounded retry count; one current job per candidate |
 | `payment_attempts` | Logical call ID, pool/wallet foreign keys, catalog/route identity, generation, chosen requirements hash, reserved amount, nonce, payee, validity, phase, receipt/chain evidence; UNIQUE `(wallet_id, nonce)` |
 | `budget_entries` | Operation, owning pool or treasury-maintenance purpose, UTC day, reserved/consumed/refunded zatoshis, fee evidence; no duplicate reservation, debit or release |
 
@@ -528,7 +528,11 @@ are injected in tests rather than exposed as production token/network overrides.
 
 ### Funding a candidate
 
-1. Use the persisted candidate key/address and immutable target. Discover token
+1. Use the persisted candidate key/address and allocation floor. Request an exact-output
+   quote; a strictly recognized bridge-minimum rejection can raise the requested
+   output, bounded to three unsigned attempts and subject to the existing cost caps.
+   Commit the accepted encrypted quote and increased wallet/job target atomically
+   before preparation. Never resize a signed or funded operation. Discover token
    IDs with `/v0/tokens`, verifying ZEC mainnet and native Base USDC by chain,
    contract and decimals, not symbol alone. Persist the validated IDs.
 2. Derive and durably save a fresh refund address for this funding operation.
@@ -776,7 +780,7 @@ Each `wallets.<name>` managed profile accepts:
 | Field | Behavior |
 | --- | --- |
 | `mode` | Required `zcash_rotation`; static profiles retain `mode = "static"` |
-| `deposit_size` | Positive USDC decimal string; default `"5.00"`, at most 6 decimal places; immutable target captured at each new address allocation |
+| `deposit_size` | Positive USDC decimal string; default `"2.00"`, at most 6 decimal places; allocation floor, raised to a validated bridge minimum at quote commitment |
 | `max_price_usd` | Independent per-payment cap; default `"1.00"`; retain static cap syntax but never bypass managed chain/asset/target checks |
 | `max_input_zec` | Required positive per-deposit input-plus-source-fee hard cap |
 | `max_fee_bps` | Required integer 0..10000 for quote-implied USD overhead |
@@ -1043,7 +1047,7 @@ local node/indexer infrastructure, with exact setup/invocation documented in
 | High-index refund address and restart | Regtest sync discovers it; shielding uses durable operation path |
 | Wallet round-trip and wrong-key restore | Addresses/next derivation preserved; no plaintext snapshot; wrong key never creates replacement state |
 | Two owners / multiple catalogs | Second owner rejected before networking; servers sharing a profile use one pool; different profiles use distinct keys and admission gates |
-| Two pools with deposit sizes 5 and 10 | Four distinct bootstrap addresses; each gets its own immutable target; repeat restart creates no new pair |
+| Two pools with deposit sizes 5 and 10 | Four distinct bootstrap addresses; each gets its own quote-bound target; repeat restart creates no new pair |
 | Simultaneous depletion across pools | One promotion/job per pool; funded calls progress while shared treasury sends serialize; no duplicate Zcash input use |
 | Aggregate treasury budget race | Sum of both pools' reservations and maintenance fees stays within one limit, including across UTC rollover |
 | One pool degraded or repeatedly retrying | Other funded pool serves; eligible refill jobs get fair turns; shared outgoing ambiguity blocks new sends everywhere |

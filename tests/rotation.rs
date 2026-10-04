@@ -691,3 +691,67 @@ fn funding_capacity_and_reservation_agree_across_days_and_reduced_limits() {
     assert!(s.check_funding_capacity(259210, 81, 100).is_err());
     s.reserve("next-day", None, 3, 80, 100).unwrap();
 }
+
+#[test]
+fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
+    use x402_treazury::rotation::near::Quote;
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = create(dir.path());
+    let id = s.id().to_owned();
+    s.ensure_pool("minimum", "2").unwrap();
+    let job = s.funding_jobs().unwrap()[0].clone();
+    let quote = |target: &str| {
+        serde_json::to_vec(&Quote {
+            request: serde_json::json!({"amount":target}),
+            response: serde_json::json!({}),
+            input: 100000,
+            deadline: 2000000000,
+            deposit: Some("fixture".into()),
+        })
+        .unwrap()
+    };
+    assert!(
+        s.save_funding_quote_with_target(&job.id, &quote("1000000"), "1000000")
+            .is_err()
+    );
+    assert!(
+        s.save_funding_quote_with_target(&job.id, &quote("2500000"), "3000000")
+            .is_err()
+    );
+    // Inject a failure after target updates; neither target nor quote may survive.
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_quote BEFORE UPDATE OF quote ON funding_progress BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+    assert!(
+        s.save_funding_quote_with_target(&job.id, &quote("2500000"), "2500000")
+            .is_err()
+    );
+    assert_eq!(s.funding_jobs().unwrap()[0].target, "2000000");
+    db.execute_batch("DROP TRIGGER reject_quote;").unwrap();
+    s.save_funding_quote_with_target(&job.id, &quote("2500000"), "2500000")
+        .unwrap();
+    s.save_funding_quote_with_target(&job.id, &quote("2500000"), "2500000")
+        .unwrap();
+    assert!(
+        s.save_funding_quote_with_target(&job.id, &quote("3000000"), "3000000")
+            .is_err()
+    );
+    drop(s);
+    let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    s.ensure_pool("minimum", "2").unwrap();
+    let state = s.status().unwrap();
+    assert_eq!(
+        state.pools[0]
+            .addresses
+            .iter()
+            .find(|a| a.id == job.wallet_id)
+            .unwrap()
+            .target,
+        "2500000"
+    );
+    assert_eq!(s.funding_jobs().unwrap()[0].target, "2500000");
+    assert!(
+        s.record_credit(&job.wallet_id, "2000000", "block", 1)
+            .is_err()
+    );
+    assert!(state.treasury_operations.is_empty());
+}

@@ -163,6 +163,21 @@ impl Store {
     /// Persist a quote encrypted; it links treasury refunds to destination keys.
     /// Repeated delivery must match exactly and cannot replace an accepted quote.
     pub fn save_funding_quote(&mut self, id: &str, quote: &[u8]) -> Result<()> {
+        self.save_quote(id, quote, None)
+    }
+    /// A provisional allocation can grow to the validated bridge minimum only
+    /// when its first quote commits; wallet and job targets change atomically.
+    pub fn save_funding_quote_with_target(
+        &mut self,
+        id: &str,
+        quote: &[u8],
+        target: &str,
+    ) -> Result<()> {
+        let parsed: crate::rotation::near::Quote = serde_json::from_slice(quote)?;
+        ensure!(parsed.request["amount"] == target, "quote target mismatch");
+        self.save_quote(id, quote, Some(target))
+    }
+    fn save_quote(&mut self, id: &str, quote: &[u8], target: Option<&str>) -> Result<()> {
         ensure!(!quote.is_empty(), "empty funding quote");
         let aad = format!("v1:{}:{}:funding:{id}", self.id, self.network.name());
         let encrypted = seal(&self.key, &aad, quote)?;
@@ -182,6 +197,27 @@ impl Store {
                 serde_json::from_str::<FundingPhase>(&phase)? == FundingPhase::Allocated,
                 "funding phase conflict"
             );
+            if let Some(target) = target {
+                let (wallet, old, role, pending): (String, String, String, bool) = tx.query_row(
+                    "SELECT w.id,w.target,w.role,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED'", [id],
+                    |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+                ensure!(
+                    role == "ALLOCATED" && !pending,
+                    "funding target already committed to spending"
+                );
+                ensure!(
+                    amount(target)? >= amount(&old)?,
+                    "funding target cannot decrease"
+                );
+                tx.execute(
+                    "UPDATE wallets SET target=?2 WHERE id=?1",
+                    params![wallet, target],
+                )?;
+                tx.execute(
+                    "UPDATE funding_jobs SET target=?2 WHERE id=?1",
+                    params![id, target],
+                )?;
+            }
             tx.execute(
                 "UPDATE funding_progress SET phase='\"QUOTED\"',quote=?2 WHERE job_id=?1",
                 params![id, encrypted],

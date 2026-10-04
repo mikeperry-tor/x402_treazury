@@ -17,6 +17,7 @@ struct Fake {
     funds_available: bool,
     quote_deadline: u64,
     quotes: usize,
+    minimum: Option<String>,
     timeout: u64,
 }
 impl FundingBackend for Fake {
@@ -30,10 +31,10 @@ impl FundingBackend for Fake {
         );
         Ok(())
     }
-    async fn quote(&mut self, _: &FundingJob) -> Result<Quote> {
+    async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
         self.quotes += 1;
         Ok(Quote {
-            request: serde_json::json!({}),
+            request: serde_json::json!({"amount":self.minimum.as_ref().unwrap_or(&job.target)}),
             response: serde_json::json!({}),
             input: 50,
             deadline: self.quote_deadline,
@@ -41,6 +42,7 @@ impl FundingBackend for Fake {
         })
     }
     async fn prepare(&mut self, j: &FundingJob, quote: &Quote) -> Result<()> {
+        assert_eq!(quote.request["amount"], j.target);
         let id = j.operation_id.clone();
         let pool = j.pool_id.clone();
         let deadline = quote.deadline;
@@ -169,6 +171,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             funds_available: true,
             quote_deadline: u64::MAX,
             quotes: 0,
+            minimum: None,
             timeout: u64::MAX,
         },
         poll_seconds: 1,
@@ -252,6 +255,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             funds_available: true,
             quote_deadline: u64::MAX,
             quotes: 0,
+            minimum: None,
             timeout: u64::MAX,
         },
         poll_seconds: 1,
@@ -315,6 +319,7 @@ async fn fixture() -> (
             funds_available: true,
             quote_deadline: u64::MAX,
             quotes: 0,
+            minimum: None,
             timeout: u64::MAX,
         },
         store,
@@ -601,4 +606,31 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
             task.await.unwrap();
         }
     }
+}
+
+#[tokio::test]
+async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
+    let (_dir, mut worker, task) = fixture().await;
+    worker.backend.minimum = Some("6000000".into());
+    let now = x402_treazury::rotation::base::now().unwrap();
+    worker.tick(now).await.unwrap();
+    let state = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(state.funding_jobs[0].target, "6000000");
+    assert_eq!(state.pools[0].addresses[0].target, "6000000");
+    assert!(state.treasury_operations.is_empty());
+    worker.tick(now + 5).await.unwrap();
+    assert_eq!(worker.backend.quotes, 1);
+    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(
+        worker
+            .store
+            .call(|s| s.status())
+            .await
+            .unwrap()
+            .treasury_operations
+            .len(),
+        1
+    );
+    drop(worker);
+    task.await.unwrap();
 }

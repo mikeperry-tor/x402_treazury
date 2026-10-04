@@ -8,7 +8,7 @@ fn cap() -> String {
     "1.00".into()
 }
 fn deposit() -> String {
-    "1.00".into()
+    "2.00".into()
 }
 fn wait() -> u64 {
     30

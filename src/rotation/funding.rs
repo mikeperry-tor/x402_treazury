@@ -144,9 +144,13 @@ impl<B: FundingBackend> FundingWorker<B> {
                 let quote = self.backend.quote(job).await?;
                 ensure!(quote.deposit.is_some(), "cannot fund from dry quote");
                 let id = job.id.clone();
+                let target = quote.request["amount"]
+                    .as_str()
+                    .context("funding quote missing output target")?
+                    .to_owned();
                 let bytes = serde_json::to_vec(&quote)?;
                 self.store
-                    .call(move |s| s.save_funding_quote(&id, &bytes))
+                    .call(move |s| s.save_funding_quote_with_target(&id, &bytes, &target))
                     .await?;
             }
             Quoted => self.prepare_quoted(job, instant).await?,
@@ -308,7 +312,9 @@ impl FundingBackend for Backend {
                 .context("deadline overflow")?,
             false,
         )?;
-        self.near.quote(request, &limits, instant).await
+        self.near
+            .quote_with_minimum(request, &limits, instant)
+            .await
     }
     async fn prepare(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         let (limits, _) = self.policy(job)?;
@@ -419,6 +425,12 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> &'static str {
         match cause.to_string().as_str() {
             "near_http_401" | "near_http_403" => {
                 return "near_authentication_required; check selected mode and configured credentials";
+            }
+            "near_bridge_minimum_unstable: three quote attempts exhausted; no funds submitted" => {
+                return "near_bridge_minimum_unstable; three unsigned quote attempts exhausted; no funds submitted";
+            }
+            "quote input limit" => {
+                return "funding_input_cap_exceeded; bridge quote exceeds max_input_zec; no funds submitted";
             }
             "near_http_429" => return "near_rate_limited; backing off",
             "treasury_budget_exceeded" => {

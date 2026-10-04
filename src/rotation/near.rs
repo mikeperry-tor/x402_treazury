@@ -37,6 +37,24 @@ pub enum SwapStatus {
     Failed,
     Unknown,
 }
+#[derive(Debug)]
+struct BridgeMinimum(u64);
+impl std::fmt::Display for BridgeMinimum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "near_bridge_minimum_output_atomic:{}", self.0)
+    }
+}
+impl std::error::Error for BridgeMinimum {}
+fn bridge_minimum(value: &Value) -> Option<u64> {
+    let digits = value
+        .get("message")?
+        .as_str()?
+        .strip_prefix("Amount is too low for bridge, try at least ")?;
+    if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok().filter(|v| *v > 0)
+}
 pub struct NearClient {
     headers: reqwest::header::HeaderMap,
     origin: String,
@@ -82,10 +100,11 @@ impl NearClient {
             .send()
             .await
             .map_err(|_| anyhow::anyhow!("near_unavailable"))?;
+        let status = response.status();
         ensure!(
-            response.status().is_success(),
+            status.is_success() || status.as_u16() == 400,
             "near_http_{}",
-            response.status().as_u16()
+            status.as_u16()
         );
         let mut bytes = Vec::new();
         while let Some(chunk) = response
@@ -103,6 +122,14 @@ impl NearClient {
                 );
             }
             bytes.extend_from_slice(&chunk);
+        }
+        if status.as_u16() == 400 {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+                && let Some(minimum) = bridge_minimum(&value)
+            {
+                return Err(BridgeMinimum(minimum).into());
+            }
+            anyhow::bail!("near_http_400");
         }
         serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid NEAR JSON"))
     }
@@ -127,6 +154,47 @@ impl NearClient {
             )
             .await?;
         validate_quote(request, response, limits, now)
+    }
+    /// Only rejected, unsigned quotes may adjust output; every accepted quote
+    /// still passes the complete route, echo, input-cost and fee-cap validation.
+    pub async fn quote_with_minimum(
+        &self,
+        mut request: Value,
+        limits: &Limits,
+        now: u64,
+    ) -> Result<Quote> {
+        ensure!(
+            request["swapType"] == "EXACT_OUTPUT" && request["destinationAsset"] == USDC,
+            "minimum adjustment requires exact-output Base USDC"
+        );
+        for attempt in 0..3 {
+            match self.quote(request.clone(), limits, now).await {
+                Ok(quote) => return Ok(quote),
+                Err(error) => {
+                    let Some(minimum) = error.downcast_ref::<BridgeMinimum>() else {
+                        return Err(error);
+                    };
+                    let previous = atomic(
+                        request["amount"]
+                            .as_str()
+                            .context("missing output amount")?,
+                    )?;
+                    ensure!(minimum.0 > previous, "near_bridge_minimum_not_increasing");
+                    if attempt == 2 {
+                        anyhow::bail!(
+                            "near_bridge_minimum_unstable: three quote attempts exhausted; no funds submitted"
+                        );
+                    }
+                    tracing::warn!(
+                        previous_atomic = previous,
+                        minimum_atomic = minimum.0,
+                        "NEAR bridge minimum increased wallet funding target; source and fee caps still apply"
+                    );
+                    request["amount"] = json!(minimum.0.to_string());
+                }
+            }
+        }
+        unreachable!()
     }
     pub async fn status(&self, quote: &Quote) -> Result<SwapStatus> {
         let deposit = quote
@@ -653,6 +721,99 @@ mod tests {
             "near_http_307"
         );
         server.abort();
+    }
+    #[test]
+    fn bridge_minimum_parser_accepts_only_positive_atomic_decimal_messages() {
+        for text in [
+            "0",
+            "-1",
+            "1.2",
+            "+1",
+            "1 trailing",
+            "18446744073709551616",
+            "",
+        ] {
+            assert_eq!(
+                bridge_minimum(
+                    &json!({"message":format!("Amount is too low for bridge, try at least {text}")})
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            bridge_minimum(
+                &json!({"message":"Amount is too low for bridge, try at least 2100000"})
+            ),
+            Some(2100000)
+        );
+    }
+    #[tokio::test]
+    async fn floating_minimum_quotes_are_bounded_and_revalidate_every_accepted_offer() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        for mode in [
+            "floor",
+            "raise",
+            "twice",
+            "unstable",
+            "lower",
+            "malformed",
+            "input_cap",
+            "fee_cap",
+            "binding",
+        ] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let seen = calls.clone();
+            let app = axum::Router::new().route("/v0/quote", axum::routing::post(move |axum::Json(req): axum::Json<Value>| {
+                let index = seen.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let reject = mode != "floor" && (index == 0 || mode == "unstable" || (mode == "twice" && index == 1));
+                    if reject {
+                        let minimum = match mode {
+                            "lower" => "4000000".to_string(),
+                            "malformed" => "6000000 untrusted text".to_string(),
+                            _ => ((6 + index) * 1_000_000).to_string(),
+                        };
+                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"message":format!("Amount is too low for bridge, try at least {minimum}")})));
+                    }
+                    let mut response = json!({"quoteRequest":req,"quote":{"amountIn":if mode=="input_cap" {"200001"} else {"100000"},"amountOut":req["amount"],"amountInUsd":if mode=="fee_cap" {"9.00"} else {"5.25"}}});
+                    if mode == "binding" { response["quoteRequest"]["recipient"] = json!("0x0000000000000000000000000000000000000002"); }
+                    (axum::http::StatusCode::OK, axum::Json(response))
+                }
+            }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = NearClient::at(
+                &format!("http://{}", listener.local_addr().unwrap()),
+                None,
+                None,
+            )
+            .unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let (req, _, limits) = fixture(true);
+            let result = client.quote_with_minimum(req, &limits, 2_000_000_000).await;
+            match mode {
+                "floor" | "raise" | "twice" => assert_eq!(
+                    result.unwrap().request["amount"],
+                    match mode {
+                        "floor" => "5000000",
+                        "raise" => "6000000",
+                        _ => "7000000",
+                    }
+                ),
+                _ => assert!(result.is_err(), "{mode}"),
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                match mode {
+                    "floor" | "lower" | "malformed" => 1,
+                    "twice" | "unstable" => 3,
+                    _ => 2,
+                }
+            );
+            server.abort();
+        }
     }
     mod boundaries {
         include!("../../tests/support/near_boundaries.rs");

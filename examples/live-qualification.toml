@@ -26,15 +26,14 @@ base_rpc_url_env = "BASE_RPC_URL"
 base_confirmations = 12
 [wallets.coverage_a]
 mode = "zcash_rotation"
-# Review the current bridge minimum before authorizing new funding.
-# It is not a universal or permanent route minimum.
-deposit_size = "1.717124"
+# Funding floor; each new address uses a validated higher bridge minimum when needed.
+deposit_size = "2.00"
 max_price_usd = "0.20"
 max_input_zec = "0.002"
 max_fee_bps = 500
 [wallets.coverage_b]
 mode = "zcash_rotation"
-deposit_size = "1.717124"
+deposit_size = "2.00"
 max_price_usd = "0.20"
 max_input_zec = "0.002"
 max_fee_bps = 500

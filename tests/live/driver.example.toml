@@ -7,7 +7,7 @@ expires_at = 0
 api_budget_usdc = "0.60"
 max_source_zec = "0.0105"
 max_funding_jobs = 6
-timeout_seconds = 120
+timeout_seconds = 900
 
 # Each reservation covers the effective wallet cap ($0.20), not the expected $0.014.
 [[cases]]

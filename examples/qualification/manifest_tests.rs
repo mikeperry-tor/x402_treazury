@@ -47,6 +47,10 @@ async fn full_manifest_resolves_scope_arguments_coverage_and_budget_offline() {
     for row in &coverage {
         match row["status"].as_str().unwrap() {
             "not_attempted" => assert!(manifest.cases.iter().any(|c| c.id == row["case"])),
+            "unsigned_phase" => {
+                assert_eq!(row["provider"], "x402-list");
+                assert!(row["case"].is_null());
+            }
             "blocked_by_dependency" => {
                 assert!(row["case"].is_null());
                 assert!(!row["reason"].as_str().unwrap().is_empty());

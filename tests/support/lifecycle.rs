@@ -62,7 +62,7 @@ impl FundingBackend for Funding {
     }
     async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
         Ok(Quote {
-            request: json!({"recipient":job.recipient,"target":job.target,"pool":job.pool_name}),
+            request: json!({"recipient":job.recipient,"target":job.target,"amount":job.target,"pool":job.pool_name}),
             response: json!({}),
             input: 80,
             deadline: u64::MAX,
