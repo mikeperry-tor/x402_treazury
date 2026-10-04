@@ -135,6 +135,49 @@ impl Ledger {
         tx.commit()?;
         Ok(())
     }
+    pub fn check_renewal(&self, expected: &Value, replacement: &Value, instant: u64) -> Result<()> {
+        ensure!(self.prepared()? == *expected, "pins changed during renewal");
+        let count: i64 = self.db.query_row(
+            "SELECT count(*) FROM events WHERE kind='window_renewal'",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(count == 0, "window renewal cannot be repeated");
+        let old = expected["manifest"]["expires_at"]
+            .as_u64()
+            .context("missing previous expiry")?;
+        let new = replacement["manifest"]["expires_at"]
+            .as_u64()
+            .context("missing new expiry")?;
+        ensure!(
+            old <= instant
+                && new > instant
+                && old / 86400 == instant / 86400
+                && new / 86400 == instant / 86400,
+            "renewal must extend an expired run within the same UTC day"
+        );
+        let mut allowed = expected.clone();
+        allowed["manifest"]["expires_at"] = json!(new);
+        allowed["manifest_hash"] = replacement["manifest_hash"].clone();
+        ensure!(allowed == *replacement, "renewal changes non-expiry pins");
+        Ok(())
+    }
+    pub fn renew_window(
+        &mut self,
+        expected: &Value,
+        replacement: &Value,
+        instant: u64,
+    ) -> Result<()> {
+        self.check_renewal(expected, replacement, instant)?;
+        let tx = self.db.transaction()?;
+        tx.execute(
+            "UPDATE run SET prepared=?1 WHERE id=1",
+            [replacement.to_string()],
+        )?;
+        tx.execute("INSERT INTO events(kind,detail) VALUES('window_renewal',?1)", [json!({"before":expected,"after":replacement,"reason":"explicit operator continuation within original UTC day"}).to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }
     pub fn reserve(&mut self, id: &str, amount: u64) -> Result<()> {
         ensure!(amount <= i64::MAX as u64, "reservation overflow");
         let tx = self
@@ -235,6 +278,48 @@ mod tests {
         active.reserve("a", 1).unwrap();
         assert!(active.amend_timeouts(&old, &new).is_err());
         assert_eq!(active.prepared().unwrap(), old);
+    }
+    #[test]
+    fn renewal_preserves_attempts_and_refuses_pin_changes_rollover_and_repetition() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("run");
+        let old = json!({"manifest":{"expires_at":100,"api_budget_usdc":"1","max_funding_jobs":6},"cases":{"a":{}},"manifest_hash":"old","resolved_config_hash":"config"});
+        let mut next = old.clone();
+        next["manifest"]["expires_at"] = json!(500);
+        next["manifest_hash"] = json!("new");
+        let mut l = Ledger::create(&path, &old, 100).unwrap();
+        l.reserve("a", 60).unwrap();
+        let before = l.report().unwrap();
+        for changed in ["api_budget_usdc", "max_funding_jobs"] {
+            let mut bad = next.clone();
+            bad["manifest"][changed] = json!(999);
+            assert!(l.renew_window(&old, &bad, 200).is_err());
+        }
+        let mut bad = next.clone();
+        bad["resolved_config_hash"] = json!("different");
+        assert!(l.renew_window(&old, &bad, 200).is_err());
+        bad = next.clone();
+        bad["cases"]["b"] = json!({});
+        assert!(l.renew_window(&old, &bad, 200).is_err());
+        bad = next.clone();
+        bad["manifest"]["expires_at"] = json!(86401);
+        assert!(l.renew_window(&old, &bad, 200).is_err());
+        assert!(l.renew_window(&old, &next, 99).is_err());
+        assert!(l.renew_window(&old, &next, 500).is_err());
+        assert!(l.renew_window(&old, &next, 86400).is_err());
+        assert_eq!(l.prepared().unwrap(), old);
+        l.renew_window(&old, &next, 200).unwrap();
+        assert_eq!(l.report().unwrap(), before);
+        drop(l);
+        let mut l = Ledger::open(&path).unwrap();
+        assert_eq!(l.prepared().unwrap(), next);
+        assert!(l.reserve("a", 1).is_err());
+        assert!(l.reserve("b", 41).is_err());
+        let mut again = next.clone();
+        again["manifest"]["expires_at"] = json!(900);
+        assert!(l.renew_window(&next, &again, 600).is_err());
+        l.reserve("b", 40).unwrap();
+        assert_eq!(l.report().unwrap()["reserved_atomic"], 100);
     }
     #[test]
     fn overflow_and_links_fail_closed() {

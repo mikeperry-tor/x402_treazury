@@ -8,6 +8,8 @@ mod ledger;
 #[cfg(test)]
 #[path = "qualification/manifest_tests.rs"]
 mod manifest_tests;
+#[path = "qualification/renewal.rs"]
+mod renewal;
 #[path = "qualification/timeouts.rs"]
 mod timeouts;
 use anyhow::{Context, Result, ensure};
@@ -44,6 +46,11 @@ enum Command {
     Prepare,
     /// Once, before any activity: audited 120s/240s Tor and 900s driver timeout amendment.
     AmendTimeouts,
+    /// Once, explicitly renew an expired window within the same UTC day; preserve all budgets/cases.
+    RenewWindow {
+        #[arg(long)]
+        expires_at: u64,
+    },
     /// Capture independent catalogs with explicit reviewed qualification fallbacks; no wallet access.
     FreezeCatalogs {
         #[arg(long)]
@@ -614,6 +621,9 @@ async fn run() -> Result<()> {
         Command::Identities { output } => identities::export(&manifest, &output).await?,
         Command::Prepare => prepare(&manifest, &digest).await?,
         Command::AmendTimeouts => timeouts::amend(&args.manifest, &manifest, &digest).await?,
+        Command::RenewWindow { expires_at } => {
+            renewal::renew(&args.manifest, &manifest, &digest, expires_at).await?
+        }
         Command::Execute { case, allow_paid } => {
             execute(&manifest, &digest, &case, allow_paid).await?
         }
