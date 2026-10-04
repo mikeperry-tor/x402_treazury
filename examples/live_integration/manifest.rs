@@ -120,6 +120,11 @@ pub struct Phase {
 pub enum Scenario {
     Smoke {},
     Unsigned {},
+    TorOutage {
+        warm_case: String,
+        cached_case: String,
+        uncached_case: String,
+    },
     ProviderSweep {},
     Concurrency {
         batches: Vec<Vec<String>>,

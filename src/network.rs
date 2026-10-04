@@ -584,3 +584,127 @@ mod public_destination_tests {
 #[cfg(test)]
 #[path = "network_http_tests.rs"]
 mod http_tests;
+
+/// Dedicated supervisor boundary: literal loopback Tor control, never provider egress.
+/// The application does not use this to bypass its installed network policy.
+pub async fn local_control(
+    address: std::net::SocketAddr,
+    timeout: Duration,
+) -> Result<tokio::net::TcpStream> {
+    ensure!(
+        address.ip().is_loopback() && address.port() != 0,
+        "control transport requires a literal loopback endpoint"
+    );
+    ensure!(
+        timeout >= Duration::from_millis(1) && timeout <= Duration::from_secs(10),
+        "control connection deadline must be 1..10000 milliseconds"
+    );
+    Ok(
+        tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
+            .await
+            .context("local control connection deadline exceeded")??,
+    )
+}
+
+/// Loopback-only probes for an explicitly invoked qualification subprocess.
+/// This is separate from provider egress and is never selected by API configuration.
+pub async fn qualification_probe(
+    address: std::net::SocketAddr,
+    udp: bool,
+) -> Result<serde_json::Value> {
+    ensure!(
+        address.ip().is_loopback() && address.port() != 0,
+        "qualification probe requires literal loopback"
+    );
+    let operation = async {
+        if udp {
+            let local = if address.is_ipv4() {
+                "127.0.0.1:0"
+            } else {
+                "[::1]:0"
+            };
+            let socket = tokio::net::UdpSocket::bind(local).await?;
+            socket.send_to(b"qualification", address).await?;
+            let mut bytes = [0; 65536];
+            let (size, peer) = socket.recv_from(&mut bytes).await?;
+            if peer != address || &bytes[..size] != b"qualification" {
+                return Err(std::io::Error::other("probe reply differs"));
+            }
+        } else {
+            let _ = tokio::net::TcpStream::connect(address).await?;
+        }
+        Ok::<_, std::io::Error>(())
+    };
+    Ok(
+        match tokio::time::timeout(Duration::from_secs(2), operation).await {
+            Ok(Ok(())) => serde_json::json!({"reached":true,"denied":false}),
+            Ok(Err(error)) => {
+                serde_json::json!({"reached":false,"denied":matches!(error.raw_os_error(),Some(libc::EPERM|libc::EACCES)),"error_kind":format!("{:?}",error.kind())})
+            }
+            Err(_) => serde_json::json!({"reached":false,"denied":false,"error_kind":"timeout"}),
+        },
+    )
+}
+/// Owner-held positive-control listeners, used only by the explicit test supervisor.
+pub struct QualificationProbes {
+    pub addresses: std::collections::BTreeMap<String, std::net::SocketAddr>,
+    counters: std::sync::Arc<[std::sync::atomic::AtomicU64; 4]>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+impl QualificationProbes {
+    pub async fn start() -> Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let counters = std::sync::Arc::new(std::array::from_fn(|_| AtomicU64::new(0)));
+        let mut owner = Self {
+            addresses: Default::default(),
+            counters,
+            tasks: Vec::new(),
+        };
+        for (index, (name, local, udp)) in [
+            ("tcp4", "127.0.0.1:0", false),
+            ("tcp6", "[::1]:0", false),
+            ("udp4", "127.0.0.1:0", true),
+            ("udp6", "[::1]:0", true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let counters = owner.counters.clone();
+            if udp {
+                let socket = tokio::net::UdpSocket::bind(local).await?;
+                owner.addresses.insert(name.into(), socket.local_addr()?);
+                owner.tasks.push(tokio::spawn(async move {
+                    let mut bytes=vec![0;65536];
+                    while let Ok((size,peer))=socket.recv_from(&mut bytes).await {
+                        counters[index].fetch_add(1,Ordering::SeqCst);
+                        if &bytes[..size]==b"qualification" {let _=socket.send_to(b"qualification",peer).await;}
+                        else {eprintln!("qualification UDP probe received unexpected data; positive-control counts will reject the observation");}
+                    }
+                }));
+            } else {
+                let listener = tokio::net::TcpListener::bind(local).await?;
+                owner.addresses.insert(name.into(), listener.local_addr()?);
+                owner.tasks.push(tokio::spawn(async move {
+                    while let Ok((stream, _)) = listener.accept().await {
+                        counters[index].fetch_add(1, Ordering::SeqCst);
+                        drop(stream);
+                    }
+                }));
+            }
+        }
+        Ok(owner)
+    }
+    pub fn counts(&self) -> Vec<u64> {
+        self.counters
+            .iter()
+            .map(|c| c.load(std::sync::atomic::Ordering::SeqCst))
+            .collect()
+    }
+}
+impl Drop for QualificationProbes {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}

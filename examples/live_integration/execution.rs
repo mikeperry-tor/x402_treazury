@@ -21,14 +21,49 @@ fn now() -> Result<i64> {
 }
 
 pub async fn run(state: &Path, run: &str) -> Result<u8> {
+    run_confined(state, run, None).await
+}
+pub async fn run_confined(state: &Path, run: &str, profile: Option<&Path>) -> Result<u8> {
+    run_inner(state, run, profile, None).await
+}
+pub async fn run_owned(
+    state: &Path,
+    run: &str,
+    profile: &Path,
+    runtime: &mut crate::tor::session::Runtime,
+) -> Result<u8> {
+    run_inner(state, run, Some(profile), Some(runtime)).await
+}
+async fn run_inner(
+    state: &Path,
+    run: &str,
+    profile: Option<&Path>,
+    mut runtime: Option<&mut crate::tor::session::Runtime>,
+) -> Result<u8> {
     let mut registry = Registry::open(state, false)?;
     let manifest = registry.manifest(run)?;
+    ensure!(
+        (manifest.network.tor_mode == crate::manifest::TorMode::Owned)
+            == (profile.is_some() && runtime.is_some()),
+        "owned Tor runs require the live supervised confinement context"
+    );
     let pins = registry.pins(run)?;
     let catalogs = pins
         .catalogs
         .as_ref()
         .context("run requires prepare-catalogs, not configuration-only pins")?;
+    eprintln!("qualification verifying frozen catalog and executable provenance before serving");
     catalogs.verify(&manifest, &pins)?;
+    if let Some(profile) = profile {
+        ensure!(
+            files::hash_file(profile)?
+                == *catalogs
+                    .files
+                    .get("client.sb")
+                    .context("pinned confinement profile missing")?,
+            "confinement profile differs from preparation"
+        );
+    }
     ensure!(
         manifest.limits.result_bytes <= files::DOCUMENT_BYTES,
         "runner result_bytes exceeds supported {}-byte evidence limit; lower it explicitly",
@@ -41,6 +76,7 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
                 | Scenario::Smoke {}
                 | Scenario::ProviderSweep {}
                 | Scenario::Concurrency { .. }
+                | Scenario::TorOutage { .. }
         )),
         "this runner does not yet implement the requested scenario assertions"
     );
@@ -121,7 +157,7 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
         &serde_json::to_value(&binding)?,
         now()?,
     )?;
-    let mut child = Process::launch(
+    let mut child = Process::launch_confined(
         &manifest.binary,
         &[
             "--meta-config".into(),
@@ -135,12 +171,22 @@ pub async fn run(state: &Path, run: &str) -> Result<u8> {
         &environment,
         &catalogs.directory,
         files::DOCUMENT_BYTES,
+        profile,
     )?;
-    let stop = CancellationToken::new();
+    let stop = runtime
+        .as_ref()
+        .map_or_else(CancellationToken::new, |r| r.stop.clone());
     let signals = tokio::spawn(signal_stop(stop.clone()));
+    let faults = runtime
+        .as_ref()
+        .map(|r| r.faults())
+        .transpose()?
+        .unwrap_or_else(|| [CancellationToken::new(), CancellationToken::new()]);
     let outcome = tokio::select! {
-        result = execute(&mut registry, &manifest, &clients, &mut child, deadline, &stop) => result,
+        result = execute(&mut registry, &manifest, &clients, &mut child, deadline, &stop, &mut runtime) => result,
         _ = stop.cancelled() => Err(anyhow::anyhow!("qualification cancelled; accepted calls remain reserved")),
+        _ = faults[0].cancelled() => Err(anyhow::anyhow!("owned Tor output evidence failed; stopping dispatch")),
+        _ = faults[1].cancelled() => Err(anyhow::anyhow!("owned Tor control observer failed; stopping dispatch")),
     };
     signals.abort();
     eprintln!(
@@ -204,11 +250,27 @@ async fn signal_stop(stop: CancellationToken) {
 fn summarize(registry: &Registry, m: &Manifest) -> Result<u8> {
     let report = registry.report(Some(&m.run_id), now()?)?;
     registry.application_evidence(&m.run_id)?;
+    let outage_qualified = report["runtime_events"]
+        .as_array()
+        .is_some_and(|events| events.iter().any(|e| e["kind"] == "tor_outage_qualified"));
+    if outage_qualified {
+        for phase in &m.phases {
+            if matches!(phase.scenario, Scenario::TorOutage { .. }) {
+                crate::tor::outage::results(registry, m, phase)?;
+            }
+        }
+    }
     let cases = report["cases"].as_array().context("report cases missing")?;
     let complete = cases.iter().all(|c| c["execution"] == "COMPLETED");
-    let passed = cases
-        .iter()
-        .all(|c| c["semantic"] == "PASSED" && c["settlement"] == "NOT_SIGNED");
+    let passed = cases.iter().all(|c| {
+        (c["semantic"] == "PASSED"
+            || (c["case"]
+                .as_str()
+                .is_some_and(|id| crate::tor::outage::uncached(m, id))
+                && c["semantic"] == "FAILED"
+                && outage_qualified))
+            && c["settlement"] == "NOT_SIGNED"
+    });
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(if !complete {
         3
@@ -225,6 +287,7 @@ async fn execute(
     child: &mut Process,
     deadline: Instant,
     stop: &CancellationToken,
+    runtime: &mut Option<&mut crate::tor::session::Runtime>,
 ) -> Result<()> {
     let pins = registry.pins(&m.run_id)?;
     let dir = &pins
@@ -290,6 +353,45 @@ async fn execute(
         let phase_deadline = deadline
             .min(Instant::now() + Duration::from_secs(m.limits.phase_seconds))
             .min(Instant::now() + Duration::from_secs(window.not_after - time));
+        if let Scenario::TorOutage { warm_case, .. } = &phase.scenario {
+            registry
+                .dependencies_ready(&m.run_id, &phase.id)
+                .context("outage prerequisites failed; refusing planned Tor shutdown")?;
+            let warm = registry.response(&m.run_id, warm_case)?;
+            ensure!(
+                warm["result"]["isError"] != true,
+                "warm help failed; refusing outage qualification"
+            );
+            tokio::time::timeout_at(
+                phase_deadline,
+                runtime
+                    .as_mut()
+                    .context("Tor outage requires owned runtime")?
+                    .outage(),
+            )
+            .await
+            .context("outage preparation deadline exceeded")??;
+            for (name, client) in clients {
+                let expected = snapshot["inventory"]
+                    .as_array()
+                    .context("inventory missing")?
+                    .iter()
+                    .find(|i| i["server"] == *name)
+                    .context("listener missing")?;
+                tokio::time::timeout_at(
+                    phase_deadline,
+                    client.check_inventory(expected, m.limits.result_bytes),
+                )
+                .await
+                .context("outage tools/list deadline exceeded")??;
+            }
+            registry.event(
+                &m.run_id,
+                "tor_outage_started",
+                &json!({"phase":phase.id,"socks_closed":true,"inventory_unchanged":true}),
+                now()?,
+            )?;
+        }
         let batches = match &phase.scenario {
             Scenario::Concurrency { batches } => batches.clone(),
             _ => phase.cases.iter().map(|c| vec![c.clone()]).collect(),
@@ -394,6 +496,14 @@ async fn execute(
                 }
                 registry.event(&m.run_id, "mcp_finished", &json!({"case":id,"mcp_started_ms":began,"mcp_finished_ms":ended,"scope":"MCP request interval, not payment/signature interval"}), now()?)?;
             }
+        }
+        if matches!(&phase.scenario, Scenario::TorOutage { .. }) {
+            let evidence = crate::tor::outage::results(registry, m, phase)?;
+            registry.event(&m.run_id, "tor_outage_qualified", &evidence, now()?)?;
+            runtime
+                .as_mut()
+                .context("owned runtime missing")?
+                .outage_completed = true;
         }
     }
     Ok(())

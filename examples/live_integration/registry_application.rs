@@ -2,6 +2,14 @@
 use super::*;
 use std::collections::BTreeMap;
 impl Registry {
+    pub fn application_failure(&self, run: &str, case: &str) -> Result<Option<String>> {
+        let (count, category):(i64,Option<String>) = self.db.query_row("SELECT COUNT(*),MIN(json_extract(detail,'$.failure_category')) FROM events WHERE run=?1 AND kind='application_finished' AND json_extract(detail,'$.case')=?2", params![run,case], |r| Ok((r.get(0)?,r.get(1)?)))?;
+        ensure!(
+            count == 1,
+            "expected exactly one application completion for case {case}"
+        );
+        Ok(category)
+    }
     pub fn application_evidence(&self, run: &str) -> Result<Value> {
         let m = self.manifest(run)?;
         let cases: BTreeMap<_, _> = m.cases.iter().map(|c| (c.id.as_str(), c)).collect();

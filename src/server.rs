@@ -214,7 +214,12 @@ impl ServerHandler for Server {
                     None,
                 )
             })?;
-        let result = match self.invoke_output(&request.name, &arguments).await {
+        let invocation = self.invoke_output(&request.name, &arguments).await;
+        let failure = invocation
+            .as_ref()
+            .err()
+            .map(crate::qualification::failure_category);
+        let result = match invocation {
             Ok(output) => {
                 let structured = if request.name.starts_with("treazury_")
                     && request.name != "treazury_tool_call"
@@ -231,7 +236,7 @@ impl ServerHandler for Server {
         };
         if let Some(claim) = claim {
             claim
-                .finish(result.is_error.unwrap_or(false))
+                .finish(result.is_error.unwrap_or(false), failure)
                 .await
                 .map_err(|error| {
                     tracing::error!("qualification application evidence incomplete: {error:#}");

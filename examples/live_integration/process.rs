@@ -16,6 +16,59 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// Install before starting any children, including Tor/bootstrap inspectors.
+/// Dropping the scope aborts watchers; it never leaves a detached signal task.
+pub struct StopSignals {
+    pub stop: CancellationToken,
+    tasks: Vec<JoinHandle<()>>,
+}
+impl StopSignals {
+    pub fn install() -> Result<Self> {
+        let stop = CancellationToken::new();
+        let signal_stop = stop.clone();
+        #[cfg(unix)]
+        let task = {
+            let mut interrupt =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+            let mut terminate =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            tokio::spawn(async move {
+                tokio::select! {_ = interrupt.recv()=>{}, _ = terminate.recv()=>{}}
+                eprintln!(
+                    "qualification interrupted: deliberately draining owned children and retaining incomplete evidence"
+                );
+                signal_stop.cancel();
+            })
+        };
+        #[cfg(not(unix))]
+        let task = tokio::spawn(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            signal_stop.cancel();
+        });
+        Ok(Self {
+            stop,
+            tasks: vec![task],
+        })
+    }
+    pub fn observe_faults(&mut self, faults: [CancellationToken; 2]) {
+        let stop = self.stop.clone();
+        self.tasks.push(tokio::spawn(async move {
+            tokio::select! {_ = faults[0].cancelled()=>{}, _ = faults[1].cancelled()=>{}}
+            eprintln!(
+                "owned Tor/control evidence failed: stopping progression and draining children"
+            );
+            stop.cancel();
+        }));
+    }
+}
+impl Drop for StopSignals {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}
+
 #[derive(Clone, Default, Serialize)]
 pub struct Output {
     pub bytes: Vec<u8>,
@@ -48,6 +101,40 @@ pub struct Process {
     output: [(Arc<Mutex<Output>>, JoinHandle<()>); 2],
 }
 impl Process {
+    pub fn launch_confined(
+        binary: &Path,
+        args: &[String],
+        env: &BTreeMap<String, String>,
+        cwd: &Path,
+        limit: usize,
+        profile: Option<&Path>,
+    ) -> Result<Self> {
+        if let Some(profile) = profile {
+            ensure!(
+                cfg!(target_os = "macos"),
+                "macOS confinement is unavailable on this platform"
+            );
+            super::files::regular(profile)?;
+            let mut wrapped = vec![
+                "-f".into(),
+                profile
+                    .to_str()
+                    .context("profile path must be UTF8")?
+                    .into(),
+                binary.to_str().context("binary path must be UTF8")?.into(),
+            ];
+            wrapped.extend_from_slice(args);
+            Self::launch(
+                Path::new("/usr/bin/sandbox-exec"),
+                &wrapped,
+                env,
+                cwd,
+                limit,
+            )
+        } else {
+            Self::launch(binary, args, env, cwd, limit)
+        }
+    }
     pub fn launch(
         binary: &Path,
         args: &[String],

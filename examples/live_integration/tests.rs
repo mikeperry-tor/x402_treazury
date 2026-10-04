@@ -189,3 +189,46 @@ sources=["api"]
 
 #[path = "registry_tests.rs"]
 mod registry_tests;
+
+#[test]
+fn outage_plan_requires_owned_tor_final_phase_and_warm_dependency() {
+    let mut m = manifest();
+    m.start.pools.clear();
+    m.cases[0].unsigned = true;
+    m.cases[0].reserve_usdc = "0".into();
+    m.phases[0].pools.clear();
+    m.phases[0].scenario = Scenario::Unsigned {};
+    for id in ["cached", "fresh"] {
+        let mut c = m.cases[0].clone();
+        c.id = id.into();
+        m.cases.push(c);
+    }
+    let mut phase = m.phases[0].clone();
+    phase.id = "outage".into();
+    phase.cases = vec!["cached".into(), "fresh".into()];
+    phase.depends_on = vec!["smoke".into()];
+    phase.scenario = Scenario::TorOutage {
+        warm_case: "call".into(),
+        cached_case: "cached".into(),
+        uncached_case: "fresh".into(),
+    };
+    m.phases.push(phase);
+    m.network.tor_mode = TorMode::Owned;
+    m.network.tor_binary = Some("/tor".into());
+    let mut cfg = config();
+    cfg["network"]["mode"] = json!("tor");
+    planner::build(&m, &cfg).unwrap();
+    let mut bad = m.clone();
+    bad.phases[1].depends_on.clear();
+    assert!(planner::build(&bad, &cfg).is_err());
+    let mut bad = m.clone();
+    bad.phases.swap(0, 1);
+    assert!(planner::build(&bad, &cfg).is_err());
+    let mut bad = m.clone();
+    bad.network.tor_mode = TorMode::External;
+    bad.network.tor_binary = None;
+    assert!(planner::build(&bad, &cfg).is_err());
+    let mut bad = m.clone();
+    bad.phases[1].cases.reverse();
+    assert!(planner::build(&bad, &cfg).is_err());
+}

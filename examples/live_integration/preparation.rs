@@ -62,4 +62,4 @@ fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>> {
 
 #[path = "preparation_catalogs.rs"]
 mod catalogs;
-pub use catalogs::{CatalogPins, collect_catalogs};
+pub use catalogs::{CatalogPins, collect_catalogs, collect_catalogs_confined};

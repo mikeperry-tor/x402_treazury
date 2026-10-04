@@ -485,7 +485,7 @@ impl Registry {
         if let Some(id) = run {
             let _ = self.manifest(id)?;
         }
-        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_claim','application_finished') ORDER BY seq LIMIT 50001")?;
+        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_claim','application_finished','tor_outage_started','tor_outage_qualified') ORDER BY seq LIMIT 50001")?;
         let runtime_events = events
             .query_map([run], |r| {
                 Ok((

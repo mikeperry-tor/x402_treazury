@@ -162,6 +162,34 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
                 "unsigned phase cannot contain paid cases or funding pools"
             ),
             Scenario::Concurrency { batches } => validate_batches(m, p, batches)?,
+            Scenario::TorOutage {
+                warm_case,
+                cached_case,
+                uncached_case,
+            } => {
+                ensure!(
+                    m.network.tor_mode == TorMode::Owned && phase_unsigned && p.pools.is_empty(),
+                    "Tor outage requires owned Tor and unsigned cases"
+                );
+                ensure!(
+                    m.phases.last().is_some_and(|last| last.id == p.id),
+                    "Tor outage must be the final phase"
+                );
+                ensure!(
+                    cached_case != uncached_case
+                        && p.cases == [cached_case.clone(), uncached_case.clone()],
+                    "Tor outage requires ordered cached/uncached cases exactly once"
+                );
+                let warm = m
+                    .phases
+                    .iter()
+                    .find(|phase| phase.cases.contains(warm_case))
+                    .context("outage warm case missing")?;
+                ensure!(
+                    seen.contains(&warm.id) && p.depends_on.contains(&warm.id),
+                    "outage requires an earlier warm phase as an explicit dependency"
+                );
+            }
             Scenario::Rotation { refill_slots } | Scenario::RefillService { refill_slots } => {
                 ensure!(
                     !phase_unsigned && !p.pools.is_empty() && *refill_slots == 1,

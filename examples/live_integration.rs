@@ -18,6 +18,8 @@ mod schema;
 #[cfg(test)]
 #[path = "live_integration/tests.rs"]
 mod tests;
+#[path = "live_integration/tor.rs"]
+mod tor;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -28,6 +30,34 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Qualify macOS egress confinement using loopback-only positive/negative controls.
+    QualifyConfinement {
+        #[arg(long)]
+        evidence_dir: PathBuf,
+        #[arg(long)]
+        socks_port: u16,
+        #[arg(long, required = true)]
+        mcp_port: Vec<u16>,
+    },
+    /// Own a dedicated Tor and confine unsigned preparation/execution (opt-in).
+    QualifyTor {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+    /// Internal loopback-only confinement probe; never contacts a provider.
+    #[command(hide = true)]
+    EgressProbe {
+        #[arg(long)]
+        tcp4: std::net::SocketAddr,
+        #[arg(long)]
+        tcp6: std::net::SocketAddr,
+        #[arg(long)]
+        udp4: std::net::SocketAddr,
+        #[arg(long)]
+        udp6: std::net::SocketAddr,
+    },
     /// Initialize or explicitly revise cumulative registry authority; no spending.
     AuthorizeRegistry {
         #[arg(long)]
@@ -114,6 +144,52 @@ async fn run() -> Result<u8> {
 async fn execute(command: Command) -> Result<u8> {
     let now = i64::try_from(x402_treazury::rotation::base::now()?)?;
     match command {
+        Command::QualifyConfinement {
+            evidence_dir,
+            socks_port,
+            mcp_port,
+        } => {
+            files::create_dir(&evidence_dir)?;
+            let profile = evidence_dir.join("client.sb");
+            files::publish(
+                &profile,
+                tor::confinement::profile(socks_port, &mcp_port)?.as_bytes(),
+            )?;
+            let result = tor::confinement::qualify(
+                &std::env::current_exe()?.canonicalize()?,
+                &profile,
+                &evidence_dir,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Command::QualifyTor {
+            state_dir,
+            manifest,
+        } => {
+            let input = manifest::Manifest::load(&manifest).await?;
+            return tor::session::qualify(&state_dir, &input).await;
+        }
+        Command::EgressProbe {
+            tcp4,
+            tcp6,
+            udp4,
+            udp6,
+        } => {
+            let mut results = std::collections::BTreeMap::new();
+            for (name, address, udp) in [
+                ("tcp4", tcp4, false),
+                ("tcp6", tcp6, false),
+                ("udp4", udp4, true),
+                ("udp6", udp6, true),
+            ] {
+                results.insert(
+                    name,
+                    x402_treazury::network::qualification_probe(address, udp).await?,
+                );
+            }
+            println!("{}", serde_json::to_string(&results)?);
+        }
         Command::AuthorizeRegistry {
             state_dir,
             authorization,

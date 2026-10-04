@@ -12,6 +12,30 @@ use std::{
 };
 const LIMIT: usize = 16 * 1024 * 1024;
 static ACTIVE: OnceLock<Arc<Guard>> = OnceLock::new();
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureCategory {
+    HttpConnect,
+    HttpTimeout,
+    HttpStatus,
+    Other,
+}
+pub fn failure_category(error: &anyhow::Error) -> FailureCategory {
+    for cause in error.chain() {
+        if let Some(http) = cause.downcast_ref::<reqwest::Error>() {
+            return if http.is_timeout() {
+                FailureCategory::HttpTimeout
+            } else if http.is_connect() {
+                FailureCategory::HttpConnect
+            } else if http.is_status() {
+                FailureCategory::HttpStatus
+            } else {
+                FailureCategory::Other
+            };
+        }
+    }
+    FailureCategory::Other
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
@@ -249,13 +273,17 @@ async fn claim_with(
     })
 }
 impl Claim {
-    pub async fn finish(self, is_error: bool) -> Result<()> {
+    pub async fn finish(self, is_error: bool, failure: Option<FailureCategory>) -> Result<()> {
+        ensure!(
+            is_error || failure.is_none(),
+            "successful completion cannot carry a failure category"
+        );
         let elapsed = self.started.elapsed().as_millis();
         tokio::task::spawn_blocking(move || -> Result<()> {
             // Completion remains permitted after expiry/revocation; this records
             // accepted work and grants no new execution authority.
             let db=connection(&self.guard.binding)?;
-            let detail=json!({"case":self.case,"session":self.guard.binding.session,"is_error":is_error,"elapsed_ms":elapsed,"finished_micros":self.guard.origin.elapsed().as_micros()});
+            let detail=json!({"case":self.case,"session":self.guard.binding.session,"is_error":is_error,"failure_category":failure,"elapsed_ms":elapsed,"finished_micros":self.guard.origin.elapsed().as_micros()});
             db.execute("INSERT INTO events(run,kind,detail,at) VALUES(?1,'application_finished',?2,?3)",params![self.guard.binding.run,detail.to_string(),now()?])?;
             Ok(())
         }).await??;
@@ -267,6 +295,48 @@ impl Claim {
 mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
+    #[tokio::test]
+    async fn failure_categories_are_typed_and_durable_not_inferred_from_prose() {
+        assert_eq!(
+            failure_category(&anyhow::anyhow!("Connection refused")),
+            FailureCategory::Other
+        );
+        let status = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(403)
+                .body("denied")
+                .unwrap(),
+        )
+        .error_for_status()
+        .unwrap_err();
+        assert_eq!(
+            failure_category(&anyhow::Error::new(status)),
+            FailureCategory::HttpStatus
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        drop(listener);
+        let context =
+            crate::network::NetworkContext::new(crate::network::NetworkPolicy::default()).unwrap();
+        let error = context
+            .discovery(&url, Duration::from_secs(2))
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap_err();
+        let category = failure_category(&anyhow::Error::new(error).context("outer help error"));
+        assert_eq!(category, FailureCategory::HttpConnect);
+        let (_dir, guard, db) = fixture();
+        claim_with(guard, "listener", "read", &args(), &id())
+            .await
+            .unwrap()
+            .finish(true, Some(category))
+            .await
+            .unwrap();
+        let recorded:String = db.query_row("SELECT json_extract(detail,'$.failure_category') FROM events WHERE kind='application_finished'",[],|r|r.get(0)).unwrap();
+        assert_eq!(recorded, "http_connect");
+    }
     pub(super) fn fixture() -> (tempfile::TempDir, Arc<Guard>, Connection) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.sqlite");
@@ -367,7 +437,7 @@ mod tests {
         // Revocation stops starts, but must not discard completion of accepted work.
         db.execute("INSERT INTO authorizations VALUES('revoked',2)", [])
             .unwrap();
-        claim.finish(false).await.unwrap();
+        claim.finish(false, None).await.unwrap();
         let count: i64 = db
             .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
             .unwrap();
@@ -424,7 +494,7 @@ mod concurrency_tests {
             claim_with(guard, "listener", "read", &args, &id)
         );
         assert_ne!(a.is_ok(), b.is_ok());
-        a.or(b).unwrap().finish(false).await.unwrap();
+        a.or(b).unwrap().finish(false, None).await.unwrap();
         let claims: i64 = db
             .query_row(
                 "SELECT COUNT(*) FROM events WHERE kind='application_claim'",

@@ -7,6 +7,15 @@ pub enum Outcome {
     TransportUncertain,
 }
 impl Registry {
+    pub fn dependencies_ready(&self, run: &str, phase: &str) -> Result<()> {
+        let m = self.manifest(run)?;
+        let phase = m
+            .phases
+            .iter()
+            .find(|p| p.id == phase)
+            .context("unknown phase")?;
+        check_dependencies(&self.db, run, &phase.depends_on)
+    }
     // Kept private to the supervisor modules; no CLI exposes synthetic reservations.
     // M3 must qualify pins/identity before using this durable pre-dispatch boundary.
     #[allow(
@@ -65,13 +74,7 @@ impl Registry {
             [],
             |r| r.get(0),
         )?;
-        for dependency in &p.depends_on {
-            let blocked:i64=tx.query_row("SELECT COUNT(*) FROM cases WHERE run=?1 AND phase=?2 AND (execution!='COMPLETED' OR semantic!='PASSED' OR settlement NOT IN ('NOT_SIGNED','USED','EXPIRED_UNUSED'))",params![run,dependency],|r|r.get(0))?;
-            ensure!(
-                blocked == 0,
-                "dependency {dependency} has incomplete/unqualified cases"
-            );
-        }
+        check_dependencies(&tx, run, &p.depends_on)?;
         let mut sum = 0i64;
         let mut unique = BTreeSet::new();
         for id in ids {
@@ -166,7 +169,34 @@ impl Registry {
     }
 }
 
+fn check_dependencies(db: &Connection, run: &str, dependencies: &[String]) -> Result<()> {
+    for dependency in dependencies {
+        let blocked:i64=db.query_row("SELECT COUNT(*) FROM cases WHERE run=?1 AND phase=?2 AND (execution!='COMPLETED' OR semantic!='PASSED' OR settlement NOT IN ('NOT_SIGNED','USED','EXPIRED_UNUSED'))",params![run,dependency],|r|r.get(0))?;
+        ensure!(
+            blocked == 0,
+            "dependency {dependency} has incomplete/unqualified cases"
+        );
+    }
+    Ok(())
+}
+
 impl Registry {
+    pub fn response(&self, run: &str, id: &str) -> Result<Value> {
+        let hash: String = self.db.query_row(
+            "SELECT result_hash FROM cases WHERE run=?1 AND id=?2 AND execution='COMPLETED'",
+            params![run, id],
+            |r| r.get(0),
+        )?;
+        let bytes = files::read(&self.root.join(format!(
+            "response-{}.bin",
+            files::hash(format!("{run}:{id}"))
+        )))?;
+        ensure!(
+            files::hash(&bytes) == hash,
+            "case response evidence changed"
+        );
+        Ok(serde_json::from_slice(&bytes)?)
+    }
     pub fn uncertain_unsigned(&mut self, run: &str, id: &str) -> Result<()> {
         let manifest = self.manifest(run)?;
         ensure!(

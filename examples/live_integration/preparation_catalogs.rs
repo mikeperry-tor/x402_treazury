@@ -30,7 +30,11 @@ pub struct CatalogPins {
 }
 impl CatalogPins {
     pub fn verify(&self, m: &Manifest, pins: &Pins) -> Result<()> {
-        unsigned_contract(m, &pins.resolved_config)?;
+        unsigned_contract(
+            m,
+            &pins.resolved_config,
+            self.files.contains_key("client.sb"),
+        )?;
         files::directory(&self.directory)?;
         ensure!(
             self.directory == m.evidence_dir.join(&m.run_id),
@@ -76,7 +80,7 @@ impl CatalogPins {
         Ok(())
     }
 }
-fn unsigned_contract(m: &Manifest, config: &Value) -> Result<()> {
+fn unsigned_contract(m: &Manifest, config: &Value, confined: bool) -> Result<()> {
     ensure!(
         m.cases.iter().all(|c| c.unsigned),
         "catalog runner currently requires exclusively unsigned cases"
@@ -86,10 +90,14 @@ fn unsigned_contract(m: &Manifest, config: &Value) -> Result<()> {
         "catalog runner requires frozen execution"
     );
     ensure!(
-        m.network.tor_mode != TorMode::Owned
-            && m.network.confinement == Confinement::None
-            && !m.network.require_isolation_evidence,
-        "owned Tor/confinement qualification is not implemented yet; cannot certify this run"
+        (confined
+            && m.network.tor_mode == TorMode::Owned
+            && m.network.confinement == Confinement::MacosSandbox)
+            || (!confined
+                && m.network.tor_mode != TorMode::Owned
+                && m.network.confinement == Confinement::None
+                && !m.network.require_isolation_evidence),
+        "owned Tor qualification requires the supervised confined command; cannot downgrade to proxy-only"
     );
     ensure!(
         config["resolved_wallets"]
@@ -131,6 +139,7 @@ fn verify_build(build: &BuildIdentity, pins: &Pins) -> Result<()> {
     Ok(())
 }
 fn validate_cases(m: &Manifest, snapshot: &Value) -> Result<()> {
+    crate::tor::outage::validate(m, snapshot)?;
     ensure!(
         snapshot["version"] == 1,
         "unsupported catalog snapshot contract"
@@ -168,22 +177,30 @@ async fn inspect(
     label: &str,
     args: Vec<String>,
     deadline: Instant,
+    profile: Option<&Path>,
+    stop: CancellationToken,
 ) -> Result<Vec<u8>> {
+    ensure!(
+        !stop.is_cancelled(),
+        "catalog preparation cancelled before {label}"
+    );
+    eprintln!("qualification inspecting {label} through the pinned executable");
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .context("catalog preparation deadline exceeded")?;
-    let child = Process::launch(
+    let child = Process::launch_confined(
         &m.binary,
         &args,
         &BTreeMap::new(),
         directory,
         files::DOCUMENT_BYTES,
+        profile,
     )?;
     let evidence = child
         .wait(
             remaining,
             Duration::from_secs(m.limits.cleanup_seconds),
-            CancellationToken::new(),
+            stop.clone(),
         )
         .await?;
     files::publish(
@@ -214,14 +231,32 @@ async fn inspect(
     Ok(evidence.stdout.bytes)
 }
 pub async fn collect_catalogs(m: &Manifest, state: &Path) -> Result<(Plan, Pins)> {
+    collect_catalogs_confined(m, state, None, CancellationToken::new()).await
+}
+pub async fn collect_catalogs_confined(
+    m: &Manifest,
+    state: &Path,
+    profile: Option<&Path>,
+    stop: CancellationToken,
+) -> Result<(Plan, Pins)> {
+    eprintln!("qualification preparing binary/configuration provenance and frozen catalogs");
     let (plan, mut pins) = collect(m, state).await?;
-    unsigned_contract(m, &pins.resolved_config)?;
+    unsigned_contract(m, &pins.resolved_config, profile.is_some())?;
     files::directory(&m.evidence_dir)?;
     let directory = m.evidence_dir.join(&m.run_id);
     files::create_dir(&directory)?; // Failed preparation evidence is never overwritten.
     let deadline = Instant::now() + Duration::from_secs(m.limits.run_seconds);
     let build: BuildIdentity = serde_json::from_slice(
-        &inspect(m, &directory, "build", vec!["build-info".into()], deadline).await?,
+        &inspect(
+            m,
+            &directory,
+            "build",
+            vec!["build-info".into()],
+            deadline,
+            profile,
+            stop.clone(),
+        )
+        .await?,
     )?;
     verify_build(&build, &pins)?;
     let bytes = inspect(
@@ -234,6 +269,8 @@ pub async fn collect_catalogs(m: &Manifest, state: &Path) -> Result<(Plan, Pins)
             "--qualification-snapshot".into(),
         ],
         deadline,
+        profile,
+        stop.clone(),
     )
     .await?;
     let snapshot: Value = serde_json::from_slice(&bytes)?;
@@ -259,6 +296,10 @@ pub async fn collect_catalogs(m: &Manifest, state: &Path) -> Result<(Plan, Pins)
         artifacts.insert(name, files::hash(bytes));
         Ok(())
     };
+    if let Some(profile) = profile {
+        files::regular(profile)?;
+        save("client.sb".into(), &files::read(profile)?)?;
+    }
     save("build.json".into(), &serde_json::to_vec(&build)?)?;
     save("snapshot.json".into(), &bytes)?;
     for (name, source) in &mut config.sources {
@@ -301,6 +342,8 @@ pub async fn collect_catalogs(m: &Manifest, state: &Path) -> Result<(Plan, Pins)
             "--qualification-snapshot".into(),
         ],
         deadline,
+        profile,
+        stop.clone(),
     )
     .await?;
     let frozen_value: Value = serde_json::from_slice(&frozen)?;
