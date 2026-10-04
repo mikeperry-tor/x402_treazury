@@ -27,6 +27,10 @@ struct Args {
 }
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter("warn")
+        .init();
     match run().await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {

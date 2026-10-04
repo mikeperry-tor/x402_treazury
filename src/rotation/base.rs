@@ -8,27 +8,8 @@ use std::{
     collections::BTreeMap,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-/// Contains only fixed method/category names and numeric codes, never upstream prose.
-#[derive(Debug)]
-pub(crate) struct RpcFailure {
-    method: &'static str,
-    category: &'static str,
-    http: Option<u16>,
-    code: Option<i64>,
-}
-impl std::fmt::Display for RpcFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Base RPC {}: {}", self.method, self.category)?;
-        if let Some(status) = self.http {
-            write!(f, "; HTTP {status}")?;
-        }
-        if let Some(code) = self.code {
-            write!(f, "; RPC code {code}")?;
-        }
-        Ok(())
-    }
-}
-impl std::error::Error for RpcFailure {}
+mod transport;
+pub(crate) use transport::RpcFailure;
 #[derive(Debug)]
 pub(crate) struct VerificationStage(pub &'static str);
 impl std::fmt::Display for VerificationStage {
@@ -138,58 +119,16 @@ impl BaseRpc {
         })
     }
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
-        let failure = |category, http, code| RpcFailure {
+        transport::rpc(
+            &self.http,
+            &self.url,
             method,
-            category,
-            http,
-            code,
-        };
-        let response = self
-            .http
-            .post(self.url.clone())
-            .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
-            .send()
-            .await
-            .map_err(|e| {
-                failure(
-                    if e.is_timeout() {
-                        "timeout"
-                    } else if e.is_connect() {
-                        "connect"
-                    } else {
-                        "transport"
-                    },
-                    None,
-                    None,
-                )
-            })?;
-        let status = response.status().as_u16();
-        ensure!(
-            response.status().is_success(),
-            failure("HTTP rejection", Some(status), None)
-        );
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|_| failure("invalid JSON body", Some(status), None))?;
-        ensure!(
-            value.get("error").is_none(),
-            failure(
-                "RPC rejection",
-                Some(status),
-                value["error"]["code"].as_i64()
-            )
-        );
-        ensure!(
-            value["id"] == 1 && value["jsonrpc"] == "2.0",
-            failure("invalid envelope", Some(status), None)
-        );
-        value
-            .get("result")
-            .filter(|v| !v.is_null())
-            .cloned()
-            .ok_or_else(|| failure("missing result", Some(status), None).into())
+            params,
+            crate::network::global().request_timeout(Duration::from_secs(15)),
+        )
+        .await
     }
+
     async fn block(&self, tag: &str) -> Result<(Anchor, u64)> {
         let v = self
             .rpc("eth_getBlockByNumber", json!([tag, false]))
@@ -334,7 +273,7 @@ fn validate_timestamp(timestamp: u64, clock: u64, max_age: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[derive(Clone, Default)]
-    struct Logs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    pub(super) struct Logs(pub(super) std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for Logs {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(bytes);
