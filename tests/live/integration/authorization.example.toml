@@ -1,0 +1,8 @@
+# Cumulative ceilings for this treasury registry, not a fresh budget per run/day.
+# Copy to an owner-controlled file and explicitly review/change each value.
+version = 1
+id = "replace_with_authorization_id"
+treasury_id = "replace_with_treasury_uuid"
+cumulative_api_usdc = "0"
+cumulative_source_zec = "0"
+cumulative_new_jobs = 0

@@ -186,3 +186,6 @@ sources=["api"]
     assert!(!dir.path().join("absent_state").exists());
     assert!(!dir.path().join("evidence").exists());
 }
+
+#[path = "registry_tests.rs"]
+mod registry_tests;
