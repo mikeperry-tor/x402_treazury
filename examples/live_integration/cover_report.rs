@@ -70,13 +70,34 @@ pub fn collect(config: &MetaConfig, manifest: &Manifest, evidence: &Evidence) ->
             padding_requested |= cover.padding.is_some();
         }
     }
+    let observed = (!range_requested || m.qualified_ranges > 0)
+        && (!padding_requested || m.padding_requests > 0);
     Ok(
-        json!({"status":"observed","range_requested":range_requested,"padding_requested":padding_requested,"at_least_one_range_qualified":m.qualified_ranges>0,"padding_dispatched":m.padding_requests>0,"metrics":m,"connection_affinity":envelope.connection_affinity,"measurement_layers":{"body":"application cover reader; includes observed overrun chunks","padding":"uncompressed header values dispatched; not TLS bytes"},"wire_padding_qualification":"local fixtures only","privacy_qualification":false}),
+        json!({"status":"observed","requested_modes_observed":observed,"range_requested":range_requested,"padding_requested":padding_requested,"at_least_one_range_qualified":m.qualified_ranges>0,"padding_dispatched":m.padding_requests>0,"metrics":m,"connection_affinity":envelope.connection_affinity,"measurement_layers":{"body":"application cover reader; includes observed overrun chunks","padding":"uncompressed header values dispatched; not TLS bytes"},"wire_padding_qualification":"local fixtures only","privacy_qualification":false}),
     )
+}
+pub fn require_samples(report: &Value) -> Result<()> {
+    ensure!(
+        report["status"] == "disabled" || report["requested_modes_observed"] == true,
+        "requested cover modes have no successful samples; real-call and refusal evidence retained, cover qualification incomplete"
+    );
+    Ok(())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn requested_cover_cannot_qualify_without_observed_samples() {
+        assert!(require_samples(&json!({"status":"disabled"})).is_ok());
+        assert!(
+            require_samples(&json!({"status":"observed","requested_modes_observed":true})).is_ok()
+        );
+        assert!(
+            require_samples(&json!({"status":"observed","requested_modes_observed":false}))
+                .is_err()
+        );
+        assert!(require_samples(&json!({"status":"observed"})).is_err());
+    }
     fn manifest() -> Manifest {
         serde_json::from_value(json!({
         "version":1,"run_id":"test_run","treasury_id":"11111111-1111-4111-8111-111111111111",

@@ -19,6 +19,11 @@ pub enum Distribution {
     LogNormal,
     WeightedDiscrete,
 }
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum Resource {
+    Httpbin,
+    Rfc,
+}
 #[derive(Args)]
 pub struct Options {
     /// New private directory. This creates synthetic state that must never be funded.
@@ -28,6 +33,8 @@ pub struct Options {
     pub binary: PathBuf,
     #[arg(long)]
     pub tor_binary: PathBuf,
+    #[arg(long, value_enum, default_value = "httpbin")]
+    pub resource: Resource,
     #[arg(long, value_enum, default_value = "ranges")]
     pub profile: Profile,
     #[arg(long, value_enum, default_value = "log-normal")]
@@ -102,7 +109,23 @@ pub fn write(options: Options) -> Result<Value> {
     );
     let binary = options.binary.canonicalize()?;
     let tor_binary = options.tor_binary.canonicalize()?;
-    let cover = config(options.profile, options.distribution, options.concurrency)?;
+    let (base_url, api_path, cover_url) = match options.resource {
+        Resource::Httpbin => (
+            "https://nghttp2.org",
+            "/httpbin/json",
+            "https://nghttp2.org/httpbin/range/16384",
+        ),
+        Resource::Rfc => (
+            "https://www.rfc-editor.org",
+            "/rfc/rfc9113.txt",
+            "https://www.rfc-editor.org/rfc/rfc9113.txt",
+        ),
+    };
+    let mut cover = config(options.profile, options.distribution, options.concurrency)?;
+    if let Some(cover) = &mut cover {
+        cover.url = cover_url.into();
+        cover.validate_origin(base_url)?;
+    }
     files::create_dir(&options.directory)?;
     let root = &options.directory;
     let state = root.join("state");
@@ -115,7 +138,9 @@ pub fn write(options: Options) -> Result<Value> {
     let id = store.id().to_owned();
     drop(store);
     files::create_dir(&root.join("evidence"))?;
-    let spec = json!({"openapi":"3.0.3","info":{"title":"Unsigned public-document qualification","version":"1"},"paths":{"/rfc/rfc9113.txt":{"get":{"description":"Read public RFC9113 text, without payment."}}}});
+    let mut spec = json!({"openapi":"3.0.3","info":{"title":"Unsigned public-resource qualification","version":"1"},"paths":{}});
+    spec["paths"][api_path] =
+        json!({"get":{"description":"Read the reviewed public test resource without payment."}});
     files::publish(&root.join("spec.json"), &serde_json::to_vec_pretty(&spec)?)?;
     files::publish(
         &root.join("help.json"),
@@ -123,7 +148,7 @@ pub fn write(options: Options) -> Result<Value> {
     )?;
     let source = x402_treazury::catalog::Config {
         spec: "spec.json".into(),
-        base_url: Some("https://www.rfc-editor.org".into()),
+        base_url: Some(base_url.into()),
         prefix: Some("api".into()),
         probe_pricing: false,
         cover_traffic: cover.clone(),
@@ -193,7 +218,7 @@ pub fn write(options: Options) -> Result<Value> {
     )?;
     files::publish(&root.join("SYNTHETIC_DO_NOT_FUND.txt"),b"Synthetic test state, not a Zcash wallet to fund. No live requests have run. Review deployment.toml and run.toml before qualify-tor. Header padding is experimental and independently optional; public resource availability does not establish vendor approval.\n")?;
     Ok(
-        json!({"state_dir":state,"manifest":root.join("run.toml"),"profile":format!("{:?}",options.profile),"distribution":format!("{:?}",options.distribution),"samples":options.samples,"live_requests":0,"spending_authority":0}),
+        json!({"state_dir":state,"manifest":root.join("run.toml"),"resource":format!("{:?}",options.resource),"profile":format!("{:?}",options.profile),"distribution":format!("{:?}",options.distribution),"samples":options.samples,"live_requests":0,"spending_authority":0}),
     )
 }
 #[cfg(test)]
@@ -208,6 +233,7 @@ mod tests {
             directory: root.clone(),
             binary: exe.clone(),
             tor_binary: exe,
+            resource: Resource::Httpbin,
             profile: Profile::Combined,
             distribution: Distribution::Weibull,
             concurrency: 3,

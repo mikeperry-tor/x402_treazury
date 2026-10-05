@@ -228,7 +228,7 @@ async fn run_inner(
         "child did not finish with complete evidence; see private process record"
     );
     application?;
-    cover?;
+    cover_report::require_samples(&cover?)?;
     if let Err(error) = outcome {
         eprintln!("qualification incomplete: {error:#}");
         println!(
