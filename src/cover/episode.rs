@@ -59,6 +59,13 @@ impl Episode {
             || now >= self.deadline
             || self.tail_deadline.is_some_and(|t| now >= t)
     }
+    pub fn deadline_reason(&self) -> &'static str {
+        if self.received >= self.target {
+            "cover_budget_completed"
+        } else {
+            "cover_budget_unspent"
+        }
+    }
     pub fn reserve(&mut self, config: &Config, now: Instant, requested: u64) -> Result<u64> {
         ensure!(!self.exhausted(now), "cover_episode_stopped");
         ensure!(now >= self.first_dispatch, "cover_start_delay");

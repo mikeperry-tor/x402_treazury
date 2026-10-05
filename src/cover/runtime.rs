@@ -253,11 +253,7 @@ impl Engine {
                 break;
             }
             if now >= deadline {
-                reason = if available == 0 {
-                    "cover_budget_completed"
-                } else {
-                    "cover_budget_unspent"
-                };
+                reason = "cover_episode_deadline";
                 break;
             }
             if available == 0 && pending.is_empty() {
@@ -472,6 +468,12 @@ impl Engine {
         }
         pending.abort_all();
         while pending.join_next().await.is_some() {}
+        // Guards have now released reservations and accounted every observed chunk.
+        let reason = if reason == "cover_episode_deadline" {
+            s.episode.lock().unwrap().deadline_reason()
+        } else {
+            reason
+        };
         let mut registry = self.registry.lock().unwrap();
         if matches!(registry.owners[&owner].capability, Capability::Checking) {
             registry.owners.get_mut(&owner).unwrap().capability =

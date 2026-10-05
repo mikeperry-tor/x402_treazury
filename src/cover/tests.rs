@@ -4,6 +4,24 @@ fn dist(text: &str) -> Distribution {
     toml::from_str(text).unwrap()
 }
 #[test]
+fn deadline_completion_requires_received_bytes_not_reserved_capacity() {
+    let mut config = example_config();
+    config.volume = dist("distribution='uniform'\nmin_bytes=1024\nmax_bytes=1024");
+    config.start_delay = dist("distribution='uniform'\nmin_ms=0\nmax_ms=0");
+    let now = tokio::time::Instant::now();
+    let mut episode = episode::Episode::new(&config, now, &mut StdRng::seed_from_u64(1)).unwrap();
+    let reserved = episode.reserve(&config, now, 1024).unwrap();
+    assert_eq!(episode.reserved, episode.target);
+    assert_eq!(episode.deadline_reason(), "cover_budget_unspent");
+    episode.finish(reserved, 512, true);
+    assert_eq!(episode.deadline_reason(), "cover_budget_unspent");
+    let reserved = episode.reserve(&config, now, 1024).unwrap();
+    assert_eq!(reserved, 512);
+    assert_eq!(episode.deadline_reason(), "cover_budget_unspent");
+    episode.finish(reserved, 512, true);
+    assert_eq!(episode.deadline_reason(), "cover_budget_completed");
+}
+#[test]
 fn configured_example_is_valid() {
     let config = example_config();
     config.validate().unwrap();
