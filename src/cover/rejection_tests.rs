@@ -1,0 +1,150 @@
+//! Padding failure must not replay a signed request or disable independent ranges.
+use super::*;
+use crate::{
+    catalog::RoutedRequest,
+    network::{Mode, NetworkContext, NetworkPolicy},
+    payment::{PaidClient, Payer, SpendPolicy},
+    test_socks::{Fault, Socks},
+};
+use axum::{
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    routing::get,
+};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde_json::json;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
+#[test]
+fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
+    if std::env::var_os("TREAZURY_COVER_REJECTION_CHILD").is_some() {
+        tokio::runtime::Runtime::new().unwrap().block_on(run());
+        return;
+    }
+    let out=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","cover::rejection_tests::rejected_padding_and_ranges_are_independent_without_payment_replay","--nocapture"]).env("TREAZURY_COVER_REJECTION_CHILD","1").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+async fn run() {
+    let signed = Arc::new(AtomicUsize::new(0));
+    let refused = Arc::new(AtomicUsize::new(0));
+    let padded = Arc::new(AtomicUsize::new(0));
+    let (s, r, p) = (signed.clone(), refused.clone(), padded.clone());
+    let waited = refused.clone();
+    let app=axum::Router::new()
+        .route("/refused",get(move || {let r=r.clone();async move {r.fetch_add(1,Ordering::SeqCst);StatusCode::FORBIDDEN}}))
+        .route("/paid",get(move |h:HeaderMap|{let s=s.clone();async move{
+            if let Some(value)=h.get("payment-signature"){
+                let payload:serde_json::Value=serde_json::from_slice(&STANDARD.decode(value.as_bytes()).unwrap()).unwrap();crate::test_signatures::recover_exact(&payload);s.fetch_add(1,Ordering::SeqCst);
+                return if h.contains_key("x-example-padding"){StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE.into_response()}else{(StatusCode::OK,"accepted").into_response()};
+            }
+            let challenge=json!({"x402Version":2,"resource":{"url":"https://api.example.com/paid","description":"fixture","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
+        }}))
+        .route("/free",get(move |h:HeaderMap|{let p=p.clone();let waited=waited.clone();async move{
+            assert!(!h.contains_key("payment-signature"));
+            if h.contains_key("x-example-padding"){p.fetch_add(1,Ordering::SeqCst);}
+            let body=axum::body::Body::from_stream(futures_util::stream::once(async move{
+                while waited.load(Ordering::SeqCst)==0 {tokio::task::yield_now().await;}
+                Ok::<_,std::io::Error>(axum::body::Bytes::from_static(b"free"))
+            }));
+            ([("content-type","text/plain")],body)
+        }}));
+    let (addr, server) =
+        crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+    let socks = Socks::start(
+        BTreeMap::from([("api.example.com".into(), addr)]),
+        Fault::None,
+    )
+    .await;
+    crate::network::install_test_context(
+        NetworkContext::new(NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(socks.address),
+            cover_traffic_enabled: true,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
+    );
+    let scope = status::Scope {
+        listener: "main".into(),
+        source: "api".into(),
+    };
+    let client = |n: u64, cfg| {
+        PaidClient::new(
+            Payer::new(&format!("{n:064x}"), SpendPolicy::dollars("1").unwrap()).unwrap(),
+        )
+        .with_cover(Some(cfg), scope.clone())
+    };
+    let route = |path: &str| RoutedRequest {
+        method: "GET".into(),
+        url: format!("https://api.example.com{path}"),
+        query: Default::default(),
+        body: None,
+    };
+    let mut cfg = tests::example_config();
+    cfg.ranges_enabled = false;
+    let paid = client(10, cfg);
+    assert!(paid.execute_response(route("/paid")).await.is_err());
+    assert_eq!(
+        signed.load(Ordering::SeqCst),
+        1,
+        "431 must not replay signed payment"
+    );
+    assert_eq!(
+        paid.execute_response(route("/paid")).await.unwrap().bytes,
+        b"accepted"
+    );
+    assert_eq!(
+        signed.load(Ordering::SeqCst),
+        2,
+        "new independent call may pay without disabled padding"
+    );
+    let mut cfg = tests::example_config();
+    cfg.url = "https://api.example.com/refused".into();
+    cfg.start_delay = toml::from_str("distribution='uniform'\nmin_ms=0\nmax_ms=0").unwrap();
+    let free = client(11, cfg);
+    for _ in 0..2 {
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            free.execute_response(route("/free")),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.bytes, b"free");
+        crate::network::global()
+            .cover
+            .as_ref()
+            .unwrap()
+            .wait_experiment_idle()
+            .await;
+    }
+    assert_eq!(
+        refused.load(Ordering::SeqCst),
+        1,
+        "negative range capability is cached"
+    );
+    assert_eq!(
+        padded.load(Ordering::SeqCst),
+        2,
+        "range refusal must leave API padding available"
+    );
+    let engine = crate::network::global().cover.as_ref().unwrap();
+    engine.shutdown().await;
+    let evidence = engine.status(&[scope]).to_string();
+    assert!(evidence.contains("cover_padding_rejected") && evidence.contains("cover_forbidden"));
+    assert_eq!(engine.metrics().in_flight_ranges, 0);
+    server.abort();
+}

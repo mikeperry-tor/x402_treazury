@@ -1,5 +1,5 @@
 //! Server-held credentials must not become diagnostic content. Vendor bodies are distinct.
-use axum::{Router, http::StatusCode, routing::get};
+use axum::{Router, http::StatusCode, routing::any};
 use serde_json::json;
 use x402_treazury::{
     catalog::{Config, RoutedRequest, build_tools, load_json},
@@ -24,7 +24,9 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
-            Router::new().route("/", get(|| async { StatusCode::BAD_GATEWAY })),
+            // Fetches use GET and JSON-RPC uses POST; both must see the intended
+            // availability failure rather than an unrelated method rejection.
+            Router::new().route("/", any(|| async { StatusCode::BAD_GATEWAY })),
         )
         .await
         .unwrap();

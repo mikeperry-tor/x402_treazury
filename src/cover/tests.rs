@@ -7,7 +7,7 @@ fn dist(text: &str) -> Distribution {
 fn configured_example_is_valid() {
     let config = example_config();
     config.validate().unwrap();
-    let text = include_str!("../../docs/plans/http2_cover_traffic.md")
+    let text = include_str!("../../docs/cover-traffic.md")
         .split("```toml\n")
         .nth(1)
         .unwrap()
@@ -26,6 +26,26 @@ fn configured_example_is_valid() {
         config
             .validate_origin("https://cdn.example.com/openapi.json")
             .is_err()
+    );
+}
+#[test]
+fn padding_only_needs_an_active_request_kind_and_agents_cannot_opt_in() {
+    let mut config = example_config();
+    config.ranges_enabled = false;
+    config.validate().unwrap();
+    config.padding.as_mut().unwrap().on_api_requests = false;
+    config.padding.as_mut().unwrap().on_cover_requests = true;
+    assert!(config.validate().is_err());
+    let mut candidate =
+        serde_json::json!({"name":"test","spec_url":"https://api.example.com/openapi.json"});
+    assert!(serde_json::from_value::<crate::discovery::Candidate>(candidate.clone()).is_ok());
+    candidate["cover_traffic"] = serde_json::to_value(config).unwrap();
+    assert!(serde_json::from_value::<crate::discovery::Candidate>(candidate).is_err());
+    assert!(
+        serde_json::from_value::<crate::discovery::Selection>(
+            serde_json::json!({"cover_traffic":{}})
+        )
+        .is_err()
     );
 }
 #[test]
@@ -95,7 +115,7 @@ fn invalid_parameters_and_sampling_exhaustion_are_explicit() {
 }
 
 pub(super) fn example_config() -> Config {
-    let plan = include_str!("../../docs/plans/http2_cover_traffic.md");
+    let plan = include_str!("../../docs/cover-traffic.md");
     let text = plan
         .split("```toml\n")
         .nth(1)

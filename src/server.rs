@@ -387,11 +387,14 @@ pub async fn serve_http(
     log_http_shutdown();
     stop.cancel();
     if let Some(engine) = &crate::network::global().cover {
-        engine.shutdown().await;
+        engine.stop_ranges().await;
     }
     tokio::time::timeout(SHUTDOWN_TIMEOUT, serving)
         .await
         .context(SHUTDOWN_TIMEOUT_MESSAGE)??;
+    if let Some(engine) = &crate::network::global().cover {
+        engine.emit_summary();
+    }
     signal.context("shutdown signal handler failed")?;
     Ok(())
 }

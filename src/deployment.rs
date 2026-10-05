@@ -980,7 +980,7 @@ impl RunningDeployment {
         };
         crate::server::log_http_shutdown();
         if let Some(engine) = &crate::network::global().cover {
-            engine.shutdown().await;
+            engine.stop_ranges().await;
         }
         stop.cancel();
         if tokio::time::timeout(crate::server::SHUTDOWN_TIMEOUT, async {
@@ -1003,6 +1003,9 @@ impl RunningDeployment {
         #[cfg(feature = "zcash")]
         if let Some(task) = treasury_task {
             task.await.context("treasury worker failed")??;
+        }
+        if let Some(engine) = &crate::network::global().cover {
+            engine.emit_summary();
         }
         result
     }

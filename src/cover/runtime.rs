@@ -1,7 +1,7 @@
 //! Lifecycle-owned cover tasks on the existing identity-bound HTTP client.
 use super::{
     Config, Limits,
-    budget::{Budget, Reservation},
+    budget::Budget,
     episode::Episode,
     range::{self, Range, Representation},
     registry::{Capability, Owner, Registry},
@@ -20,6 +20,8 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 pub struct Engine {
     limits: Limits,
+    metrics: super::metrics::Shared,
+    summary_emitted: std::sync::atomic::AtomicBool,
     registry: Mutex<Registry>,
     budget: Budget,
     rng: Mutex<Option<StdRng>>,
@@ -55,6 +57,8 @@ impl Engine {
     pub fn new(limits: Limits) -> Arc<Self> {
         Arc::new(Self {
             limits: limits.clone(),
+            metrics: Default::default(),
+            summary_emitted: std::sync::atomic::AtomicBool::new(false),
             registry: Mutex::new(Registry::new(limits.clone())),
             budget: Budget::new(limits),
             rng: Mutex::new(None),
@@ -66,6 +70,28 @@ impl Engine {
     fn random<T>(&self, f: impl FnOnce(&mut StdRng) -> Result<T>) -> Result<T> {
         let mut rng = self.rng.lock().unwrap();
         f(rng.get_or_insert_with(StdRng::from_os_rng))
+    }
+    pub fn metrics(&self) -> super::metrics::Metrics {
+        self.metrics.lock().unwrap().clone()
+    }
+    #[cfg(test)]
+    pub(crate) async fn wait_experiment_idle(&self) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !self.tasks.is_empty() {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .expect("cover experiment exceeded its cleanup deadline");
+    }
+    #[cfg(test)]
+    pub(crate) fn reset_experiment(&self, seed: u64) {
+        assert!(
+            self.tasks.is_empty(),
+            "fixture must wait for cover task cleanup before resetting measurements"
+        );
+        *self.metrics.lock().unwrap() = Default::default();
+        *self.rng.lock().unwrap() = Some(StdRng::seed_from_u64(seed));
     }
     pub fn register(&self, scope: Scope) {
         self.status.lock().unwrap().register(scope);
@@ -145,6 +171,9 @@ impl Engine {
             self.record(&session, "cover_padding_disabled");
         }
         if fresh {
+            self.metrics.lock().unwrap().episodes += 1;
+        }
+        if fresh && session.config.ranges_enabled {
             let engine = self.clone();
             let s = session.clone();
             self.tasks.spawn(async move {
@@ -161,6 +190,10 @@ impl Engine {
         })
     }
     pub async fn shutdown(&self) {
+        self.stop_ranges().await;
+        self.emit_summary();
+    }
+    pub async fn stop_ranges(&self) {
         {
             let _registry = self.registry.lock().unwrap();
             self.stop.cancel();
@@ -170,6 +203,19 @@ impl Engine {
             "Stopping optional cover tasks; financial requests retain their safety drain"
         );
         self.tasks.wait().await;
+    }
+    pub fn emit_summary(&self) {
+        if self
+            .summary_emitted
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        eprintln!(
+            "{}{}",
+            super::metrics::REPORT_PREFIX,
+            serde_json::json!({"version":1,"connection_affinity":"pooled_best_effort_unobserved","metrics":*self.metrics.lock().unwrap()})
+        );
     }
     async fn run(self: Arc<Self>, owner: Owner, s: Arc<Session>, http: reqwest::Client) {
         let mut pending = JoinSet::new();
@@ -313,6 +359,8 @@ impl Engine {
                 });
                 let counter = budget.counter();
                 let mut guard = RangeGuard {
+                    metrics: self.metrics.clone(),
+                    outcome: None,
                     dispatched: false,
                     session: s.clone(),
                     reserved,
@@ -339,12 +387,19 @@ impl Engine {
                 gate.handles.retain(|h| !h.is_finished());
                 let handle = pending.spawn(async move {
                     guard.dispatched = true;
+                    {
+                        let mut m = guard.metrics.lock().unwrap();
+                        m.in_flight_ranges += 1;
+                        m.peak_in_flight_ranges = m.peak_in_flight_ranges.max(m.in_flight_ranges);
+                    }
                     let mut padding_budget = padding_budget;
                     if let Some(p) = &mut padding_budget {
                         p.dispatched();
                     }
                     let result =
                         range::download(&client, &cfg, range, deadline, budget, padding).await;
+                    guard.outcome =
+                        Some(result.as_ref().map(|_| "qualified").unwrap_or_else(|e| e.0));
                     drop(guard);
                     (qualifying, result)
                 });
@@ -413,6 +468,8 @@ impl Engine {
     }
 }
 struct RangeGuard {
+    metrics: super::metrics::Shared,
+    outcome: Option<&'static str>,
     dispatched: bool,
     session: Arc<Session>,
     reserved: u64,
@@ -420,6 +477,19 @@ struct RangeGuard {
 }
 impl Drop for RangeGuard {
     fn drop(&mut self) {
+        if self.dispatched {
+            let mut m = self.metrics.lock().unwrap();
+            m.in_flight_ranges -= 1;
+            m.range_requests += 1;
+            m.cover_body_bytes = m
+                .cover_body_bytes
+                .saturating_add(self.counter.load(std::sync::atomic::Ordering::Relaxed));
+            let outcome = self.outcome.unwrap_or("cancelled");
+            if outcome == "qualified" {
+                m.qualified_ranges += 1;
+            }
+            *m.range_outcomes.entry(outcome.into()).or_default() += 1;
+        }
         self.session.episode.lock().unwrap().finish(
             self.reserved,
             self.counter.load(std::sync::atomic::Ordering::Relaxed),
@@ -489,7 +559,11 @@ impl Call {
             self.engine.record(&self.session, "cover_padding_rejected");
         }
     }
-    pub fn pad(&self, request: &mut reqwest::Request, api: bool) -> Option<Reservation> {
+    pub fn pad(
+        &self,
+        request: &mut reqwest::Request,
+        api: bool,
+    ) -> Option<super::metrics::PaddingReservation> {
         self.engine.pad(&self.session, request, api)
     }
 }
@@ -519,7 +593,11 @@ impl Engine {
         session: &Session,
         request: &mut reqwest::Request,
         api: bool,
-    ) -> Option<Reservation> {
+    ) -> Option<super::metrics::PaddingReservation> {
+        if self.stop.is_cancelled() {
+            self.record(session, "cover_shutdown");
+            return None;
+        }
         let p = session.config.padding.as_ref()?;
         if session.http1_allowed {
             self.record(session, "cover_padding_http1_compatibility");
@@ -531,7 +609,7 @@ impl Engine {
         {
             return None;
         }
-        let result = (|| -> Result<Option<Reservation>> {
+        let result = (|| -> Result<Option<super::metrics::PaddingReservation>> {
             let bytes = self.random(|r| p.size.sample(Unit::Bytes, r))?;
             if bytes == 0 {
                 return Ok(None);
@@ -564,7 +642,11 @@ impl Engine {
             let mut value = reqwest::header::HeaderValue::from_str(&contents)?;
             value.set_sensitive(true);
             request.headers_mut().insert(name, value);
-            Ok(Some(reservation))
+            Ok(Some(super::metrics::PaddingReservation::new(
+                reservation,
+                self.metrics.clone(),
+                bytes,
+            )))
         })();
         match result {
             Ok(r) => r,

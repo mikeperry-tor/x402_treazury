@@ -1,4 +1,6 @@
 //! Explicit opt-in qualification tooling. Planning never opens wallets or networks.
+#[path = "live_integration/cover_fixture.rs"]
+mod cover_fixture;
 #[path = "live_integration/execution.rs"]
 mod execution;
 #[path = "live_integration/files.rs"]
@@ -30,6 +32,8 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Write a zero-spend unsigned cover experiment; performs no live requests.
+    CoverFixture(cover_fixture::Options),
     /// Qualify macOS egress confinement using loopback-only positive/negative controls.
     QualifyConfinement {
         #[arg(long)]
@@ -144,6 +148,13 @@ async fn run() -> Result<u8> {
 async fn execute(command: Command) -> Result<u8> {
     let now = i64::try_from(x402_treazury::rotation::base::now()?)?;
     match command {
+        Command::CoverFixture(options) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&cover_fixture::write(options)?)?
+            );
+            return Ok(0);
+        }
         Command::QualifyConfinement {
             evidence_dir,
             socks_port,

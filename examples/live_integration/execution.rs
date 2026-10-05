@@ -14,6 +14,8 @@ use x402_treazury::{
     deployment::MetaConfig,
     network::{NetworkContext, NetworkPolicy},
 };
+#[path = "cover_report.rs"]
+mod cover_report;
 #[path = "execution_mcp.rs"]
 mod mcp;
 fn now() -> Result<i64> {
@@ -204,8 +206,15 @@ async fn run_inner(
         .await?;
     save_process(&session, &evidence)?;
     registry.event(run, "child_finished", &json!({"success":evidence.success,"forced_kill":evidence.forced_kill,"valid_output":evidence.valid_output()}), now()?)?;
+    let cover = cover_report::collect(&config, &manifest, &evidence);
+    let cover_value = match &cover {
+        Ok(value) => value.clone(),
+        Err(_) => json!({"status":"invalid_or_incomplete"}),
+    };
+    registry.event(run, "cover_observed", &cover_value, now()?)?;
     let application = registry.application_evidence(run);
     let mut report = registry.report(Some(run), now()?)?;
+    report["cover_evidence"] = cover_value;
     report["application_evidence"] = match &application {
         Ok(value) => value.clone(),
         Err(_) => json!({"status":"invalid_or_incomplete"}),
@@ -219,6 +228,7 @@ async fn run_inner(
         "child did not finish with complete evidence; see private process record"
     );
     application?;
+    cover?;
     if let Err(error) = outcome {
         eprintln!("qualification incomplete: {error:#}");
         println!(

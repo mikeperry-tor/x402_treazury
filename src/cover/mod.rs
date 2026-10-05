@@ -1,6 +1,7 @@
 //! Optional, bounded provider cover traffic. Disabled operation owns no tasks or RNG.
 pub mod budget;
 pub mod episode;
+pub mod metrics;
 pub mod range;
 pub mod registry;
 pub mod runtime;
@@ -68,6 +69,8 @@ pub enum VolumeMode {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default = "default_ranges_enabled")]
+    pub ranges_enabled: bool,
     pub url: String,
     pub volume_mode: VolumeMode,
     pub concurrency: usize,
@@ -134,8 +137,15 @@ impl Padding {
         Ok(())
     }
 }
+fn default_ranges_enabled() -> bool {
+    true
+}
 impl Config {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.ranges_enabled || self.padding.as_ref().is_some_and(|p| p.on_api_requests),
+            "cover must enable ranges or API request padding"
+        );
         let url = reqwest::Url::parse(&self.url)?;
         ensure!(
             url.scheme() == "https"
@@ -208,3 +218,9 @@ mod runtime_tests;
 
 #[cfg(test)]
 mod protocol_tests;
+
+#[cfg(test)]
+mod matrix_tests;
+
+#[cfg(test)]
+mod rejection_tests;
