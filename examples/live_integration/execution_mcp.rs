@@ -130,6 +130,25 @@ impl Client {
                 "duplicate prepared tool name"
             );
         }
+        if let Some(local) = expected.get("management_tools") {
+            for tool in local
+                .as_array()
+                .context("prepared local tools must be an array")?
+            {
+                let name = tool["name"]
+                    .as_str()
+                    .context("prepared local tool missing name")?;
+                ensure!(
+                    prepared
+                        .insert(
+                            name.to_owned(),
+                            json!({"description":tool["description"],"schema":tool["inputSchema"]})
+                        )
+                        .is_none(),
+                    "duplicate prepared tool name"
+                );
+            }
+        }
         ensure!(
             actual == prepared,
             "served MCP inventory differs from pinned catalog"
@@ -154,5 +173,57 @@ impl Client {
         let result: rmcp::model::CallToolResult =
             serde_json::from_value(result).context("malformed MCP tool result")?;
         Ok((body, !result.is_error.unwrap_or(false)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn inventory_includes_pinned_local_tools_and_rejects_drift() {
+        let local = serde_json::to_value(x402_treazury::cover::status::definition()).unwrap();
+        let api = json!({"name":"api_read","description":"read","inputSchema":{"type":"object","properties":{}}});
+        let tools = std::sync::Arc::new(std::sync::Mutex::new(vec![api.clone(), local.clone()]));
+        let state = tools.clone();
+        let app =
+            axum::Router::new().route(
+                "/mcp",
+                axum::routing::post(move |axum::Json(v): axum::Json<Value>| {
+                    let tools = state.lock().unwrap().clone();
+                    async move {
+                        axum::Json(json!({"jsonrpc":"2.0","id":v["id"],"result":{"tools":tools}}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let network = x402_treazury::network::NetworkContext::new(Default::default()).unwrap();
+        let client = Client {
+            http: network
+                .discovery(&endpoint, std::time::Duration::from_secs(2))
+                .unwrap(),
+            endpoint,
+            token: "fixture".into(),
+        };
+        let expected = json!({"tools":[{"name":"api_read","description":"read","input_schema":api["inputSchema"]}],"management_tools":[local]});
+        client.check_inventory(&expected, 10000).await.unwrap();
+        tools.lock().unwrap().pop();
+        assert!(client.check_inventory(&expected, 10000).await.is_err());
+        tools
+            .lock()
+            .unwrap()
+            .push(expected["management_tools"][0].clone());
+        tools.lock().unwrap()[1]["description"] = json!("changed");
+        assert!(client.check_inventory(&expected, 10000).await.is_err());
+        tools.lock().unwrap()[1] = expected["management_tools"][0].clone();
+        tools
+            .lock()
+            .unwrap()
+            .push(json!({"name":"unexpected","description":"extra","inputSchema":{}}));
+        assert!(client.check_inventory(&expected, 10000).await.is_err());
+        server.abort();
     }
 }
