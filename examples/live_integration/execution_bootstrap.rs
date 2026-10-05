@@ -101,10 +101,26 @@ pub(super) async fn wait_evidence(
     stop: &CancellationToken,
 ) -> Result<()> {
     let mut progress = Instant::now() - Duration::from_secs(15);
+    let mut terminal_reported = std::collections::BTreeSet::new();
     loop {
         registry.observe_settlement(&manifest.run_id, false)?;
         let report = registry.report(Some(&manifest.run_id), now()?)?;
         let debits = registry.verified_debits(&manifest.run_id)?;
+        for case in report["cases"].as_array().context("case report missing")? {
+            if case["execution"] == "COMPLETED"
+                && case["semantic"] == "PASSED"
+                && terminal_without_debit(case)
+                && !super::debit_complete(case, manifest, &debits)
+            {
+                let id = case["case"].as_str().context("case ID missing")?;
+                if terminal_reported.insert(id.to_owned()) {
+                    eprintln!(
+                        "qualification case {id}: terminal {} authorization cannot establish a paid success; ending its debit wait without retrying, qualification remains incomplete",
+                        case["settlement"].as_str().unwrap_or("unknown")
+                    );
+                }
+            }
+        }
         let waiting = waiting_count(&report, manifest, phase, &debits)?;
         if waiting == 0 {
             return Ok(());
@@ -125,6 +141,10 @@ pub(super) async fn wait_evidence(
             _ = tokio::time::sleep(Duration::from_secs(1)) => {},
         }
     }
+}
+
+fn terminal_without_debit(case: &Value) -> bool {
+    matches!(case["settlement"].as_str(), Some("EXPIRED_UNUSED" | "NOT_SIGNED"))
 }
 
 pub(crate) fn waiting_count(
@@ -168,6 +188,9 @@ pub(crate) fn waiting_count(
     let waiting = selected
         .iter()
         .filter(admitted)
+        // Canonical unused/unsigned outcomes cannot acquire a debit by waiting.
+        // They still fail paid-success qualification in debit_complete.
+        .filter(|c| !terminal_without_debit(c))
         .filter(|c| c["settlement"] == "PENDING" || !super::debit_complete(c, manifest, debits))
         .count();
 

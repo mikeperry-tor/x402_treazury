@@ -334,6 +334,15 @@ fn payment_wait_observes_successful_peers_without_waiting_for_undispatched_work(
     assert_eq!(waiting(&report, None, &empty), 1);
     let verified = std::collections::BTreeMap::from([("call".into(), json!({}))]);
     assert_eq!(waiting(&report, None, &verified), 0);
+    for terminal in ["EXPIRED_UNUSED", "NOT_SIGNED"] {
+        report["cases"][0]["settlement"] = json!(terminal);
+        assert_eq!(waiting(&report, None, &empty), 0);
+        assert_eq!(waiting(&report, Some(&dependent), &empty), 0);
+        assert!(!super::execution::debit_complete(&report["cases"][0], &m, &empty));
+    }
+    // Missing evidence for an actually consumed authorization still needs observation.
+    report["cases"][0]["settlement"] = json!("USED");
+    assert_eq!(waiting(&report, None, &empty), 1);
     report["runtime_events"] = json!([]);
     assert_eq!(waiting(&report, None, &empty), 0);
     report["cases"][0]["execution"] = json!("UNATTEMPTED");
