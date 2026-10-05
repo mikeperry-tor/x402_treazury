@@ -24,6 +24,30 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
     )
 }
 #[tokio::test]
+async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
+    use rmcp::ServerHandler;
+    let (vendor, task) =
+        serve(Router::new().route("/cover_status", get(|| async { "ordinary API" }))).await;
+    let tools = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/cover_status":{"get":{}}}}),
+        "treazury",
+    )
+    .unwrap();
+    assert_eq!(tools[0].name, "treazury_cover_status");
+    let server = Server::new(tools, PaidClient::unsigned(), vendor, None, None);
+    server.validate_cover().unwrap();
+    assert!(server.get_tool("treazury_cover_status").is_some());
+    assert_eq!(
+        server
+            .invoke("treazury_cover_status", &Default::default())
+            .await
+            .unwrap(),
+        "ordinary API"
+    );
+    task.abort();
+}
+#[tokio::test]
 async fn authenticated_stateless_http_initializes_lists_and_calls() {
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();

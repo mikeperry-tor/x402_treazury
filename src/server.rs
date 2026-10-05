@@ -101,7 +101,7 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
-        if name == crate::cover::status::TOOL_NAME {
+        if name == crate::cover::status::TOOL_NAME && !self.cover_scopes().is_empty() {
             self.validate_cover()?;
             let scopes = self.cover_scopes();
             anyhow::ensure!(
