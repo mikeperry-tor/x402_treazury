@@ -274,6 +274,9 @@ impl Deployment {
         for (server, tools) in &selected {
             for (id, tool) in tools {
                 let source = &sources[id];
+                if tool.help_url.is_some() {
+                    continue;
+                }
                 if let Some(cover) = &source.config.cover_traffic {
                     let route =
                         if tool.path.starts_with("https://") || tool.path.starts_with("http://") {
@@ -328,7 +331,7 @@ impl Deployment {
                     let g = crate::discovery::policy::grant(&self.config, name);
                     let mut tools =
                         crate::discovery::tools::definitions(g.enabled, g.accept_sources);
-                    if self.config.network.cover_traffic_enabled
+                    if self.config.network.cover_enabled()
                         && self.selected[name].iter().any(|(id, t)| {
                             t.help_url.is_none() && self.sources[id].config.cover_traffic.is_some()
                         })

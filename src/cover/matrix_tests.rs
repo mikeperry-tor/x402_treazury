@@ -104,7 +104,7 @@ async fn run() {
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
             socks_endpoint: Some(socks.address),
-            cover_traffic_enabled: true,
+            cover_traffic_enabled: Some(true),
             cover_limits: Limits {
                 max_requests_per_window: 4096,
                 max_cover_body_bytes_per_window: 16_777_216,

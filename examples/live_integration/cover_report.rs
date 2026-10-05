@@ -25,7 +25,7 @@ pub fn collect(config: &MetaConfig, manifest: &Manifest, evidence: &Evidence) ->
         .split(|b| *b == b'\n')
         .filter_map(|line| line.strip_prefix(REPORT_PREFIX.as_bytes()))
         .collect();
-    if !config.network.cover_traffic_enabled {
+    if !config.network.cover_enabled() {
         ensure!(
             reports.is_empty(),
             "disabled cover emitted a runtime summary"
@@ -60,14 +60,31 @@ pub fn collect(config: &MetaConfig, manifest: &Manifest, evidence: &Evidence) ->
     let mut range_requested = false;
     let mut padding_requested = false;
     for case in &manifest.cases {
-        if let Some(table) = config
-            .sources
-            .get(&case.source)
-            .and_then(|s| s.provider.get("cover_traffic"))
-        {
-            let cover: x402_treazury::cover::Config = table.clone().try_into()?;
-            range_requested |= cover.ranges_enabled;
-            padding_requested |= cover.padding.is_some();
+        if let Some(source) = config.sources.get(&case.source) {
+            // Prepared deployments freeze fully resolved source settings, including
+            // automatically selected cover resources. Help calls never run cover.
+            if source
+                .provider
+                .get("cover_traffic_enabled")
+                .and_then(toml::Value::as_bool)
+                == Some(false)
+            {
+                continue;
+            }
+            if source.provider.contains_key("help_url")
+                && source
+                    .provider
+                    .get("prefix")
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|p| case.tool == format!("{p}_help"))
+            {
+                continue;
+            }
+            if let Some(table) = source.provider.get("cover_traffic") {
+                let cover: x402_treazury::cover::Config = table.clone().try_into()?;
+                range_requested |= cover.ranges_enabled;
+                padding_requested |= cover.padding.is_some();
+            }
         }
     }
     let observed = (!range_requested || m.qualified_ranges > 0)
@@ -115,7 +132,7 @@ mod tests {
     fn complete_unique_summary_and_accounting_are_required() {
         let mut config: MetaConfig =
             serde_json::from_value(json!({"version":1,"servers":{}})).unwrap();
-        config.network.cover_traffic_enabled = true;
+        config.network.cover_traffic_enabled = Some(true);
         let manifest = manifest();
         let mut evidence = Evidence {
             pid: 1,
@@ -148,7 +165,7 @@ mod tests {
         };
         evidence.stderr.bytes = format!("{REPORT_PREFIX}{}\n", json!({"version":1,"connection_affinity":"pooled_best_effort_unobserved","metrics":metrics})).into_bytes();
         assert!(collect(&config, &manifest, &evidence).is_err());
-        config.network.cover_traffic_enabled = false;
+        config.network.cover_traffic_enabled = Some(false);
         assert!(collect(&config, &manifest, &evidence).is_err());
         evidence.stderr.bytes.clear();
         assert_eq!(

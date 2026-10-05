@@ -145,3 +145,121 @@ pub(super) fn example_config() -> Config {
     let config: Config = table["cover_traffic"].clone().try_into().unwrap();
     config
 }
+
+#[test]
+fn tor_default_and_explicit_network_overrides() {
+    use crate::network::{NetworkContext, NetworkPolicy};
+    for (mode, override_value, expected) in [
+        ("direct", "", false),
+        ("tor", "", true),
+        ("tor", "cover_traffic_enabled=false", false),
+        ("direct", "cover_traffic_enabled=true", true),
+    ] {
+        let socks = if mode == "tor" {
+            "socks_endpoint='127.0.0.1:9150'"
+        } else {
+            ""
+        };
+        let p: NetworkPolicy =
+            toml::from_str(&format!("mode='{mode}'\n{socks}\n{override_value}")).unwrap();
+        assert_eq!(p.cover_enabled(), expected);
+        assert_eq!(p.inspection()["cover_traffic_enabled"], expected);
+        assert_eq!(NetworkContext::new(p).unwrap().cover.is_some(), expected);
+    }
+}
+
+#[test]
+fn automatic_catalog_cover_and_provider_opt_out() {
+    let base = "https://api.example.com/v1";
+    let mut cfg = crate::catalog::Config {
+        spec: "https://api.example.com/openapi.json".into(),
+        ..Default::default()
+    };
+    cfg.resolve_cover(base, true).unwrap();
+    let profile = cfg.cover_traffic.as_ref().unwrap();
+    profile.validate().unwrap();
+    assert_eq!(profile.url, cfg.spec);
+    assert_eq!(profile.concurrency, 1);
+    assert!(profile.padding.is_none());
+    cfg.cover_traffic_enabled = Some(false);
+    cfg.resolve_cover(base, true).unwrap();
+    assert!(cfg.cover_traffic.is_none());
+    cfg.cover_traffic_enabled = Some(true);
+    cfg.resolve_cover(base, false).unwrap();
+    assert!(cfg.cover_traffic.is_none()); // Provider cannot override global off.
+    for spec in [
+        "local.json",
+        "https://cdn.example.com/openapi.json",
+        "http://api.example.com/openapi.json",
+    ] {
+        cfg.spec = spec.into();
+        cfg.resolve_cover(base, true).unwrap();
+        assert!(cfg.cover_traffic.is_none());
+    }
+    cfg.cover_traffic = Some(example_config());
+    cfg.resolve_cover(base, true).unwrap();
+    assert!(cfg.cover_traffic.as_ref().unwrap().padding.is_some());
+    cfg.cover_traffic_enabled = Some(false);
+    cfg.cover_traffic.as_mut().unwrap().concurrency = 0;
+    assert!(cfg.resolve_cover(base, true).is_err());
+}
+
+#[tokio::test]
+async fn source_can_disable_inherited_cover_without_replacing_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = crate::catalog::Config {
+        spec: "https://api.example.com/openapi.json".into(),
+        cover_traffic: Some(example_config()),
+        ..Default::default()
+    };
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        toml::to_string(&provider).unwrap(),
+    )
+    .unwrap();
+    let source = dir.path().join("source.toml");
+    std::fs::write(
+        &source,
+        "extends='provider.toml'\ncover_traffic_enabled=false",
+    )
+    .unwrap();
+    let mut cfg = crate::config::load(&source).await.unwrap().settings;
+    assert!(cfg.cover_traffic.is_some());
+    assert_eq!(cfg.cover_traffic_enabled, Some(false));
+    cfg.resolve_cover("https://api.example.com", true).unwrap();
+    assert!(cfg.cover_traffic.is_none());
+}
+
+#[test]
+fn fallback_is_same_origin_and_automatic_help_is_reviewed() {
+    let mut cfg = crate::catalog::Config {
+        spec: "https://api.example.com/openapi.json".into(),
+        help_url: Some("https://api.example.com/llms.txt".into()),
+        ..Default::default()
+    };
+    cfg.resolve_cover("https://api.example.com/v1", true)
+        .unwrap();
+    let cover = cfg.cover_traffic.as_mut().unwrap();
+    assert_eq!(
+        cover.fallback_url.as_deref(),
+        Some("https://api.example.com/llms.txt")
+    );
+    cover.validate().unwrap();
+    for url in [
+        "https://other.example.com/llms.txt",
+        "http://api.example.com/llms.txt",
+        "https://user@api.example.com/llms.txt",
+        "https://api.example.com/llms.txt#fragment",
+    ] {
+        cover.fallback_url = Some(url.into());
+        assert!(cover.validate().is_err());
+    }
+    cfg.cover_traffic = None;
+    cfg.spec = "local.json".into();
+    cfg.resolve_cover("https://api.example.com", true).unwrap();
+    assert_eq!(
+        cfg.cover_traffic.as_ref().unwrap().url,
+        "https://api.example.com/llms.txt"
+    );
+    assert!(cfg.cover_traffic.as_ref().unwrap().fallback_url.is_none());
+}

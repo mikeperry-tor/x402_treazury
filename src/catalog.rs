@@ -51,6 +51,9 @@ pub struct Config {
     pub image_limits: crate::output::ImageLimits,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover_traffic: Option<crate::cover::Config>,
+    /// Explicit provider/source opt-out, including inherited cover settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_traffic_enabled: Option<bool>,
     pub allow_http1: bool,
     pub allow_tls12: bool,
     pub timeout: f64,
@@ -98,6 +101,7 @@ impl Default for Config {
             response_mappings: BTreeMap::new(),
             image_limits: Default::default(),
             cover_traffic: None,
+            cover_traffic_enabled: None,
             allow_http1: false,
             allow_tls12: false,
             timeout: 30.0,

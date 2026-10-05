@@ -146,7 +146,7 @@ async fn run() -> Result<()> {
 }
 
 async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()> {
-    let cfg = standalone_config(&args, &env).await?;
+    let mut cfg = standalone_config(&args, &env).await?;
     if !args.list_tools && !args.list_tags && !args.check && args.route_tool.is_none() {
         x402_treazury::provider_status::warn(cfg.name.as_deref().unwrap_or("standalone"), &cfg);
     }
@@ -176,9 +176,10 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
                 .map(str::to_owned)
         })
         .context("base_url is required for digests/specs without servers")?;
-    if let Some(cover) = &cfg.cover_traffic {
-        cover.validate_origin(&base)?;
-    }
+    cfg.resolve_cover(
+        &base,
+        x402_treazury::network::global().policy.cover_enabled(),
+    )?;
     let prefix = cfg
         .prefix
         .clone()

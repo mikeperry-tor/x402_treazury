@@ -32,6 +32,7 @@ pub struct OwnerState {
     pub config: Arc<Config>,
     pub session: Option<Arc<super::runtime::Session>>,
     pub capability: Capability,
+    pub using_fallback: bool,
     pub padding_disabled: Arc<Mutex<bool>>,
     pub episode: Option<Arc<Mutex<Episode>>>,
 }
@@ -43,6 +44,31 @@ impl OwnerState {
             true
         } else {
             false
+        }
+    }
+    /// Switch at most once, only after completed initial qualification failure.
+    pub fn try_fallback(&mut self, failure: super::range::Failure) -> bool {
+        if self.using_fallback
+            || self.config.fallback_url.is_none()
+            || matches!(
+                failure.0,
+                "cover_http2_unavailable" | "cover_rate_limited" | "cover_deadline"
+            )
+        {
+            return false;
+        }
+        self.using_fallback = true;
+        self.capability = Capability::Unknown;
+        true
+    }
+    pub fn resource_url(&self) -> &str {
+        if self.using_fallback {
+            self.config
+                .fallback_url
+                .as_deref()
+                .expect("selected fallback")
+        } else {
+            &self.config.url
         }
     }
     pub fn qualified(
@@ -114,6 +140,7 @@ impl Registry {
             config,
             session: None,
             capability: Capability::Unknown,
+            using_fallback: false,
             padding_disabled: Arc::new(Mutex::new(false)),
             episode: None,
         });
@@ -178,5 +205,32 @@ mod tests {
             r.owners[&owner].capability,
             Capability::Unavailable("range_ignored")
         ));
+    }
+    #[test]
+    fn fallback_is_single_use_and_does_not_retry_rate_limits_or_deadlines() {
+        for code in [
+            "cover_rate_limited",
+            "cover_deadline",
+            "cover_http2_unavailable",
+            "cover_range_ignored",
+        ] {
+            let mut config = crate::cover::tests::example_config();
+            config.fallback_url = Some("https://api.example.com/llms.txt".into());
+            let mut state = OwnerState {
+                config: Arc::new(config),
+                session: None,
+                capability: Capability::Checking,
+                using_fallback: false,
+                padding_disabled: Arc::new(Mutex::new(false)),
+                episode: None,
+            };
+            let switched = state.try_fallback(super::super::range::Failure(code));
+            assert_eq!(switched, code == "cover_range_ignored");
+            if switched {
+                assert_eq!(state.resource_url(), "https://api.example.com/llms.txt");
+                assert!(state.begin_qualification());
+                assert!(!state.try_fallback(super::super::range::Failure(code)));
+            }
+        }
     }
 }

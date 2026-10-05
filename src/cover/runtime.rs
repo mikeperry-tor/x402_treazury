@@ -356,9 +356,12 @@ impl Engine {
                     self.record(&s, "cover_range_size_adjusted");
                 }
                 range.length = reserved;
+                let resource_url = self.registry.lock().unwrap().owners[&owner]
+                    .resource_url()
+                    .to_owned();
                 let mut padding_request = reqwest::Request::new(
                     reqwest::Method::GET,
-                    s.config.url.parse().expect("validated cover URL"),
+                    resource_url.parse().expect("validated cover URL"),
                 );
                 padding_request.headers_mut().insert(
                     reqwest::header::RANGE,
@@ -387,7 +390,9 @@ impl Engine {
                     reserved,
                     counter,
                 };
-                let cfg = s.config.clone();
+                let mut cfg = (*s.config).clone();
+                cfg.url = resource_url;
+                cfg.fallback_url = None;
                 let client = http.clone();
                 let mut gate = s.gate.lock().unwrap();
                 if gate.paused > 0 {
@@ -454,7 +459,19 @@ impl Engine {
                 item=pending.join_next(),if !pending.is_empty()=>{
                     match item {
                         Some(Ok((qualifying,result)))=>{
-                            if qualifying {self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().qualified(result.clone());next=Instant::now();}
+                            if qualifying {
+                                if let Err(error) = &result {
+                                    let switched = self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().try_fallback(*error);
+                                    if switched {
+                                        self.record(&s, error.0);
+                                        self.record(&s, "cover_fallback_selected");
+                                        tracing::warn!(code = "cover_fallback_selected", reason = error.0, "Primary cover qualification failed; trying configured fallback within existing budgets");
+                                        next=Instant::now();
+                                        continue;
+                                    }
+                                }
+                                self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().qualified(result.clone());next=Instant::now();
+                            }
                             if let Err(error)=result {self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().capability=Capability::Unavailable(error.0);reason=error.0;break;}
                         },
                         Some(Err(error)) if error.is_cancelled()=>{

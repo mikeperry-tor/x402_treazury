@@ -95,7 +95,7 @@ async fn run() {
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
             socks_endpoint: Some(socks.address),
-            cover_traffic_enabled: true,
+            cover_traffic_enabled: Some(true),
             ..Default::default()
         })
         .unwrap()
@@ -244,7 +244,7 @@ async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(socks.address),
-        cover_traffic_enabled: true,
+        cover_traffic_enabled: Some(true),
         ..Default::default()
     })
     .unwrap()

@@ -1,0 +1,38 @@
+# Bounded range-only Tor default. Runtime qualification is still mandatory.
+url = "https://example.invalid/openapi.json"
+volume_mode = "extra_body"
+concurrency = 1
+max_requests_per_episode = 8
+max_cover_body_bytes_per_episode = 16384
+max_episode_ms = 10000
+qualification_range_bytes = 1024
+max_resource_bytes = 16777216
+
+[volume]
+distribution = "log_normal"
+median_bytes = 8192
+sigma = 0.65
+min_bytes = 4096
+max_bytes = 16384
+
+[ranges]
+distribution = "uniform"
+min_bytes = 1024
+max_bytes = 4096
+
+[start_delay]
+distribution = "uniform"
+min_ms = 0
+max_ms = 100
+
+[request_gap]
+distribution = "weibull"
+scale_ms = 100.0
+shape = 0.8
+min_ms = 50
+max_ms = 250
+
+[tail]
+distribution = "uniform"
+min_ms = 1000
+max_ms = 3000

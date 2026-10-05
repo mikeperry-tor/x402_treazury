@@ -3,6 +3,8 @@
 # Tor Browser must already be running on the configured SOCKS port.
 [network]
 mode = "tor"
+# Cover ranges default on; uncomment to disable globally.
+# cover_traffic_enabled = false
 socks_endpoint = "127.0.0.1:9150"
 isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"

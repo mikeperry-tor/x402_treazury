@@ -251,7 +251,7 @@ mod tests {
         let deployment: x402_treazury::deployment::MetaConfig =
             toml::from_str(&std::fs::read_to_string(root.join("deployment.toml")).unwrap())
                 .unwrap();
-        assert!(deployment.network.cover_traffic_enabled);
+        assert!(deployment.network.cover_enabled());
         let loaded = x402_treazury::deployment::Deployment::load(&root.join("deployment.toml"))
             .await
             .unwrap();

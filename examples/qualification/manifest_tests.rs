@@ -36,13 +36,22 @@ async fn full_manifest_resolves_scope_arguments_coverage_and_budget_offline() {
     }
     let mut files = BTreeSet::new();
     providers(&root.join("providers"), root, &mut files);
-    assert_eq!(
-        files,
-        coverage
-            .iter()
-            .map(|v| v["config"].as_str().unwrap().into())
-            .collect()
-    );
+    // Preserve the historical funded scope and budget. Newly bundled providers
+    // need an explicit exclusion until a separately reviewed manifest adds them.
+    let exclusions: Vec<Value> =
+        serde_json::from_str(include_str!("../../tests/live/coverage_exclusions.json")).unwrap();
+    let mut covered: BTreeSet<String> = coverage
+        .iter()
+        .map(|v| v["config"].as_str().unwrap().into())
+        .collect();
+    for row in exclusions {
+        assert!(!row["reason"].as_str().unwrap().is_empty());
+        assert!(
+            covered.insert(row["config"].as_str().unwrap().into()),
+            "duplicate coverage/exclusion"
+        );
+    }
+    assert_eq!(files, covered);
     assert_eq!(coverage.len(), 24);
     for row in &coverage {
         match row["status"].as_str().unwrap() {

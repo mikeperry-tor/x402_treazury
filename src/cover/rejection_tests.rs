@@ -39,9 +39,19 @@ async fn run() {
     let signed = Arc::new(AtomicUsize::new(0));
     let refused = Arc::new(AtomicUsize::new(0));
     let padded = Arc::new(AtomicUsize::new(0));
+    let fallback_reads = Arc::new(AtomicUsize::new(0));
+    let f = fallback_reads.clone();
     let (s, r, p) = (signed.clone(), refused.clone(), padded.clone());
     let waited = refused.clone();
     let app=axum::Router::new()
+        .route("/llms.txt",get(move |h:HeaderMap| {let f=f.clone();async move {
+            assert!(!h.contains_key("payment-signature") && !h.contains_key("x-payment"));
+            f.fetch_add(1,Ordering::SeqCst);
+            let range=h["range"].to_str().unwrap().strip_prefix("bytes=").unwrap();
+            let (start,end)=range.split_once('-').unwrap();
+            let start:usize=start.parse().unwrap();let end:usize=end.parse().unwrap();
+            (StatusCode::PARTIAL_CONTENT,[("content-range",format!("bytes {start}-{end}/16384")),("etag","\"fixture\"".into())],vec![b'x';end-start+1])
+        }}))
         .route("/refused",get(move || {let r=r.clone();async move {r.fetch_add(1,Ordering::SeqCst);StatusCode::FORBIDDEN}}))
         .route("/paid",get(move |h:HeaderMap|{let s=s.clone();async move{
             if let Some(value)=h.get("payment-signature"){
@@ -71,7 +81,7 @@ async fn run() {
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
             socks_endpoint: Some(socks.address),
-            cover_traffic_enabled: true,
+            cover_traffic_enabled: Some(true),
             ..Default::default()
         })
         .unwrap()
@@ -141,10 +151,95 @@ async fn run() {
         2,
         "range refusal must leave API padding available"
     );
+    let mut cfg = tests::example_config();
+    cfg.url = "https://api.example.com/refused".into();
+    cfg.fallback_url = Some("https://api.example.com/llms.txt".into());
+    cfg.start_delay = toml::from_str("distribution='uniform'\nmin_ms=0\nmax_ms=0").unwrap();
+    cfg.tail = toml::from_str("distribution='uniform'\nmin_ms=1000\nmax_ms=1000").unwrap();
+    cfg.volume = toml::from_str("distribution='uniform'\nmin_bytes=1024\nmax_bytes=1024").unwrap();
+    cfg.qualification_range_bytes = 1024;
+    cfg.ranges = toml::from_str("distribution='uniform'\nmin_bytes=1024\nmax_bytes=1024").unwrap();
+    cfg.padding = None;
+    let fallback_client = client(12, cfg.clone());
+    for _ in 0..2 {
+        assert_eq!(
+            fallback_client
+                .execute_response(route("/free"))
+                .await
+                .unwrap()
+                .bytes,
+            b"free"
+        );
+        crate::network::global()
+            .cover
+            .as_ref()
+            .unwrap()
+            .wait_experiment_idle()
+            .await;
+        tokio::time::sleep(Duration::from_millis(1100)).await; // Start a new episode after its fixed tail.
+    }
+    assert_eq!(
+        refused.load(Ordering::SeqCst),
+        2,
+        "primary tried once for fallback owner"
+    );
+    assert_eq!(
+        fallback_reads.load(Ordering::SeqCst),
+        2,
+        "successful fallback retained across episodes"
+    );
+    cfg.fallback_url = Some("https://api.example.com/refused?fallback=true".into());
+    let failed_client = client(13, cfg.clone());
+    for _ in 0..2 {
+        assert_eq!(
+            failed_client
+                .execute_response(route("/free"))
+                .await
+                .unwrap()
+                .bytes,
+            b"free"
+        );
+        crate::network::global()
+            .cover
+            .as_ref()
+            .unwrap()
+            .wait_experiment_idle()
+            .await;
+        tokio::time::sleep(Duration::from_millis(1100)).await; // Start a new episode after its fixed tail.
+    }
+    assert_eq!(
+        refused.load(Ordering::SeqCst),
+        4,
+        "failed primary and fallback are both cached; no retry loop"
+    );
+    cfg.fallback_url = Some("https://api.example.com/llms.txt".into());
+    cfg.max_requests_per_episode = 1;
+    let bounded = client(14, cfg);
+    assert_eq!(
+        bounded
+            .execute_response(route("/free"))
+            .await
+            .unwrap()
+            .bytes,
+        b"free"
+    );
+    crate::network::global()
+        .cover
+        .as_ref()
+        .unwrap()
+        .wait_experiment_idle()
+        .await;
+    assert_eq!(refused.load(Ordering::SeqCst), 5);
+    assert_eq!(
+        fallback_reads.load(Ordering::SeqCst),
+        2,
+        "fallback cannot exceed episode request budget"
+    );
     let engine = crate::network::global().cover.as_ref().unwrap();
     engine.shutdown().await;
     let evidence = engine.status(&[scope]).to_string();
     assert!(evidence.contains("cover_padding_rejected") && evidence.contains("cover_forbidden"));
+    assert!(evidence.contains("cover_fallback_selected"));
     assert_eq!(engine.metrics().in_flight_ranges, 0);
     server.abort();
 }

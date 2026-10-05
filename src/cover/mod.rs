@@ -72,6 +72,8 @@ pub struct Config {
     #[serde(default = "default_ranges_enabled")]
     pub ranges_enabled: bool,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_url: Option<String>,
     pub volume_mode: VolumeMode,
     pub concurrency: usize,
     pub max_requests_per_episode: usize,
@@ -146,6 +148,17 @@ impl Config {
             self.ranges_enabled || self.padding.as_ref().is_some_and(|p| p.on_api_requests),
             "cover must enable ranges or API request padding"
         );
+        if let Some(fallback) = &self.fallback_url {
+            let mut candidate = self.clone();
+            candidate.url = fallback.clone();
+            candidate.fallback_url = None;
+            candidate.validate()?;
+            candidate.validate_origin(&self.url)?;
+            ensure!(
+                candidate.url != self.url,
+                "cover fallback must differ from primary URL"
+            );
+        }
         let url = reqwest::Url::parse(&self.url)?;
         ensure!(
             url.scheme() == "https"
@@ -224,3 +237,55 @@ mod matrix_tests;
 
 #[cfg(test)]
 mod rejection_tests;
+
+impl crate::catalog::Config {
+    /// Resolve once after the API origin is known. Remote catalogs never supply
+    /// this policy: only authored source settings enter this method.
+    pub fn resolve_cover(&mut self, base: &str, process_enabled: bool) -> Result<()> {
+        // Invalid authored settings remain errors even when cover is disabled.
+        if let Some(config) = &self.cover_traffic {
+            config.validate()?;
+            config.validate_origin(base)?;
+        }
+        if !process_enabled || self.cover_traffic_enabled == Some(false) {
+            self.cover_traffic = None;
+            return Ok(());
+        }
+        if self.cover_traffic.is_none() {
+            let origin = reqwest::Url::parse(base)?;
+            let eligible = |value: &str| {
+                reqwest::Url::parse(value)
+                    .ok()
+                    .filter(|u| {
+                        u.scheme() == "https"
+                            && u.origin() == origin.origin()
+                            && u.username().is_empty()
+                            && u.password().is_none()
+                            && u.fragment().is_none()
+                    })
+                    .map(|u| u.to_string())
+            };
+            let catalog = eligible(&self.spec);
+            let help = self.help_url.as_deref().and_then(eligible);
+            if let Some(url) = catalog.clone().or_else(|| help.clone()) {
+                let mut profile = Config::catalog_default(url.clone());
+                profile.fallback_url = help.filter(|h| *h != url);
+                self.cover_traffic = Some(profile);
+            } else {
+                tracing::warn!(code = "cover_no_same_origin_resource", source = ?self.prefix,
+                    "Cover unavailable: configure a same-origin HTTPS catalog/help/cover URL or disable cover for this provider");
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Config {
+    /// Conservative range-only profile; the endpoint must still qualify at runtime.
+    pub fn catalog_default(url: String) -> Self {
+        let mut config: Self =
+            toml::from_str(include_str!("default.toml")).expect("tested built-in cover profile");
+        config.url = url;
+        config
+    }
+}

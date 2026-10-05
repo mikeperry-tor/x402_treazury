@@ -353,6 +353,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["network"]["mode"], "direct");
+    assert_eq!(value["network"]["cover_traffic_enabled"], false);
     let policy = dir.path().join("tor.toml");
     std::fs::write(
         &policy,
@@ -373,6 +374,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["network"]["mode"], "tor");
+    assert_eq!(value["network"]["cover_traffic_enabled"], true);
     assert_eq!(value["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(value["network"]["socks_auth"], "tor_extended");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))

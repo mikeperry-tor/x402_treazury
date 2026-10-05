@@ -27,8 +27,8 @@ pub enum SocksAuth {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkPolicy {
-    #[serde(default)]
-    pub cover_traffic_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_traffic_enabled: Option<bool>,
     #[serde(default)]
     pub cover_limits: crate::cover::Limits,
     #[serde(default)]
@@ -41,6 +41,10 @@ pub struct NetworkPolicy {
     pub request_timeout_seconds: Option<u64>,
 }
 impl NetworkPolicy {
+    pub fn cover_enabled(&self) -> bool {
+        self.cover_traffic_enabled.unwrap_or(self.mode == Mode::Tor)
+    }
+
     pub fn validate(&self) -> Result<()> {
         self.cover_limits.validate()?;
         if self.mode == Mode::Direct {
@@ -93,7 +97,7 @@ impl NetworkPolicy {
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"cover_traffic_enabled":self.cover_traffic_enabled,"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"request_timeout_seconds":self.request_timeout_seconds.or((self.mode == Mode::Tor).then_some(240)),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"request_timeout_seconds":self.request_timeout_seconds.or((self.mode == Mode::Tor).then_some(240)),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
@@ -203,7 +207,7 @@ impl NetworkContext {
         policy.validate()?;
         Ok(Self {
             cover: policy
-                .cover_traffic_enabled
+                .cover_enabled()
                 .then(|| crate::cover::runtime::Engine::new(policy.cover_limits.clone())),
             policy,
             http: Mutex::new(HashMap::new()),
