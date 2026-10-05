@@ -6635,6 +6635,7 @@ dependencies = [
  "dotenvy",
  "fs2",
  "futures-util",
+ "h2",
  "hyper",
  "hyper-util",
  "libc",

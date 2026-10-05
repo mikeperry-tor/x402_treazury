@@ -218,7 +218,7 @@ impl PaidClient {
                 self.transport,
             )?;
             let mut unavailable = None;
-            let cover = self.cover.as_ref().and_then(|(config, scope)| {
+            let mut cover = self.cover.as_ref().and_then(|(config, scope)| {
                 let engine = factory.cover.as_ref()?;
                 let owner = crate::cover::registry::Owner {
                     runtime: tokio::runtime::Handle::current().id(),
@@ -237,6 +237,9 @@ impl PaidClient {
                     }
                 }
             });
+            if let Some(call) = &cover {
+                call.prioritize().await;
+            }
             let mut unsigned = request
                 .try_clone()
                 .context("request body cannot be retried")?;
@@ -322,6 +325,9 @@ impl PaidClient {
             if let Some(c) = &cover {
                 c.protocol(response.version());
                 c.rejected_padding(response.status());
+            }
+            if let Some(call) = &mut cover {
+                call.response_headers();
             }
             break (response, cover, unavailable);
         };

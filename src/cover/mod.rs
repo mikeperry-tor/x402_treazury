@@ -205,3 +205,6 @@ mod tests;
 
 #[cfg(test)]
 mod runtime_tests;
+
+#[cfg(test)]
+mod protocol_tests;

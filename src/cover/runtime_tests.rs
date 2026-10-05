@@ -58,7 +58,18 @@ async fn paid_fixture() {
     let wait_ranges = ranges.clone();
     let held = Arc::new(tokio::sync::Semaphore::new(0));
     let held_range = held.clone();
+    let balances = Arc::new(Mutex::new(BTreeMap::<String, u64>::new()));
+    let rpc_balances = balances.clone();
     let app=axum::Router::new()
+        .route("/rpc",axum::routing::post(move |h:HeaderMap,axum::Json(v):axum::Json<serde_json::Value>| {let balances=rpc_balances.clone();async move{
+            assert!(!h.contains_key("x-example-padding")&&!h.contains_key("payment-signature"));
+            let result=match v["method"].as_str().unwrap(){
+                "eth_chainId"=>json!("0x2105"),
+                "eth_getBlockByNumber"=>json!({"number":if v["params"][0]=="latest" {"0x64"} else {v["params"][0].as_str().unwrap()},"hash":format!("0x{:064x}",1),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())}),
+                "eth_call"=>{let data=v["params"][0]["data"].as_str().unwrap();let value=if data.starts_with("0x70a08231"){let key=format!("0x{}",&data[data.len()-40..]).to_lowercase();*balances.lock().unwrap().get(&key).unwrap_or(&0)}else{0};json!(format!("0x{value:064x}"))},
+                _=>panic!("unexpected fixture RPC")
+            };axum::Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
+        }}))
         .route("/openapi.json",get(move |h:HeaderMap|{let r=r.clone();let held=held_range.clone();async move{
             assert!(!h.contains_key("payment-signature")&&!h.contains_key("authorization"));
             let raw=h["range"].to_str().unwrap().strip_prefix("bytes=").unwrap();let (a,b)=raw.split_once('-').unwrap();let (a,b)=(a.parse::<usize>().unwrap(),b.parse::<usize>().unwrap());
@@ -71,9 +82,12 @@ async fn paid_fixture() {
             if let Some(header)=h.get("payment-signature") {
                 let payload:serde_json::Value=serde_json::from_slice(&STANDARD.decode(header.as_bytes()).unwrap()).unwrap();
                 assert_eq!(payload["accepted"]["amount"],"5000");crate::test_signatures::recover_exact(&payload);s.fetch_add(1,Ordering::SeqCst);
-                return (StatusCode::OK,[("payment-response",STANDARD.encode(br#"{"success":true}"#))],"paid").into_response();
+                let body=axum::body::Body::from_stream(futures_util::stream::once(async move {
+                    while wait_ranges.load(Ordering::SeqCst)<2 {tokio::task::yield_now().await;}
+                    Ok::<_,std::convert::Infallible>(axum::body::Bytes::from_static(b"paid"))
+                }));
+                return (StatusCode::OK,[("payment-response",STANDARD.encode(br#"{"success":true}"#)),("content-type","text/plain".into())],body).into_response();
             }
-            while wait_ranges.load(Ordering::SeqCst)<2 {tokio::task::yield_now().await;}
             let challenge=json!({"x402Version":2,"resource":{"url":"https://api.example.com/api","description":"fixture","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
         }}));
@@ -108,7 +122,7 @@ async fn paid_fixture() {
     let client = PaidClient::new(
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     )
-    .with_cover(Some(config), scope.clone());
+    .with_cover(Some(config.clone()), scope.clone());
     let route = || crate::catalog::RoutedRequest {
         method: "GET".into(),
         url: "https://api.example.com/api".into(),
@@ -187,6 +201,61 @@ async fn paid_fixture() {
         .validate_cover()
         .is_err()
     );
+    // Synthetic managed pool: the first unsigned payer is empty, standby is funded.
+    // Admission must promote before signing, preserving the new identity's cover owner.
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = crate::rotation::store::Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = store.ensure_pool("cover", "0.01").unwrap();
+    let state = store.status().unwrap();
+    let addresses = &state.pools[0].addresses;
+    let active = addresses[0].address.clone();
+    for address in addresses {
+        store
+            .record_credit(&address.id, "10000", &format!("0x{:064x}", 1), 88)
+            .unwrap();
+    }
+    for address in addresses {
+        balances.lock().unwrap().insert(
+            address.address.to_lowercase(),
+            if address.address == active { 0 } else { 10000 },
+        );
+    }
+    let (store, worker) = crate::rotation::store::StoreHandle::spawn(store);
+    let manager = Arc::new(
+        crate::rotation::manager::ManagedPool::new(
+            store.clone(),
+            pool,
+            crate::rotation::base::BaseRpc::new("https://api.example.com/rpc", 12, 120).unwrap(),
+            "0.01",
+            SpendPolicy::dollars("1").unwrap(),
+            2,
+        )
+        .unwrap(),
+    );
+    let managed = PaidClient::managed(manager).with_cover(
+        Some(config),
+        status::Scope {
+            listener: "managed".into(),
+            source: "fixture".into(),
+        },
+    );
+    let result = tokio::time::timeout(Duration::from_secs(3), managed.execute_response(route()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.bytes, b"paid");
+    assert!(result.paid_submission);
+    let after = store.call(|s| s.status()).await.unwrap();
+    assert_eq!(after.pools[0].generation, 1);
+    drop(managed);
+    drop(store);
+    worker.await.unwrap();
     let engine = crate::network::global().cover.as_ref().unwrap();
     engine.shutdown().await;
     let report = engine.status(&[scope]);

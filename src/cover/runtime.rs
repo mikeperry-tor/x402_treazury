@@ -27,7 +27,14 @@ pub struct Engine {
     tasks: TaskTracker,
     stop: CancellationToken,
 }
+#[derive(Default)]
+struct RequestGate {
+    paused: usize,
+    handles: Vec<tokio::task::AbortHandle>,
+}
 pub struct Session {
+    gate: Mutex<RequestGate>,
+    quiet: Notify,
     episode: Arc<Mutex<Episode>>,
     config: Arc<Config>,
     scopes: Mutex<BTreeSet<Scope>>,
@@ -42,6 +49,7 @@ pub struct Call {
     pub session: Arc<Session>,
     scope: Scope,
     completed: bool,
+    request_pending: bool,
 }
 impl Engine {
     pub fn new(limits: Limits) -> Arc<Self> {
@@ -92,11 +100,14 @@ impl Engine {
         config.validate()?;
         config.validate_origin(&owner.origin)?;
         let mut registry = self.registry.lock().unwrap();
+        anyhow::ensure!(!self.stop.is_cancelled(), "cover_shutdown");
         let (episode, fresh) =
             self.random(|rng| registry.attach(owner.clone(), config.clone(), Instant::now(), rng))?;
         let state = registry.owners.get_mut(&owner).unwrap();
         let session = if fresh {
             let s = Arc::new(Session {
+                gate: Mutex::new(RequestGate::default()),
+                quiet: Notify::new(),
                 episode,
                 config,
                 scopes: Mutex::new(BTreeSet::new()),
@@ -114,6 +125,14 @@ impl Engine {
                 .expect("active cover session")
                 .clone()
         };
+        {
+            let mut gate = session.gate.lock().unwrap();
+            gate.paused += 1;
+            for handle in &gate.handles {
+                handle.abort();
+            }
+        }
+        session.notify.notify_one();
         session.scopes.lock().unwrap().insert(scope.clone());
         self.status
             .lock()
@@ -125,7 +144,6 @@ impl Engine {
         if *state.padding_disabled.lock().unwrap() {
             self.record(&session, "cover_padding_disabled");
         }
-        drop(registry);
         if fresh {
             let engine = self.clone();
             let s = session.clone();
@@ -133,16 +151,21 @@ impl Engine {
                 engine.run(owner, s, http).await;
             });
         }
+        drop(registry);
         Ok(Call {
             engine: self.clone(),
             session,
             scope,
             completed: false,
+            request_pending: true,
         })
     }
     pub async fn shutdown(&self) {
-        self.stop.cancel();
-        self.tasks.close();
+        {
+            let _registry = self.registry.lock().unwrap();
+            self.stop.cancel();
+            self.tasks.close();
+        }
         tracing::info!(
             "Stopping optional cover tasks; financial requests retain their safety drain"
         );
@@ -189,7 +212,9 @@ impl Engine {
                 reason = "cover_episode_request_limit";
                 break;
             }
-            let can_schedule = now >= next
+            let paused = s.gate.lock().unwrap().paused > 0;
+            let can_schedule = !paused
+                && now >= next
                 && streams < s.config.concurrency
                 && available > 0
                 && requests < s.config.max_requests_per_episode;
@@ -287,14 +312,33 @@ impl Engine {
                         .map(|v| (p.header_name.parse().unwrap(), v))
                 });
                 let counter = budget.counter();
-                let guard = RangeGuard {
+                let mut guard = RangeGuard {
+                    dispatched: false,
                     session: s.clone(),
                     reserved,
                     counter,
                 };
                 let cfg = s.config.clone();
                 let client = http.clone();
-                pending.spawn(async move {
+                let mut gate = s.gate.lock().unwrap();
+                if gate.paused > 0 {
+                    drop(gate);
+                    if qualifying {
+                        self.registry
+                            .lock()
+                            .unwrap()
+                            .owners
+                            .get_mut(&owner)
+                            .unwrap()
+                            .capability = Capability::Unknown;
+                    }
+                    drop(guard);
+                    drop(budget);
+                    continue;
+                }
+                gate.handles.retain(|h| !h.is_finished());
+                let handle = pending.spawn(async move {
+                    guard.dispatched = true;
                     let mut padding_budget = padding_budget;
                     if let Some(p) = &mut padding_budget {
                         p.dispatched();
@@ -304,6 +348,8 @@ impl Engine {
                     drop(guard);
                     (qualifying, result)
                 });
+                gate.handles.push(handle);
+                drop(gate);
                 // Qualification is serialized; range replenishment rolls as slots free.
                 let gap =
                     match self.random(|rng| s.config.request_gap.sample(Unit::Milliseconds, rng)) {
@@ -316,7 +362,8 @@ impl Engine {
                 next = now + Duration::from_millis(gap);
                 continue;
             }
-            let wake = if streams < s.config.concurrency
+            let wake = if !paused
+                && streams < s.config.concurrency
                 && available > 0
                 && requests < s.config.max_requests_per_episode
             {
@@ -333,6 +380,10 @@ impl Engine {
                         Some(Ok((qualifying,result)))=>{
                             if qualifying {self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().qualified(result.clone());next=Instant::now();}
                             if let Err(error)=result {self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().capability=Capability::Unavailable(error.0);reason=error.0;break;}
+                        },
+                        Some(Err(error)) if error.is_cancelled()=>{
+                            if matches!(self.registry.lock().unwrap().owners[&owner].capability,Capability::Checking) {reason="cover_qualification_preempted";break;}
+                            self.record(&s,"cover_preempted_for_api");
                         },
                         _=>{reason="cover_task_failed";break;},
                     }
@@ -362,6 +413,7 @@ impl Engine {
     }
 }
 struct RangeGuard {
+    dispatched: bool,
     session: Arc<Session>,
     reserved: u64,
     counter: Arc<std::sync::atomic::AtomicU64>,
@@ -371,11 +423,31 @@ impl Drop for RangeGuard {
         self.session.episode.lock().unwrap().finish(
             self.reserved,
             self.counter.load(std::sync::atomic::Ordering::Relaxed),
-            true,
+            self.dispatched,
         );
+        self.session.quiet.notify_waiters();
     }
 }
 impl Call {
+    /// Wait only for local cancellation cleanup, never a peer response or body drain.
+    pub async fn prioritize(&self) {
+        loop {
+            let quiet = self.session.quiet.notified();
+            tokio::pin!(quiet);
+            quiet.as_mut().enable();
+            if self.session.episode.lock().unwrap().streams == 0 {
+                break;
+            }
+            quiet.await;
+        }
+    }
+    pub fn response_headers(&mut self) {
+        if self.request_pending {
+            self.request_pending = false;
+            self.session.gate.lock().unwrap().paused -= 1;
+            self.session.notify.notify_one();
+        }
+    }
     pub fn advisory(&self) -> Option<String> {
         let reasons = self
             .session
@@ -423,6 +495,7 @@ impl Call {
 }
 impl Drop for Call {
     fn drop(&mut self) {
+        self.response_headers();
         let mut e = self.session.episode.lock().unwrap();
         e.detach(Instant::now());
         if !self.completed && e.calls == 0 {

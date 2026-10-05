@@ -69,6 +69,7 @@ x402-reqwest = "=2.0.2"
 x402-types = "=2.0.2"
 
 [dev-dependencies]
+h2 = "0.4"
 alloy-sol-types = "1.5"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 

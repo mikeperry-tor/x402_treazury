@@ -521,8 +521,16 @@ configuration placeholder is part of the MVP.
 ## Resource, isolation and lifecycle invariants
 
 Real calls take precedence over cover in local scheduling. HTTP/2 server stream
-limits may be below our configured concurrency; skip or delay cover instead of
-blocking payment admission. Cover cannot reserve USDC, create wallets, trigger
+limits may be below our configured concurrency. Before an API attempt, cancel
+outstanding cover streams and wait only for their local cleanup, never for the
+peer or for body draining. Pause range scheduling through unsigned challenge,
+signing and signed retry until final response headers arrive. Then allow ranges
+concurrently with real body consumption and during the bounded tail. Overlapping
+attempts share a pause count; no range dispatch may race a new pause. This trades
+away cover during server computation/header waits to avoid occupying the only
+available stream slot. Header padding remains available during these requests.
+A preempted qualification becomes explicitly unavailable for that owner lifetime;
+do not hide this outcome or create a requalification loop. Cover cannot reserve USDC, create wallets, trigger
 rotation/refills, hold wallet/store locks, or extend signed-payment drain deadlines.
 
 For paid execution, bind each episode to the actual EVM address captured for that
