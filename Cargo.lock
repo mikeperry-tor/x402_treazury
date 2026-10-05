@@ -6601,6 +6601,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "x402-types"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23ef29b26928723dae166230f9f4f7139f66fe52804d19edd9241ae94b946179"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "base64 0.22.1",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "x402_treazury"
 version = "0.1.0"
 dependencies = [
@@ -6655,23 +6672,6 @@ dependencies = [
  "zingo-status",
  "zingolib",
  "zip32",
-]
-
-[[package]]
-name = "x402-types"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23ef29b26928723dae166230f9f4f7139f66fe52804d19edd9241ae94b946179"
-dependencies = [
- "alloy-primitives",
- "async-trait",
- "base64 0.22.1",
- "rust_decimal",
- "serde",
- "serde_json",
- "serde_with",
- "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]
