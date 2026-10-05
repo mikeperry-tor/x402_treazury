@@ -119,7 +119,7 @@ pub fn write(options: Options) -> Result<Value> {
     files::publish(&root.join("spec.json"), &serde_json::to_vec_pretty(&spec)?)?;
     files::publish(
         &root.join("help.json"),
-        br#"{"openapi":"3.0.3","paths":{}}"#,
+        br#"{"openapi":"3.0.3","paths":{"/cdn-cgi/trace":{"get":{"description":"Public diagnostic document; only its help wrapper is selected."}}}}"#,
     )?;
     let source = x402_treazury::catalog::Config {
         spec: "spec.json".into(),
@@ -135,6 +135,7 @@ pub fn write(options: Options) -> Result<Value> {
         .unwrap()
         .name;
     let mut deployment = json!({"version":1,"treasury":{"id":id,"state_dir":"state","key_file":"nonexistent-key","indexer_url_env":"ABSENT_INDEXER","submission_url_env":"ABSENT_SUBMISSION","daily_input_zec":"0.1","shield_max_fee_zec":"0.001"},"network":{"mode":"tor","socks_endpoint":format!("127.0.0.1:{}",options.socks_port),"isolation_namespace":format!("cover_{}",uuid::Uuid::new_v4().simple()),"cover_traffic_enabled":cover.is_some()},"wallets":{"test":{"mode":"static","private_key_env":"ABSENT_KEY"}},"sources":{"api":source,"trace":{"spec":"help.json","base_url":"https://www.cloudflare.com","prefix":"trace","help_url":"https://www.cloudflare.com/cdn-cgi/trace","probe_pricing":false},"fresh":{"spec":"help.json","base_url":"https://www.cloudflare.com","prefix":"fresh","help_url":"https://www.cloudflare.com/cdn-cgi/trace?treazury_cover_qualification=uncached","probe_pricing":false}},"servers":{"main":{"listen":format!("127.0.0.1:{}",options.mcp_port),"sources":["api","trace","fresh"],"wallet":"test","bearer_token_env":"TOKEN"}}});
+    deployment["servers"]["main"]["include_tools"] = json!([tool, "trace_help", "fresh_help"]);
     // JSON optional nulls must not be emitted as TOML values.
     fn strip_null(v: &mut Value) {
         match v {
@@ -225,6 +226,19 @@ mod tests {
             toml::from_str(&std::fs::read_to_string(root.join("deployment.toml")).unwrap())
                 .unwrap();
         assert!(deployment.network.cover_traffic_enabled);
+        let loaded = x402_treazury::deployment::Deployment::load(&root.join("deployment.toml"))
+            .await
+            .unwrap();
+        let inventories = loaded.inventory();
+        assert_eq!(inventories[0].tools.len(), 3);
+        for case in &manifest.cases {
+            assert!(
+                inventories[0]
+                    .tools
+                    .iter()
+                    .any(|t| t.tool.name == case.tool)
+            );
+        }
         assert!(root.join("SYNTHETIC_DO_NOT_FUND.txt").is_file());
     }
     #[test]
