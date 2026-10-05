@@ -1,6 +1,7 @@
 //! Optional, bounded provider cover traffic. Disabled operation owns no tasks or RNG.
 pub mod budget;
 pub mod episode;
+pub mod range;
 pub mod registry;
 pub mod sampling;
 pub mod status;

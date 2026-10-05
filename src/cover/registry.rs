@@ -24,7 +24,7 @@ pub enum Capability {
     Checking,
     Available {
         length: u64,
-        validator: Option<String>,
+        validator: Option<(String, String)>,
     },
     Unavailable(&'static str),
 }
@@ -32,6 +32,29 @@ pub struct OwnerState {
     pub config: Arc<Config>,
     pub capability: Capability,
     pub episode: Option<Arc<Mutex<Episode>>>,
+}
+impl OwnerState {
+    /// Only the first eligible caller may qualify; other calls remain uncovered.
+    pub fn begin_qualification(&mut self) -> bool {
+        if matches!(self.capability, Capability::Unknown) {
+            self.capability = Capability::Checking;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn qualified(
+        &mut self,
+        result: Result<super::range::Representation, super::range::Failure>,
+    ) {
+        self.capability = match result {
+            Ok(rep) => Capability::Available {
+                length: rep.length,
+                validator: rep.validator,
+            },
+            Err(error) => Capability::Unavailable(error.0),
+        };
+    }
 }
 pub struct Registry {
     pub owners: HashMap<Owner, OwnerState>,
@@ -134,7 +157,11 @@ mod tests {
         let mut other = owner.clone();
         other.identity = IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
         assert!(r.attach(other, config.clone(), now, &mut rng).is_err());
-        r.owners.get_mut(&owner).unwrap().capability = Capability::Unavailable("range_ignored");
+        let state = r.owners.get_mut(&owner).unwrap();
+        assert!(state.begin_qualification());
+        assert!(!state.begin_qualification());
+        state.qualified(Err(super::super::range::Failure("range_ignored")));
+        assert!(!state.begin_qualification());
         {
             let mut e = a.lock().unwrap();
             e.detach(now);
