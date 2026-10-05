@@ -33,3 +33,5 @@ pub mod output;
 pub mod supervision;
 
 pub mod build_identity;
+
+pub mod cover;

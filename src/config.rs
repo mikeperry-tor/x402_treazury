@@ -70,6 +70,12 @@ pub fn validate(settings: &Config) -> Result<()> {
         "max_response_bytes, max_help_bytes and max_spec_bytes must be positive"
     );
     settings.image_limits.validate()?;
+    if let Some(cover) = &settings.cover_traffic {
+        cover.validate()?;
+        if let Some(base) = &settings.base_url {
+            cover.validate_origin(base)?;
+        }
+    }
     for (operation, mapping) in &settings.response_mappings {
         let (method, path) = operation
             .split_once(' ')

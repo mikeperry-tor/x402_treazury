@@ -215,14 +215,16 @@ mixture configuration or correlation model is included.
 | `uniform` | None | Baseline/control; bounded sizes or jitter | Integer uniform from `rand` |
 | `exponential` | Positive `mean_ms` or `mean_bytes` | Memoryless timing baseline; skewed sizes if requested | Closed-form inverse CDF; `rand_distr::Exp` also exists |
 | `weibull` | Positive `scale_ms` or `scale_bytes`, positive dimensionless `shape` | Flexible gap shape; shape 1 equals exponential, below 1 favors short gaps with a longer tail | Closed-form inverse CDF; `rand_distr::Weibull` also exists |
-| `log_normal` | Positive `median_ms` or `median_bytes`, positive dimensionless log-space `sigma` | Skewed volume/header/range budgets and optional long-tailed delays | `rand_distr::LogNormal::new(ln(median), sigma)` plus bounded rejection |
+| `log_normal` | Positive `median_ms` or `median_bytes`, positive dimensionless log-space `sigma` | Skewed volume/header/range budgets and optional long-tailed delays | Closed-form Box–Muller normal, `exp(ln(median) + sigma*z)`, plus bounded rejection |
 | `weighted_discrete` | `values_ms` or `values_bytes`, matching positive integer `weights` | Explicit multiple size peaks or a small empirical timing histogram | `rand::distr::weighted::WeightedIndex` over integer weights |
 
 The [Rust distributions library](https://docs.rs/rand_distr/latest/rand_distr/)
 provides Exp, Weibull and LogNormal; [WeightedIndex](https://docs.rs/rand/latest/rand/distr/weighted/struct.WeightedIndex.html)
-provides categorical sampling. Select compatible `rand`/`rand_distr` versions under
-repository dependency policy and commit the lockfile during C1; do not add a full
-statistics framework just to generate these samples. Constructor parameters are
+provides categorical sampling. Use the already-resolved `rand` 0.9 dependency,
+closed-form transforms and integer cumulative-weight sampling for the MVP; these
+avoid an additional statistics dependency. Commit its direct dependency and lockfile
+under repository dependency policy. Box–Muller consumes two independent open-unit
+uniform draws for each standard normal, without cached cross-owner samples. Constructor parameters are
 those of the untruncated parent law: `mean` and `median` are not promises about the
 bounded, rounded output. Proposed example settings are engineering examples, not
 trace-fitted defaults or privacy claims.

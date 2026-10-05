@@ -49,6 +49,8 @@ pub struct Config {
     pub response_mappings: BTreeMap<String, crate::output::ResponseMapping>,
     #[serde(skip_serializing_if = "crate::output::ImageLimits::is_default")]
     pub image_limits: crate::output::ImageLimits,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_traffic: Option<crate::cover::Config>,
     pub allow_http1: bool,
     pub allow_tls12: bool,
     pub timeout: f64,
@@ -95,6 +97,7 @@ impl Default for Config {
             reliability_note: String::new(),
             response_mappings: BTreeMap::new(),
             image_limits: Default::default(),
+            cover_traffic: None,
             allow_http1: false,
             allow_tls12: false,
             timeout: 30.0,

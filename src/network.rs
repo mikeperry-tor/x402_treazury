@@ -28,6 +28,10 @@ pub enum SocksAuth {
 #[serde(deny_unknown_fields)]
 pub struct NetworkPolicy {
     #[serde(default)]
+    pub cover_traffic_enabled: bool,
+    #[serde(default)]
+    pub cover_limits: crate::cover::Limits,
+    #[serde(default)]
     pub mode: Mode,
     pub socks_endpoint: Option<SocketAddr>,
     pub isolation_namespace: Option<String>,
@@ -38,6 +42,7 @@ pub struct NetworkPolicy {
 }
 impl NetworkPolicy {
     pub fn validate(&self) -> Result<()> {
+        self.cover_limits.validate()?;
         if self.mode == Mode::Direct {
             ensure!(
                 self.socks_endpoint.is_none()
@@ -88,7 +93,7 @@ impl NetworkPolicy {
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"request_timeout_seconds":self.request_timeout_seconds.or((self.mode == Mode::Tor).then_some(240)),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        serde_json::json!({"cover_traffic_enabled":self.cover_traffic_enabled,"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"request_timeout_seconds":self.request_timeout_seconds.or((self.mode == Mode::Tor).then_some(240)),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
