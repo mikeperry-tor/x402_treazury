@@ -34,6 +34,7 @@ fn synced(s: &mut Store) -> Result<()> {
             checkpoint_at: instant,
             scanned_blocks: 1,
             target_height: Some(1),
+            observed_tip_height: None,
             height: Some(1),
             confirmations: 1,
             max_age_seconds: 3600,

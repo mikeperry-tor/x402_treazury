@@ -2,6 +2,7 @@
 pub mod actor;
 pub mod birthday;
 mod expiry;
+mod freshness;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
@@ -339,6 +340,7 @@ impl Treasury {
             checkpoint_at: 0,
             scanned_blocks: 0,
             target_height: None,
+            observed_tip_height: None,
             height: None,
             confirmations: settings.confirmations.get(),
             max_age_seconds: settings.max_age_seconds,
@@ -496,6 +498,11 @@ impl SyncSession {
             info.chain_name == self.network.rpc_name(),
             "indexer is not on mainnet"
         );
+        let target_height = info.block_height;
+        let checked_at = now()?;
+        let started = std::time::Instant::now();
+        observation.target_height = Some(target_height);
+        observation.observed_tip_height = None;
         server::check_endpoint(
             &settings.endpoint,
             &self.identity,
@@ -503,7 +510,6 @@ impl SyncSession {
             info.block_height,
         )
         .await?;
-        observation.target_height = Some(info.block_height);
         self.client
             .sync()
             .await
@@ -525,7 +531,6 @@ impl SyncSession {
             .map_or(result.blocks_scanned, |progress| {
                 progress.total_blocks_scanned
             });
-        let checked_at = now()?;
         let info = tokio::time::timeout(
             crate::network::global().request_timeout(Duration::from_secs(15)),
             indexer.get_lightd_info(
@@ -538,11 +543,17 @@ impl SyncSession {
         .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
         let height = u64::from(u32::from(result.sync_end_height));
         ensure!(
-            info.chain_name == self.network.rpc_name() && info.block_height == height,
-            "treasury requires another sync to the current {} tip (wallet={height}, indexer={})",
-            self.network.name(),
-            info.block_height
+            info.chain_name == self.network.rpc_name(),
+            "indexer is not on mainnet"
         );
+        observation.observed_tip_height = Some(info.block_height);
+        let lag = freshness::validate(
+            target_height,
+            height,
+            info.block_height,
+            started.elapsed(),
+            settings.max_age_seconds,
+        )?;
         server::check_endpoint(
             &settings.endpoint,
             &self.identity,
@@ -630,6 +641,22 @@ impl SyncSession {
         drop(wallet);
         self.reconcile_refunds(height, settings.confirmations.get())
             .await?;
+        freshness::validate(
+            target_height,
+            height,
+            info.block_height,
+            started.elapsed(),
+            settings.max_age_seconds,
+        )?;
+        if lag > 0 {
+            tracing::warn!(
+                scanned_height = height,
+                observed_tip_height = info.block_height,
+                lag_blocks = lag,
+                max_lag_blocks = freshness::MAX_LAG_BLOCKS,
+                "treasury sync accepted with bounded tip lag; background sync will continue"
+            );
+        }
         observation.checked_at = Some(checked_at);
         observation.height = Some(height);
         Ok(())

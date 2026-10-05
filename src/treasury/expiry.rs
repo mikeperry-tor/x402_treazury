@@ -89,6 +89,7 @@ impl Treasury {
             .await?;
         let status = self.status().await?;
         let sync = status.sync.context("treasury not synced")?;
+        freshness::require_current_tip(&sync)?;
         let height = sync.height.context("missing sync height")?;
         ensure!(
             sync.fresh(now()?, status.snapshot_revision),
@@ -114,6 +115,7 @@ impl Treasury {
         self.sync_once(stop).await?;
         let status = self.status().await?;
         let sync = status.sync.context("treasury not synced")?;
+        freshness::require_current_tip(&sync)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
             sync.fresh(now()?, status.snapshot_revision)

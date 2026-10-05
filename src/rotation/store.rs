@@ -62,6 +62,9 @@ pub struct SyncObservation {
     pub scanned_blocks: u32,
     pub target_height: Option<u64>,
     pub height: Option<u64>,
+    /// Final indexer tip; absent in historical snapshots. Never a scanned height.
+    #[serde(default)]
+    pub observed_tip_height: Option<u64>,
     pub confirmations: u32,
     pub max_age_seconds: u64,
     #[serde(default)]
@@ -85,6 +88,11 @@ pub enum SyncPhase {
     Offline,
 }
 impl SyncObservation {
+    #[cfg(feature = "zcash")]
+    pub(crate) fn at_observed_tip(&self) -> bool {
+        self.height.is_some() && self.height == self.observed_tip_height
+    }
+
     pub fn fresh(&self, now: u64, revision: i64) -> bool {
         self.phase == SyncPhase::Ready
             && self.snapshot_revision == revision

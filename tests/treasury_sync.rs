@@ -97,6 +97,7 @@ fn framed(message: Vec<u8>) -> Vec<u8> {
 struct Mock {
     chain: &'static str,
     tip: u64,
+    final_tip: Option<u64>,
     ironwood: &'static [u8],
     calls: Arc<Mutex<Vec<String>>>,
     stall_blocks: Arc<AtomicBool>,
@@ -110,7 +111,22 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             [
                 bytes(4, mock.chain.as_bytes()),
                 number(5, 419_200),
-                number(7, mock.tip),
+                number(
+                    7,
+                    if mock
+                        .calls
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|m| *m == "GetLightdInfo")
+                        .count()
+                        > 1
+                    {
+                        mock.final_tip.unwrap_or(mock.tip)
+                    } else {
+                        mock.tip
+                    },
+                ),
             ]
             .concat(),
         ],
@@ -200,6 +216,19 @@ async fn mock_with_tree(
     tokio::task::JoinHandle<()>,
     Arc<AtomicBool>,
 ) {
+    mock_with_tip_change(chain, tip, ironwood, None).await
+}
+async fn mock_with_tip_change(
+    chain: &'static str,
+    tip: u64,
+    ironwood: &'static [u8],
+    final_tip: Option<u64>,
+) -> (
+    String,
+    Arc<Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+    Arc<AtomicBool>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let calls = Arc::new(Mutex::new(vec![]));
@@ -207,6 +236,7 @@ async fn mock_with_tree(
     let app = axum::Router::new().fallback(rpc).with_state(Mock {
         chain,
         tip,
+        final_tip,
         ironwood,
         calls: calls.clone(),
         stall_blocks: stall_blocks.clone(),
@@ -289,9 +319,14 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         .as_object_mut()
         .unwrap()
         .remove("confirmed_pool_balances_zatoshis");
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("observed_tip_height");
     let legacy: x402_treazury::rotation::store::SyncObservation =
         serde_json::from_value(legacy).unwrap();
     assert!(legacy.confirmed_pool_balances_zatoshis.is_none());
+    assert!(legacy.observed_tip_height.is_none());
     {
         use x402_treazury::rotation::transaction::{PrepareRequest, TransactionPreparer};
         let before = calls.lock().unwrap().len();
@@ -839,4 +874,43 @@ spec="nonexistent.json"
     );
     reopened.close().await.unwrap();
     server.abort();
+}
+
+#[tokio::test]
+async fn moving_tip_accepts_bounded_lag_and_rejects_excess_or_regression() {
+    for (delta, accepted) in [(1i64, true), (3, true), (4, false), (-1, false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let tip = TIP.checked_add_signed(delta).unwrap();
+        let (endpoint, calls, server, _) =
+            mock_with_tip_change("main", TIP, b"000000", Some(tip)).await;
+        let mut treasury = wallet(dir.path()).await;
+        treasury.configure_sync(SyncSettings::new(endpoint, 7, 300).unwrap());
+        let before = x402_treazury::rotation::base::now().unwrap();
+        let result = treasury.sync_once(&CancellationToken::new()).await;
+        assert_eq!(result.is_ok(), accepted, "delta={delta}: {result:?}");
+        let status = treasury.status().await.unwrap();
+        assert_eq!(status.sync_fresh, accepted);
+        let observation = status.sync.unwrap();
+        assert_eq!(observation.observed_tip_height, Some(tip));
+        assert_eq!(observation.target_height, Some(TIP));
+        if accepted {
+            assert_eq!(observation.height, Some(TIP));
+            assert_eq!(observation.confirmations, 7);
+            assert!(observation.checked_at.unwrap() >= before);
+            assert!(observation.fresh(
+                observation.checked_at.unwrap() + 300,
+                status.snapshot_revision
+            ));
+            assert!(!observation.fresh(
+                observation.checked_at.unwrap() + 301,
+                status.snapshot_revision
+            ));
+        } else {
+            assert_eq!(observation.phase, SyncPhase::Failed);
+            assert!(observation.last_error.is_some());
+        }
+        assert!(!calls.lock().unwrap().iter().any(|m| m == "SendTransaction"));
+        treasury.close().await.unwrap();
+        server.abort();
+    }
 }

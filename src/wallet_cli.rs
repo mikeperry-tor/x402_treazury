@@ -436,6 +436,15 @@ async fn sync(
         treasury.close().await?;
         return Err(error);
     }
+    if let Some(sync) = treasury.status().await?.sync
+        && let (Some(height), Some(tip)) = (sync.height, sync.observed_tip_height)
+        && tip > height
+    {
+        eprintln!(
+            "treasury sync accepted with bounded tip lag: scanned={height}, observed_tip={tip}, lag={} blocks; background sync continues while serving",
+            tip - height
+        );
+    }
     Ok(treasury)
 }
 

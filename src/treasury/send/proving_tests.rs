@@ -75,6 +75,7 @@ async fn qualify_preparation(fail_commit: bool) {
             checkpoint_at: 0,
             scanned_blocks: 1,
             target_height: Some(TIP.into()),
+            observed_tip_height: None,
             height: Some(TIP.into()),
             confirmations: 1,
             max_age_seconds: 300,

@@ -361,6 +361,7 @@ mod tests {
                         checkpoint_at: 0,
                         scanned_blocks: 1,
                         target_height: Some(2_000_000),
+                        observed_tip_height: None,
                         height: Some(2_000_000),
                         confirmations: 3,
                         max_age_seconds: 300,

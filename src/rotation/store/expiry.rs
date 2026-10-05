@@ -17,6 +17,10 @@ impl Store {
             status.snapshot_revision == revision && sync.fresh(instant, revision),
             "expiry recovery requires fresh unchanged snapshot"
         );
+        ensure!(
+            sync.at_observed_tip(),
+            "expiry recovery requires zero observed tip lag"
+        );
         let op = self.operation(id)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
@@ -98,6 +102,7 @@ mod tests {
             checkpoint_at: 100,
             scanned_blocks: 22,
             target_height: Some(22),
+            observed_tip_height: Some(22),
             height: Some(22),
             confirmations: 2,
             max_age_seconds: 300,
@@ -110,19 +115,31 @@ mod tests {
         s.save_sync_snapshot(2, b"shallow", Some(shallow))?;
         assert!(s.resolve_expired(&job.operation_id, 3, 100).is_err());
         assert!(s.operation_pending(&job.operation_id)?);
-        s.save_sync_snapshot(3, b"synced", Some(observation))?;
+        let mut revision = 3;
+        for tip in [None, Some(23)] {
+            let mut lagged = observation.clone();
+            lagged.observed_tip_height = tip;
+            revision = s.save_sync_snapshot(revision, b"lagged", Some(lagged))?;
+            let error = s
+                .resolve_expired(&job.operation_id, revision, 100)
+                .unwrap_err();
+            assert!(error.to_string().contains("zero observed tip lag"));
+            assert!(s.operation_pending(&job.operation_id)?);
+        }
+        revision = s.save_sync_snapshot(revision, b"synced", Some(observation))?;
         assert!(s.resolve_expired(&job.operation_id, 2, 100).is_err());
-        assert!(s.resolve_expired(&job.operation_id, 4, 401).is_err());
-        s.resolve_expired(&job.operation_id, 4, 100)?;
+        assert!(s.resolve_expired(&job.operation_id, revision, 401).is_err());
+        s.resolve_expired(&job.operation_id, revision, 100)?;
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         assert!(!s.operation_pending(&job.operation_id)?);
         let next = s.funding_jobs()?.remove(0);
         assert_ne!(next.operation_id, job.operation_id);
         assert_eq!(next.phase, funding::FundingPhase::Allocated);
-        assert!(s.resolve_expired(&job.operation_id, 4, 100).is_err());
+        assert!(s.resolve_expired(&job.operation_id, revision, 100).is_err());
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         assert!(s.confirm_spend(&job.operation_id, 100, 1).is_err());
         let treasury = s.id().to_owned();
+        let recovery_revision = revision;
         let mut revision = s.snapshot()?.0;
         for _ in 0..10 {
             revision = s.save_snapshot(revision, b"new checkpoint")?;
@@ -131,7 +148,7 @@ mod tests {
             s.db.prepare("SELECT revision FROM snapshots ORDER BY revision")?
                 .query_map([], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
-        assert_eq!(retained, vec![2, 4, revision]);
+        assert_eq!(retained, vec![2, recovery_revision, revision]);
         drop(s);
         let s = Store::open(
             &dir.path().join("state"),
