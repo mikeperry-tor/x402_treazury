@@ -180,14 +180,13 @@ mod tests {
                 assert!(case.unsigned && tool.help_url.is_some());
             }
         }
-        let old: toml::Value =
-            toml::from_str(include_str!("../../tests/live/providers.toml")).unwrap();
-        for legacy in old["cases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|c| c["id"].as_str().unwrap().starts_with("sweep_"))
-        {
+        // Independently reviewed requests, extracted from the original manifest.
+        let reviewed: Vec<Value> = serde_json::from_str(include_str!(
+            "../../tests/live/fixtures/provider_requests.json"
+        ))
+        .unwrap();
+        assert_eq!(reviewed.len(), 22);
+        for legacy in &reviewed {
             let case = manifest
                 .cases
                 .iter()

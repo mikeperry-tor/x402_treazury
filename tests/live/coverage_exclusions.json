@@ -1,0 +1,12 @@
+[
+  {
+    "provider": "blockrun",
+    "config": "providers/blockrun.toml",
+    "reason": "Outside the reviewed provider preset; no paid request or budget authorized."
+  },
+  {
+    "provider": "claw402",
+    "config": "providers/claw402.toml",
+    "reason": "Outside the reviewed provider preset; no paid request or budget authorized."
+  }
+]

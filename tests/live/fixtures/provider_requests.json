@@ -1,0 +1,172 @@
+[
+  {
+    "id": "sweep_agent402",
+    "tool": "agent402_dns",
+    "arguments": {
+      "name": "example.com",
+      "type": "A"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_agentfund",
+    "tool": "agentfund_treasury_yield_curve",
+    "arguments": {
+      "days": 1
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_agentutility",
+    "tool": "agentutility_web_search",
+    "arguments": {
+      "query": "Rust language documentation",
+      "num_results": 1
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_arkham",
+    "tool": "arkham_balances_address",
+    "arguments": {
+      "address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_botsmith",
+    "tool": "botsmith_x_search",
+    "arguments": {
+      "query": "Rust language documentation",
+      "type": "Latest"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_brazilayer",
+    "tool": "brazilayer_cnpj_situacao_cnpj",
+    "arguments": {
+      "cnpj": "33000167000101"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_concordance",
+    "tool": "concordance_search",
+    "arguments": {
+      "query": "Rust",
+      "limit": 1
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_deepline",
+    "tool": "deepline_company_enrich",
+    "arguments": {
+      "domain": "stripe.com"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_exa",
+    "tool": "exa_search",
+    "arguments": {
+      "query": "Rust language documentation",
+      "numResults": 1
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_genuinegood",
+    "tool": "genuinegood_search_get",
+    "arguments": {
+      "keyword": "education",
+      "rows": 1
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_glassnode",
+    "tool": "glassnode_metadata_assets",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_google_trends",
+    "tool": "google_trends_trend",
+    "arguments": {
+      "keyword": "rust"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_locus",
+    "tool": "locus_locus_place_report",
+    "arguments": {
+      "address": "1 E Edenton St, Raleigh, NC 27601"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_lonestar",
+    "tool": "lonestar_rates_rates",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_otto",
+    "tool": "otto_crypto_news",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_pdl",
+    "tool": "pdl_company_enrich",
+    "arguments": {
+      "website": "stripe.com"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_socialfetch",
+    "tool": "socialfetch_twitter_profiles_handle",
+    "arguments": {
+      "handle": "rustlang"
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_stableenrich",
+    "tool": "stableenrich_exa_search",
+    "arguments": {
+      "query": "Rust language documentation",
+      "numResults": 1,
+      "stream": false
+    },
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_straits",
+    "tool": "straits_brief",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_x402stock",
+    "tool": "x402stock_calendar_fomc",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_regimeshift",
+    "tool": "regimeshift_rate_sofr_usd",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  },
+  {
+    "id": "sweep_kronos",
+    "tool": "kronos_forecast_btc",
+    "arguments": {},
+    "reserve_usdc": "0.20"
+  }
+]

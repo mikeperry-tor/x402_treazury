@@ -1,0 +1,179 @@
+# TEMPLATE ONLY. Copy to live-tor-providers.local.toml and follow tests/live/INTEGRATION.md.
+# No funding starts by default. Failed catalogs are recorded in coverage.json.
+version = 1
+[network]
+mode = "tor"
+socks_endpoint = "127.0.0.1:9150"
+isolation_namespace = "qualification_replace_me"
+socks_auth = "tor_extended"
+connect_timeout_seconds = 120
+request_timeout_seconds = 240
+[treasury]
+id = "11111111-1111-4111-8111-111111111111"
+state_dir = "../state/qualification-template"
+key_file = "../secrets/qualification-template.key"
+indexer_url_env = "ZCASH_INDEXER_URL"
+submission_url_env = "ZCASH_SUBMISSION_URL"
+daily_input_zec = "0.0105"
+shield_max_fee_zec = "0.0003"
+confirmations = 3
+max_sync_age_seconds = 300
+[funding]
+auto_fund = false
+confidentiality = "public"
+base_rpc_url_env = "BASE_RPC_URL"
+# Reviewed Tor test endpoint: export BASE_RPC_URL=https://base-rpc.publicnode.com
+# Verification remains required; omitted fallback settings retain dRPC/Base failover.
+base_confirmations = 12
+[wallets.coverage_a]
+mode = "zcash_rotation"
+# Review the current bridge minimum before authorizing new funding.
+# It is not a universal or permanent route minimum.
+deposit_size = "2.00"
+max_price_usd = "0.20"
+max_input_zec = "0.002"
+max_fee_bps = 500
+[wallets.coverage_b]
+mode = "zcash_rotation"
+deposit_size = "2.00"
+max_price_usd = "0.20"
+max_input_zec = "0.002"
+max_fee_bps = 500
+
+[sources.agent402]
+extends = "../providers/agent402.toml"
+probe_pricing = false
+tags = ["network"]
+
+[sources.agentfund]
+extends = "../providers/agentfund.toml"
+probe_pricing = false
+
+[sources.agentutility]
+extends = "../providers/agentutility/provider.toml"
+probe_pricing = false
+
+[sources.arkham]
+extends = "../providers/arkham.toml"
+probe_pricing = false
+
+[sources.botsmith]
+extends = "../providers/botsmith.toml"
+probe_pricing = false
+
+[sources.brazilayer]
+extends = "../providers/brazilayer.toml"
+probe_pricing = false
+
+[sources.concordance]
+extends = "../providers/concordance/provider.toml"
+probe_pricing = false
+
+[sources.deepline]
+extends = "../providers/deepline.toml"
+probe_pricing = false
+
+[sources.exa]
+extends = "../providers/exa.toml"
+probe_pricing = false
+
+[sources.genuinegood]
+extends = "../providers/genuinegood.toml"
+probe_pricing = false
+
+[sources.glassnode]
+extends = "../providers/glassnode/provider.toml"
+probe_pricing = false
+
+[sources.google_trends]
+extends = "../providers/google-trends.toml"
+probe_pricing = false
+
+[sources.locus]
+extends = "../providers/locus/provider.toml"
+probe_pricing = false
+
+[sources.lonestar]
+extends = "../providers/lonestar.toml"
+probe_pricing = false
+
+[sources.otto]
+extends = "../providers/otto.toml"
+probe_pricing = false
+
+[sources.pdl]
+extends = "../providers/pdl.toml"
+probe_pricing = false
+
+[sources.socialfetch]
+extends = "../providers/socialfetch.toml"
+probe_pricing = false
+
+[sources.stableenrich]
+extends = "../providers/stableenrich.toml"
+probe_pricing = false
+
+[sources.straits]
+extends = "../providers/straits/provider.toml"
+probe_pricing = false
+
+[sources.x402stock]
+extends = "../providers/x402stock.toml"
+probe_pricing = false
+
+[sources.x402_list]
+extends = "../providers/x402-list.toml"
+probe_pricing = false
+
+[sources.regimeshift]
+# Qualification-only pinned catalog: live availability failures remain in the report.
+spec = "../tests/fixtures/regimeshift_openapi.json"
+extends = "../providers/regimeshift.toml"
+probe_pricing = false
+
+[sources.kronos]
+# Qualification-only pinned catalog: live availability failures remain in the report.
+spec = "../tests/fixtures/kronos_openapi.json"
+extends = "../providers/kronos.toml"
+probe_pricing = false
+
+[sources.rotation]
+extends = "../providers/arkham.toml"
+prefix = "rotation"
+overrides = {}
+probe_pricing = false
+wallet = "coverage_a"
+
+[sources.shared_social]
+extends = "../providers/socialfetch.toml"
+prefix = "shared"
+overrides = {}
+probe_pricing = false
+wallet = "coverage_a"
+
+[sources.isolated_social]
+extends = "../providers/socialfetch.toml"
+prefix = "isolated"
+overrides = {}
+probe_pricing = false
+
+[servers.a]
+listen = "127.0.0.1:8381"
+bearer_token_env = "QUALIFICATION_A_TOKEN"
+wallet = "coverage_a"
+sources = ["rotation", "shared_social"]
+include_tools = ["rotation_balances_address", "rotation_help", "shared_twitter_profiles_handle", "shared_help"]
+
+[servers.b]
+listen = "127.0.0.1:8382"
+bearer_token_env = "QUALIFICATION_B_TOKEN"
+wallet = "coverage_b"
+sources = ["agent402", "agentfund", "agentutility", "arkham", "botsmith", "brazilayer", "concordance", "deepline", "exa", "genuinegood", "glassnode", "google_trends", "locus", "lonestar", "otto", "pdl", "socialfetch", "stableenrich", "straits", "x402stock", "x402_list", "regimeshift", "kronos", "shared_social"]
+include_tools = ["agent402_dns", "agentfund_treasury_yield_curve", "agentutility_web_search", "arkham_balances_address", "botsmith_x_search", "brazilayer_cnpj_situacao_cnpj", "concordance_search", "deepline_company_enrich", "exa_search", "genuinegood_search_get", "glassnode_metadata_assets", "google_trends_trend", "locus_locus_place_report", "lonestar_rates_rates", "otto_crypto_news", "pdl_company_enrich", "socialfetch_twitter_profiles_handle", "stableenrich_exa_search", "straits_brief", "x402stock_calendar_fomc", "x402_list_best", "exa_contents", "google_trends_interest_by_region", "google_trends_related_queries", "google_trends_related_topics", "shared_twitter_profiles_handle", "agent402_help", "agentutility_help", "arkham_help", "botsmith_help", "brazilayer_help", "concordance_help", "exa_help", "genuinegood_help", "glassnode_help", "google_trends_help", "locus_help", "lonestar_help", "otto_help", "socialfetch_help", "stableenrich_help", "straits_help", "x402stock_help", "x402_list_help", "regimeshift_rate_sofr_usd", "regimeshift_help", "kronos_forecast_btc", "kronos_help", "shared_help"]
+
+[servers.c]
+listen = "127.0.0.1:8383"
+bearer_token_env = "QUALIFICATION_C_TOKEN"
+wallet = "coverage_b"
+sources = ["isolated_social"]
+include_tools = ["isolated_twitter_profiles_handle", "isolated_help"]

@@ -1,0 +1,146 @@
+[
+  {
+    "provider": "agent402",
+    "config": "providers/agent402.toml",
+    "case": "sweep_agent402",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "agentfund",
+    "config": "providers/agentfund.toml",
+    "case": "sweep_agentfund",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "agentutility",
+    "config": "providers/agentutility/provider.toml",
+    "case": "sweep_agentutility",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "arkham",
+    "config": "providers/arkham.toml",
+    "case": "sweep_arkham",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "botsmith",
+    "config": "providers/botsmith.toml",
+    "case": "sweep_botsmith",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "brazilayer",
+    "config": "providers/brazilayer.toml",
+    "case": "sweep_brazilayer",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "concordance",
+    "config": "providers/concordance/provider.toml",
+    "case": "sweep_concordance",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "deepline",
+    "config": "providers/deepline.toml",
+    "case": "sweep_deepline",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "exa",
+    "config": "providers/exa.toml",
+    "case": "sweep_exa",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "genuinegood",
+    "config": "providers/genuinegood.toml",
+    "case": "sweep_genuinegood",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "glassnode",
+    "config": "providers/glassnode/provider.toml",
+    "case": "sweep_glassnode",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "google-trends",
+    "config": "providers/google-trends.toml",
+    "case": "sweep_google_trends",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "kronos",
+    "config": "providers/kronos.toml",
+    "case": "sweep_kronos",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "locus",
+    "config": "providers/locus/provider.toml",
+    "case": "sweep_locus",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "lonestar",
+    "config": "providers/lonestar.toml",
+    "case": "sweep_lonestar",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "oneshot",
+    "config": "providers/oneshot.toml",
+    "case": null,
+    "reason": "Excluded from the reviewed preset: catalog-access and async/authentication contracts need qualification."
+  },
+  {
+    "provider": "otto",
+    "config": "providers/otto.toml",
+    "case": "sweep_otto",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "pdl",
+    "config": "providers/pdl.toml",
+    "case": "sweep_pdl",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "regimeshift",
+    "config": "providers/regimeshift.toml",
+    "case": "sweep_regimeshift",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "socialfetch",
+    "config": "providers/socialfetch.toml",
+    "case": "sweep_socialfetch",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "stableenrich",
+    "config": "providers/stableenrich.toml",
+    "case": "sweep_stableenrich",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "straits",
+    "config": "providers/straits/provider.toml",
+    "case": "sweep_straits",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  },
+  {
+    "provider": "x402-list",
+    "config": "providers/x402-list.toml",
+    "case": null,
+    "reason": "Unsigned directory case only; a 402 must never trigger payment."
+  },
+  {
+    "provider": "x402stock",
+    "config": "providers/x402stock.toml",
+    "case": "sweep_x402stock",
+    "reason": "Reviewed paid request; content and canonical debit assertions are independent."
+  }
+]
