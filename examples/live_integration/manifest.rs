@@ -69,6 +69,9 @@ pub struct Limits {
     pub call_seconds: u64,
     pub cleanup_seconds: u64,
     pub result_bytes: usize,
+    /// Explicit experiment settling interval after connected batches, including the last.
+    #[serde(default)]
+    pub post_batch_wait_ms: u64,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -299,6 +302,10 @@ impl Manifest {
         ensure!(
             l.call_seconds <= l.phase_seconds && l.phase_seconds <= l.run_seconds,
             "call/phase/run deadlines must be ordered"
+        );
+        ensure!(
+            l.post_batch_wait_ms <= 60_000 && l.post_batch_wait_ms <= l.phase_seconds * 1000,
+            "post_batch_wait_ms must be 0..60000 and fit within the phase budget"
         );
         ensure!(
             (1..=64 * 1024 * 1024).contains(&l.result_bytes),

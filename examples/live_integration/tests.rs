@@ -232,3 +232,17 @@ fn outage_plan_requires_owned_tor_final_phase_and_warm_dependency() {
     bad.phases[1].cases.reverse();
     assert!(planner::build(&bad, &cfg).is_err());
 }
+
+#[test]
+fn settling_interval_is_explicit_and_bounded_by_phase() {
+    let mut m = manifest();
+    assert_eq!(m.limits.post_batch_wait_ms, 0);
+    m.limits.post_batch_wait_ms = 60_000;
+    m.validate().unwrap();
+    m.limits.post_batch_wait_ms = 60_001;
+    assert!(m.validate().is_err());
+    m.limits.post_batch_wait_ms = 2_000;
+    m.limits.phase_seconds = 1;
+    m.limits.call_seconds = 1;
+    assert!(m.validate().is_err());
+}

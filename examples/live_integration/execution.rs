@@ -506,6 +506,36 @@ async fn execute(
                 }
                 registry.event(&m.run_id, "mcp_finished", &json!({"case":id,"mcp_started_ms":began,"mcp_finished_ms":ended,"scope":"MCP request interval, not payment/signature interval"}), now()?)?;
             }
+            if m.limits.post_batch_wait_ms > 0
+                && !matches!(phase.scenario, Scenario::TorOutage { .. })
+            {
+                let wait = Duration::from_millis(m.limits.post_batch_wait_ms);
+                ensure!(
+                    Instant::now() + wait <= phase_deadline,
+                    "post-batch wait cannot fit within remaining phase/run/window deadline"
+                );
+                eprintln!(
+                    "qualification settling for {} ms after batch; no new API calls are dispatched",
+                    m.limits.post_batch_wait_ms
+                );
+                registry.event(
+                    &m.run_id,
+                    "post_batch_wait",
+                    &json!({"batch":batch,"milliseconds":m.limits.post_batch_wait_ms}),
+                    now()?,
+                )?;
+                tokio::select! {
+                    _ = stop.cancelled() => anyhow::bail!("post-batch wait cancelled"),
+                    _ = child.fault.cancelled() => anyhow::bail!("child evidence failed during post-batch wait"),
+                    _ = tokio::time::sleep(wait) => {},
+                }
+                registry.event(
+                    &m.run_id,
+                    "post_batch_wait_completed",
+                    &json!({"batch":batch}),
+                    now()?,
+                )?;
+            }
         }
         if matches!(&phase.scenario, Scenario::TorOutage { .. }) {
             let evidence = crate::tor::outage::results(registry, m, phase)?;
