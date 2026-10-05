@@ -46,7 +46,7 @@ pub struct Budget {
 pub struct Reservation {
     budget: Budget,
     id: u64,
-    received: u64,
+    received: Arc<std::sync::atomic::AtomicU64>,
     finished: bool,
 }
 impl Budget {
@@ -130,7 +130,7 @@ impl Budget {
         Ok(Reservation {
             budget: self.clone(),
             id,
-            received: 0,
+            received: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             finished: false,
         })
     }
@@ -145,6 +145,9 @@ impl Budget {
     }
 }
 impl Reservation {
+    pub fn counter(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        self.received.clone()
+    }
     pub fn dispatched(&mut self) {
         self.budget
             .state
@@ -157,7 +160,8 @@ impl Reservation {
     }
     /// Include every observed chunk, including the chunk that crossed a read bound.
     pub fn received(&mut self, bytes: u64) {
-        self.received = self.received.saturating_add(bytes);
+        self.received
+            .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
     }
     pub fn finish(mut self, now: Instant) {
         self.complete(now);
@@ -173,7 +177,7 @@ impl Reservation {
             .get_mut(&self.id)
             .expect("outstanding reservation retained");
         if e.dispatched {
-            e.body = self.received;
+            e.body = self.received.load(std::sync::atomic::Ordering::Relaxed);
             e.completed = Some(now);
         } else {
             state.entries.remove(&self.id);

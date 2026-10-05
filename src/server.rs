@@ -48,6 +48,40 @@ impl Server {
             max_response_chars,
         }
     }
+    fn cover_scopes(&self) -> Vec<crate::cover::status::Scope> {
+        let snapshot = self.catalog.read();
+        snapshot
+            .views
+            .get(&self.catalog_server)
+            .into_iter()
+            .flatten()
+            .filter(|bound| bound.tool.help_url.is_none())
+            .filter_map(|bound| bound.client.cover_scope().cloned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+    pub fn validate_cover(&self) -> Result<()> {
+        if !self.cover_scopes().is_empty() {
+            let snapshot = self.catalog.read();
+            anyhow::ensure!(
+                !snapshot
+                    .views
+                    .get(&self.catalog_server)
+                    .into_iter()
+                    .flatten()
+                    .any(|b| b.tool.name == crate::cover::status::TOOL_NAME),
+                "duplicate reserved tool treazury_cover_status"
+            );
+        }
+        Ok(())
+    }
+    fn cover_tool(&self) -> Option<Tool> {
+        if self.cover_scopes().is_empty() || self.validate_cover().is_err() {
+            return None;
+        }
+        Some(crate::cover::status::definition())
+    }
     fn definition(t: &ToolSpec) -> Tool {
         Tool::new(
             t.name.clone(),
@@ -67,6 +101,21 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
+        if name == crate::cover::status::TOOL_NAME {
+            self.validate_cover()?;
+            let scopes = self.cover_scopes();
+            anyhow::ensure!(
+                !scopes.is_empty() && args.is_empty(),
+                "unknown cover tool or unexpected arguments"
+            );
+            let engine = crate::network::global()
+                .cover
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("cover disabled"))?;
+            return Ok(crate::output::ToolOutput::text(serde_json::to_string(
+                &engine.status(&scopes),
+            )?));
+        }
         if let Some(manager) = &self.discovery
             && name.starts_with("treazury_")
         {
@@ -102,7 +151,8 @@ impl Server {
         Ok(self.limit(text))
     }
     fn management_tools(&self) -> Vec<Tool> {
-        self.discovery
+        let mut tools: Vec<Tool> = self
+            .discovery
             .as_ref()
             .map(|m| {
                 crate::discovery::tools::definitions(
@@ -110,7 +160,9 @@ impl Server {
                     m.accepts(&self.catalog_server),
                 )
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        tools.extend(self.cover_tool());
+        tools
     }
     fn limit(&self, mut output: crate::output::ToolOutput) -> crate::output::ToolOutput {
         let text = output.text;
@@ -151,6 +203,8 @@ impl ServerHandler for Server {
         request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        self.validate_cover()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         let snapshot = self.catalog.read();
         let mut tools = self.management_tools();
         tools.extend(
@@ -319,6 +373,7 @@ pub async fn serve_http(
 ) -> Result<()> {
     use anyhow::Context;
     use std::future::IntoFuture;
+    server.validate_cover()?;
     let stop = tokio_util::sync::CancellationToken::new();
     let _cancel_on_drop = stop.clone().drop_guard();
     let serving = axum::serve(listener, http_app(server, token))
@@ -331,6 +386,9 @@ pub async fn serve_http(
     };
     log_http_shutdown();
     stop.cancel();
+    if let Some(engine) = &crate::network::global().cover {
+        engine.shutdown().await;
+    }
     tokio::time::timeout(SHUTDOWN_TIMEOUT, serving)
         .await
         .context(SHUTDOWN_TIMEOUT_MESSAGE)??;

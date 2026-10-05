@@ -107,6 +107,7 @@ impl ResponseMapping {
 }
 #[derive(Debug)]
 pub struct HttpOutput {
+    pub advisories: Vec<String>,
     pub bytes: Vec<u8>,
     pub mime_type: Option<String>,
     pub paid_submission: bool,
@@ -118,6 +119,7 @@ pub struct InlineImage {
 }
 #[derive(Debug)]
 pub struct ToolOutput {
+    pub advisories: Vec<String>,
     pub text: String,
     pub images: Vec<InlineImage>,
 }
@@ -125,6 +127,7 @@ impl ToolOutput {
     pub fn text(text: String) -> Self {
         Self {
             text,
+            advisories: vec![],
             images: vec![],
         }
     }
@@ -133,7 +136,11 @@ impl ToolOutput {
             self.images.is_empty(),
             "image result requires the typed MCP result interface"
         );
-        Ok(self.text)
+        Ok(if self.advisories.is_empty() {
+            self.text
+        } else {
+            format!("{}\n{}", self.text, self.advisories.join("\n"))
+        })
     }
     pub fn into_content(self) -> Vec<rmcp::model::ContentBlock> {
         let mut content = vec![rmcp::model::ContentBlock::text(self.text)];
@@ -141,6 +148,11 @@ impl ToolOutput {
             self.images
                 .into_iter()
                 .map(|i| rmcp::model::ContentBlock::image(i.data, i.mime_type)),
+        );
+        content.extend(
+            self.advisories
+                .into_iter()
+                .map(rmcp::model::ContentBlock::text),
         );
         content
     }
@@ -193,12 +205,13 @@ fn image(bytes: &[u8], mime: &str, limits: &ImageLimits, total: &mut usize) -> R
 }
 impl HttpOutput {
     pub fn render(
-        self,
+        mut self,
         mapping: Option<&ResponseMapping>,
         limits: &ImageLimits,
     ) -> Result<ToolOutput> {
         let paid = self.paid_submission;
-        self.render_inner(mapping, limits).map_err(|error| {
+        let advisories = std::mem::take(&mut self.advisories);
+        self.render_inner(mapping, limits).map(|mut output|{output.advisories=advisories;output}).map_err(|error| {
             tracing::warn!("API output conversion rejected; no partial result returned");
             if paid { error.context("API output unavailable; a payment may already have settled. Do not automatically retry a paid request") }
             else { error }
@@ -216,6 +229,7 @@ impl HttpOutput {
             bound(1, limits.max_images, "image_limits.max_images")?;
             let attachment = image(&self.bytes, mime, limits, &mut total)?;
             return Ok(ToolOutput {
+                advisories: vec![],
                 text: format!(
                     "Inline image attachment 1: {mime}, {} bytes.",
                     self.bytes.len()
@@ -292,6 +306,7 @@ fn mapped_output(
             json!({"treazury_attachment": index + 1, "mime_type": images[index].mime_type});
     }
     Ok(ToolOutput {
+        advisories: vec![],
         text: format!(
             "Image payloads extracted into numbered MCP image attachments; metadata follows:\n{}",
             serde_json::to_string(&doc)?

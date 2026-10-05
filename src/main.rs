@@ -176,6 +176,9 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
                 .map(str::to_owned)
         })
         .context("base_url is required for digests/specs without servers")?;
+    if let Some(cover) = &cfg.cover_traffic {
+        cover.validate_origin(&base)?;
+    }
     let prefix = cfg
         .prefix
         .clone()
@@ -216,6 +219,13 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         tools,
         PaidClient::new(payer)
             .with_transport(cfg.transport())
+            .with_cover(
+                cfg.cover_traffic.clone(),
+                x402_treazury::cover::status::Scope {
+                    listener: "standalone".into(),
+                    source: "standalone".into(),
+                },
+            )
             .with_timeout(Duration::from_secs_f64(cfg.timeout))
             .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes),
         base,
@@ -225,12 +235,16 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if let Some(name) = cfg.name {
         server.name = name;
     }
+    server.validate_cover()?;
     if args.transport == "stdio" {
         server
             .serve(rmcp::transport::stdio())
             .await?
             .waiting()
             .await?;
+        if let Some(engine) = &x402_treazury::network::global().cover {
+            engine.shutdown().await;
+        }
     } else {
         let token = args
             .bearer_token

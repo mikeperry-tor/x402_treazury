@@ -186,6 +186,7 @@ struct HttpKey {
     timeout_ms: u64,
 }
 pub struct NetworkContext {
+    pub cover: Option<Arc<crate::cover::runtime::Engine>>,
     pub policy: NetworkPolicy,
     http: Mutex<HashMap<HttpKey, reqwest::Client>>,
     #[cfg(test)]
@@ -201,6 +202,9 @@ impl NetworkContext {
     pub fn new(policy: NetworkPolicy) -> Result<Self> {
         policy.validate()?;
         Ok(Self {
+            cover: policy
+                .cover_traffic_enabled
+                .then(|| crate::cover::runtime::Engine::new(policy.cover_limits.clone())),
             policy,
             http: Mutex::new(HashMap::new()),
             #[cfg(test)]

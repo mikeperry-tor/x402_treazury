@@ -496,6 +496,7 @@ async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
     let body = serde_json::json!({"before":{"data_base64":png,"anchor_date":"2025-05-15"},"after":{"data_base64":png,"anchor_date":"2026-05-15"},"content_type":"image/png","attribution":"Copernicus fixture","license":"CC BY-SA 3.0 IGO"});
     let output = HttpOutput {
+        advisories: vec![],
         bytes: serde_json::to_vec(&body).unwrap(),
         mime_type: Some("application/json".into()),
         paid_submission: false,

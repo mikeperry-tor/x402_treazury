@@ -30,7 +30,9 @@ pub enum Capability {
 }
 pub struct OwnerState {
     pub config: Arc<Config>,
+    pub session: Option<Arc<super::runtime::Session>>,
     pub capability: Capability,
+    pub padding_disabled: Arc<Mutex<bool>>,
     pub episode: Option<Arc<Mutex<Episode>>>,
 }
 impl OwnerState {
@@ -110,7 +112,9 @@ impl Registry {
         let e = Arc::new(Mutex::new(Episode::new(&config, now, rng)?));
         let state = self.owners.entry(owner).or_insert_with(|| OwnerState {
             config,
+            session: None,
             capability: Capability::Unknown,
+            padding_disabled: Arc::new(Mutex::new(false)),
             episode: None,
         });
         state.episode = Some(e.clone());

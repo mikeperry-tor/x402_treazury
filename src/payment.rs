@@ -65,6 +65,7 @@ impl Payer {
 }
 #[derive(Clone)]
 pub struct PaidClient {
+    cover: Option<(Arc<crate::cover::Config>, crate::cover::status::Scope)>,
     unsigned_only: bool,
     transport: crate::network::HttpPolicy,
     public_only: bool,
@@ -77,6 +78,7 @@ pub struct PaidClient {
 impl PaidClient {
     pub fn new(payer: Payer) -> Self {
         Self {
+            cover: None,
             unsigned_only: false,
             transport: Default::default(),
             public_only: false,
@@ -89,6 +91,7 @@ impl PaidClient {
     }
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
+            cover: None,
             unsigned_only: false,
             transport: Default::default(),
             public_only: false,
@@ -102,6 +105,7 @@ impl PaidClient {
     /// Keyless qualification client. Challenges are never parsed for signing or retried.
     pub fn unsigned() -> Self {
         Self {
+            cover: None,
             unsigned_only: true,
             transport: Default::default(),
             public_only: false,
@@ -111,6 +115,20 @@ impl PaidClient {
             payer: None,
             managed: None,
         }
+    }
+    pub fn with_cover(
+        mut self,
+        config: Option<crate::cover::Config>,
+        scope: crate::cover::status::Scope,
+    ) -> Self {
+        if let (Some(config), Some(engine)) = (config, &crate::network::global().cover) {
+            engine.register(scope.clone());
+            self.cover = Some((Arc::new(config), scope));
+        }
+        self
+    }
+    pub fn cover_scope(&self) -> Option<&crate::cover::status::Scope> {
+        self.cover.as_ref().map(|c| &c.1)
     }
     pub fn with_transport(mut self, transport: crate::network::HttpPolicy) -> Self {
         self.transport = transport;
@@ -176,7 +194,7 @@ impl PaidClient {
         let mut extensions_omitted = false;
         // Only a pre-signing managed identity change can restart this loop.
         // The new unsigned challenge must use the new identity-bound transport.
-        let response = loop {
+        let (response, mut cover, unavailable) = loop {
             let candidate = match &self.managed {
                 Some(pool) => Some(pool.candidate().await?),
                 None => None,
@@ -199,16 +217,45 @@ impl PaidClient {
                 self.public_only,
                 self.transport,
             )?;
-            let unsigned = request
+            let mut unavailable = None;
+            let cover = self.cover.as_ref().and_then(|(config, scope)| {
+                let engine = factory.cover.as_ref()?;
+                let owner = crate::cover::registry::Owner {
+                    runtime: tokio::runtime::Handle::current().id(),
+                    identity: identity.clone(),
+                    origin: request.url().origin().ascii_serialization(),
+                    transport: self.transport,
+                    public_only: self.public_only,
+                    timeout_ms: factory.request_timeout(self.timeout).as_millis() as u64,
+                };
+                match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
+                    Ok(call) => Some(call),
+                    Err(error) => {
+                        tracing::warn!("optional cover unavailable: {error}");
+                        unavailable = Some(format!("Optional cover unavailable: {error}"));
+                        None
+                    }
+                }
+            });
+            let mut unsigned = request
                 .try_clone()
                 .context("request body cannot be retried")?;
             let retry = request
                 .try_clone()
                 .context("request body cannot be retried")?;
+            let mut padding = cover.as_ref().and_then(|c| c.pad(&mut unsigned, true));
+            if let Some(p) = &mut padding {
+                p.dispatched();
+            }
             let mut response = http
                 .execute(unsigned)
                 .await
                 .map_err(reqwest::Error::without_url)?;
+            drop(padding);
+            if let Some(c) = &cover {
+                c.protocol(response.version());
+                c.rejected_padding(response.status());
+            }
             crate::network::log_http(&response, "payment_challenge");
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 if self.unsigned_only {
@@ -223,11 +270,12 @@ impl PaidClient {
                 response = self.bound_challenge(response).await?;
                 if let Some(pool) = &self.managed {
                     match pool
-                        .pay(
+                        .pay_with_cover(
                             &http,
                             candidate.expect("managed candidate"),
                             retry,
                             response,
+                            cover.as_ref(),
                         )
                         .await
                     {
@@ -259,6 +307,10 @@ impl PaidClient {
                         .context("x402 challenge rejected or signing failed")?;
                     let mut retry = retry;
                     retry.headers_mut().extend(headers);
+                    let mut padding = cover.as_ref().and_then(|c| c.pad(&mut retry, true));
+                    if let Some(p) = &mut padding {
+                        p.dispatched();
+                    }
                     response = http
                         .execute(retry)
                         .await
@@ -267,9 +319,24 @@ impl PaidClient {
                 }
             }
             crate::network::log_http(&response, "payment_result");
-            break response;
+            if let Some(c) = &cover {
+                c.protocol(response.version());
+                c.rejected_padding(response.status());
+            }
+            break (response, cover, unavailable);
         };
-        let result = self.response_output(response, paid_submission).await;
+        let mut result = self.response_output(response, paid_submission).await;
+        if let Some(call) = &mut cover
+            && result.is_ok()
+        {
+            call.complete();
+        }
+        if let Ok(output) = &mut result {
+            output.advisories.extend(unavailable);
+            output
+                .advisories
+                .extend(cover.as_ref().and_then(|c| c.advisory()));
+        }
         if extensions_omitted {
             result.context(crate::rotation::manager::OMITTED_EXTENSIONS)
         } else {
@@ -318,6 +385,7 @@ impl PaidClient {
             bail!("HTTP {status}: {} {body}", detail.unwrap_or(Value::Null));
         }
         Ok(crate::output::HttpOutput {
+            advisories: vec![],
             bytes,
             mime_type,
             paid_submission,

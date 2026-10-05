@@ -60,7 +60,7 @@ sha2 = "0.10"
 hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", features = ["tokio", "client-legacy", "client-proxy"] }
 tokio = { version = "1", features = ["full"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

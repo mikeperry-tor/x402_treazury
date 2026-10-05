@@ -3,6 +3,7 @@ pub mod budget;
 pub mod episode;
 pub mod range;
 pub mod registry;
+pub mod runtime;
 pub mod sampling;
 pub mod status;
 use anyhow::{Result, ensure};
@@ -201,3 +202,6 @@ impl Config {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod runtime_tests;

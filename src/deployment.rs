@@ -270,6 +270,35 @@ impl Deployment {
         for (name, server) in &config.servers {
             selected.insert(name.clone(), select_listener_tools(name, server, &sources)?);
         }
+        let mut cover_owners = BTreeMap::new();
+        for (server, tools) in &selected {
+            for (id, tool) in tools {
+                let source = &sources[id];
+                if let Some(cover) = &source.config.cover_traffic {
+                    let route =
+                        if tool.path.starts_with("https://") || tool.path.starts_with("http://") {
+                            tool.path.clone()
+                        } else {
+                            source.base_url.clone()
+                        };
+                    cover.validate_origin(&route)?;
+                    let key = (
+                        wallet_resolution.bindings[server][id].wallet.clone(),
+                        reqwest::Url::parse(&route)?.origin().ascii_serialization(),
+                        source.config.transport(),
+                        crate::network::global()
+                            .request_timeout(Duration::from_secs_f64(source.config.timeout))
+                            .as_millis(),
+                    );
+                    if let Some(previous) = cover_owners.insert(key, cover) {
+                        ensure!(
+                            previous == cover,
+                            "conflicting cover settings for shared wallet/origin"
+                        );
+                    }
+                }
+            }
+        }
         Ok(Self {
             config,
             sources,
@@ -297,7 +326,16 @@ impl Deployment {
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
                 management_tools: {
                     let g = crate::discovery::policy::grant(&self.config, name);
-                    crate::discovery::tools::definitions(g.enabled, g.accept_sources)
+                    let mut tools =
+                        crate::discovery::tools::definitions(g.enabled, g.accept_sources);
+                    if self.config.network.cover_traffic_enabled
+                        && self.selected[name].iter().any(|(id, t)| {
+                            t.help_url.is_none() && self.sources[id].config.cover_traffic.is_some()
+                        })
+                    {
+                        tools.push(crate::cover::status::definition());
+                    }
+                    tools
                 },
                 tools: self.selected[name]
                     .iter()
@@ -568,6 +606,13 @@ impl Deployment {
                         wallets[&self.wallet_resolution.bindings[name][id].wallet]
                             .clone()
                             .with_transport(source.config.transport())
+                            .with_cover(
+                                source.config.cover_traffic.clone(),
+                                crate::cover::status::Scope {
+                                    listener: name.clone(),
+                                    source: id.clone(),
+                                },
+                            )
                             .with_timeout(Duration::from_secs_f64(source.config.timeout))
                             .with_download_limits(
                                 source.config.max_response_bytes,
@@ -687,6 +732,7 @@ impl Deployment {
         let mut servers = self.build_servers(&wallets);
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
+            server.validate_cover()?;
             let tools = server.catalog.read().views["default"].clone();
             if self.config.source_management.is_some() {
                 ensure!(
@@ -933,6 +979,9 @@ impl RunningDeployment {
             }
         };
         crate::server::log_http_shutdown();
+        if let Some(engine) = &crate::network::global().cover {
+            engine.shutdown().await;
+        }
         stop.cancel();
         if tokio::time::timeout(crate::server::SHUTDOWN_TIMEOUT, async {
             while tasks.join_next().await.is_some() {}

@@ -218,6 +218,9 @@ impl Source {
                     .map(str::to_owned)
             })
             .with_context(|| format!("source {id}: base_url required"))?;
+        if let Some(cover) = &cfg.cover_traffic {
+            cover.validate_origin(&base_url)?;
+        }
         let parsed = reqwest::Url::parse(&base_url)?;
         ensure!(
             matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),

@@ -67,6 +67,19 @@ impl Status {
             .collect()
     }
 }
+pub fn definition() -> rmcp::model::Tool {
+    rmcp::model::Tool::new(
+        TOOL_NAME,
+        "Inspect optional cover-traffic status for this listener's selected sources. Local only: no network requests. Retains 32 events per source and reports evictions. Pooled connection reuse is best-effort, not a privacy guarantee.",
+        std::sync::Arc::new(
+            serde_json::json!({"type":"object","properties":{},"additionalProperties":false})
+                .as_object()
+                .unwrap()
+                .clone(),
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

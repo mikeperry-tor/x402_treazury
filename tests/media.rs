@@ -5,6 +5,7 @@ const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
 fn response(bytes: Vec<u8>, mime: &str, paid: bool) -> HttpOutput {
     HttpOutput {
+        advisories: vec![],
         bytes,
         mime_type: Some(mime.into()),
         paid_submission: paid,

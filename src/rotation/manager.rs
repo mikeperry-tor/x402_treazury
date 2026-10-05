@@ -92,8 +92,19 @@ impl ManagedPool {
         &self,
         http: &reqwest::Client,
         expected: PaymentCandidateHandle,
+        retry: reqwest::Request,
+        response: reqwest::Response,
+    ) -> Result<(reqwest::Response, bool)> {
+        self.pay_with_cover(http, expected, retry, response, None)
+            .await
+    }
+    pub async fn pay_with_cover(
+        &self,
+        http: &reqwest::Client,
+        expected: PaymentCandidateHandle,
         mut retry: reqwest::Request,
         mut response: reqwest::Response,
+        cover: Option<&crate::cover::runtime::Call>,
     ) -> Result<(reqwest::Response, bool)> {
         let header = response
             .headers()
@@ -189,6 +200,10 @@ impl ManagedPool {
             ))
         })??;
         retry.headers_mut().extend(headers);
+        let mut padding = cover.and_then(|c| c.pad(&mut retry, true));
+        if let Some(p) = &mut padding {
+            p.dispatched();
+        }
         // One attempt only. Receipt/final 402/transport errors do not release exposure.
         let result = http.execute(retry).await.map_err(|_| {
             anyhow::anyhow!(AdmissionError::OutcomeUnknown(
