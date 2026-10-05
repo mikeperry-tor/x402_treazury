@@ -109,6 +109,16 @@ impl Engine {
             process_request_limit = self.limits.max_requests_per_window,
             process_body_byte_limit = self.limits.max_cover_body_bytes_per_window,
             process_padding_byte_limit = self.limits.max_padding_value_bytes_per_window,
+            episode_padding_byte_limit = session
+                .config
+                .padding
+                .as_ref()
+                .map(|p| p.max_value_bytes_per_episode),
+            header_list_byte_limit = session
+                .config
+                .padding
+                .as_ref()
+                .map(|p| p.max_total_header_list_bytes),
             "optional cover status; pooled best-effort connection reuse"
         );
         for scope in session.scopes.lock().unwrap().iter() {
@@ -281,6 +291,12 @@ impl Engine {
                             };
                         let length_request = requested.min(length).min(available);
                         if length_request != requested {
+                            tracing::warn!(
+                                code = "cover_range_size_adjusted",
+                                sampled_bytes = requested,
+                                admitted_bytes = length_request,
+                                "optional range reduced to resource/remaining episode capacity"
+                            );
                             self.record(&s, "cover_range_size_adjusted");
                         }
                         let start = self
@@ -334,6 +350,15 @@ impl Engine {
                         .begin_qualification();
                 }
                 let mut range = range;
+                if reserved != range.length {
+                    tracing::warn!(
+                        code = "cover_range_size_adjusted",
+                        requested_bytes = range.length,
+                        admitted_bytes = reserved,
+                        "optional qualification reduced to remaining episode capacity"
+                    );
+                    self.record(&s, "cover_range_size_adjusted");
+                }
                 range.length = reserved;
                 let mut padding_request = reqwest::Request::new(
                     reqwest::Method::GET,

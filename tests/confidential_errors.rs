@@ -53,7 +53,11 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
         .err()
         .unwrap();
     clean(&format!("{err:#}"));
-    assert!(err.to_string().contains("base_rpc_unavailable"));
+    let diagnostic = err.to_string();
+    assert!(
+        diagnostic.contains("Base RPC eth_chainId") && diagnostic.contains("HTTP 502"),
+        "{diagnostic}"
+    );
     // The same adapter error may be retained by funding reconciliation for inspection.
     let state = tempfile::tempdir().unwrap();
     let db = state.path().join("state");
@@ -70,7 +74,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let mut store = x402_treazury::rotation::store::Store::open(&db, &key, &id).unwrap();
     let jobs = store.funding_jobs().unwrap();
     clean(&serde_json::to_string(&jobs).unwrap());
-    assert_eq!(jobs[0].last_error.as_deref(), Some("base_rpc_unavailable"));
+    assert_eq!(jobs[0].last_error.as_deref(), Some(diagnostic.as_str()));
 
     let config = Config {
         prefix: Some("safe".into()),
