@@ -464,9 +464,10 @@
   },
   "providers/lonestar.toml": {
     "additional_properties": false,
-    "allow_http1": false,
+    "allow_http1": true,
     "allow_tls12": false,
     "base_url": "https://lonestaroracle.xyz/api",
+    "cover_traffic_enabled": false,
     "exclude": [
       "/agri/feed",
       "/agri/preview",

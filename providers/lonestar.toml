@@ -1,4 +1,7 @@
 # Reusable Rust provider settings. Paths are relative to this file.
+# The gateway negotiates HTTP/1.1 (verified through Tor); TLS 1.3 remains required.
+allow_http1 = true
+cover_traffic_enabled = false
 spec = "https://lonestaroracle.xyz/openapi.json"
 name = "LoneStarOracle"
 base_url = "https://lonestaroracle.xyz/api"
