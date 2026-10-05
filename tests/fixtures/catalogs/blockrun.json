@@ -1,0 +1,394 @@
+[
+  {
+    "name": "blockrun_chat_completions",
+    "description": "Access 86 frontier LLMs with OpenAI-compatible API. Price depends on model and token usage. Price: $0.0001–$5.00 per call, scaling with usage (vendor spec).",
+    "method": "POST",
+    "path": "/api/v1/chat/completions",
+    "input_schema": {
+      "properties": {
+        "max_tokens": {
+          "description": "Set an explicit small output-token limit to bound the provider's pre-call quote and response size.",
+          "maximum": 128000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "messages": {
+          "description": "Array of chat messages",
+          "items": {
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "role": {
+                "enum": [
+                  "system",
+                  "user",
+                  "assistant"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "role",
+              "content"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "model": {
+          "description": "Model ID to use for completion",
+          "enum": [
+            "openai/gpt-6-astra",
+            "openai/gpt-6-sol",
+            "openai/gpt-6-luna",
+            "openai/gpt-5.6-sol",
+            "openai/gpt-5.6-terra",
+            "openai/gpt-5.6-luna",
+            "openai/gpt-5.6-sol-pro",
+            "openai/gpt-5.6-terra-pro",
+            "openai/gpt-5.6-luna-pro",
+            "openai/gpt-5.5",
+            "openai/gpt-5.5-pro",
+            "openai/chat-latest",
+            "openai/gpt-5.4",
+            "openai/gpt-5.4-pro",
+            "openai/gpt-5.1",
+            "openai/gpt-5.2",
+            "openai/gpt-5.4-mini",
+            "openai/gpt-5-mini",
+            "openai/gpt-5.4-nano",
+            "openai/gpt-5.2-pro",
+            "openai/gpt-5.3-codex",
+            "openai/gpt-4.1",
+            "openai/gpt-4.1-mini",
+            "openai/gpt-4.1-nano",
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "openai/o1",
+            "openai/o3",
+            "openai/o3-mini",
+            "openai/o4-mini",
+            "anthropic/claude-haiku-4.5",
+            "anthropic/claude-sonnet-5.5",
+            "anthropic/claude-sonnet-5",
+            "anthropic/claude-sonnet-4.6",
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-opus-4.5",
+            "anthropic/claude-opus-4.7",
+            "anthropic/claude-fable-5.1",
+            "anthropic/claude-fable-5",
+            "anthropic/claude-opus-4.8",
+            "anthropic/claude-opus-5",
+            "anthropic/claude-opus-5.5",
+            "google/gemini-3.1-pro",
+            "google/gemini-3-flash-preview",
+            "google/gemini-3.8-flash",
+            "google/gemini-3.6-flash",
+            "google/gemini-3.5-flash",
+            "google/gemini-2.5-pro",
+            "google/gemini-2.5-flash",
+            "google/gemini-3.5-flash-lite",
+            "google/gemini-3.1-flash-lite",
+            "google/gemini-2.5-flash-lite",
+            "deepseek/deepseek-v4-flash-vision-exp",
+            "deepseek/deepseek-v4-pro",
+            "deepseek/deepseek-chat",
+            "deepseek/deepseek-reasoner",
+            "moonshot/kimi-k3",
+            "zai/glm-5.3",
+            "zai/glm-5.3-flash",
+            "zai/glm-5.2",
+            "zai/glm-5.1",
+            "zai/glm-5",
+            "zai/glm-5-turbo",
+            "xai/grok-4.3",
+            "xai/grok-build-0.1",
+            "xai/grok-4.7",
+            "xai/grok-4.6",
+            "xai/grok-4.5",
+            "minimax/minimax-m2.7",
+            "minimax/minimax-m3",
+            "qwen/qwen3.8-max",
+            "qwen/qwen3.7-max",
+            "qwen/qwen3.7-plus",
+            "qwen/qwen3.7-flash",
+            "qwen/qwen3.8-flash",
+            "tencent/hy4-preview",
+            "xiaomi/mimo-v2.5",
+            "xiaomi/mimo-v2.5-pro",
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            "nvidia/nemotron-3.5-lightning",
+            "nvidia/llama-3.2-11b-vision",
+            "nvidia/nemotron-3-ultra-550b",
+            "cohere/north-mini-code",
+            "poolside/laguna-xs-2.1",
+            "poolside/laguna-s-2.1",
+            "nvidia/muse-glimmer-30b"
+          ],
+          "type": "string"
+        },
+        "stream": {
+          "description": "Omit or set false. Treazury returns completed tool responses, not a streamed chat session.",
+          "type": "boolean"
+        },
+        "temperature": {
+          "description": "Sampling temperature (0-2)",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "messages",
+        "model"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "max_tokens": "body",
+      "messages": "body",
+      "model": "body",
+      "stream": "body",
+      "temperature": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "blockrun_exa_answer",
+    "description": "Get an AI-generated answer to a question grounded in live web search results. Price: $0.011 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/v1/exa/answer",
+    "input_schema": {
+      "properties": {
+        "query": {
+          "description": "Question to answer with grounded search.",
+          "type": "string"
+        },
+        "text": {
+          "default": false,
+          "description": "Include full text of cited pages in response.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "query": "body",
+      "text": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "blockrun_exa_contents",
+    "description": "Extract full text content from one or more URLs. Total = urls.length × $0.002 plus one transaction fee: $0.003 for a single URL, $0.201 at the 100-URL maximum.",
+    "method": "POST",
+    "path": "/api/v1/exa/contents",
+    "input_schema": {
+      "properties": {
+        "highlights": {
+          "description": "Exa highlights config.",
+          "type": "object"
+        },
+        "summary": {
+          "description": "Exa summary config.",
+          "type": "object"
+        },
+        "text": {
+          "default": true,
+          "description": "Include extracted text.",
+          "type": "boolean"
+        },
+        "urls": {
+          "description": "List of URLs to extract content from. Price scales linearly with count: $0.003 for one, $0.201 for 100.",
+          "items": {
+            "format": "uri",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "highlights": "body",
+      "summary": "body",
+      "text": "body",
+      "urls": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "blockrun_exa_find_similar",
+    "description": "Find pages semantically similar to a given URL. Price: $0.011 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/v1/exa/find-similar",
+    "input_schema": {
+      "properties": {
+        "excludeSourceDomain": {
+          "default": true,
+          "type": "boolean"
+        },
+        "numResults": {
+          "default": 10,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "url": {
+          "description": "Source URL to find pages similar to.",
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "excludeSourceDomain": "body",
+      "numResults": "body",
+      "url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "blockrun_exa_search",
+    "description": "Neural and keyword web search powered by Exa. Optional category filter: company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report. Price: $0.011 per call (vendor spec).",
+    "method": "POST",
+    "path": "/api/v1/exa/search",
+    "input_schema": {
+      "properties": {
+        "category": {
+          "description": "Optional category filter (company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report).",
+          "type": "string"
+        },
+        "endPublishedDate": {
+          "description": "ISO-8601 date.",
+          "type": "string"
+        },
+        "excludeDomains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "includeDomains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "numResults": {
+          "default": 10,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "description": "Search query.",
+          "type": "string"
+        },
+        "startPublishedDate": {
+          "description": "ISO-8601 date.",
+          "type": "string"
+        },
+        "type": {
+          "default": "auto",
+          "enum": [
+            "neural",
+            "keyword",
+            "auto"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "category": "body",
+      "endPublishedDate": "body",
+      "excludeDomains": "body",
+      "includeDomains": "body",
+      "numResults": "body",
+      "query": "body",
+      "startPublishedDate": "body",
+      "type": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "blockrun_help",
+    "description": "Read BlockRun's unified API guide, model/pricing guidance and usage examples. Cached after successful retrieval. The guide includes unsupported jobs and lifecycle APIs that are not in this default toolset; Treazury handles x402 signing and never automatically replays failed paid requests.",
+    "method": "GET",
+    "path": "https://blockrun.ai/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://blockrun.ai/llms.txt"
+  },
+  {
+    "name": "blockrun_search",
+    "description": "Real-time web and news search powered by xAI Grok with live data access. Price: $0.025–$1.25 per call, scaling with usage (vendor spec).",
+    "method": "POST",
+    "path": "/api/v1/search",
+    "input_schema": {
+      "properties": {
+        "max_results": {
+          "default": 10,
+          "description": "Maximum number of results per source",
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "description": "Search query",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sources": {
+          "default": [
+            "x",
+            "web"
+          ],
+          "description": "Data sources to search",
+          "items": {
+            "enum": [
+              "x",
+              "web",
+              "news"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "max_results": "body",
+      "query": "body",
+      "sources": "body"
+    },
+    "has_body": true
+  }
+]

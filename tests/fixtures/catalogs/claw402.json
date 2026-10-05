@@ -1,0 +1,274 @@
+[
+  {
+    "name": "claw402_coinank_funding_rate_current",
+    "description": "Real-time funding rate rankings (type: current/day/week/month/year) Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/coinank/funding-rate/current",
+    "input_schema": {
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "type": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_coinank_indicator_altcoin_season",
+    "description": "Altcoin Season Index Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/coinank/indicator/altcoin-season",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "claw402_coinank_indicator_fear_greed",
+    "description": "Crypto fear & greed index Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/coinank/indicator/fear-greed",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "claw402_coinank_oi_all",
+    "description": "Real-time open interest list by exchange Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/coinank/oi/all",
+    "input_schema": {
+      "properties": {
+        "baseCoin": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "baseCoin": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_coinank_rank_price",
+    "description": "Price change rankings (sortBy: priceChangeH24/priceChangeH1) Price: $0.01 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/coinank/rank/price",
+    "input_schema": {
+      "properties": {
+        "sortBy": {
+          "type": "string"
+        },
+        "sortType": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "sortBy": "query",
+      "sortType": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_help",
+    "description": "Read Claw402's unified API guide, including market parameters and per-call prices. Cached after successful retrieval. The guide covers more operations than this curated toolset. Treazury handles payment and does not follow the guide's advice to automatically re-sign failed requests.",
+    "method": "GET",
+    "path": "https://claw402.ai/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://claw402.ai/llms.txt"
+  },
+  {
+    "name": "claw402_nofx_netflow_low_ranking",
+    "description": "Top net capital outflow rankings Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/nofx/netflow/low-ranking",
+    "input_schema": {
+      "properties": {
+        "duration": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "string"
+        },
+        "trade": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "duration": "query",
+      "limit": "query",
+      "trade": "query",
+      "type": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_nofx_netflow_top_ranking",
+    "description": "Top net capital inflow rankings Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/nofx/netflow/top-ranking",
+    "input_schema": {
+      "properties": {
+        "duration": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "string"
+        },
+        "trade": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "duration": "query",
+      "limit": "query",
+      "trade": "query",
+      "type": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_nofx_price_ranking",
+    "description": "Price change rankings (gainers & losers) Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/nofx/price/ranking",
+    "input_schema": {
+      "properties": {
+        "duration": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "duration": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_vergex_direction_change_leaderboard",
+    "description": "Bull/bear radar leaderboard for the OI Top 30, with stable bias, direction score, five factor directions, price, and rank Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/vergex/direction-change/leaderboard",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "claw402_vergex_flow_markets",
+    "description": "Order-flow leaderboard: ranks the full universe by net taker-buy notional over a rolling window, returning top inflow (most buying) and top outflow (most selling) markets with buy/sell notional, trade count and latest price. Optional window (5m/15m/1h/4h/24h) and limit Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/vergex/flow-markets",
+    "input_schema": {
+      "properties": {
+        "chain": {
+          "description": "Chain (default mainnet) 链，默认 mainnet",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max markets per side (inflow / outflow), e.g. 25 每侧（流入/流出）返回的最大市场数",
+          "type": "string"
+        },
+        "window": {
+          "description": "Rolling lookback window: 5m / 15m / 1h / 4h / 24h (default 1h) 滚动回看窗口",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "chain": "query",
+      "limit": "query",
+      "window": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_vergex_signal_ranking",
+    "description": "Signal ranking: cross-market factor model that ranks the full universe by composite z (bias, capital-gains-overhang pct, liquidation-fuel pct, cascade vulnerability). Optional liqBand tunes the liquidation banding Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/vergex/signal-ranking",
+    "input_schema": {
+      "properties": {
+        "chain": {
+          "description": "Chain (default mainnet) 链，默认 mainnet",
+          "type": "string"
+        },
+        "liqBand": {
+          "description": "Liquidation band index (e.g. 5) 清算分箱档位（如 5）",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "chain": "query",
+      "liqBand": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "claw402_vergex_whale_flashes",
+    "description": "Paginated whale-flash feed for large-address activity, optionally filtered by one or more symbols and localized in six languages Price: $0.002 per call (vendor spec).",
+    "method": "GET",
+    "path": "/api/v1/vergex/whale-flashes",
+    "input_schema": {
+      "properties": {
+        "locale": {
+          "description": "Response locale: zh, en, fr, es, ja, or ko 返回语言",
+          "type": "string"
+        },
+        "page": {
+          "description": "Page number, starting at 1 页码，从 1 开始",
+          "type": "string"
+        },
+        "page_size": {
+          "description": "Items per page, 1-100 每页数量，1-100",
+          "type": "string"
+        },
+        "symbol": {
+          "description": "Optional symbol or friendly ticker filter; comma-separate multiple values, e.g. BTC,SNDK 可选市场代码或简称筛选，多个值用逗号分隔",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "locale": "query",
+      "page": "query",
+      "page_size": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  }
+]

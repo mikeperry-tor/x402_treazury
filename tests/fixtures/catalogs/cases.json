@@ -98,5 +98,15 @@
     "name": "agentutility",
     "provider": "providers/agentutility/provider.toml",
     "spec": null
+  },
+  {
+    "name": "blockrun",
+    "provider": "providers/blockrun.toml",
+    "spec": "tests/fixtures/blockrun_openapi.json"
+  },
+  {
+    "name": "claw402",
+    "provider": "providers/claw402.toml",
+    "spec": "tests/fixtures/claw402_openapi.json"
   }
 ]

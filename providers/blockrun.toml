@@ -1,0 +1,27 @@
+# Focused synchronous text tools. The vendor's broader catalog includes async jobs,
+# unsupported media outputs and example values embedded in nominally variable paths.
+spec = "https://blockrun.ai/api/openapi"
+name = "BlockRun"
+base_url = "https://blockrun.ai"
+prefix = "blockrun"
+include = ["/api/v1"]
+include_operations = [
+  "POST /api/v1/chat/completions",
+  "POST /api/v1/search",
+  "POST /api/v1/exa/search",
+  "POST /api/v1/exa/find-similar",
+  "POST /api/v1/exa/contents",
+  "POST /api/v1/exa/answer",
+]
+pricing_key = "x-payment-info"
+probe_pricing = false
+timeout = 120
+help_url = "https://blockrun.ai/llms.txt"
+instructions_text = "BlockRun synchronous chat and web research through x402 on Base. Treazury handles payment; no API key or SDK setup is needed. Use stream=false or omit it for chat, and set a small max_tokens. Prices vary with model, tokens and search options; the fresh payment challenge and configured cap are authoritative. The help guide covers a broader service than these selected tools and commonly shows /v1 aliases; these tools use the spec's /api/v1 routes. Async image/video/voice jobs, audio, sandbox/phone lifecycle, trading and example-valued market paths are excluded."
+
+[overrides.blockrun_chat_completions.params]
+stream = "Omit or set false. Treazury returns completed tool responses, not a streamed chat session."
+max_tokens = "Set an explicit small output-token limit to bound the provider's pre-call quote and response size."
+
+[overrides.blockrun_help]
+description = "Read BlockRun's unified API guide, model/pricing guidance and usage examples. Cached after successful retrieval. The guide includes unsupported jobs and lifecycle APIs that are not in this default toolset; Treazury handles x402 signing and never automatically replays failed paid requests."

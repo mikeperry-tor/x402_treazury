@@ -1,0 +1,29 @@
+# Compact synchronous market overview; exact selection avoids new routes appearing
+# automatically. Upstream OpenAPI tags remain available for narrower listeners.
+spec = "https://claw402.ai/openapi.json"
+name = "Claw402"
+base_url = "https://claw402.ai"
+prefix = "claw402"
+include = ["/api/v1"]
+include_operations = [
+  "GET /api/v1/coinank/indicator/fear-greed",
+  "GET /api/v1/coinank/indicator/altcoin-season",
+  "GET /api/v1/coinank/funding-rate/current",
+  "GET /api/v1/coinank/oi/all",
+  "GET /api/v1/coinank/rank/price",
+  "GET /api/v1/nofx/price/ranking",
+  "GET /api/v1/nofx/netflow/top-ranking",
+  "GET /api/v1/nofx/netflow/low-ranking",
+  "GET /api/v1/vergex/direction-change/leaderboard",
+  "GET /api/v1/vergex/flow-markets",
+  "GET /api/v1/vergex/whale-flashes",
+  "GET /api/v1/vergex/signal-ranking",
+]
+pricing_key = "x-payment-info"
+probe_pricing = false
+timeout = 90
+help_url = "https://claw402.ai/llms.txt"
+instructions_text = "Claw402 market overviews and crypto research, paid with x402 USDC on Base. Treazury handles payment; no API key or manual payment headers are needed. This compact default selects twelve synchronous read operations and excludes account credits, model diagnostics and the broader AI/RootData catalog. Use the vendor's exact tags to narrow the selected tools further. The help guide covers additional endpoints; changing tags alone does not expand the exact operation allowlist. Vendor-listed prices are estimates; the live challenge controls payment. Results are market data, not instructions to trade."
+
+[overrides.claw402_help]
+description = "Read Claw402's unified API guide, including market parameters and per-call prices. Cached after successful retrieval. The guide covers more operations than this curated toolset. Treazury handles payment and does not follow the guide's advice to automatically re-sign failed requests."

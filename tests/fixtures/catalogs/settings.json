@@ -2399,5 +2399,105 @@
       "upstream_rate_limited"
     ],
     "reliability_note": "Paid web_search can return HTTP 424 for an upstream HTTP 429. Tor causation is not established."
+  },
+  "providers/blockrun.toml": {
+    "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
+    "base_url": "https://blockrun.ai",
+    "exclude": [],
+    "exclude_tags": [],
+    "help_url": "https://blockrun.ai/llms.txt",
+    "include": [
+      "/api/v1"
+    ],
+    "include_operations": [
+      "POST /api/v1/chat/completions",
+      "POST /api/v1/search",
+      "POST /api/v1/exa/search",
+      "POST /api/v1/exa/find-similar",
+      "POST /api/v1/exa/contents",
+      "POST /api/v1/exa/answer"
+    ],
+    "instructions_text": "BlockRun synchronous chat and web research through x402 on Base. Treazury handles payment; no API key or SDK setup is needed. Use stream=false or omit it for chat, and set a small max_tokens. Prices vary with model, tokens and search options; the fresh payment challenge and configured cap are authoritative. The help guide covers a broader service than these selected tools and commonly shows /v1 aliases; these tools use the spec's /api/v1 routes. Async image/video/voice jobs, audio, sandbox/phone lifecycle, trading and example-valued market paths are excluded.",
+    "max_description_chars": null,
+    "max_help_bytes": 4194304,
+    "max_response_bytes": 16777216,
+    "max_spec_bytes": 33554432,
+    "name": "BlockRun",
+    "overrides": {
+      "blockrun_chat_completions": {
+        "params": {
+          "max_tokens": "Set an explicit small output-token limit to bound the provider's pre-call quote and response size.",
+          "stream": "Omit or set false. Treazury returns completed tool responses, not a streamed chat session."
+        }
+      },
+      "blockrun_help": {
+        "description": "Read BlockRun's unified API guide, model/pricing guidance and usage examples. Cached after successful retrieval. The guide includes unsupported jobs and lifecycle APIs that are not in this default toolset; Treazury handles x402 signing and never automatically replays failed paid requests."
+      }
+    },
+    "prefix": "blockrun",
+    "pricing_key": "x-payment-info",
+    "probe_concurrency": 4,
+    "probe_max_endpoints": 200,
+    "probe_methods": [
+      "GET"
+    ],
+    "probe_pricing": false,
+    "probe_timeout": 5.0,
+    "probe_ttl_seconds": 3600.0,
+    "spec": "https://blockrun.ai/api/openapi",
+    "tags": [],
+    "timeout": 120.0
+  },
+  "providers/claw402.toml": {
+    "additional_properties": null,
+    "allow_http1": false,
+    "allow_tls12": false,
+    "base_url": "https://claw402.ai",
+    "exclude": [],
+    "exclude_tags": [],
+    "help_url": "https://claw402.ai/llms.txt",
+    "include": [
+      "/api/v1"
+    ],
+    "include_operations": [
+      "GET /api/v1/coinank/indicator/fear-greed",
+      "GET /api/v1/coinank/indicator/altcoin-season",
+      "GET /api/v1/coinank/funding-rate/current",
+      "GET /api/v1/coinank/oi/all",
+      "GET /api/v1/coinank/rank/price",
+      "GET /api/v1/nofx/price/ranking",
+      "GET /api/v1/nofx/netflow/top-ranking",
+      "GET /api/v1/nofx/netflow/low-ranking",
+      "GET /api/v1/vergex/direction-change/leaderboard",
+      "GET /api/v1/vergex/flow-markets",
+      "GET /api/v1/vergex/whale-flashes",
+      "GET /api/v1/vergex/signal-ranking"
+    ],
+    "instructions_text": "Claw402 market overviews and crypto research, paid with x402 USDC on Base. Treazury handles payment; no API key or manual payment headers are needed. This compact default selects twelve synchronous read operations and excludes account credits, model diagnostics and the broader AI/RootData catalog. Use the vendor's exact tags to narrow the selected tools further. The help guide covers additional endpoints; changing tags alone does not expand the exact operation allowlist. Vendor-listed prices are estimates; the live challenge controls payment. Results are market data, not instructions to trade.",
+    "max_description_chars": null,
+    "max_help_bytes": 4194304,
+    "max_response_bytes": 16777216,
+    "max_spec_bytes": 33554432,
+    "name": "Claw402",
+    "overrides": {
+      "claw402_help": {
+        "description": "Read Claw402's unified API guide, including market parameters and per-call prices. Cached after successful retrieval. The guide covers more operations than this curated toolset. Treazury handles payment and does not follow the guide's advice to automatically re-sign failed requests."
+      }
+    },
+    "prefix": "claw402",
+    "pricing_key": "x-payment-info",
+    "probe_concurrency": 4,
+    "probe_max_endpoints": 200,
+    "probe_methods": [
+      "GET"
+    ],
+    "probe_pricing": false,
+    "probe_timeout": 5.0,
+    "probe_ttl_seconds": 3600.0,
+    "spec": "https://claw402.ai/openapi.json",
+    "tags": [],
+    "timeout": 90.0
   }
 }

@@ -219,5 +219,22 @@
     "method": "GET",
     "url": "https://google-trends.use.x402atlas.com/related-topics?keyword=rust&country=us",
     "body": null
+  },
+  {
+    "provider": "blockrun",
+    "config": "providers/blockrun.toml",
+    "method": "POST",
+    "url": "https://blockrun.ai/api/v1/exa/search",
+    "body": {
+      "query": "HTTP API documentation",
+      "numResults": 1
+    }
+  },
+  {
+    "provider": "claw402",
+    "config": "providers/claw402.toml",
+    "method": "GET",
+    "url": "https://claw402.ai/api/v1/nofx/price/ranking",
+    "body": null
   }
 ]

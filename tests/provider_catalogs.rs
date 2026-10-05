@@ -14,7 +14,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 20);
+    assert_eq!(cases.len(), 22);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_treazury"));
@@ -48,7 +48,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 840);
+    assert_eq!(total, 860);
 }
 
 #[tokio::test]
@@ -548,5 +548,78 @@ async fn added_help_tools_build_offline_without_changing_api_routes() {
         assert!(help.param_routes.is_empty());
         assert!(!help.has_body);
         assert!(help.description.contains("cached for this process"));
+    }
+}
+
+#[tokio::test]
+async fn new_market_providers_keep_curated_routes_and_body_query_contracts() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (name, count) in [("blockrun", 7), ("claw402", 13)] {
+        let cfg = config::load(&root.join(format!("providers/{name}.toml")))
+            .await
+            .unwrap()
+            .settings;
+        assert!(!cfg.probe_pricing);
+        assert!(!cfg.allow_http1 && !cfg.allow_tls12);
+        let mut doc: Value = serde_json::from_slice(
+            &std::fs::read(root.join(format!("tests/fixtures/{name}_openapi.json"))).unwrap(),
+        )
+        .unwrap();
+        doc["paths"]["/health"] = json!({"get":{"summary":"New diagnostic"}});
+        doc["paths"]["/api/v1/new-paid-job"] = json!({"post":{"summary":"New async job"}});
+        let tools = catalog::build_tools(&cfg, &doc, name).unwrap();
+        assert_eq!(tools.len(), count);
+        let help = tools
+            .iter()
+            .find(|t| t.name == format!("{name}_help"))
+            .unwrap();
+        assert_eq!(help.help_url, cfg.help_url);
+        if name == "blockrun" {
+            let t = tools
+                .iter()
+                .find(|t| t.name == "blockrun_exa_search")
+                .unwrap();
+            let args = json!({"query":"API documentation","numResults":1});
+            let routed = t
+                .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+                .unwrap();
+            assert_eq!(routed.url, "https://blockrun.ai/api/v1/exa/search");
+            assert_eq!(routed.body, Some(args));
+            assert!(routed.query.is_empty());
+            let chat = tools
+                .iter()
+                .find(|t| t.name == "blockrun_chat_completions")
+                .unwrap();
+            assert!(
+                chat.input_schema["properties"]["stream"]["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains("false")
+            );
+            assert!(
+                tools
+                    .iter()
+                    .all(|t| !t.path.contains("images") && !t.path.contains("sandbox"))
+            );
+        } else {
+            let t = tools
+                .iter()
+                .find(|t| t.name == "claw402_nofx_price_ranking")
+                .unwrap();
+            let args = json!({"duration":"1h"});
+            let routed = t
+                .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+                .unwrap();
+            assert_eq!(routed.url, "https://claw402.ai/api/v1/nofx/price/ranking");
+            assert_eq!(routed.query["duration"], "1h");
+            assert!(routed.body.is_none());
+            let mut selected = cfg.clone();
+            selected.tags = vec!["Price".into()];
+            let filtered = catalog::build_tools(&selected, &doc, name).unwrap();
+            assert_eq!(filtered.len(), 2); // One tagged API operation plus lazy help.
+            assert_eq!(filtered[0].name, "claw402_nofx_price_ranking");
+        }
     }
 }
