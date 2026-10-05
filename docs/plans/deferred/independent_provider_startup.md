@@ -2,8 +2,8 @@
 
 Deferred until partial provider availability is a priority. The bounded eager
 startup optimizations are implemented; this plan changes serving lifecycle and
-agent-visible inventory behavior. Automated live payment integration remains a
-separate priority in [its implementation plan](../live_integration_testing.md).
+agent-visible inventory behavior. The [live integration runner](../../../tests/live/INTEGRATION.md)
+already supports provider testing; partial startup availability remains separate work.
 
 ## Objective
 

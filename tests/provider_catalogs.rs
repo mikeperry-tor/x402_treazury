@@ -8,6 +8,65 @@ struct Case {
     provider: String,
     spec: Option<String>,
 }
+
+#[test]
+fn live_provider_scope_accounts_for_every_bundled_definition() {
+    use std::collections::BTreeSet;
+    fn definitions(root: &Path, dir: &Path, found: &mut BTreeSet<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                definitions(root, &path, found);
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "toml")
+            {
+                found.insert(path.strip_prefix(root).unwrap().to_str().unwrap().into());
+            }
+        }
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut bundled = BTreeSet::new();
+    definitions(root, &root.join("providers"), &mut bundled);
+    let coverage: Vec<Value> = serde_json::from_str(include_str!("live/coverage.json")).unwrap();
+    let exclusions: Vec<Value> =
+        serde_json::from_str(include_str!("live/coverage_exclusions.json")).unwrap();
+    let preset: toml::Value =
+        toml::from_str(include_str!("live/integration/providers.example.toml")).unwrap();
+    let cases: BTreeSet<_> = preset["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|case| case["id"].as_str().unwrap())
+        .collect();
+    let mut accounted = BTreeSet::new();
+    let mut paid = BTreeSet::new();
+    for row in coverage.iter().chain(&exclusions) {
+        assert!(!row["reason"].as_str().unwrap().trim().is_empty());
+        assert!(accounted.insert(row["config"].as_str().unwrap().to_owned()));
+        if let Some(case) = row["case"].as_str() {
+            assert!(
+                cases.contains(case),
+                "missing reviewed provider case {case}"
+            );
+            assert!(paid.insert(case));
+        }
+    }
+    assert_eq!(
+        bundled, accounted,
+        "new providers require explicit scope review"
+    );
+    let selected: BTreeSet<_> = cases
+        .into_iter()
+        .filter(|id| id.starts_with("sweep_"))
+        .collect();
+    assert_eq!(
+        paid, selected,
+        "provider scope must match the paid preset exactly"
+    );
+    assert_eq!(paid.len(), 22);
+}
+
 #[test]
 fn bundled_catalogs_match_reviewed_tool_contracts() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

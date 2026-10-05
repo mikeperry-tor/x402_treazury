@@ -1,4 +1,4 @@
-# TEMPLATE ONLY. Copy to live-qualification.local.toml and follow tests/live/DRIVER.md.
+# TEMPLATE ONLY. Copy to live-qualification.local.toml and use tests/live/INTEGRATION.md for funded testing.
 # No funding starts by default. This demonstrates sharing with one provider;
 # the full provider run needs its reviewed sources/cases added before preparation.
 version = 1

@@ -23,6 +23,100 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
         }),
     )
 }
+
+#[tokio::test]
+async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result() {
+    use axum::http::{HeaderMap, StatusCode};
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let vendor = format!("http://{}", listener.local_addr().unwrap());
+    let challenge = STANDARD.encode(
+        json!({
+            "x402Version": 2,
+            "resource": {"url": format!("{vendor}/read"), "mimeType": "text/plain"},
+            "accepts": [{"scheme": "exact", "network": "eip155:8453", "amount": "1000",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "payTo": "0x0000000000000000000000000000000000000002",
+                "maxTimeoutSeconds": 60, "extra": {"name": "USD Coin", "version": "2"}}]
+        })
+        .to_string(),
+    );
+    let unsigned = Arc::new(AtomicUsize::new(0));
+    let signed = Arc::new(AtomicUsize::new(0));
+    let (initial, retry) = (unsigned.clone(), signed.clone());
+    let vendor_task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/read",
+                get(move |headers: HeaderMap| {
+                    let (challenge, initial, retry) =
+                        (challenge.clone(), initial.clone(), retry.clone());
+                    async move {
+                        if headers.contains_key("payment-signature") {
+                            retry.fetch_add(1, Ordering::SeqCst);
+                            (
+                                StatusCode::OK,
+                                [("content-type", "text/plain".to_owned())],
+                                "paid result",
+                            )
+                        } else {
+                            initial.fetch_add(1, Ordering::SeqCst);
+                            (
+                                StatusCode::PAYMENT_REQUIRED,
+                                [("payment-required", challenge)],
+                                "payment required",
+                            )
+                        }
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let tools = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/read":{"get":{}}}}),
+        "test",
+    )
+    .unwrap();
+    let payer = Payer::new(
+        &format!("{:064x}", 1),
+        SpendPolicy::dollars("0.20").unwrap(),
+    )
+    .unwrap();
+    let server = Server::new(tools, PaidClient::new(payer), vendor, None, None);
+    let (mcp, task) = serve(http_app(server, "test-token".into())).await;
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let request = || {
+        http.post(format!("{mcp}/mcp"))
+            .header("accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"test_read","arguments":{}}}))
+    };
+    assert_eq!(
+        request().send().await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(unsigned.load(Ordering::SeqCst), 0);
+    assert_eq!(signed.load(Ordering::SeqCst), 0);
+    let result: Value = request()
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(result["result"]["isError"], true, "{result}");
+    assert_eq!(result["result"]["content"][0]["text"], "paid result");
+    assert_eq!(unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(signed.load(Ordering::SeqCst), 1);
+    task.abort();
+    vendor_task.abort();
+}
+
 #[tokio::test]
 async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
     use rmcp::ServerHandler;
