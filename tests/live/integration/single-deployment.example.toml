@@ -1,0 +1,46 @@
+# Copy with the matching manifest to a private directory, make paths absolute,
+# and supply the initialized treasury UUID/state/key and owned Tor endpoint.
+version = 1
+[network]
+mode = "tor"
+socks_endpoint = "127.0.0.1:19450"
+isolation_namespace = "integration_replace_me"
+socks_auth = "tor_extended"
+[treasury]
+id = "11111111-1111-4111-8111-111111111111"
+state_dir = "../../../state/replace_me"
+key_file = "../../../secrets/replace_me.key"
+indexer_url_env = "ZCASH_INDEXER_URL"
+submission_url_env = "ZCASH_SUBMISSION_URL"
+daily_input_zec = "0.02"
+shield_max_fee_zec = "0.0003"
+confirmations = 3
+max_sync_age_seconds = 300
+[funding]
+# Enable only for reviewed rotation/lifecycle/bootstrap manifests, alongside
+# --allow-funding and positive registry limits. Zero-funding runs enforce denial.
+auto_fund = false
+confidentiality = "public"
+base_confirmations = 12
+[wallets.test_pool]
+mode = "zcash_rotation"
+deposit_size = "2.00"
+max_price_usd = "0.20"
+max_input_zec = "0.002"
+max_fee_bps = 500
+[sources.shared]
+extends = "../../../providers/socialfetch.toml"
+prefix = "shared"
+overrides = {}
+probe_pricing = false
+wallet = "test_pool"
+[servers.a]
+listen = "127.0.0.1:18481"
+bearer_token_env = "INTEGRATION_A_TOKEN"
+sources = ["shared"]
+include_tools = ["shared_twitter_profiles_handle"]
+[servers.b]
+listen = "127.0.0.1:18482"
+bearer_token_env = "INTEGRATION_B_TOKEN"
+sources = ["shared"]
+include_tools = ["shared_twitter_profiles_handle"]

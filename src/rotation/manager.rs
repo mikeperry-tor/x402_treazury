@@ -78,11 +78,34 @@ impl ManagedPool {
         let _gate = self.gate.lock().await;
         let pool = self.pool.clone();
         let query = self.store.call(move |s| s.chain_query(&pool)).await?;
+        let observation = crate::qualification::pool_observation(&self.pool).await;
         let view = self.base.view(query).await?;
         let pool = self.pool.clone();
         self.store
-            .call(move |s| s.reconcile_pool(&pool, view))
-            .await
+            .call(move |s| {
+                // Keep the RPC anchor and refreshed wallet set distinct from persisted
+                // balances of retired wallets not included in this chain query.
+                let evidence = observation.as_ref().map(|_| serde_json::json!({
+                    "block_height":view.anchor.height,"block_hash":view.anchor.hash,
+                    "confirmed":view.balances.iter().map(|(id,b)| (id.clone(),b.to_string())).collect::<std::collections::BTreeMap<_,_>>()
+                }));
+                s.reconcile_pool(&pool, view)?;
+                if let Some(observation) = observation {
+                    let result = (|| {
+                        let mut evidence = evidence.context("missing pool balance evidence")?;
+                        evidence["unresolved"] = s.qualification_exposure(&pool)?;
+                        observation.record(s.qualification_lifecycle()?, evidence)
+                    })();
+                    if let Err(error) = result {
+                        tracing::warn!(category="qualification_pool_observation_failed", %error,
+                            "pool observation unavailable after successful reconciliation; normal reconciliation continues, no paid request is retried");
+                    }
+                }
+                Ok(())
+            })
+            .await?;
+        drop(_gate);
+        crate::qualification::reconcile_debit(&self.base, &self.store, &self.pool).await
     }
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
         let pool = self.pool.clone();
@@ -135,7 +158,9 @@ impl ManagedPool {
             serde_json::from_value(challenge.clone())
                 .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
-        let headers = tokio::time::timeout(self.wait, async {
+        let qualification = crate::qualification::payment_context()?;
+        let admission_context = qualification.clone();
+        let (headers, attempt_id) = tokio::time::timeout(self.wait, async {
             let _guard = self.gate.lock().await;
             let pool = self.pool.clone();
             let query = self.store.call(move |s| s.chain_query(&pool)).await?;
@@ -145,7 +170,13 @@ impl ManagedPool {
             let amount = offer.amount;
             let lease = self
                 .store
-                .call(move |s| s.admit_for(&pool, amount, &hash, view, Some(&expected)))
+                .call(move |s| {
+                    let lease = s.admit_for(&pool, amount, &hash, view, Some(&expected))?;
+                    if let Some(context) = admission_context {
+                        context.record(&s.qualification_payment(&lease.id)?)?;
+                    }
+                    Ok(lease)
+                })
                 .await?;
             let signer = PrivateKeySigner::from_slice(&lease.key)
                 .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
@@ -179,7 +210,8 @@ impl ManagedPool {
                 "managed signer unexpectedly emitted extensions"
             );
             let auth = validate_payload(&payload, &offer, &lease.address)?;
-            let id = lease.id;
+            let attempt_id = lease.id;
+            let id = attempt_id.clone();
             let wallet = lease.wallet;
             let generation = lease.generation;
             let hash = requirements_hash;
@@ -191,7 +223,7 @@ impl ManagedPool {
             // The journal now reserves exposure across cancellation, concurrent
             // admission, reconciliation and rotation. Do not hold the pool gate
             // while the seller establishes a connection or returns its response.
-            Ok::<_, anyhow::Error>(headers)
+            Ok::<_, anyhow::Error>((headers, attempt_id))
         })
         .await
         .map_err(|_| {
@@ -205,11 +237,29 @@ impl ManagedPool {
             p.dispatched();
         }
         // One attempt only. Receipt/final 402/transport errors do not release exposure.
+        let signed_request_started = qualification.as_ref().map(|c| c.elapsed_micros());
         let result = http.execute(retry).await.map_err(|_| {
             anyhow::anyhow!(AdmissionError::OutcomeUnknown(
                 "signed request transport failed"
             ))
         });
+        if let Some(context) = qualification {
+            let response_observed = context.elapsed_micros();
+            let observer = context.clone();
+            let lifecycle = self.store.call(move |s| {
+                let state = s.qualification_lifecycle()?;
+                Ok(serde_json::json!({"observed_micros":observer.elapsed_micros(),"state":state}))
+            }).await;
+            context
+                .record_response(
+                    attempt_id,
+                    signed_request_started.context("qualification request timing missing")?,
+                    response_observed,
+                    lifecycle,
+                    &result,
+                )
+                .await?;
+        }
         let response = if omitted {
             result.context(OMITTED_EXTENSIONS)?
         } else {

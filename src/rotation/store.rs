@@ -3,6 +3,7 @@ mod backup;
 #[cfg(feature = "zcash")]
 mod expiry;
 pub mod funding;
+mod ownership;
 pub mod refunds;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
@@ -13,7 +14,6 @@ use chacha20poly1305::{
     ChaCha20Poly1305, KeyInit, Nonce,
     aead::{Aead, AeadCore, OsRng, Payload, rand_core::RngCore},
 };
-use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,6 +22,9 @@ use std::{
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
+
+mod qualification;
+pub use qualification::qualification_state;
 
 const SCHEMA: &str = "
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -136,9 +139,11 @@ impl TreasuryNetwork {
 }
 pub struct Store {
     funding_restriction: super::restriction::FundingRestriction,
+    funding_permits: Option<std::sync::Arc<dyn super::restriction::FundingPermits>>,
     network: TreasuryNetwork,
     db: Connection,
-    _lock: File,
+    // Keep ownership until SQLite has closed (fields drop in declaration order).
+    _lock: ownership::Owner,
     key: Zeroizing<[u8; 32]>,
     id: String,
 }
@@ -216,12 +221,11 @@ fn directory(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn lock(path: &Path) -> Result<File> {
+fn lock(path: &Path) -> Result<ownership::Owner> {
     directory(path)?;
     let path = path.join("owner.lock");
     let file = private_file(&path, !path.exists())?;
-    file.try_lock_exclusive().context("state_in_use")?;
-    Ok(file)
+    ownership::Owner::acquire(file)
 }
 fn configure(db: &Connection) -> Result<()> {
     db.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -320,6 +324,7 @@ impl Store {
         }
         Ok(Self {
             funding_restriction: Default::default(),
+            funding_permits: None,
             db,
             _lock: owner,
             key,
@@ -366,6 +371,7 @@ impl Store {
         );
         let store = Self {
             funding_restriction: Default::default(),
+            funding_permits: None,
             db,
             _lock: owner,
             key,
@@ -473,6 +479,57 @@ impl Store {
             "qualification funding restriction installed: zero new jobs and zero new ZEC spending; existing reconciliation remains available"
         );
     }
+    /// Install once, before pool setup. Reopening requires explicit reinstallation.
+    pub fn install_funding_permits(
+        &mut self,
+        permits: std::sync::Arc<dyn super::restriction::FundingPermits>,
+    ) -> Result<()> {
+        ensure!(
+            self.funding_permits.is_none(),
+            "funding permits already installed"
+        );
+        permits.validate_treasury(&self.id)?;
+        permits.validate_state(&self.qualification_state()?)?;
+        self.funding_permits = Some(permits);
+        Ok(())
+    }
+    pub fn check_job_permit(&self, job: &str, input_with_fee: u64) -> Result<()> {
+        if let Some(permits) = &self.funding_permits {
+            super::restriction::permit_result(
+                permits.check_preparation(&self.id, job, input_with_fee),
+                "preparation",
+            )?;
+        }
+        Ok(())
+    }
+    fn check_operation_permit(&self, operation: &str, input_with_fee: u64) -> Result<()> {
+        if let Some(permits) = &self.funding_permits {
+            let job: String = self
+                .db
+                .query_row(
+                    "SELECT job_id FROM funding_progress WHERE operation_id=?1",
+                    [operation],
+                    |r| r.get(0),
+                )
+                .context("qualification_funding_denied: operation lacks a current funding job")?;
+            self.check_job_permit(&job, input_with_fee)?;
+            // Recovery may have committed before the registry acknowledgement.
+            // Only durable archived operations with no bytes or consumed funds
+            // can release an old source reservation. Current operations cannot.
+            let mut query = self.db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE r.job_id=?1 AND NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=r.operation_id AND b.consumed!=0)")?;
+            for old in query.query_map([&job], |r| r.get::<_, String>(0))? {
+                super::restriction::permit_result(
+                    permits.retire_unprepared(&self.id, &job, &old?),
+                    "unprepared_recovery",
+                )?;
+            }
+            super::restriction::permit_result(
+                permits.reserve_preparation(&self.id, &job, operation, input_with_fee),
+                "source_reservation",
+            )?;
+        }
+        Ok(())
+    }
     pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
@@ -530,6 +587,7 @@ impl Store {
             "INSERT INTO pools(id,name,target) VALUES (?1,?2,?3)",
             params![id, name, target.to_string()],
         )?;
+        let jobs = allocation_jobs(self.funding_permits.as_ref(), &tx, &self.id, &id, &[0, 1])?;
         for seq in 0..2 {
             allocate(
                 &tx,
@@ -537,8 +595,11 @@ impl Store {
                 &self.id,
                 self.network,
                 &id,
-                seq,
-                &target.to_string(),
+                Allocation {
+                    sequence: seq,
+                    target: &target.to_string(),
+                    job: &jobs[seq as usize],
+                },
             )?;
         }
         tx.commit()?;
@@ -631,6 +692,12 @@ impl Store {
                 |r| r.get(0),
             )
             .context("standby_not_ready")?;
+        let seq: i64 = tx.query_row(
+            "SELECT MAX(sequence)+1 FROM wallets WHERE pool_id=?1",
+            [pool],
+            |r| r.get(0),
+        )?;
+        let jobs = allocation_jobs(self.funding_permits.as_ref(), &tx, &self.id, pool, &[seq])?;
         ensure!(
             tx.execute(
                 "UPDATE wallets SET role='RETIRED' WHERE pool_id=?1 AND role='ACTIVE'",
@@ -639,12 +706,18 @@ impl Store {
             "active wallet missing"
         );
         tx.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [ready])?;
-        let seq: i64 = tx.query_row(
-            "SELECT MAX(sequence)+1 FROM wallets WHERE pool_id=?1",
-            [pool],
-            |r| r.get(0),
+        allocate(
+            &tx,
+            &self.key,
+            &self.id,
+            self.network,
+            pool,
+            Allocation {
+                sequence: seq,
+                target: &target,
+                job: &jobs[0],
+            },
         )?;
-        allocate(&tx, &self.key, &self.id, self.network, pool, seq, &target)?;
         let next = generation.checked_add(1).context("generation overflow")?;
         tx.execute(
             "UPDATE pools SET generation=?1 WHERE id=?2",
@@ -663,6 +736,7 @@ impl Store {
         limit: i64,
     ) -> Result<()> {
         ensure!(zatoshis > 0 && limit > 0, "invalid ZEC budget amount");
+        self.check_operation_permit(id, u64::try_from(zatoshis)?)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -762,6 +836,14 @@ impl Store {
         }
         self.funding_restriction
             .require_new_funding("source_preparation_commit")?;
+        if self.funding_permits.is_some() {
+            let requested: i64 = self.db.query_row(
+                "SELECT requested FROM budget_entries WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )?;
+            self.check_operation_permit(id, u64::try_from(requested)?)?;
+        }
         let next = expected_revision
             .checked_add(1)
             .context("snapshot revision overflow")?;
@@ -895,15 +977,56 @@ impl Store {
         read_status(&self.db)
     }
 }
+struct Allocation<'a> {
+    sequence: i64,
+    target: &'a str,
+    job: &'a str,
+}
+fn allocation_jobs(
+    permits: Option<&std::sync::Arc<dyn super::restriction::FundingPermits>>,
+    db: &Connection,
+    treasury: &str,
+    pool: &str,
+    sequences: &[i64],
+) -> Result<Vec<String>> {
+    let Some(permits) = permits else {
+        return Ok(sequences
+            .iter()
+            .map(|_| Uuid::new_v4().to_string())
+            .collect());
+    };
+    let name: String = db.query_row("SELECT name FROM pools WHERE id=?1", [pool], |r| r.get(0))?;
+    let jobs = super::restriction::permit_result(
+        permits.reserve_allocations(treasury, &name, sequences),
+        "allocation",
+    )?;
+    ensure!(
+        jobs.len() == sequences.len(),
+        "qualification_funding_denied: incomplete allocation permits"
+    );
+    let mut unique = std::collections::BTreeSet::new();
+    for job in &jobs {
+        let id = Uuid::parse_str(job)?;
+        ensure!(
+            !id.is_nil() && unique.insert(id),
+            "qualification_funding_denied: invalid allocation job identity"
+        );
+    }
+    Ok(jobs)
+}
 fn allocate(
     db: &Connection,
     key: &[u8; 32],
     treasury: &str,
     network: TreasuryNetwork,
     pool: &str,
-    seq: i64,
-    target: &str,
+    allocation: Allocation<'_>,
 ) -> Result<()> {
+    let Allocation {
+        sequence: seq,
+        target,
+        job,
+    } = allocation;
     let signer = PrivateKeySigner::random();
     let id = Uuid::new_v4().to_string();
     let secret = Zeroizing::new(signer.to_bytes().to_vec());
@@ -913,7 +1036,6 @@ fn allocate(
         &secret,
     )?;
     db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,?2,?3,?4,?5,?6,'ALLOCATED')",params![id,pool,seq,signer.address().to_string(),encrypted,target])?;
-    let job = Uuid::new_v4().to_string();
     db.execute(
         "INSERT INTO funding_jobs VALUES (?1,?2,'QUEUED',?3)",
         params![job, id, target],
@@ -1100,7 +1222,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 10, "unsupported state schema");
+    ensure!(version <= 11, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1159,6 +1281,11 @@ COMMIT;")?;
     }
     if version < 10 {
         db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT NOT NULL); PRAGMA user_version=10; COMMIT;")?;
+    }
+    if version < 11 {
+        db.execute_batch("BEGIN IMMEDIATE;
+CREATE TABLE payment_resolutions(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),outcome TEXT NOT NULL CHECK(outcome IN ('USED','EXPIRED_UNUSED')),height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL);
+PRAGMA user_version=11; COMMIT;")?;
     }
     Ok(())
 }
@@ -1370,14 +1497,33 @@ impl Store {
                 commit_chain_view(tx, pool, &view, &depleted)?;
                 return Err(error);
             }
-            tx.execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])?;
-            tx.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [&ready])?;
             let seq: i64 = tx.query_row(
                 "SELECT MAX(sequence)+1 FROM wallets WHERE pool_id=?1",
                 [pool],
                 |r| r.get(0),
             )?;
-            allocate(&tx, &self.key, &self.id, self.network, pool, seq, &target)?;
+            let jobs =
+                match allocation_jobs(self.funding_permits.as_ref(), &tx, &self.id, pool, &[seq]) {
+                    Ok(jobs) => jobs,
+                    Err(error) => {
+                        commit_chain_view(tx, pool, &view, &depleted)?;
+                        return Err(error);
+                    }
+                };
+            tx.execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])?;
+            tx.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [&ready])?;
+            allocate(
+                &tx,
+                &self.key,
+                &self.id,
+                self.network,
+                pool,
+                Allocation {
+                    sequence: seq,
+                    target: &target,
+                    job: &jobs[0],
+                },
+            )?;
             generation = generation.checked_add(1).context("generation overflow")?;
             tx.execute(
                 "UPDATE pools SET generation=?1 WHERE id=?2",
@@ -1532,8 +1678,31 @@ fn apply_chain_view(
     view: &super::base::ChainView,
 ) -> Result<Vec<String>> {
     let mut depleted = Vec::new();
+    ensure!(
+        view.released.len() == view.resolutions.len()
+            && view
+                .released
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == view.released.len()
+            && view
+                .released
+                .iter()
+                .all(|id| view.resolutions.contains_key(id)),
+        "authorization release lacks complete canonical resolution evidence"
+    );
     for id in &view.released {
-        tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
+        let resolution = &view.resolutions[id];
+        let outcome = match resolution.outcome {
+            super::base::AuthorizationOutcome::Used => "USED",
+            super::base::AuthorizationOutcome::ExpiredUnused => "EXPIRED_UNUSED",
+        };
+        let changed = tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
+        if changed == 1 {
+            tx.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES(?1,?2,?3,?4,?5)",
+                params![id,outcome,i64::try_from(view.anchor.height)?,view.anchor.hash,i64::try_from(resolution.block_time)?])?;
+        }
     }
     let rows: Vec<(String, String, String)> = tx
         .prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?

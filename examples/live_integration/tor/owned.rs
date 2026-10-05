@@ -34,10 +34,18 @@ impl Tor {
         policy.validate()?;
         ensure!(policy.mode == Mode::Tor, "owned Tor requires a Tor policy");
         files::directory(evidence)?;
+        // Children run from the evidence directory. Resolve CLI-relative paths
+        // before launch so persistent data and control files keep their identity.
+        let evidence_path = evidence.canonicalize()?;
+        let evidence = evidence_path.as_path();
+        let binary_path = binary.canonicalize()?;
+        let binary = binary_path.as_path();
         if !data.try_exists()? {
             files::create_dir(data)?;
         }
         files::directory(data)?;
+        let data_path = data.canonicalize()?;
+        let data = data_path.as_path();
         let lock = data.join("supervisor.lock");
         if !lock.try_exists()? {
             files::create_file(&lock)?.sync_all()?;
@@ -285,6 +293,10 @@ mod tests {
             return;
         };
         let data = Path::new(&root);
+        assert!(
+            data.is_absolute(),
+            "Tor data path must survive child cwd changes"
+        );
         let counter = data.join("fixture-starts");
         let n = std::fs::read_to_string(&counter)
             .ok()
@@ -343,8 +355,11 @@ mod tests {
     #[tokio::test]
     async fn owned_process_persists_data_and_control_shutdown_reaps_only_itself() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let script = tmp.path().join("tor-fixture");
+        let cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir_in(cwd.join("target")).unwrap();
+        let root = tmp.path().strip_prefix(&cwd).unwrap();
+        assert!(root.is_relative());
+        let script = root.join("tor-fixture");
         let contents = format!(
             r#"#!/bin/sh
 if [ "$1" = "--version" ]; then printf 'Tor fixture\n'; exit 0; fi
@@ -371,9 +386,9 @@ exec {} --exact tor::owned::tests::fake_tor --ignored --nocapture
             socks_endpoint: Some(socks),
             ..Default::default()
         };
-        let data = tmp.path().join("persistent");
+        let data = root.join("persistent");
         for n in 1..=2 {
-            let evidence = tmp.path().join(format!("session-{n}"));
+            let evidence = root.join(format!("session-{n}"));
             files::create_dir(&evidence).unwrap();
             let mut tor = Tor::start(&script, &data, &evidence, &policy)
                 .await
@@ -396,7 +411,7 @@ exec {} --exact tor::owned::tests::fake_tor --ignored --nocapture
         // Cancellation during bootstrap must still reap the owned process and
         // retain process evidence, rather than abandoning a Tor listener.
         std::fs::write(data.join("hold-bootstrap"), b"hold").unwrap();
-        let evidence = tmp.path().join("cancelled");
+        let evidence = root.join("cancelled");
         files::create_dir(&evidence).unwrap();
         let stop = CancellationToken::new();
         let cancel = async {

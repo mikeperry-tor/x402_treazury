@@ -1,4 +1,5 @@
 //! Bounded, scoped catalog futures: no detached tasks or partial inventory publication.
+use super::catalog_evidence::{self, State};
 use super::{MetaConfig, Source, SourceConfig};
 use crate::catalog;
 use anyhow::{Context, Result, ensure};
@@ -22,10 +23,25 @@ type DownloadKey = (
 );
 type Document = Arc<serde_json::Value>;
 
+// Preserve the original typed failure across aliases without a second request.
+#[derive(Clone, Debug)]
+struct SharedFailure(Arc<anyhow::Error>);
+impl std::fmt::Display for SharedFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+impl std::error::Error for SharedFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref().as_ref())
+    }
+}
+type DownloadResult = std::result::Result<Document, SharedFailure>;
+
 /// One deployment load, one immutable network policy/runtime. Retain parsed remote
 /// documents only for this load; aliases still generate/filter/bind independently.
 #[derive(Default)]
-struct Downloads(Mutex<BTreeMap<DownloadKey, Arc<OnceCell<Document>>>>);
+struct Downloads(Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>);
 impl Downloads {
     async fn load(
         &self,
@@ -56,14 +72,15 @@ impl Downloads {
             entries.entry(key).or_default().clone()
         };
         // No detached tasks: cancellation drops the initializer and its HTTP request.
-        let document = cell
-            .get_or_try_init(|| async {
-                Ok::<_, anyhow::Error>(Arc::new(
-                    catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes).await?,
-                ))
-            })
-            .await?;
-        Ok(document.clone())
+        cell.get_or_init(|| async {
+            catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes)
+                .await
+                .map(Arc::new)
+                .map_err(|error| SharedFailure(Arc::new(error)))
+        })
+        .await
+        .clone()
+        .map_err(anyhow::Error::new)
     }
 }
 
@@ -99,6 +116,7 @@ struct Progress<'a> {
 impl Drop for Progress<'_> {
     fn drop(&mut self) {
         if !self.finished {
+            catalog_evidence::record(self.source, State::Cancelled, self.phase, None);
             tracing::warn!(target: "x402_treazury::startup", source = self.source,
                 phase = self.phase, elapsed_ms = self.started.elapsed().as_millis() as u64,
                 "Startup source work cancelled; no partial inventory published");
@@ -113,6 +131,7 @@ pub(super) async fn load(
 ) -> Result<BTreeMap<String, Source>> {
     let started = Instant::now();
     let total = config.sources.len();
+    catalog_evidence::register(config.sources.keys())?;
     let limit = config.startup.catalog_concurrency;
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, "Loading catalogs; startup waits for all sources");
     let downloads = Downloads::default();
@@ -123,13 +142,24 @@ pub(super) async fn load(
     }
     let mut pending = stream::iter(loads).buffer_unordered(limit);
     let mut sources = BTreeMap::new();
+    let collect_failures = catalog_evidence::collecting();
+    let mut failures = 0usize;
+    let mut first_error = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
     heartbeat.tick().await;
     loop {
         tokio::select! {
             result = pending.next() => match result {
                 Some(result) => {
-                    let (id, source) = result?;
+                    let (id, source) = match result {
+                        Ok(source) => source,
+                        Err(error) if collect_failures => {
+                            failures += 1;
+                            if first_error.is_none() { first_error = Some(error); }
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    };
                     sources.insert(id.clone(), source);
                     tracing::info!(target: "x402_treazury::startup", source = id, completed = sources.len(), total,
                         elapsed_ms = started.elapsed().as_millis() as u64, "Catalog ready");
@@ -137,9 +167,14 @@ pub(super) async fn load(
                 None => break,
             },
             _ = heartbeat.tick() => tracing::info!(target: "x402_treazury::startup", completed = sources.len(), total,
-                remaining = total - sources.len(), elapsed_ms = started.elapsed().as_millis() as u64,
+                failed = failures, remaining = total - sources.len() - failures, elapsed_ms = started.elapsed().as_millis() as u64,
                 "Startup waiting for catalogs; remaining count includes queued sources"),
         }
+    }
+    if let Some(error) = first_error {
+        tracing::warn!(target: "x402_treazury::startup", total, failed = failures,
+            completed = sources.len(), "Catalog inspection finished with failures; no partial inventory published");
+        return Err(error.context(format!("catalog inspection failed for {failures} of {total} sources; independent catalog results retained")));
     }
     tracing::info!(target: "x402_treazury::startup", total, elapsed_ms = started.elapsed().as_millis() as u64, "All catalogs loaded");
     Ok(sources)
@@ -161,9 +196,32 @@ async fn load_one(
     tracing::info!(target: "x402_treazury::startup", source = id, "Catalog load started");
     let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
     progress.finished = true;
-    if result.is_err() {
+    if let Err(error) = &result {
+        let error = error
+            .downcast_ref::<SharedFailure>()
+            .map(|shared| shared.0.as_ref())
+            .unwrap_or(error);
+        let phase = error
+            .downcast_ref::<catalog::LoadStage>()
+            .map(|stage| stage.label())
+            .unwrap_or(progress.phase);
+        catalog_evidence::record(
+            id,
+            State::Failed,
+            phase,
+            error
+                .downcast_ref::<reqwest::Error>()
+                .and_then(|e| e.status())
+                .map(|s| s.as_u16()),
+        );
         tracing::warn!(target: "x402_treazury::startup", source = id, phase = progress.phase,
-            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Catalog load failed; aborting startup");
+            failure_stage = phase,
+            http_status = error.downcast_ref::<reqwest::Error>().and_then(|e| e.status()).map(|s| s.as_u16()),
+            elapsed_ms = progress.started.elapsed().as_millis() as u64,
+            collecting_independent_results = catalog_evidence::collecting(),
+            "Catalog load failed; complete inventory unavailable");
+    } else {
+        catalog_evidence::record(id, State::Completed, "generation", None);
     }
     result.map(|source| (id.to_owned(), source))
 }
@@ -252,9 +310,16 @@ pub(super) async fn price_source<'a>(
     };
     tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
         "Startup pricing source started");
+    crate::qualification::record_pricing(id, crate::qualification::PricingStage::Started).await?;
     let result = async {
-        let prices = crate::pricing::process_cache()
-            .discover(&source.config, &source.document, &selected, &source.base_url).await?;
+        let discovery = crate::pricing::process_cache()
+            .discover_observed(&source.config, &source.document, &selected, &source.base_url).await;
+        let stage=match &discovery {
+            Ok(d)=>crate::qualification::PricingStage::Completed{evidence:d.evidence.clone(),prices:d.prices.iter().map(|((method,path),line)|crate::pricing::Price{method:method.clone(),path:path.clone(),line:line.clone()}).collect()},
+            Err(error)=>crate::qualification::PricingStage::Failed{failure:crate::qualification::failure_category(error)},
+        };
+        crate::qualification::record_pricing(id,stage).await?;
+        let prices=discovery?.prices;
         tracing::info!(target: "x402_treazury::startup", source = id, prices = prices.len(),
             elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
         if prices.is_empty() {

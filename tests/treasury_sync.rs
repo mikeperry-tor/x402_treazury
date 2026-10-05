@@ -727,3 +727,116 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
     reopened.close().await.unwrap();
     server.abort();
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn supervised_sync_eof_checkpoints_and_releases_wallet() {
+    use std::{process::Stdio, time::Duration};
+    let dir = tempfile::tempdir().unwrap();
+    let (endpoint, calls, server, stalled) = mock("main").await;
+    stalled.store(true, Ordering::SeqCst);
+    let treasury = wallet(dir.path()).await;
+    let id = treasury.status().await.unwrap().treasury_id;
+    treasury.close().await.unwrap();
+    let config = dir.path().join("sync.toml");
+    std::fs::write(
+        &config,
+        format!(
+            r#"version=1
+servers={{}}
+[treasury]
+id="{id}"
+state_dir="state"
+key_file="key"
+indexer_url_env="INDEXER"
+submission_url_env="MISSING_SUBMISSION"
+daily_input_zec="0.1"
+shield_max_fee_zec="0.001"
+[sources.unloaded]
+spec="nonexistent.json"
+"#
+        ),
+    )
+    .unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .env("INDEXER", &endpoint)
+        .args([
+            "wallet",
+            "sync",
+            "--qualification-parent-stdin",
+            "--meta-config",
+        ])
+        .arg(&config)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    // Cold macOS executable validation can dominate startup; this is separate
+    // from the strict ten-second cancellation deadline below.
+    tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                use tokio::io::AsyncReadExt;
+                let mut error = String::new();
+                child
+                    .stderr
+                    .take()
+                    .unwrap()
+                    .read_to_string(&mut error)
+                    .await
+                    .unwrap();
+                panic!("sync exited before indexer: {status}: {error}");
+            }
+            if calls.lock().unwrap().iter().any(|m| m == "GetBlockRange") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("sync did not reach stalled indexer");
+    drop(child.stdin.take());
+    let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
+        .await
+        .expect("supervised sync failed to drain")
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        output.status.code().is_some(),
+        "sync must exit without a kill signal"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "cancelled sync must not publish readiness"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("deliberately cancelling and checkpointing"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("treasury sync cancelled by supervisor"),
+        "{stderr}"
+    );
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    let mut reopened = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Offline
+    );
+    stalled.store(false, Ordering::SeqCst);
+    reopened.configure_sync(SyncSettings::new(endpoint, 3, 300).unwrap());
+    reopened.sync_once(&CancellationToken::new()).await.unwrap();
+    assert_eq!(
+        reopened.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Ready
+    );
+    reopened.close().await.unwrap();
+    server.abort();
+}

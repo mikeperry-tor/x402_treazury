@@ -1,0 +1,312 @@
+# TEMPLATE: fill treasury/run/authority IDs, paths and UTC windows before use.
+# See SCENARIO_PRESETS.md. All cases are explicit; no automatic replay or expansion.
+version = 1
+run_id = "replace_with_unique_run_id"
+treasury_id = "replace_with_treasury_uuid"
+deployment = "./managed-deployment.example.toml"
+binary = "../../../target/debug/treazury"
+evidence_dir = "../../../target/live-integration/replace_with_unique_run_id"
+registry_authorization = "replace_with_authorization_id"
+
+[start]
+mode = "treasury_only"
+pools = ["test_pool", "independent_pool"]
+
+[network]
+tor_mode = "owned"
+tor_binary = "/replace/with/installed/tor"
+confinement = "macos_sandbox"
+require_isolation_evidence = true
+
+[limits]
+api_reservation_usdc = "5.60"
+new_funding_jobs = 6
+source_exposure_zec = "0.012"
+max_in_flight = 2
+run_seconds = 14400
+phase_seconds = 7200
+call_seconds = 300
+cleanup_seconds = 900
+result_bytes = 16777216
+
+[catalog]
+execution = "frozen"
+record_live_discovery = true
+
+[[windows]]
+id = "main"
+not_before = 0
+not_after = 0
+
+[[cases]]
+id = "round1_deplete_01"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_02"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_03"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_04"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_05"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_06"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_07"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_08"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_09"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_10"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_11"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_deplete_12"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_service_a"
+server = "a"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round1_service_c"
+server = "c"
+source = "independent"
+tool = "independent_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_01"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_02"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_03"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_04"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_05"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_06"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_07"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_08"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_09"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_10"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_11"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_deplete_12"
+server = "a"
+source = "depletion"
+tool = "depletion_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_service_a"
+server = "a"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "round2_service_c"
+server = "c"
+source = "independent"
+tool = "independent_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[phases]]
+id = "lifecycle"
+window = "main"
+cases = ["round1_deplete_01", "round1_deplete_02", "round1_deplete_03", "round1_deplete_04", "round1_deplete_05", "round1_deplete_06", "round1_deplete_07", "round1_deplete_08", "round1_deplete_09", "round1_deplete_10", "round1_deplete_11", "round1_deplete_12", "round1_service_a", "round1_service_c", "round2_deplete_01", "round2_deplete_02", "round2_deplete_03", "round2_deplete_04", "round2_deplete_05", "round2_deplete_06", "round2_deplete_07", "round2_deplete_08", "round2_deplete_09", "round2_deplete_10", "round2_deplete_11", "round2_deplete_12", "round2_service_a", "round2_service_c"]
+pools = ["test_pool", "independent_pool"]
+required = true
+[phases.scenario]
+kind = "lifecycle"
+refill_slots = 2
+restart = "queued_refill"
+[[phases.scenario.rounds]]
+pool = "test_pool"
+expected_price_usdc = "0.20"
+depletion_cases = ["round1_deplete_01", "round1_deplete_02", "round1_deplete_03", "round1_deplete_04", "round1_deplete_05", "round1_deplete_06", "round1_deplete_07", "round1_deplete_08", "round1_deplete_09", "round1_deplete_10", "round1_deplete_11", "round1_deplete_12"]
+service_cases = ["round1_service_a", "round1_service_c"]
+[[phases.scenario.rounds]]
+pool = "test_pool"
+expected_price_usdc = "0.20"
+depletion_cases = ["round2_deplete_01", "round2_deplete_02", "round2_deplete_03", "round2_deplete_04", "round2_deplete_05", "round2_deplete_06", "round2_deplete_07", "round2_deplete_08", "round2_deplete_09", "round2_deplete_10", "round2_deplete_11", "round2_deplete_12"]
+service_cases = ["round2_service_a", "round2_service_c"]

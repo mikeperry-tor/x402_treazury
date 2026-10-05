@@ -5,8 +5,13 @@ use crate::{
     server::{Server, http_app},
 };
 use anyhow::{Context, Result, bail, ensure};
+pub mod catalog_evidence;
 mod startup;
 pub use startup::StartupConfig;
+
+/// Full frozen catalogs may exceed ordinary tool-result/evidence limits. Includes
+/// all source documents and inventories, with no response-schema truncation.
+pub const QUALIFICATION_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -311,6 +316,11 @@ impl Deployment {
         })
     }
     /// Credential-free qualification snapshot, returned only by an explicit CLI inspection.
+    pub async fn inspect_catalogs(
+        path: &Path,
+    ) -> (Result<Self>, Vec<catalog_evidence::Observation>) {
+        catalog_evidence::capture(Self::load(path)).await
+    }
     pub fn qualification_snapshot(&self) -> serde_json::Value {
         let sources: BTreeMap<_,_> = self.sources.iter().map(|(id, s)| (id.clone(), serde_json::json!({"settings":s.config,"document":s.document,"base_url":s.base_url}))).collect();
         serde_json::json!({"version":1,"deployment":self.config,"sources":sources,"inventory":self.inventory()})
@@ -466,6 +476,11 @@ impl Deployment {
                 .await?;
                 owner.configure_sync(sync_settings);
                 let store = owner.store_handle();
+                if let Some(permits) = crate::qualification::managed_permits() {
+                    store
+                        .call(move |s| s.install_funding_permits(permits))
+                        .await?;
+                }
                 if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding {
                     store
                         .call(|s| {
@@ -935,7 +950,7 @@ impl RunningDeployment {
                         result = pool.reconcile() => {
                             failures = if result.is_err() { failures.saturating_add(1) } else { 0 };
                             if result.is_err() {
-                                tracing::warn!(retry_seconds = reconciliation_delay(failures), "background Base reconciliation unavailable; backing off without releasing payment reservations");
+                                tracing::warn!(retry_seconds = reconciliation_delay(failures), "background payment reconciliation unavailable; backing off without releasing payment reservations");
                             }
                         }
                     }

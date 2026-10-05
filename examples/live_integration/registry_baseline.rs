@@ -2,38 +2,17 @@ use super::*;
 use std::collections::BTreeMap;
 pub(super) fn capture(state: &Path, treasury: &str) -> Result<(files::Ownership, Value)> {
     let owner = files::lock(&state.join("owner.lock"))?;
-    let status = x402_treazury::rotation::store::status(state)?;
+    let mut snapshot = x402_treazury::rotation::store::qualification_state(state)?;
     ensure!(
-        status.treasury_id == treasury,
+        snapshot["treasury_status"]["treasury_id"] == treasury,
         "authorization treasury does not match existing state"
     );
-    let db =
-        Connection::open_with_flags(state.join("state.sqlite"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let mut stmt = db.prepare(
-        "SELECT id,pool_id,wallet_id,generation,amount,state FROM payment_attempts ORDER BY id",
-    )?;
-    let count: i64 = db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))?;
-    ensure!(
-        count <= 10000,
-        "baseline exceeds 10000 payment attempts; export/review support required"
-    );
-    let attempts=stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"wallet":r.get::<_,String>(2)?,"generation":r.get::<_,i64>(3)?,"amount":r.get::<_,String>(4)?,"state":r.get::<_,String>(5)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    let count: i64 = db.query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r.get(0))?;
-    ensure!(
-        count <= 10000,
-        "baseline exceeds 10000 source budget entries"
-    );
-    let mut stmt = db.prepare(
-        "SELECT id,day,original_day,requested,reserved,consumed FROM budget_entries ORDER BY id",
-    )?;
-    let budget=stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"day":r.get::<_,i64>(1)?,"original_day":r.get::<_,i64>(2)?,"requested":r.get::<_,i64>(3)?,"reserved":r.get::<_,i64>(4)?,"consumed":r.get::<_,i64>(5)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut hashes = BTreeMap::new();
     let mut locks = vec![];
     legacy(state, state, 0, &mut hashes, &mut locks)?;
-    Ok((
-        owner,
-        json!({"treasury_status":status,"payment_attempts":attempts,"source_budget_entries":budget,"legacy_file_hashes":hashes,"meaning":"immutable historical baseline, not new spending authority"}),
-    ))
+    snapshot["legacy_file_hashes"] = serde_json::to_value(hashes)?;
+    snapshot["meaning"] = json!("immutable historical baseline, not new spending authority");
+    Ok((owner, snapshot))
 }
 fn legacy(
     root: &Path,

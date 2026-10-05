@@ -23,6 +23,7 @@ alloy-sol-types = "1.5"
 axum = "0.8"
 base64 = "0.22"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+rmcp = { version = "=3.5.0", default-features = false, features = ["server"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }

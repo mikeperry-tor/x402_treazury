@@ -216,7 +216,7 @@ pub fn write(options: Options) -> Result<Value> {
         &root.join("run.toml"),
         toml::to_string_pretty(&manifest)?.as_bytes(),
     )?;
-    files::publish(&root.join("SYNTHETIC_DO_NOT_FUND.txt"),b"Synthetic test state, not a Zcash wallet to fund. No live requests have run. Review deployment.toml and run.toml before qualify-tor. Header padding is experimental and independently optional; public resource availability does not establish vendor approval.\n")?;
+    files::publish(&root.join("SYNTHETIC_DO_NOT_FUND.txt"),b"Synthetic test state, not a Zcash wallet to fund. No live requests have run. Review deployment.toml and run.toml before prepare and run. Header padding is experimental and independently optional; public resource availability does not establish vendor approval.\n")?;
     Ok(
         json!({"state_dir":state,"manifest":root.join("run.toml"),"resource":format!("{:?}",options.resource),"profile":format!("{:?}",options.profile),"distribution":format!("{:?}",options.distribution),"samples":options.samples,"live_requests":0,"spending_authority":0}),
     )

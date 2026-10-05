@@ -5744,6 +5744,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",
@@ -6569,45 +6570,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "x402_treazury"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "alloy-signer-local",
- "anyhow",
- "axum",
- "base64 0.22.1",
- "chacha20poly1305",
- "chrono",
- "clap",
- "dotenvy",
- "fs2",
- "futures-util",
- "hyper-util",
- "libc",
- "percent-encoding",
- "regex",
- "reqwest",
- "rmcp",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
- "tempfile",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "x402-chain-eip155",
- "x402-reqwest",
- "x402-types",
- "zeroize",
-]
-
-[[package]]
 name = "x402-types"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6633,12 +6595,55 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "reqwest",
+ "rmcp",
  "serde_json",
  "tempfile",
  "tokio",
  "x402_treazury",
  "zingolib",
  "zip32",
+]
+
+[[package]]
+name = "x402_treazury"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-signer-local",
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "chrono",
+ "clap",
+ "dotenvy",
+ "fs2",
+ "futures-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "percent-encoding",
+ "rand 0.9.5",
+ "regex",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "rustls 0.23.45",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "x402-chain-eip155",
+ "x402-reqwest",
+ "x402-types",
+ "zeroize",
 ]
 
 [[package]]

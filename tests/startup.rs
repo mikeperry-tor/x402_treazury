@@ -206,6 +206,54 @@ async fn failure_cancels_other_fetches_and_never_starts_queued_sources() {
     assert!(fixture.arrivals.try_recv().is_err());
 }
 #[tokio::test]
+async fn failed_inspection_finishes_independent_catalogs_with_rolling_bound() {
+    let mut fixture = Fixture::new(3, Some(0)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = config(
+        dir.path(),
+        &format!("http://{}", fixture.address),
+        3,
+        Some(2),
+        "",
+    );
+    let task = tokio::spawn(async move { Deployment::inspect_catalogs(&path).await });
+    let mut first = vec![fixture.next().await, fixture.next().await];
+    first.sort();
+    assert_eq!(first, [0, 1]);
+    assert!(fixture.arrivals.try_recv().is_err());
+    fixture.release(0);
+    assert_eq!(fixture.next().await, 2);
+    assert!(!task.is_finished());
+    fixture.release(2);
+    fixture.release(1);
+    let (result, rows) = task.await.unwrap();
+    assert!(result.is_err());
+    use x402_treazury::deployment::catalog_evidence::State;
+    assert_eq!(rows[0].state, State::Failed);
+    assert_eq!(rows[0].stage, "parse");
+    assert_eq!(rows[1].state, State::Completed);
+    assert_eq!(rows[2].state, State::Completed);
+}
+#[tokio::test]
+async fn failed_inspection_aliases_share_one_failure_without_retry() {
+    let mut fixture = Fixture::new(1, Some(0)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 3, 2);
+    let task = tokio::spawn(async move { Deployment::inspect_catalogs(&path).await });
+    assert_eq!(fixture.next().await, 0);
+    fixture.release(0);
+    let (result, rows) = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.is_err());
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|row| row.state
+        == x402_treazury::deployment::catalog_evidence::State::Failed
+        && row.stage == "parse"));
+    assert!(fixture.arrivals.try_recv().is_err());
+}
+#[tokio::test]
 async fn startup_config_is_strict_and_validated_before_fetching() {
     let dir = tempfile::tempdir().unwrap();
     for limit in [0, 65] {
@@ -357,6 +405,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
         "Catalog load started",
         "Catalog response headers received; reading body",
         "Catalog response body complete",
+        "Catalog JSON parse complete",
         "Catalog fetch/parse finished",
         "Catalog generation finished",
         "Catalog ready",
@@ -367,6 +416,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
     assert!(log.contains("elapsed_ms"));
     assert!(log.contains("headers_ms"));
     assert!(log.contains("body_ms"));
+    assert!(log.contains("parse_ms"));
     assert!(log.contains("catalog_download"));
     assert!(!log.contains(&fixture.address.to_string()));
 }
@@ -384,6 +434,70 @@ fn alias_config(
     }
     std::fs::write(&path, text).unwrap();
     path
+}
+
+#[tokio::test]
+async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
+    let fixture = Fixture::new(1, Some(0)).await;
+    fixture.release(0);
+    let dir = tempfile::tempdir().unwrap();
+    let path = config(
+        dir.path(),
+        &format!("http://{}", fixture.address),
+        1,
+        None,
+        "",
+    );
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        .args(["--meta-config", path.to_str().unwrap(), "--list-tools"])
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let log = String::from_utf8(output.stderr).unwrap();
+    assert!(log.contains("Catalog response body complete"));
+    assert!(log.contains("Catalog load failed; complete inventory unavailable"));
+    assert!(log.contains("failure_stage=\"parse\""), "{log}");
+    assert!(!log.contains("Catalog JSON parse complete"));
+    assert!(!log.contains(&fixture.address.to_string()));
+}
+
+#[tokio::test]
+async fn failed_inspection_retains_structured_stages_but_never_a_partial_inventory() {
+    let fixture = Fixture::new(2, Some(0)).await;
+    fixture.release(0);
+    fixture.release(1);
+    let dir = tempfile::tempdir().unwrap();
+    let path = config(
+        dir.path(),
+        &format!("http://{}", fixture.address),
+        2,
+        None,
+        "",
+    );
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        .args([
+            "--meta-config",
+            path.to_str().unwrap(),
+            "--qualification-snapshot",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    let snapshot: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(snapshot["preparation_failed"], true);
+    assert_eq!(snapshot["catalog_stages"][0]["stage"], "parse");
+    assert_eq!(snapshot["catalog_stages"][0]["state"], "failed");
+    assert_eq!(snapshot["catalog_stages"][1]["state"], "completed");
+    assert!(snapshot.get("inventory").is_none());
+    assert!(snapshot.get("sources").is_none());
+    assert!(
+        !String::from_utf8(output.stdout)
+            .unwrap()
+            .contains(&fixture.address.to_string())
+    );
 }
 
 #[tokio::test]
@@ -499,4 +613,42 @@ async fn malformed_shared_catalog_fails_startup_without_alias_retry() {
     fixture.release(0);
     assert!(task.await.unwrap().is_err());
     assert!(fixture.arrivals.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn inspection_retains_shared_http_rejection_without_retry_or_url() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = count.clone();
+    let app = axum::Router::new().fallback(move || {
+        let seen = seen.clone();
+        async move {
+            seen.fetch_add(1, Ordering::SeqCst);
+            axum::http::StatusCode::FORBIDDEN
+        }
+    });
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = tempfile::tempdir().unwrap();
+    let path = alias_config(dir.path(), &format!("http://{address}"), 3, 2);
+    let (result, rows) = Deployment::inspect_catalogs(&path).await;
+    assert!(result.is_err());
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(rows.len(), 3);
+    for row in &rows {
+        assert_eq!(
+            row.state,
+            x402_treazury::deployment::catalog_evidence::State::Failed
+        );
+        assert_eq!(row.stage, "headers");
+        assert_eq!(row.http_status, Some(403));
+    }
+    assert!(
+        !serde_json::to_string(&rows)
+            .unwrap()
+            .contains(&address.to_string())
+    );
+    server.abort();
+    let _ = server.await;
 }

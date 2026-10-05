@@ -12,6 +12,8 @@ pub struct Identity {
     pub kind: String,
     pub targets: BTreeSet<String>,
     pub required: bool,
+    #[serde(default)]
+    pub required_targets: BTreeSet<String>,
     /// Known historical identities may be exported without authorizing their use.
     pub permitted: bool,
 }
@@ -61,6 +63,7 @@ pub fn fields(line: &str) -> Result<Vec<String>> {
 struct Stream {
     credential: Option<(String, String)>,
     remote_host: bool,
+    target: Option<String>,
     success: bool,
 }
 pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
@@ -86,6 +89,13 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
             "discovery identity lacks destination constraint"
         );
     }
+    for id in expected.values() {
+        ensure!(
+            id.required_targets.is_subset(&id.targets),
+            "required destinations exceed identity permissions"
+        );
+    }
+    let mut observed_targets: BTreeMap<&String, BTreeSet<String>> = BTreeMap::new();
     let mut streams: BTreeMap<String, Stream> = BTreeMap::new();
     let mut circuits: BTreeMap<&String, BTreeSet<String>> = BTreeMap::new();
     let mut owners = BTreeMap::new();
@@ -181,6 +191,12 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
                     || identity.targets.contains(&target.to_ascii_lowercase()),
                 "Tor identity used an unexpected destination"
             );
+            let target = target.to_ascii_lowercase();
+            ensure!(
+                state.target.as_ref().is_none_or(|old| old == &target),
+                "Tor stream destination changed"
+            );
+            state.target = Some(target);
             state.remote_host = true;
         }
         if circuit != "0" {
@@ -197,6 +213,10 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
             if !state.success {
                 *successes.entry(label).or_default() += 1;
                 state.success = true;
+                observed_targets
+                    .entry(label)
+                    .or_default()
+                    .insert(state.target.clone().context("stream destination missing")?);
             }
         }
     }
@@ -207,7 +227,13 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
             !id.required || count > 0,
             "required Tor identity {label} has no successful remote-host stream"
         );
-        result.insert(label,json!({"kind":id.kind,"required":id.required,"permitted":id.permitted,"successful_streams":count,"circuits":circuits.get(label).map_or(0,BTreeSet::len),"status":if count>0 {"observed"}else{"not_observed"}}));
+        ensure!(
+            id.required_targets.iter().all(|t| observed_targets
+                .get(label)
+                .is_some_and(|seen| seen.contains(t))),
+            "required Tor identity {label} lacks a successful stream to a required destination"
+        );
+        result.insert(label,json!({"kind":id.kind,"required":id.required,"permitted":id.permitted,"successful_streams":count,"required_destinations":id.required_targets.len(),"circuits":circuits.get(label).map_or(0,BTreeSet::len),"status":if count>0 {"observed"}else{"not_observed"}}));
     }
     Ok(
         json!({"identities":result,"scope":"Tor STREAM identity separation; not payment, settlement or complete unlinkability"}),
@@ -248,6 +274,7 @@ mod tests {
                         BTreeSet::new()
                     },
                     required: kind != "discovery",
+                    required_targets: BTreeSet::new(),
                     permitted: true,
                 },
             );

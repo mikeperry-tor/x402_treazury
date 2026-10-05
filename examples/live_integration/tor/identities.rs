@@ -5,7 +5,10 @@ use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use x402_treazury::network::{IsolationId, NetworkContext, NetworkPolicy};
-pub fn discovery(m: &Manifest, snapshot: &Value) -> Result<Identities> {
+#[path = "identities_managed.rs"]
+mod managed;
+pub use managed::{managed_map, managed_map_frozen};
+fn discovery_catalogs(m: &Manifest, snapshot: &Value, fetched: bool) -> Result<Identities> {
     let policy: NetworkPolicy = serde_json::from_value(snapshot["deployment"]["network"].clone())?;
     let context = NetworkContext::new(policy)?;
     let mut result = Identities::new();
@@ -30,6 +33,7 @@ pub fn discovery(m: &Manifest, snapshot: &Value) -> Result<Identities> {
             kind: "discovery".into(),
             targets: BTreeSet::new(),
             required: false,
+            required_targets: Default::default(),
             permitted: true,
         });
         entry.targets.insert(target);
@@ -46,7 +50,7 @@ pub fn discovery(m: &Manifest, snapshot: &Value) -> Result<Identities> {
                 .as_str()
                 .filter(|s| s.starts_with("https://") || s.starts_with("http://"))
             {
-                add(url, field == "spec")?;
+                add(url, fetched && field == "spec")?;
             }
         }
     }
@@ -76,7 +80,11 @@ pub fn discovery(m: &Manifest, snapshot: &Value) -> Result<Identities> {
                     .to_owned()
             }
         };
-        add(&url, !super::outage::uncached(m, &case.id))?;
+        add(
+            &url,
+            (case.unsigned || tool["help_url"].is_string())
+                && !super::outage::uncached(m, &case.id),
+        )?;
     }
     Ok(result)
 }
@@ -84,7 +92,22 @@ pub fn discovery(m: &Manifest, snapshot: &Value) -> Result<Identities> {
 /// Export every durable public address, including retired and replacement slots.
 /// In a keyless session their presence is explanatory, never permission to use them.
 pub fn unsigned_map(m: &Manifest, snapshot: &Value, state: &std::path::Path) -> Result<Identities> {
-    let mut result = discovery(m, snapshot)?;
+    unsigned_map_catalogs(m, snapshot, state, true)
+}
+pub fn unsigned_map_frozen(
+    m: &Manifest,
+    snapshot: &Value,
+    state: &std::path::Path,
+) -> Result<Identities> {
+    unsigned_map_catalogs(m, snapshot, state, false)
+}
+fn unsigned_map_catalogs(
+    m: &Manifest,
+    snapshot: &Value,
+    state: &std::path::Path,
+    fetched: bool,
+) -> Result<Identities> {
+    let mut result = discovery_catalogs(m, snapshot, fetched)?;
     let status = x402_treazury::rotation::store::status(state)?;
     ensure!(
         status.treasury_id == m.treasury_id,
@@ -118,6 +141,7 @@ pub fn unsigned_map(m: &Manifest, snapshot: &Value, state: &std::path::Path) -> 
                         kind: kind.into(),
                         targets,
                         required: false,
+                        required_targets: Default::default(),
                         permitted: false
                     }
                 )
@@ -165,4 +189,39 @@ pub fn unsigned_map(m: &Manifest, snapshot: &Value, state: &std::path::Path) -> 
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn frozen_catalogs_keep_destination_permissions_without_fabricating_discovery_samples() {
+        let mut m = crate::tests::manifest();
+        let snapshot = json!({"deployment":{"network":{"mode":"tor","socks_endpoint":"127.0.0.1:19050","isolation_namespace":"test","socks_auth":"tor_extended"}},
+            "sources":{"api":{"settings":{"spec":"https://spec.test/openapi.json","help_url":"https://help.test/llms.txt"}}},
+            "inventory":[{"server":"main","tools":[{"source":"api","name":"api_read","help_url":"https://help.test/llms.txt"}]}]});
+        let fresh = discovery_catalogs(&m, &snapshot, true).unwrap();
+        let frozen = discovery_catalogs(&m, &snapshot, false).unwrap();
+        for (name, before) in &fresh {
+            let after = &frozen[name];
+            assert_eq!(before.user, after.user);
+            assert_eq!(before.password, after.password);
+            assert_eq!(before.targets, after.targets);
+            assert!(after.permitted);
+            if before.targets.contains("spec.test:443") {
+                assert!(before.required);
+                assert!(!after.required);
+            } else {
+                assert!(after.required);
+            }
+        }
+        m.cases.clear();
+        assert!(
+            discovery_catalogs(&m, &snapshot, false)
+                .unwrap()
+                .values()
+                .all(|id| !id.required)
+        );
+    }
 }

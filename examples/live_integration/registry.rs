@@ -12,12 +12,22 @@ use std::{
     fs::File,
     path::{Path, PathBuf},
 };
+#[path = "registry_accounting.rs"]
+mod accounting;
 #[path = "registry_application.rs"]
 mod application;
 #[path = "registry_baseline.rs"]
 mod baseline;
 #[path = "registry_cases.rs"]
 mod cases;
+#[path = "registry_debits.rs"]
+mod debits;
+#[path = "registry_lifecycle.rs"]
+mod lifecycle;
+#[path = "registry_observation.rs"]
+mod observation;
+#[path = "registry_settlement.rs"]
+mod settlement;
 #[cfg(test)]
 pub use cases::Outcome;
 
@@ -116,6 +126,7 @@ impl Registry {
         let (_treasury_lock, baseline) = baseline::capture(state, &auth.treasury_id)?;
         // Creation failure leaves evidence, never silently recreates/reset a registry.
         files::create_dir(&root)?;
+        let root = root.canonicalize()?;
         files::create_file(&root.join("owner.lock"))?.sync_all()?;
         files::create_file(&root.join("registry.sqlite"))?.sync_all()?;
         let lock = files::lock(&root.join("owner.lock"))?;
@@ -128,6 +139,7 @@ impl Registry {
         )?;
         let tx = db.transaction()?;
         tx.execute_batch(SCHEMA)?;
+        tx.execute_batch(x402_treazury::qualification::funding::SCHEMA)?;
         let raw = bounded_json(&baseline)?;
         tx.execute(
             "INSERT INTO identity VALUES(1,?1,?2,?3)",
@@ -147,6 +159,9 @@ impl Registry {
         files::directory(state)?;
         let root = state.join("live-integration");
         files::directory(&root)?;
+        // Bindings cross the child working-directory boundary; retain an absolute
+        // registry location on both creation and reopen.
+        let root = root.canonicalize()?;
         for name in [
             "owner.lock",
             "registry.sqlite",
@@ -176,6 +191,7 @@ impl Registry {
         db.execute_batch("PRAGMA foreign_keys=ON;")?;
         if !read_only {
             db.execute_batch("PRAGMA synchronous=FULL; PRAGMA journal_mode=DELETE;")?;
+            db.execute_batch(x402_treazury::qualification::funding::SCHEMA)?;
         }
         let check: String = db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         ensure!(check == "ok", "integration registry integrity failure");
@@ -192,7 +208,7 @@ impl Registry {
         let treasury: String = tx.query_row("SELECT treasury FROM identity", [], |r| r.get(0))?;
         ensure!(treasury == a.treasury_id, "registry treasury mismatch");
         let consumed: i64 = tx.query_row(
-            "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution!='UNATTEMPTED'",
+            "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",
             [],
             |r| r.get(0),
         )?;
@@ -200,7 +216,13 @@ impl Registry {
             usdc(&a.cumulative_api_usdc)? >= consumed,
             "authorization cannot erase consumed reservations"
         );
-        // Positive funding is stored authority only; M5 will add transactional permits.
+        let (funding_jobs, source_reserved) = funding_usage(&tx)?;
+        ensure!(
+            i64::from(a.cumulative_new_jobs) >= funding_jobs
+                && zec(&a.cumulative_source_zec)? >= source_reserved,
+            "authorization cannot erase funding permits or orphan reservations"
+        );
+        // Positive execution remains disabled until production permit hooks land.
         tx.execute(
             "INSERT INTO authorizations(id,api,source,jobs,at) VALUES(?1,?2,?3,?4,?5)",
             params![
@@ -291,57 +313,6 @@ impl Registry {
         tx.commit()?;
         Ok(())
     }
-    pub fn revise(
-        &mut self,
-        run: &str,
-        replacement: &Pins,
-        expected: &str,
-        now: i64,
-    ) -> Result<Value> {
-        ensure!(now >= 0, "invalid registry timestamp");
-        replacement.validate()?;
-        let tx = self.db.transaction()?;
-        let attempted: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM cases WHERE run=?1 AND execution!='UNATTEMPTED'",
-            [run],
-            |r| r.get(0),
-        )?;
-        ensure!(attempted == 0, "pin revision refused after any reservation");
-        let (revision, raw, digest): (i64, String, String) = tx.query_row(
-            "SELECT revision,payload,digest FROM pins WHERE run=?1 ORDER BY revision DESC LIMIT 1",
-            [run],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )?;
-        ensure!(
-            digest == expected,
-            "expected pin digest mismatch; review current pins first"
-        );
-        let old: Pins = serde_json::from_str(&raw)?;
-        let mut prior = old.resolved_config.clone();
-        let mut new = replacement.resolved_config.clone();
-        for config in [&mut prior, &mut new] {
-            if let Some(sources) = config["sources"].as_object_mut() {
-                for source in sources.values_mut() {
-                    source["settings"]
-                        .as_object_mut()
-                        .context("source settings missing")?
-                        .remove("reliability_note");
-                }
-            }
-        }
-        ensure!(
-            prior == new && old.qualification == replacement.qualification,
-            "pin revision changes execution contract; create a new run within existing cumulative budget"
-        );
-        insert_pins(&tx, run, revision + 1, replacement, now)?;
-        let diff = json!({"from":digest,"to":files::hash(bounded_json(replacement)?),"binary_changed":old.binary_sha256!=replacement.binary_sha256,"configuration_changed":old.resolved_config!=replacement.resolved_config,"checkout_changed":old.source_revision!=replacement.source_revision || old.source_dirty!=replacement.source_dirty});
-        tx.execute(
-            "INSERT INTO events(run,kind,detail,at) VALUES(?1,'pin_revision',?2,?3)",
-            params![run, bounded_json(&diff)?, now],
-        )?;
-        tx.commit()?;
-        Ok(diff)
-    }
     pub fn application_binding(
         &self,
         run: &str,
@@ -365,9 +336,21 @@ impl Registry {
             expires_at,
         })
     }
+    pub fn require_unstarted(&self, run: &str) -> Result<()> {
+        let started: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE run=?1 AND kind IN ('execution_started','application_session','application_claim')) OR EXISTS(SELECT 1 FROM cases WHERE run=?1 AND execution!='UNATTEMPTED')",
+            [run], |r| r.get(0))?;
+        ensure!(
+            !started,
+            "run already started or reserved; observation only; review untouched work under a new run within the same cumulative registry"
+        );
+        Ok(())
+    }
     pub fn begin_execution(&mut self, run: &str, now: i64) -> Result<i64> {
         let m = self.manifest(run)?;
-        self.db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS application_claim_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_claim';")?;
+        self.db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS application_claim_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_claim';
+        CREATE UNIQUE INDEX IF NOT EXISTS application_payment_case_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_payment';
+        CREATE UNIQUE INDEX IF NOT EXISTS application_payment_attempt_once ON events(run,json_extract(detail,'$.attempt_id')) WHERE kind='application_payment';")?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -394,22 +377,15 @@ impl Registry {
             [run],
             |r| r.get(0),
         )?;
-        let start = start.unwrap_or(now);
+        ensure!(start.is_none(), "run already started; observation only");
+        let start = now;
         let end = start
             .checked_add(i64::try_from(m.limits.run_seconds)?)
             .context("execution deadline overflow")?;
         ensure!(now < end, "run execution deadline expired");
         tx.execute(
             "INSERT INTO events(run,kind,detail,at) VALUES(?1,?2,'{}',?3)",
-            params![
-                run,
-                if start == now {
-                    "execution_started"
-                } else {
-                    "execution_resumed"
-                },
-                now
-            ],
+            params![run, "execution_started", now],
         )?;
         tx.commit()?;
         Ok(end)
@@ -467,10 +443,17 @@ impl Registry {
         let mut stmt=self.db.prepare("SELECT run,id,reservation,window_start,window_end,execution,semantic,settlement,result_hash FROM cases WHERE (?1 IS NULL OR run=?1) ORDER BY run,id")?;
         let rows=stmt.query_map([run],|r|{
             let state:String=r.get(5)?;let start:i64=r.get(3)?;let end:i64=r.get(4)?;
-            Ok(json!({"run":r.get::<_,String>(0)?,"case":r.get::<_,String>(1)?,"reservation_atomic":r.get::<_,i64>(2)?,"execution":state,"semantic":r.get::<_,String>(6)?,"settlement":r.get::<_,String>(7)?,"result_hash":r.get::<_,Option<String>>(8)?,"eligibility":if state!="UNATTEMPTED"{"observe_only"}else if now<start{"waiting_window"}else if now>=end{"expired_window"}else{"requires_execution_qualification"}}))
+            Ok(json!({"run":r.get::<_,String>(0)?,"case":r.get::<_,String>(1)?,"reservation_atomic":r.get::<_,i64>(2)?,"charged_reservation_atomic":if matches!(state.as_str(),"UNATTEMPTED"|"SKIPPED_TARGET_REACHED"){0}else{r.get::<_,i64>(2)?},"execution":state,"semantic":r.get::<_,String>(6)?,"settlement":r.get::<_,String>(7)?,"result_hash":r.get::<_,Option<String>>(8)?,"eligibility":if state!="UNATTEMPTED"{"observe_only"}else if now<start{"waiting_window"}else if now>=end{"expired_window"}else{"requires_execution_qualification"}}))
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for id in rows
+            .iter()
+            .filter_map(|r| r["run"].as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            self.validated_skips(id)?;
+        }
         let consumed: i64 = self.db.query_row(
-            "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution!='UNATTEMPTED'",
+            "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",
             [],
             |r| r.get(0),
         )?;
@@ -483,9 +466,9 @@ impl Registry {
         let mut pins=self.db.prepare("SELECT run,revision,digest FROM pins WHERE (?1 IS NULL OR run=?1) ORDER BY run,revision")?;
         let revisions=pins.query_map([run],|r|Ok(json!({"run":r.get::<_,String>(0)?,"revision":r.get::<_,i64>(1)?,"digest":r.get::<_,String>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
         if let Some(id) = run {
-            let _ = self.manifest(id)?;
+            self.validated_skips(id)?;
         }
-        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_claim','application_finished','tor_outage_started','tor_outage_qualified') ORDER BY seq LIMIT 50001")?;
+        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','cover_observed','funding_execution','bootstrap_wait_started','bootstrap_wait_progress','bootstrap_ready','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_pricing','application_claim','application_help','application_challenge','application_payment','application_receipt','application_debit_check','application_debit_verified','application_finished','payment_observed','tor_outage_started','tor_outage_qualified','rotation_promotion','pool_observation_requested','application_pool_observation','rotation_started','rotation_refill_ready','application_session','restart_requested','restart_drained','restart_completed','restart_checkpoint_unobserved','outage_backup_completed') ORDER BY seq LIMIT 50001")?;
         let runtime_events = events
             .query_map([run], |r| {
                 Ok((
@@ -513,7 +496,58 @@ impl Registry {
         } else {
             Value::Null
         };
-        let report = json!({"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"application_evidence":application_evidence,"qualification_scope":if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":false,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare-catalogs is required before unsigned execution" }});
+        let managed = run
+            .map(|id| self.manifest(id).map(|m| !m.start.pools.is_empty()))
+            .transpose()?
+            .unwrap_or(false);
+        let (funding_jobs_reserved, source_reserved_zatoshis) = funding_usage(&self.db)?;
+        let report = json!({"funding_jobs_reserved":funding_jobs_reserved,"source_reserved_zatoshis":source_reserved_zatoshis,"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"application_evidence":application_evidence,"qualification_scope":if execution_available && managed { "managed_mcp_with_authorization_evidence" } else if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":execution_available && managed,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available && managed { "positive funding requires --allow-funding and registry authority; unresolved authorizations or missing debit proofs remain incomplete" } else if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare is required before execution" }});
+        let mut report = report;
+        if let Some(run) = run {
+            report["treasury_accounting"] = self.accounting_report(run)?;
+            report["catalog_stages"] =
+                crate::catalog_stages::report(&self.pins(run)?, &self.manifest(run)?)?;
+            report["provider_semantics"] =
+                crate::semantics::report(self, &self.manifest(run)?, &report)?;
+            report["canonical_api_debits"] = match self.verified_debits(run) {
+                Ok(proofs) => {
+                    json!({"status":"validated", "cases":proofs.into_iter().map(|(case, proof)| (case, proof["amount_atomic"].clone())).collect::<std::collections::BTreeMap<_,_>>() })
+                }
+                Err(_) => json!({"status":"invalid_or_incomplete","cases":{}}),
+            };
+            report["pricing_stages"] = crate::pricing_stages::report(
+                &self.manifest(run)?,
+                &self.pins(run)?.resolved_config,
+                &report,
+            )?;
+            report["help_stages"] = crate::help::report(&self.manifest(run)?, &report)?;
+            report["fee_observations"] = crate::fees::report(&report)?;
+            report["reliability"] = match crate::reliability::report(&self.manifest(run)?, &report)
+            {
+                Ok(value) => value,
+                Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+            };
+            report["rotation"] =
+                match crate::rotation_report::report(self, &self.manifest(run)?, &report) {
+                    Ok(value) => value,
+                    Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+                };
+            report["concurrency"] = match crate::concurrency::report(
+                &self.manifest(run)?,
+                &self.pins(run)?.resolved_config,
+                &report,
+            ) {
+                Ok(value) => value,
+                Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+            };
+        }
+        if let Some(run) = run {
+            report["summary"] = serde_json::to_value(crate::report_model::build(
+                &self.manifest(run)?,
+                &self.pins(run)?.resolved_config,
+                &report,
+            )?)?;
+        }
         bounded_json(&report)?;
         Ok(report)
     }
@@ -541,4 +575,20 @@ fn usdc(s: &str) -> Result<i64> {
 }
 fn zec(s: &str) -> Result<i64> {
     Ok(atomic_zec(s)?.try_into()?)
+}
+
+fn funding_usage(db: &Connection) -> Result<(i64, i64)> {
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='funding_permits')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Ok((0, 0));
+    }
+    Ok(db.query_row(
+        "SELECT COUNT(*),COALESCE(SUM(source_bound),0) FROM funding_permits",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?)
 }

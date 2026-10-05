@@ -100,6 +100,34 @@ pub fn require_samples(report: &Value) -> Result<()> {
     );
     Ok(())
 }
+pub fn combine(sessions: &[Value]) -> Result<Value> {
+    ensure!(
+        !sessions.is_empty(),
+        "cover report lacks closed application sessions"
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    for session in sessions {
+        let id = session["session"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .context("cover session identity missing")?;
+        ensure!(
+            seen.insert(id) && session["complete"] == true,
+            "duplicate or incomplete cover session"
+        );
+        ensure!(
+            session["cover"].is_object(),
+            "session cover summary missing"
+        );
+    }
+    if sessions.len() == 1 {
+        return Ok(sessions[0]["cover"].clone());
+    }
+    Ok(
+        json!({"status":"multiple_sessions", "requested_modes_observed":sessions.iter().all(|s| require_samples(&s["cover"]).is_ok()),
+        "sessions":sessions,"scope":"every application session must have complete output and its own requested cover samples"}),
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +142,18 @@ mod tests {
                 .is_err()
         );
         assert!(require_samples(&json!({"status":"observed"})).is_err());
+    }
+    #[test]
+    fn restarted_sessions_each_need_complete_output_and_requested_samples() {
+        let a = json!({"session":"a","complete":true,"cover":{"status":"observed","requested_modes_observed":true}});
+        let mut b = json!({"session":"b","complete":true,"cover":{"status":"observed","requested_modes_observed":false}});
+        assert!(require_samples(&combine(&[a.clone(), b.clone()]).unwrap()).is_err());
+        b["cover"]["requested_modes_observed"] = json!(true);
+        require_samples(&combine(&[a.clone(), b.clone()]).unwrap()).unwrap();
+        assert!(combine(&[a.clone(), a]).is_err());
+        b["complete"] = json!(false);
+        assert!(combine(&[b]).is_err());
+        assert!(combine(&[]).is_err());
     }
     fn manifest() -> Manifest {
         serde_json::from_value(json!({

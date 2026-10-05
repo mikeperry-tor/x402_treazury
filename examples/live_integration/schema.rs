@@ -1,6 +1,8 @@
 //! Deliberately strict offline JSON Schema subset: unknown assertions fail qualification.
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
+#[path = "schema_formats.rs"]
+mod formats;
 pub fn validate(schema: &Value, value: &Value) -> Result<()> {
     preflight(schema, 0, &mut 100_000)?;
     validate_numbers(value, 0, &mut 100_000)?;
@@ -80,6 +82,7 @@ fn preflight(schema: &Value, depth: usize, remaining: &mut usize) -> Result<()> 
             "pattern" => {
                 regex::Regex::new(v.as_str().context("invalid pattern")?)?;
             }
+            "format" => formats::supported(v.as_str().context("invalid schema format")?)?,
             "$schema" => ensure!(
                 matches!(
                     v.as_str(),
@@ -162,6 +165,7 @@ fn check(schema: &Value, value: &Value, depth: usize, remaining: &mut usize) -> 
                 "minItems",
                 "maxItems",
                 "pattern",
+                "format",
                 "allOf",
                 "anyOf",
                 "oneOf",
@@ -235,6 +239,9 @@ fn check(schema: &Value, value: &Value, depth: usize, remaining: &mut usize) -> 
         }
     }
     if let Some(text) = value.as_str() {
+        if let Some(format) = schema.get("format") {
+            formats::check(format.as_str().context("invalid schema format")?, text)?;
+        }
         bounds(text.chars().count(), schema, "minLength", "maxLength")?;
         if let Some(p) = schema.get("pattern") {
             ensure!(
@@ -323,6 +330,20 @@ mod tests {
             assert!(validate(&s, &v).is_err());
         }
         assert!(validate(&json!({"format":"uri"}), &json!("x")).is_err());
+        assert!(
+            validate(
+                &json!({"properties":{"optional":{"format":"date-time"}}}),
+                &json!({})
+            )
+            .is_ok()
+        );
+        assert!(
+            validate(
+                &json!({"properties":{"optional":{"format":"date-time"}}}),
+                &json!({"optional":"2026-02-30T00:00:00Z"})
+            )
+            .is_err()
+        );
     }
 }
 
@@ -333,10 +354,10 @@ mod preflight_tests {
     #[test]
     fn hidden_unsupported_or_malformed_branches_never_certify() {
         for s in [
-            json!({"anyOf":[true,{"format":"uri"}]}),
-            json!({"oneOf":[true,{"format":"uri"}]}),
-            json!({"not":{"format":"uri"}}),
-            json!({"properties":{"absent":{"format":"uri"}}}),
+            json!({"anyOf":[true,{"format":"unknown"}]}),
+            json!({"oneOf":[true,{"format":"unknown"}]}),
+            json!({"not":{"format":"unknown"}}),
+            json!({"properties":{"absent":{"format":"unknown"}}}),
             json!({"required":"bad"}),
             json!({"properties":[]}),
             json!({"minimum":9007199254740993u64}),

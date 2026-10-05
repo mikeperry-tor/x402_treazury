@@ -195,7 +195,7 @@ async fn attempt(
     }
     value
         .get("result")
-        .filter(|v| !v.is_null())
+        .filter(|v| !v.is_null() || method == "eth_getTransactionReceipt")
         .cloned()
         .ok_or_else(|| RpcFailure::new(method, "missing result", "envelope", Some(status)).into())
 }
@@ -208,7 +208,10 @@ pub(super) async fn rpc(
     budget: Duration,
 ) -> Result<Value> {
     ensure!(
-        matches!(method, "eth_chainId" | "eth_getBlockByNumber" | "eth_call"),
+        matches!(
+            method,
+            "eth_chainId" | "eth_getBlockByNumber" | "eth_getTransactionReceipt" | "eth_call"
+        ),
         "unsupported read-only Base RPC method"
     );
     let payload = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});

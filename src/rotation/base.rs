@@ -8,7 +8,9 @@ use std::{
     collections::BTreeMap,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+mod receipt;
 mod transport;
+pub use receipt::{TransferExpectation, TransferProof};
 pub(crate) use transport::RpcFailure;
 #[derive(Debug)]
 pub(crate) struct VerificationStage(pub &'static str);
@@ -43,6 +45,14 @@ fn safe_reason(error: &anyhow::Error) -> String {
                 | "invalid RPC quantity"
                 | "insufficient Base confirmations"
                 | "Base block is in the future"
+                | "receipt block height mismatch"
+                | "receipt transaction reverted"
+                | "receipt transaction/block mismatch"
+                | "receipt log limit exceeded"
+                | "receipt log provenance mismatch"
+                | "receipt lacks unique matching USDC transfer and authorization nonce"
+                | "receipt event topics malformed"
+                | "authorization event data malformed"
         ) {
             return message;
         }
@@ -69,10 +79,22 @@ pub struct ChainQuery {
     pub pending: Vec<PendingAuthorization>,
     pub anchor: Option<Anchor>,
 }
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AuthorizationOutcome {
+    Used,
+    ExpiredUnused,
+}
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct AuthorizationResolution {
+    pub outcome: AuthorizationOutcome,
+    pub block_time: u64,
+}
 pub struct ChainView {
     pub anchor: Anchor,
     pub balances: BTreeMap<String, U256>,
     pub released: Vec<String>,
+    pub resolutions: BTreeMap<String, AuthorizationResolution>,
 }
 #[derive(Clone)]
 pub struct BaseRpc {
@@ -268,6 +290,7 @@ impl BaseRpc {
             balances.insert(id, stable.min(current));
         }
         let mut released = Vec::new();
+        let mut resolutions = BTreeMap::new();
         let selector = &keccak256("authorizationState(address,bytes32)")[..4];
         let selector = alloy_primitives::hex::encode(selector);
         for auth in query.pending {
@@ -285,6 +308,17 @@ impl BaseRpc {
                 .context(VerificationStage("authorization nonce"))?;
             ensure!(used <= U256::from(1), "invalid authorizationState result");
             if used == U256::from(1) || confirmed_time > auth.valid_before {
+                resolutions.insert(
+                    auth.id.clone(),
+                    AuthorizationResolution {
+                        outcome: if used == U256::from(1) {
+                            AuthorizationOutcome::Used
+                        } else {
+                            AuthorizationOutcome::ExpiredUnused
+                        },
+                        block_time: confirmed_time,
+                    },
+                );
                 released.push(auth.id);
             }
         }
@@ -303,6 +337,7 @@ impl BaseRpc {
             anchor: confirmed,
             balances,
             released,
+            resolutions,
         })
     }
 }

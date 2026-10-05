@@ -8,13 +8,65 @@ pub enum Outcome {
 }
 impl Registry {
     pub fn dependencies_ready(&self, run: &str, phase: &str) -> Result<()> {
+        self.validated_skips(run)?;
+        self.verified_debits(run)?;
         let m = self.manifest(run)?;
         let phase = m
             .phases
             .iter()
             .find(|p| p.id == phase)
             .context("unknown phase")?;
+        self.rotation_dependencies_ready(run, &phase.depends_on)?;
         check_dependencies(&self.db, run, &phase.depends_on)
+    }
+    fn rotation_dependencies_ready(&self, run: &str, dependencies: &[String]) -> Result<()> {
+        let m = self.manifest(run)?;
+        if !dependencies.is_empty() {
+            let cases = m
+                .phases
+                .iter()
+                .filter(|p| dependencies.contains(&p.id))
+                .flat_map(|p| p.cases.clone())
+                .collect::<Vec<_>>();
+            let evidence = self.report(Some(run), 0)?;
+            let (_, provider_passed) = crate::semantics::qualification(&evidence, Some(&cases))?;
+            let (_, help_passed) = crate::help::qualification(&evidence, Some(&cases))?;
+            let passed = provider_passed && help_passed;
+            ensure!(
+                passed,
+                "dependency provider/help assertions failed or require manual review"
+            );
+        }
+        let selected: Vec<_> = m
+            .phases
+            .iter()
+            .filter(|p| {
+                dependencies.contains(&p.id)
+                    && matches!(
+                        p.scenario,
+                        crate::manifest::Scenario::Rotation { .. }
+                            | crate::manifest::Scenario::RefillService { .. }
+                            | crate::manifest::Scenario::Lifecycle { .. }
+                    )
+            })
+            .collect();
+        if selected.is_empty() {
+            return Ok(());
+        }
+        let report = self.report(Some(run), 0)?;
+        let results = report["rotation"]
+            .as_array()
+            .context("rotation dependency report missing")?;
+        for phase in selected {
+            ensure!(
+                results
+                    .iter()
+                    .any(|r| r["phase"] == phase.id && r["status"] == "passed"),
+                "dependency {} lacks complete rotation/refill qualification",
+                phase.id
+            );
+        }
+        Ok(())
     }
     // Kept private to the supervisor modules; no CLI exposes synthetic reservations.
     // M3 must qualify pins/identity before using this durable pre-dispatch boundary.
@@ -33,6 +85,8 @@ impl Registry {
             identifier(batch) && !ids.is_empty(),
             "invalid/empty reservation batch"
         );
+        self.validated_skips(run)?;
+        self.verified_debits(run)?;
         let m = self.manifest(run)?;
         let p = m
             .phases
@@ -57,6 +111,7 @@ impl Registry {
             ids.len() <= m.limits.max_in_flight,
             "batch exceeds max_in_flight"
         );
+        self.rotation_dependencies_ready(run, &p.depends_on)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -92,7 +147,7 @@ impl Registry {
                 .checked_add(cost)
                 .context("batch reservation overflow")?;
         }
-        let (global,local):(i64,i64)=tx.query_row("SELECT COALESCE(SUM(reservation),0),COALESCE(SUM(CASE WHEN run=?1 THEN reservation ELSE 0 END),0) FROM cases WHERE execution!='UNATTEMPTED'",[run],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        let (global,local):(i64,i64)=tx.query_row("SELECT COALESCE(SUM(reservation),0),COALESCE(SUM(CASE WHEN run=?1 THEN reservation ELSE 0 END),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",[run],|r|Ok((r.get(0)?,r.get(1)?)))?;
         ensure!(
             global.checked_add(sum).is_some_and(|n| n <= ceiling)
                 && local
@@ -171,9 +226,10 @@ impl Registry {
 
 fn check_dependencies(db: &Connection, run: &str, dependencies: &[String]) -> Result<()> {
     for dependency in dependencies {
-        let blocked:i64=db.query_row("SELECT COUNT(*) FROM cases WHERE run=?1 AND phase=?2 AND (execution!='COMPLETED' OR semantic!='PASSED' OR settlement NOT IN ('NOT_SIGNED','USED','EXPIRED_UNUSED'))",params![run,dependency],|r|r.get(0))?;
+        let blocked:i64=db.query_row("SELECT COUNT(*) FROM cases WHERE run=?1 AND phase=?2 AND execution!='SKIPPED_TARGET_REACHED' AND (execution!='COMPLETED' OR semantic!='PASSED' OR settlement NOT IN ('NOT_SIGNED','USED','EXPIRED_UNUSED'))",params![run,dependency],|r|r.get(0))?;
+        let unverified:i64=db.query_row("SELECT COUNT(*) FROM cases c WHERE c.run=?1 AND c.phase=?2 AND c.settlement='USED' AND NOT EXISTS(SELECT 1 FROM events e WHERE e.run=c.run AND e.kind='application_debit_verified' AND json_extract(CASE WHEN json_valid(e.detail) THEN e.detail END,'$.case')=c.id)", params![run,dependency],|r|r.get(0))?;
         ensure!(
-            blocked == 0,
+            blocked == 0 && unverified == 0,
             "dependency {dependency} has incomplete/unqualified cases"
         );
     }
@@ -231,6 +287,44 @@ impl Registry {
         // The keyless executable contract establishes NOT_SIGNED, not the seller body.
         ensure!(self.db.execute("UPDATE cases SET execution='COMPLETED',semantic=?3,settlement='NOT_SIGNED' WHERE run=?1 AND id=?2 AND execution='RESPONSE_SAVED'",
             params![run,id,if passed { "PASSED" } else { "FAILED" }])? == 1, "unsigned completion state changed");
+        Ok(())
+    }
+}
+
+impl Registry {
+    /// MCP completion is not settlement evidence, even when the provider says success.
+    pub fn finish_managed(
+        &mut self,
+        run: &str,
+        id: &str,
+        body: Option<&[u8]>,
+        passed: bool,
+    ) -> Result<()> {
+        ensure!(
+            self.manifest(run)?
+                .cases
+                .iter()
+                .any(|c| c.id == id && !c.unsigned),
+            "managed result requires a paid case"
+        );
+        self.finish(
+            run,
+            id,
+            if body.is_some() {
+                Outcome::ResponseSaved
+            } else {
+                Outcome::TransportUncertain
+            },
+            body,
+        )?;
+        if body.is_some() {
+            ensure!(self.db.execute(
+                "UPDATE cases SET execution='COMPLETED',semantic=?3 WHERE run=?1 AND id=?2 AND execution='RESPONSE_SAVED'",
+                params![run,id,if passed { "PASSED" } else { "FAILED" }])? == 1,
+                "managed completion state changed");
+        }
+        // Retain PENDING until durable application and canonical chain observations
+        // establish whether an authorization escaped and whether it was consumed.
         Ok(())
     }
 }

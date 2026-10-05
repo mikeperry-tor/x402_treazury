@@ -36,6 +36,7 @@ pub async fn plan(m: &Manifest) -> Result<Plan> {
 }
 pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
     m.validate()?;
+    crate::pricing_stages::validate(m, config)?;
     let wallets = config["resolved_wallets"]
         .as_object()
         .context("resolved wallets missing")?;
@@ -109,7 +110,6 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
     } else {
         0
     };
-    let mut reliability: BTreeMap<String, &Window> = BTreeMap::new();
     for p in &m.phases {
         unique(p.depends_on.iter().map(String::as_str), "dependency")?;
         for dependency in &p.depends_on {
@@ -168,6 +168,12 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
                 uncached_case,
             } => {
                 ensure!(
+                    m.start.pools.is_empty()
+                        && declared.is_empty()
+                        && config["funding"]["auto_fund"] != true,
+                    "Tor outage requires a separate keyless deployment with no managed wallets or automatic funding"
+                );
+                ensure!(
                     m.network.tor_mode == TorMode::Owned && phase_unsigned && p.pools.is_empty(),
                     "Tor outage requires owned Tor and unsigned cases"
                 );
@@ -190,46 +196,36 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
                     "outage requires an earlier warm phase as an explicit dependency"
                 );
             }
-            Scenario::Rotation { refill_slots } | Scenario::RefillService { refill_slots } => {
+            Scenario::Rotation {
+                refill_slots,
+                rounds,
+            }
+            | Scenario::RefillService {
+                refill_slots,
+                rounds,
+            } => {
                 ensure!(
                     !phase_unsigned && !p.pools.is_empty() && *refill_slots == 1,
                     "rotation/refill requires paid cases, pools and exactly one refill slot"
-                )
+                );
+                validate_rounds(m, p, rounds, 1, &bindings, config)?;
             }
-            Scenario::Lifecycle { refill_slots, .. } => ensure!(
-                !phase_unsigned && !p.pools.is_empty() && *refill_slots == 2,
-                "lifecycle requires paid cases, pools and exactly two refill slots"
-            ),
-            Scenario::Reliability {
-                min_spacing_seconds,
-                later_utc_day,
+            Scenario::Lifecycle {
+                refill_slots,
+                rounds,
+                ..
             } => {
                 ensure!(
-                    *min_spacing_seconds > 0,
-                    "reliability spacing must be positive"
+                    !phase_unsigned && !p.pools.is_empty() && *refill_slots == 2,
+                    "lifecycle requires paid cases, pools and exactly two refill slots"
                 );
-                for id in &p.cases {
-                    let c = cases[id.as_str()];
-                    let key =
-                        serde_json::to_string(&json!([c.server, c.source, c.tool, c.arguments]))?;
-                    if let Some(previous) = reliability.insert(key, window) {
-                        ensure!(
-                            window.not_before
-                                >= previous
-                                    .not_after
-                                    .checked_add(*min_spacing_seconds)
-                                    .context("window spacing overflow")?,
-                            "reliability windows overlap or lack minimum spacing"
-                        );
-                        if *later_utc_day {
-                            ensure!(
-                                window.not_before / 86400 > previous.not_after / 86400,
-                                "reliability window must be on a later UTC day"
-                            );
-                        }
-                    }
-                }
+                validate_rounds(m, p, rounds, 2, &bindings, config)?;
+                ensure!(
+                    rounds[0].pool == rounds[1].pool,
+                    "lifecycle must rotate the same selected pool twice"
+                );
             }
+            Scenario::Reliability { .. } => {}
             Scenario::ProviderSweep {} => {}
         }
         jobs = jobs
@@ -238,6 +234,7 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         expanded.push(json!({"id":p.id,"scenario":p.scenario,"depends_on":p.depends_on,"window":window,"cases":p.cases,"pools":p.pools,"required":p.required,"call_count":p.cases.len()}));
         seen.insert(p.id.clone());
     }
+    crate::reliability::validate(m)?;
     ensure!(
         used.len() == cases.len(),
         "unused cases: every reviewed case must appear in exactly one phase"
@@ -280,6 +277,81 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         network_disclosures: json!({"policy":config["network"],"base_rpc_policy":config["base_rpc_policy"],"tor":m.network,"external_requests_performed":0,"provider_origins":"resolve during prepare; no catalog downloads during plan"}),
         manifest: m.clone(),
     })
+}
+fn validate_rounds(
+    m: &Manifest,
+    phase: &Phase,
+    rounds: &[RotationRound],
+    count: usize,
+    bindings: &BTreeMap<String, Value>,
+    config: &Value,
+) -> Result<()> {
+    ensure!(
+        rounds.len() == count,
+        "scenario requires exactly {count} rotation rounds"
+    );
+    let mut ordered = Vec::new();
+    for round in rounds {
+        ensure!(
+            phase.pools.contains(&round.pool),
+            "rotation pool is not selected by phase"
+        );
+        ensure!(
+            !round.depletion_cases.is_empty() && !round.service_cases.is_empty(),
+            "rotation requires separate depletion and post-promotion service cases"
+        );
+        let price = usdc(&round.expected_price_usdc)?;
+        ensure!(price > 0, "rotation expected price must be positive");
+        let cap = usdc(
+            config["resolved_wallets"][&round.pool]["max_price_usd"]
+                .as_str()
+                .context("rotation pool cap missing")?,
+        )?;
+        ensure!(
+            price <= cap,
+            "estimated depletion price exceeds effective wallet cap"
+        );
+        let mut first = None;
+        for id in round.depletion_cases.iter().chain(&round.service_cases) {
+            let case = m
+                .cases
+                .iter()
+                .find(|c| &c.id == id)
+                .context("unknown rotation case")?;
+            ensure!(!case.unsigned, "rotation cases must be paid");
+            ensure!(
+                phase.cases.contains(id),
+                "rotation case belongs to a different phase"
+            );
+            ordered.push(id.clone());
+        }
+        for id in &round.depletion_cases {
+            let case = m.cases.iter().find(|c| &c.id == id).expect("checked case");
+            ensure!(
+                bindings[id]["wallet"] == round.pool,
+                "depletion case must use its selected rotation pool"
+            );
+            ensure!(
+                price <= usdc(&case.reserve_usdc)?,
+                "estimated depletion price exceeds case reservation"
+            );
+            let request = (&case.server, &case.source, &case.tool, &case.arguments);
+            ensure!(
+                first.is_none_or(|previous| previous == request),
+                "depletion estimate requires identical reviewed requests within each round"
+            );
+            first = Some(request);
+        }
+        ensure!(
+            bindings[&round.service_cases[0]]["wallet"] == round.pool,
+            "first post-promotion service case must exercise the rotated pool"
+        );
+    }
+    ensure!(
+        ordered == phase.cases,
+        "rotation rounds must cover phase cases exactly once in depletion/service order"
+    );
+    Ok(())
 }
 fn validate_batches(m: &Manifest, p: &Phase, batches: &[Vec<String>]) -> Result<()> {
     ensure!(!batches.is_empty(), "concurrency requires explicit batches");

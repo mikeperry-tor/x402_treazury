@@ -188,6 +188,7 @@ impl PaidClient {
             .as_ref()
             .map(|p| p.read().expect("payer lock poisoned").clone());
         let request = build_request(route)?;
+        let unsigned_only = self.unsigned_only || crate::qualification::unsigned_case();
         let idempotent = matches!(request.method().as_str(), "GET" | "HEAD");
         let mut attempt = 0;
         let mut paid_submission = false;
@@ -196,10 +197,10 @@ impl PaidClient {
         // The new unsigned challenge must use the new identity-bound transport.
         let (response, mut cover, unavailable) = loop {
             let candidate = match &self.managed {
-                Some(pool) => Some(pool.candidate().await?),
-                None => None,
+                Some(pool) if !unsigned_only => Some(pool.candidate().await?),
+                _ => None,
             };
-            let identity = if self.unsigned_only {
+            let identity = if unsigned_only {
                 crate::network::IsolationId::discovery(request.url().as_str())?
             } else {
                 let address = candidate
@@ -261,10 +262,11 @@ impl PaidClient {
             }
             crate::network::log_http(&response, "payment_challenge");
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
-                if self.unsigned_only {
+                crate::qualification::record_challenge(response.headers()).await?;
+                if unsigned_only {
                     tracing::warn!(
                         code = "qualification_payment_denied",
-                        "unsigned-only qualification refused HTTP 402; no signing key loaded and no paid retry sent"
+                        "unsigned qualification case refused HTTP 402; no payment signed or retried"
                     );
                     bail!(
                         "qualification_payment_denied: unsigned-only mode; HTTP 402 received; no payment signed or retried"

@@ -26,33 +26,45 @@ impl BoundTool {
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
         if let Some(url) = &self.tool.help_url {
-            Ok(crate::output::ToolOutput::text(
-                self.help
-                    .get_or_try_init(|| async {
-                        let response = crate::network::provider_discovery(
-                            url,
-                            self.client.timeout(),
-                            self.client.transport(),
-                        )?
-                        .get(url)
-                        .send()
-                        .await
-                        .map_err(reqwest::Error::without_url)?
-                        .error_for_status()
-                        .map_err(reqwest::Error::without_url)?;
-                        crate::network::log_http(&response, "help");
-                        let bytes = crate::limits::read(
-                            response,
-                            self.client.max_help_bytes(),
-                            "help document",
-                            "max_help_bytes",
-                        )
-                        .await?;
-                        Ok::<_, anyhow::Error>(String::from_utf8_lossy(&bytes).into_owned())
-                    })
-                    .await?
-                    .clone(),
-            ))
+            let already_cached = self.help.get().is_some();
+            crate::qualification::record_help(true, None, None).await?;
+            let fetched = std::sync::atomic::AtomicBool::new(false);
+            let result = self
+                .help
+                .get_or_try_init(|| async {
+                    fetched.store(true, std::sync::atomic::Ordering::Relaxed);
+                    let response = crate::network::provider_discovery(
+                        url,
+                        self.client.timeout(),
+                        self.client.transport(),
+                    )?
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(reqwest::Error::without_url)?
+                    .error_for_status()
+                    .map_err(reqwest::Error::without_url)?;
+                    crate::network::log_http(&response, "help");
+                    let bytes = crate::limits::read(
+                        response,
+                        self.client.max_help_bytes(),
+                        "help document",
+                        "max_help_bytes",
+                    )
+                    .await?;
+                    Ok::<_, anyhow::Error>(String::from_utf8_lossy(&bytes).into_owned())
+                })
+                .await
+                .cloned();
+            let cache = if fetched.load(std::sync::atomic::Ordering::Relaxed) {
+                crate::qualification::HelpCache::Fetch
+            } else if already_cached {
+                crate::qualification::HelpCache::Hit
+            } else {
+                crate::qualification::HelpCache::Shared
+            };
+            crate::qualification::record_help(false, Some(cache), Some(&result)).await?;
+            Ok(crate::output::ToolOutput::text(result?))
         } else {
             self.client
                 .execute_response(self.tool.route(&self.base, args)?)

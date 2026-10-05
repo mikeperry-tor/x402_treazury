@@ -1,0 +1,86 @@
+# TEMPLATE: fill treasury/run/authority IDs, paths and UTC windows before use.
+# See SCENARIO_PRESETS.md. All cases are explicit; no automatic replay or expansion.
+version = 1
+run_id = "replace_with_unique_run_id"
+treasury_id = "replace_with_treasury_uuid"
+deployment = "./single-deployment.example.toml"
+binary = "../../../target/debug/treazury"
+evidence_dir = "../../../target/live-integration/replace_with_unique_run_id"
+registry_authorization = "replace_with_authorization_id"
+
+[start]
+mode = "funded_pools"
+pools = ["test_pool"]
+
+[network]
+tor_mode = "owned"
+tor_binary = "/replace/with/installed/tor"
+confinement = "macos_sandbox"
+require_isolation_evidence = true
+
+[limits]
+api_reservation_usdc = "0.40"
+new_funding_jobs = 0
+source_exposure_zec = "0"
+max_in_flight = 2
+run_seconds = 172800
+phase_seconds = 7200
+call_seconds = 300
+cleanup_seconds = 900
+result_bytes = 16777216
+
+[catalog]
+execution = "frozen"
+record_live_discovery = true
+
+[[windows]]
+id = "main"
+not_before = 0
+not_after = 0
+
+[[windows]]
+id = "later"
+not_before = 0
+not_after = 0
+
+[[cases]]
+id = "observe_first"
+server = "a"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+checks = [{ "kind" = "json_equals", "pointer" = "/data/lookupStatus", "value" = "found" }, { "kind" = "json_exists", "pointer" = "/data/profile" }]
+
+[[cases]]
+id = "observe_later"
+server = "a"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+checks = [{ "kind" = "json_equals", "pointer" = "/data/lookupStatus", "value" = "found" }, { "kind" = "json_exists", "pointer" = "/data/profile" }]
+
+[[phases]]
+id = "first"
+window = "main"
+cases = ["observe_first"]
+pools = ["test_pool"]
+required = true
+[phases.scenario]
+kind = "reliability"
+min_spacing_seconds = 60
+later_utc_day = true
+
+[[phases]]
+id = "later"
+window = "later"
+cases = ["observe_later"]
+pools = ["test_pool"]
+required = true
+[phases.scenario]
+kind = "reliability"
+min_spacing_seconds = 60
+later_utc_day = true

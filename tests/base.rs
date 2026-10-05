@@ -64,6 +64,19 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
                     vec![]
                 }
             );
+            assert_eq!(view.resolutions.len(), usize::from(released));
+            if released {
+                use x402_treazury::rotation::base::AuthorizationOutcome;
+                assert_eq!(
+                    view.resolutions["attempt"].outcome,
+                    if nonce == 1 {
+                        AuthorizationOutcome::Used
+                    } else {
+                        AuthorizationOutcome::ExpiredUnused
+                    }
+                );
+                assert_eq!(view.resolutions["attempt"].block_time, stamp);
+            }
             let calls = requests.lock().unwrap().clone();
             let calls = calls
                 .iter()

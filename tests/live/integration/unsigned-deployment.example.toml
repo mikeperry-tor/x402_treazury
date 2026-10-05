@@ -1,0 +1,21 @@
+version = 1
+[network]
+mode = "tor"
+socks_endpoint = "127.0.0.1:19450"
+isolation_namespace = "integration_unsigned_replace_me"
+socks_auth = "tor_extended"
+[wallets.keyless]
+mode = "static"
+# Qualification unsigned mode never reads this variable or loads a signer.
+private_key_env = "UNSET_UNSIGNED_KEY"
+[sources.directory]
+extends = "../../../providers/x402-list.toml"
+prefix = "directory"
+overrides = {}
+probe_pricing = false
+[servers.directory]
+listen = "127.0.0.1:18484"
+wallet = "keyless"
+bearer_token_env = "INTEGRATION_DIRECTORY_TOKEN"
+sources = ["directory"]
+include_tools = ["directory_best", "directory_help"]

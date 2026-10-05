@@ -348,3 +348,13 @@ fn near_diagnostics_preserve_stage_and_safe_categories_only() {
             .contains("NEAR asset catalog: invalid asset catalog")
     );
 }
+
+#[test]
+fn permit_denial_remains_actionable_without_leaking_registry_errors() {
+    let error = anyhow::anyhow!("private registry path and database detail")
+        .context(crate::rotation::error::AdmissionError::FundingPermitDenied);
+    let message = super::safe_error(&error, &super::FundingPhase::Quoted);
+    assert!(message.contains("qualification_funding_denied"));
+    assert!(message.contains("inspect qualification registry"));
+    assert!(!message.contains("private registry path"));
+}

@@ -1,64 +1,85 @@
-# Copy to a private directory and supply reviewed deployment/state references.
-# Zero window and placeholder UUID deliberately prevent execution.
+# TEMPLATE: fill treasury/run/authority IDs, paths and UTC windows before use.
+# See SCENARIO_PRESETS.md. All cases are explicit; no automatic replay or expansion.
 version = 1
 run_id = "replace_with_unique_run_id"
 treasury_id = "replace_with_treasury_uuid"
-deployment = "./deployment.local.toml"
+deployment = "./managed-deployment.example.toml"
 binary = "../../../target/debug/treazury"
 evidence_dir = "../../../target/live-integration/replace_with_unique_run_id"
 registry_authorization = "replace_with_authorization_id"
+
 [start]
 mode = "funded_pools"
-pools = ["test_pool"]
+pools = ["test_pool", "independent_pool"]
+
 [network]
 tor_mode = "owned"
 tor_binary = "/replace/with/installed/tor"
 confinement = "macos_sandbox"
 require_isolation_evidence = true
+
 [limits]
-api_reservation_usdc = "0.028"
+api_reservation_usdc = "0.80"
 new_funding_jobs = 0
 source_exposure_zec = "0"
 max_in_flight = 2
-run_seconds = 3600
-phase_seconds = 1800
+run_seconds = 14400
+phase_seconds = 7200
 call_seconds = 300
 cleanup_seconds = 900
 result_bytes = 16777216
+
 [catalog]
 execution = "frozen"
 record_live_discovery = true
+
 [[windows]]
 id = "main"
 not_before = 0
 not_after = 0
 
-# Each reservation must cover the configured wallet cap, not merely the quoted fee.
-
 [[cases]]
-id = "profile_1"
-server = "b"
-source = "socialfetch"
-tool = "socialfetch_twitter_profiles_handle"
-arguments = { handle = "rustlang" }
-reserve_usdc = "0.014"
+id = "shared_a"
+server = "a"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
 reviewed_read_only = true
 
 [[cases]]
-id = "profile_2"
+id = "shared_b"
 server = "b"
-source = "socialfetch"
-tool = "socialfetch_twitter_profiles_handle"
-arguments = { handle = "rustlang" }
-reserve_usdc = "0.014"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "parallel_a"
+server = "a"
+source = "shared"
+tool = "shared_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+
+[[cases]]
+id = "parallel_c"
+server = "c"
+source = "independent"
+tool = "independent_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
 reviewed_read_only = true
 
 [[phases]]
-id = "main"
+id = "concurrent"
 window = "main"
-cases = ["profile_1", "profile_2"]
-pools = ["test_pool"]
+cases = ["shared_a", "shared_b", "parallel_a", "parallel_c"]
+pools = ["test_pool", "independent_pool"]
 required = true
 [phases.scenario]
 kind = "concurrency"
-batches = [["profile_1", "profile_2"]]
+batches = [["shared_a", "shared_b"], ["parallel_a", "parallel_c"]]

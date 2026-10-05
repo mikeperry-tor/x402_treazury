@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 impl Registry {
     pub fn application_failure(&self, run: &str, case: &str) -> Result<Option<String>> {
-        let (count, category):(i64,Option<String>) = self.db.query_row("SELECT COUNT(*),MIN(json_extract(detail,'$.failure_category')) FROM events WHERE run=?1 AND kind='application_finished' AND json_extract(detail,'$.case')=?2", params![run,case], |r| Ok((r.get(0)?,r.get(1)?)))?;
+        let (count, category):(i64,Option<String>) = self.db.query_row("SELECT COUNT(*),MIN(json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.failure_category')) FROM events WHERE run=?1 AND kind='application_finished' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2", params![run,case], |r| Ok((r.get(0)?,r.get(1)?)))?;
         ensure!(
             count == 1,
             "expected exactly one application completion for case {case}"
@@ -40,15 +40,17 @@ impl Registry {
             );
             if kind == "application_claim" {
                 ensure!(
-                    case.unsigned
-                        && event["mode"] == "unsigned"
+                    event["mode"] == (if case.unsigned { "unsigned" } else { "managed" })
                         && event["server"] == case.server
                         && event["source"] == case.source
                         && event["tool"] == case.tool,
                     "application claim differs from reviewed binding"
                 );
                 ensure!(
-                    self.execution_state(run, &id)? != "UNATTEMPTED",
+                    !matches!(
+                        self.execution_state(run, &id)?.as_str(),
+                        "UNATTEMPTED" | "SKIPPED_TARGET_REACHED"
+                    ),
                     "application accepted an unreserved case"
                 );
                 ensure!(
@@ -96,8 +98,136 @@ impl Registry {
             .keys()
             .filter(|id| !finished.contains_key(*id))
             .collect();
+        let payment_attempts = self.payment_evidence(run, &claims)?;
+        let receipts = self.receipt_evidence(run, payment_attempts)?;
+        let debits = self.verified_debits(run)?;
         Ok(
-            json!({"claims":claims.len(),"finished":finished.len(),"without_completion":pending,"scope":"keyless application acceptance/completion; no signed payment or Tor isolation qualification"}),
+            json!({"verified_debits":debits,"seller_receipts":receipts,"claims":claims.len(),"finished":finished.len(),"without_completion":pending,"payment_attempts_correlated":payment_attempts,"scope":"application acceptance/completion, pre-signing admission correlation and canonical receipt debit proofs; settlement status and Tor isolation are reported separately"}),
         )
+    }
+    fn receipt_evidence(&self, run: &str, admissions: usize) -> Result<Value> {
+        let mut query = self.db.prepare("SELECT detail FROM events WHERE run=?1 AND kind='application_receipt' ORDER BY seq LIMIT 10001")?;
+        let rows = query
+            .query_map([run], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ensure!(
+            rows.len() <= 10000,
+            "receipt evidence exceeds 10000-event limit"
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        let mut counts = BTreeMap::<String, usize>::new();
+        for raw in &rows {
+            let event: Value = serde_json::from_str(raw)?;
+            let case = event["case"].as_str().context("receipt case missing")?;
+            ensure!(
+                seen.insert(case.to_owned()),
+                "duplicate receipt observation"
+            );
+            let payment: String = self.db.query_row(
+                "SELECT detail FROM events WHERE run=?1 AND kind='application_payment' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2",
+                params![run,case], |r| r.get(0)).context("receipt lacks payment admission")?;
+            let payment: Value = serde_json::from_str(&payment)?;
+            ensure!(
+                event["session"] == payment["session"]
+                    && event["attempt_id"] == payment["attempt_id"],
+                "receipt differs from admitted payment"
+            );
+            let receipt = &event["receipt"];
+            let classification = receipt["classification"]
+                .as_str()
+                .context("receipt classification missing")?;
+            ensure!(
+                matches!(
+                    classification,
+                    "missing"
+                        | "duplicate"
+                        | "oversized"
+                        | "malformed"
+                        | "seller_success"
+                        | "seller_failure"
+                        | "transport_unknown"
+                ),
+                "unknown receipt classification"
+            );
+            if classification == "seller_success" {
+                ensure!(
+                    receipt["network"] == "eip155:8453"
+                        && receipt["transaction"]
+                            .as_str()
+                            .and_then(|s| s.parse::<alloy_primitives::B256>().ok())
+                            .is_some_and(|v| !v.is_zero()),
+                    "invalid successful seller receipt"
+                );
+                if let Some(payer) = receipt.get("payer") {
+                    let payer: alloy_primitives::Address =
+                        payer.as_str().context("receipt payer malformed")?.parse()?;
+                    let admitted: alloy_primitives::Address = payment["address"]
+                        .as_str()
+                        .context("admitted payer missing")?
+                        .parse()?;
+                    ensure!(
+                        payer == admitted,
+                        "seller receipt payer differs from admitted wallet"
+                    );
+                }
+            }
+            *counts.entry(classification.into()).or_default() += 1;
+        }
+        Ok(
+            json!({"recorded":rows.len(),"without_observation":admissions.checked_sub(rows.len()).context("receipts exceed admissions")?,
+            "classifications":counts,"meaning":"seller claims only; transaction receipt and USDC debit still require chain verification"}),
+        )
+    }
+    fn payment_evidence(&self, run: &str, claims: &BTreeMap<String, Value>) -> Result<usize> {
+        let m = self.manifest(run)?;
+        let mut query = self.db.prepare("SELECT detail FROM events WHERE run=?1 AND kind='application_payment' ORDER BY seq LIMIT 10001")?;
+        let rows = query
+            .query_map([run], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ensure!(
+            rows.len() <= 10000,
+            "payment evidence exceeds 10000-attempt run limit"
+        );
+        let mut cases = std::collections::BTreeSet::new();
+        let mut attempts = std::collections::BTreeSet::new();
+        for raw in &rows {
+            let event: Value = serde_json::from_str(raw)?;
+            let case = event["case"]
+                .as_str()
+                .context("payment evidence lacks case")?;
+            let reviewed = m
+                .cases
+                .iter()
+                .find(|c| c.id == case)
+                .context("payment has unreviewed case")?;
+            let claim = claims
+                .get(case)
+                .context("payment lacks application claim")?;
+            ensure!(
+                !reviewed.unsigned
+                    && claim["session"] == event["session"]
+                    && event["stage"] == "admitted_before_signing",
+                "payment differs from accepted case"
+            );
+            let amount: u64 = event["amount"]
+                .as_str()
+                .context("payment amount missing")?
+                .parse()?;
+            ensure!(
+                amount > 0 && amount <= super::atomic_usdc(&reviewed.reserve_usdc)?,
+                "payment exceeds case reservation"
+            );
+            ensure!(
+                cases.insert(case.to_owned())
+                    && attempts.insert(
+                        event["attempt_id"]
+                            .as_str()
+                            .context("payment attempt missing")?
+                            .to_owned()
+                    ),
+                "duplicate payment case/attempt evidence"
+            );
+        }
+        Ok(rows.len())
     }
 }

@@ -29,6 +29,9 @@ struct Args {
         conflicts_with = "env_file"
     )]
     qualification_unsigned: bool,
+    /// Internal managed serving mode; registry-bound and parent supervised.
+    #[arg(long, hide=true, requires="qualification_binding", requires="qualification_parent_stdin", conflicts_with_all=["qualification_unsigned","env_file"])]
+    qualification_managed: bool,
     /// Internal lifetime channel: EOF on piped stdin initiates deliberate shutdown.
     #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
     qualification_parent_stdin: bool,
@@ -36,10 +39,10 @@ struct Args {
     network_config: Option<std::path::PathBuf>,
     #[arg(long, requires = "meta_config")]
     check: bool,
-    #[arg(long, hide=true, requires="meta_config", conflicts_with_all=["check","show_config","list_tools","list_tags","route_tool","qualification_unsigned","qualification_parent_stdin","qualification_no_new_funding"])]
+    #[arg(long, hide=true, requires="meta_config", conflicts_with_all=["check","show_config","list_tools","list_tags","route_tool","qualification_unsigned","qualification_managed","qualification_parent_stdin","qualification_no_new_funding"])]
     qualification_snapshot: bool,
-    /// Internal private binding for registry-reviewed unsigned cases.
-    #[arg(long, hide = true, requires = "qualification_unsigned")]
+    /// Internal private binding for registry-reviewed supervised cases.
+    #[arg(long, hide = true, requires = "qualification_parent_stdin")]
     qualification_binding: Option<std::path::PathBuf>,
     #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
     show_config: bool,
@@ -274,6 +277,7 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "env_file",
                         "qualification_no_new_funding",
                         "qualification_unsigned",
+                        "qualification_managed",
                         "qualification_parent_stdin",
                         "qualification_snapshot",
                         "qualification_binding"
@@ -329,7 +333,39 @@ async fn run_deployment(
     let mut parent =
         x402_treazury::supervision::Parent::from_stdin(args.qualification_parent_stdin)?;
     if let Some(binding) = &args.qualification_binding {
-        x402_treazury::qualification::install(binding, path)?;
+        ensure!(
+            args.qualification_unsigned || args.qualification_managed,
+            "qualification binding requires an explicit unsigned or managed mode"
+        );
+        if args.qualification_managed {
+            ensure!(
+                cfg!(feature = "zcash"),
+                "managed qualification requires the zcash feature"
+            );
+            x402_treazury::qualification::install_managed(binding, path)?;
+        } else {
+            x402_treazury::qualification::install(binding, path)?;
+        }
+    }
+    if args.qualification_snapshot {
+        let (result, stages) = tokio::select! {
+            result = x402_treazury::deployment::Deployment::inspect_catalogs(path) => result,
+            closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog inspection"); }
+        };
+        let mut snapshot = match &result {
+            Ok(deployment) => deployment.qualification_snapshot(),
+            Err(_) => serde_json::json!({"version":1,"preparation_failed":true}),
+        };
+        snapshot["catalog_stages"] = serde_json::to_value(stages)?;
+        let bytes = serde_json::to_vec(&snapshot)?;
+        ensure!(
+            bytes.len() < x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES,
+            "qualification snapshot exceeds {}-byte limit including newline; split the deployment into smaller qualification runs",
+            x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES
+        );
+        println!("{}", std::str::from_utf8(&bytes)?);
+        result?;
+        return Ok(());
     }
     let loading = async {
         if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
@@ -342,15 +378,6 @@ async fn run_deployment(
         result = loading => result?,
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog startup; no server started"); }
     };
-    if args.qualification_snapshot {
-        let snapshot = serde_json::to_vec(&deployment.qualification_snapshot())?;
-        ensure!(
-            snapshot.len() <= 16 * 1024 * 1024,
-            "qualification snapshot exceeds 16777216-byte limit; narrow the source catalogs"
-        );
-        println!("{}", std::str::from_utf8(&snapshot)?);
-        return Ok(());
-    }
     if args.list_tags {
         println!(
             "{}",

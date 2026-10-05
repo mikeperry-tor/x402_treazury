@@ -100,6 +100,51 @@ pub struct Process {
     pub fault: CancellationToken,
     output: [(Arc<Mutex<Output>>, JoinHandle<()>); 2],
 }
+
+/// Own a process across a cancellable restart/drain await. The cleanup task is
+/// retained here, so dropping a waiter does not drop (and kill) the owned child.
+/// The supervisor must await `finish_shutdown` outside its cancellation select.
+pub struct ProcessSlot {
+    running: Option<Process>,
+    draining: Option<JoinHandle<Result<Evidence>>>,
+}
+impl ProcessSlot {
+    pub fn new(process: Process) -> Self {
+        Self {
+            running: Some(process),
+            draining: None,
+        }
+    }
+    pub fn running(&mut self) -> Result<&mut Process> {
+        self.running
+            .as_mut()
+            .context("application is draining or stopped; dispatch refused")
+    }
+    pub fn begin_shutdown(&mut self, reason: &str, cleanup: Duration) -> Result<()> {
+        ensure!(
+            !cleanup.is_zero() && cleanup <= Duration::from_secs(86400),
+            "invalid child cleanup deadline"
+        );
+        if self.draining.is_some() {
+            return Ok(()); // retain the original reason, deadline and child handle
+        }
+        let process = self.running.take().context("application already stopped")?;
+        let reason = reason.to_owned();
+        self.draining = Some(tokio::spawn(async move {
+            process.shutdown(&reason, cleanup).await
+        }));
+        Ok(())
+    }
+    pub async fn finish_shutdown(&mut self) -> Result<Evidence> {
+        let result = self
+            .draining
+            .as_mut()
+            .context("application shutdown not started")?
+            .await;
+        self.draining.take();
+        result.context("application cleanup task failed")?
+    }
+}
 impl Process {
     pub fn launch_confined(
         binary: &Path,
@@ -143,9 +188,9 @@ impl Process {
         limit: usize,
     ) -> Result<Self> {
         ensure!(
-            (1..=super::files::DOCUMENT_BYTES).contains(&limit),
+            (1..=super::files::CATALOG_BYTES).contains(&limit),
             "child output limit must be 1..{} bytes per stream",
-            super::files::DOCUMENT_BYTES
+            super::files::CATALOG_BYTES
         );
         let mut command = tokio::process::Command::new(binary);
         command
@@ -340,5 +385,45 @@ mod tests {
         assert_eq!(e.reason, "deadline");
         let e = shell("/bin/sleep 1 & exit 0", 128, Duration::from_secs(2)).await;
         assert!(e.stdout.pipe_incomplete || e.stderr.pipe_incomplete);
+    }
+    #[tokio::test]
+    async fn cancelled_drain_wait_preserves_child_cleanup_and_original_deadline() {
+        let dir = tempfile::tempdir().unwrap();
+        let process = Process::launch(
+            Path::new("/bin/sh"),
+            &[
+                "-c".into(),
+                "while read line; do :; done; /bin/sleep 0.1; printf drained".into(),
+            ],
+            &BTreeMap::new(),
+            dir.path(),
+            1024,
+        )
+        .unwrap();
+        let mut slot = ProcessSlot::new(process);
+        assert!(slot.begin_shutdown("invalid", Duration::ZERO).is_err());
+        assert!(slot.running().is_ok());
+        slot.begin_shutdown("restart_checkpoint", Duration::from_secs(3))
+            .unwrap();
+        assert!(slot.running().is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), slot.finish_shutdown())
+                .await
+                .is_err()
+        );
+        // A cancellation cleanup path must join the same task, not shorten its
+        // deadline or start another shutdown against a recorded PID.
+        slot.begin_shutdown("cancelled", Duration::from_millis(1))
+            .unwrap();
+        let evidence = slot.finish_shutdown().await.unwrap();
+        assert!(evidence.success && !evidence.forced_kill && evidence.valid_output());
+        assert_eq!(evidence.reason, "restart_checkpoint");
+        assert_eq!(evidence.stdout.bytes, b"drained");
+        assert!(slot.running().is_err());
+        assert!(slot.finish_shutdown().await.is_err());
+        assert!(
+            slot.begin_shutdown("again", Duration::from_secs(1))
+                .is_err()
+        );
     }
 }

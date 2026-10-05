@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -23,6 +23,8 @@ pub struct Manifest {
     pub windows: Vec<Window>,
     pub cases: Vec<Case>,
     pub phases: Vec<Phase>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pricing_checks: BTreeMap<String, crate::pricing_stages::Expectation>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +106,12 @@ pub struct Case {
     pub reviewed_read_only: bool,
     #[serde(default)]
     pub unsigned: bool,
+    /// Reviewed provider-body assertions; omission never certifies provider semantics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<crate::semantics::Check>,
+    /// Successful help response must use this cache path; never grants a new request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help_cache: Option<crate::help::ExpectedCache>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -134,18 +142,31 @@ pub enum Scenario {
     },
     Rotation {
         refill_slots: u32,
+        rounds: Vec<RotationRound>,
     },
     RefillService {
         refill_slots: u32,
+        rounds: Vec<RotationRound>,
     },
     Lifecycle {
         refill_slots: u32,
         restart: Restart,
+        rounds: Vec<RotationRound>,
     },
     Reliability {
         min_spacing_seconds: u64,
         later_utc_day: bool,
     },
+}
+/// Each round stops depletion at one observed promotion, then uses separate calls.
+/// Price is a reviewed estimate only; production challenges and caps remain authoritative.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationRound {
+    pub pool: String,
+    pub expected_price_usdc: String,
+    pub depletion_cases: Vec<String>,
+    pub service_cases: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -156,8 +177,8 @@ pub enum Restart {
 impl Scenario {
     pub fn refill_slots(&self) -> u32 {
         match self {
-            Self::Rotation { refill_slots }
-            | Self::RefillService { refill_slots }
+            Self::Rotation { refill_slots, .. }
+            | Self::RefillService { refill_slots, .. }
             | Self::Lifecycle { refill_slots, .. } => *refill_slots,
             _ => 0,
         }
@@ -275,6 +296,11 @@ impl Manifest {
                 "invalid tool name"
             );
             let reserve = usdc(&c.reserve_usdc)?;
+            crate::semantics::validate(&c.checks)?;
+            ensure!(
+                c.help_cache.is_none() || c.unsigned,
+                "help_cache assertions require an unsigned case"
+            );
             ensure!(
                 (c.unsigned && reserve == 0) || (!c.unsigned && reserve > 0),
                 "case {} unsigned/reservation mismatch",
@@ -288,15 +314,14 @@ impl Manifest {
             (1..=64).contains(&l.max_in_flight) && l.new_funding_jobs <= 1000,
             "invalid concurrency/funding-job limits"
         );
-        for n in [
-            l.run_seconds,
-            l.phase_seconds,
-            l.call_seconds,
-            l.cleanup_seconds,
-        ] {
+        ensure!(
+            (1..=604800).contains(&l.run_seconds),
+            "run deadline must be 1..604800 seconds (seven days); no automatic extension"
+        );
+        for n in [l.phase_seconds, l.call_seconds, l.cleanup_seconds] {
             ensure!(
                 (1..=86400).contains(&n),
-                "deadline must be 1..86400 seconds"
+                "call/phase/cleanup deadline must be 1..86400 seconds"
             );
         }
         ensure!(

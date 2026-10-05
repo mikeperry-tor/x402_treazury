@@ -32,7 +32,7 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     // Simulate a database produced by the offline foundation, before admission tables.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=0;",
+        "DROP TABLE payment_resolutions; DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=0;",
     )
     .unwrap();
     drop(db);
@@ -351,7 +351,7 @@ fn sync_schema_migrates_admission_state_without_changing_wallet() {
     drop(s);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=1;",
+        "DROP TABLE payment_resolutions; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=1;",
     )
     .unwrap();
     drop(db);
@@ -854,6 +854,7 @@ fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
         ]
         .into(),
         released: vec![],
+        resolutions: Default::default(),
     };
     // Initial zeroes are unfunded allocations, not exhaustion.
     store.reconcile_pool(&pool, view(0, 0)).unwrap();

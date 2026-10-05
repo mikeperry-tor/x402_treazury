@@ -10,6 +10,7 @@ use std::{
     path::Path,
 };
 pub const DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
+pub const CATALOG_BYTES: usize = x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES;
 pub fn regular(path: &Path) -> Result<()> {
     let m = std::fs::symlink_metadata(path)?;
     ensure!(
@@ -71,13 +72,19 @@ pub fn lock(path: &Path) -> Result<Ownership> {
     Ok(Ownership(file))
 }
 pub fn read(path: &Path) -> Result<Vec<u8>> {
+    read_bounded(path, DOCUMENT_BYTES)
+}
+pub fn read_catalog(path: &Path) -> Result<Vec<u8>> {
+    read_bounded(path, CATALOG_BYTES)
+}
+fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     File::open(path)?
-        .take(DOCUMENT_BYTES as u64 + 1)
+        .take(limit as u64 + 1)
         .read_to_end(&mut bytes)?;
     ensure!(
-        bytes.len() <= DOCUMENT_BYTES,
-        "document exceeds {DOCUMENT_BYTES} byte limit: {}",
+        bytes.len() <= limit,
+        "document exceeds {limit} byte limit: {}",
         path.display()
     );
     Ok(bytes)
@@ -103,10 +110,13 @@ pub fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 pub fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
-    ensure!(
-        bytes.len() <= DOCUMENT_BYTES,
-        "evidence exceeds {DOCUMENT_BYTES} byte limit"
-    );
+    publish_bounded(path, bytes, DOCUMENT_BYTES)
+}
+pub fn publish_catalog(path: &Path, bytes: &[u8]) -> Result<()> {
+    publish_bounded(path, bytes, CATALOG_BYTES)
+}
+fn publish_bounded(path: &Path, bytes: &[u8], limit: usize) -> Result<()> {
+    ensure!(bytes.len() <= limit, "evidence exceeds {limit} byte limit");
     let parent = path.parent().context("evidence parent missing")?;
     directory(parent)?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
@@ -117,4 +127,29 @@ pub fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
         .context("evidence already exists; refusing overwrite")?;
     File::open(parent)?.sync_all()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn bounded_documents_refuse_overflow_and_never_publish_partial_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let private = tmp.path().join("private");
+        create_dir(&private).unwrap();
+        let path = private.join("evidence");
+        let error = publish_bounded(&path, b"12345", 4).unwrap_err();
+        assert!(error.to_string().contains("4 byte limit"));
+        assert!(!path.exists());
+        publish_bounded(&path, b"1234", 4).unwrap();
+        assert_eq!(read_bounded(&path, 4).unwrap(), b"1234");
+        assert!(
+            read_bounded(&path, 3)
+                .unwrap_err()
+                .to_string()
+                .contains("3 byte limit")
+        );
+        assert!(publish_bounded(&path, b"12", 4).is_err());
+        assert_eq!(read_bounded(&path, 4).unwrap(), b"1234");
+    }
 }

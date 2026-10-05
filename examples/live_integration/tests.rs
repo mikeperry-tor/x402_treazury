@@ -1,6 +1,6 @@
 use super::{manifest::*, planner};
 use serde_json::{Value, json};
-fn manifest() -> Manifest {
+pub(super) fn manifest() -> Manifest {
     serde_json::from_value(json!({
         "version":1,"run_id":"test_run","treasury_id":"11111111-1111-4111-8111-111111111111",
         "deployment":"deploy.toml","binary":"treazury","evidence_dir":"evidence","registry_authorization":"review_1",
@@ -103,9 +103,17 @@ fn explicit_concurrency_and_bootstrap_refill_slots() {
     );
     m.limits.max_in_flight = 1;
     assert!(planner::build(&m, &config()).is_err());
+    for id in ["third", "fourth"] {
+        let mut case = m.cases[0].clone();
+        case.id = id.into();
+        m.cases.push(case);
+        m.phases[0].cases.push(id.into());
+    }
+    m.limits.api_reservation_usdc = "0.08".into();
     m.phases[0].scenario = Scenario::Lifecycle {
         refill_slots: 2,
         restart: Restart::QueuedRefill,
+        rounds: vec![round("call", "second"), round("third", "fourth")],
     };
     m.start.mode = StartMode::TreasuryOnly;
     m.limits.new_funding_jobs = 3;
@@ -122,6 +130,7 @@ fn explicit_concurrency_and_bootstrap_refill_slots() {
 #[test]
 fn reliability_windows_do_not_reset_budget_or_reuse_case_ids() {
     let mut m = manifest();
+    m.limits.run_seconds = 172800;
     m.phases[0].scenario = Scenario::Reliability {
         min_spacing_seconds: 60,
         later_utc_day: true,
@@ -217,7 +226,22 @@ fn outage_plan_requires_owned_tor_final_phase_and_warm_dependency() {
     m.network.tor_binary = Some("/tor".into());
     let mut cfg = config();
     cfg["network"]["mode"] = json!("tor");
+    let error = planner::build(&m, &cfg).err().unwrap();
+    assert!(error.to_string().contains("no managed wallets"));
+    cfg["resolved_wallets"] = json!({"pool":{"mode":"static","max_price_usd":"0.02"}});
     planner::build(&m, &cfg).unwrap();
+    let mut bad_config = cfg.clone();
+    bad_config["resolved_wallets"]["unused"] =
+        json!({"mode":"zcash_rotation","max_price_usd":"0.02"});
+    assert!(planner::build(&m, &bad_config).is_err());
+    let mut bad_config = cfg.clone();
+    bad_config["funding"]["auto_fund"] = json!(true);
+    assert!(planner::build(&m, &bad_config).is_err());
+    let mut managed = m.clone();
+    managed.start.pools.push("pool".into());
+    let mut managed_config = cfg.clone();
+    managed_config["resolved_wallets"]["pool"]["mode"] = json!("zcash_rotation");
+    assert!(planner::build(&managed, &managed_config).is_err());
     let mut bad = m.clone();
     bad.phases[1].depends_on.clear();
     assert!(planner::build(&bad, &cfg).is_err());
@@ -245,4 +269,159 @@ fn settling_interval_is_explicit_and_bounded_by_phase() {
     m.limits.phase_seconds = 1;
     m.limits.call_seconds = 1;
     assert!(m.validate().is_err());
+}
+
+#[test]
+fn paid_success_requires_actual_debit_but_unsigned_help_does_not() {
+    let mut m = manifest();
+    let proof = std::collections::BTreeMap::from([("call".into(), json!({}))]);
+    let empty = std::collections::BTreeMap::new();
+    for (settlement, semantic, with_proof, expected) in [
+        ("USED", "PASSED", false, false),
+        ("USED", "PASSED", true, true),
+        ("NOT_SIGNED", "PASSED", false, false),
+        ("EXPIRED_UNUSED", "PASSED", false, false),
+        ("NOT_SIGNED", "FAILED", false, true),
+        ("EXPIRED_UNUSED", "FAILED", false, true),
+    ] {
+        let case = json!({"case":"call","settlement":settlement,"semantic":semantic});
+        assert_eq!(
+            super::execution::debit_complete(&case, &m, if with_proof { &proof } else { &empty }),
+            expected
+        );
+    }
+    m.cases[0].unsigned = true;
+    assert!(super::execution::debit_complete(
+        &json!({"case":"call","settlement":"NOT_SIGNED","semantic":"PASSED"}),
+        &m,
+        &empty
+    ));
+}
+
+#[test]
+fn funding_launch_requires_explicit_flag_and_zero_authority_never_enables_it() {
+    let mut m = manifest();
+    let mut config: x402_treazury::deployment::MetaConfig =
+        toml::from_str(include_str!("../public-swap-demo.toml")).unwrap();
+    config.funding.as_mut().unwrap().auto_fund = true;
+    assert!(!super::execution::funding_enabled(&m, &config, true).unwrap());
+    m.limits.new_funding_jobs = 2;
+    assert!(super::execution::funding_enabled(&m, &config, false).is_err());
+    assert!(super::execution::funding_enabled(&m, &config, true).unwrap());
+    config.funding.as_mut().unwrap().auto_fund = false;
+    assert!(super::execution::funding_enabled(&m, &config, true).is_err());
+    config.funding.as_mut().unwrap().auto_fund = true;
+    m.start.pools.clear();
+    assert!(super::execution::funding_enabled(&m, &config, true).is_err());
+}
+
+#[test]
+fn payment_wait_observes_successful_peers_without_waiting_for_undispatched_work() {
+    let m = manifest();
+    let mut report = json!({"cases":[
+        {"case":"call","execution":"COMPLETED","semantic":"PASSED","settlement":"PENDING"},
+        {"case":"other","execution":"COMPLETED","semantic":"FAILED","settlement":"PENDING"}],
+        "runtime_events":[{"kind":"application_payment","detail":{"case":"call"}}]});
+    let empty = std::collections::BTreeMap::new();
+    let waiting = |r: &Value, phase, proofs| {
+        super::execution::bootstrap::waiting_count(r, &m, phase, proofs).unwrap()
+    };
+    assert_eq!(waiting(&report, None, &empty), 1);
+    let mut dependent = m.phases[0].clone();
+    dependent.depends_on = vec!["smoke".into()];
+    assert_eq!(waiting(&report, Some(&dependent), &empty), 1);
+    report["cases"][0]["settlement"] = json!("USED");
+    assert_eq!(waiting(&report, None, &empty), 1);
+    let verified = std::collections::BTreeMap::from([("call".into(), json!({}))]);
+    assert_eq!(waiting(&report, None, &verified), 0);
+    report["runtime_events"] = json!([]);
+    assert_eq!(waiting(&report, None, &empty), 0);
+    report["cases"][0]["execution"] = json!("UNATTEMPTED");
+    assert_eq!(waiting(&report, Some(&dependent), &empty), 0);
+}
+
+fn round(depletion: &str, service: &str) -> RotationRound {
+    RotationRound {
+        pool: "pool".into(),
+        expected_price_usdc: "0.014".into(),
+        depletion_cases: vec![depletion.into()],
+        service_cases: vec![service.into()],
+    }
+}
+
+#[test]
+fn rotation_rounds_require_distinct_ordered_paid_calls_and_exact_wallet_scope() {
+    let mut m = manifest();
+    for id in ["deplete_more", "service", "peer_service"] {
+        let mut c = m.cases[0].clone();
+        c.id = id.into();
+        m.cases.push(c);
+        m.phases[0].cases.push(id.into());
+    }
+    m.start.pools.push("unused".into());
+    m.phases[0].pools.push("unused".into());
+    m.cases[3].source = "peer".into();
+    let mut cfg = config();
+    cfg["wallet_bindings"]["main"]["peer"] = json!({"wallet":"unused"});
+    m.limits.api_reservation_usdc = "0.08".into();
+    m.limits.new_funding_jobs = 1;
+    m.limits.source_exposure_zec = "0.1".into();
+    let mut r = round("call", "service");
+    r.depletion_cases.push("deplete_more".into());
+    r.service_cases.push("peer_service".into());
+    m.phases[0].scenario = Scenario::Rotation {
+        refill_slots: 1,
+        rounds: vec![r],
+    };
+    planner::build(&m, &cfg).unwrap();
+    let mut high_reservation = m.clone();
+    high_reservation.limits.api_reservation_usdc = "0.4".into();
+    for case in &mut high_reservation.cases {
+        case.reserve_usdc = "0.1".into();
+    }
+    if let Scenario::Rotation { rounds, .. } = &mut high_reservation.phases[0].scenario {
+        rounds[0].expected_price_usdc = "0.03".into();
+    }
+    let error = planner::build(&high_reservation, &cfg).err().unwrap();
+    assert!(error.to_string().contains("effective wallet cap"));
+    let base = serde_json::to_value(&m).unwrap();
+    for (pointer, value) in [
+        ("/phases/0/scenario/rounds", json!([])),
+        ("/phases/0/scenario/rounds/0/pool", json!("absent")),
+        (
+            "/phases/0/scenario/rounds/0/expected_price_usdc",
+            json!("0"),
+        ),
+        (
+            "/phases/0/scenario/rounds/0/expected_price_usdc",
+            json!("0.03"),
+        ),
+        ("/phases/0/scenario/rounds/0/depletion_cases", json!([])),
+        ("/phases/0/scenario/rounds/0/service_cases", json!([])),
+        (
+            "/phases/0/scenario/rounds/0/service_cases",
+            json!(["call", "peer_service"]),
+        ),
+        (
+            "/phases/0/scenario/rounds/0/service_cases",
+            json!(["peer_service", "service"]),
+        ),
+        ("/cases/1/arguments", json!({"different":true})),
+        ("/cases/1/source", json!("peer")),
+        ("/cases/1/unsigned", json!(true)),
+    ] {
+        let mut v = base.clone();
+        *v.pointer_mut(pointer).unwrap() = value;
+        let bad: Manifest = serde_json::from_value(v).unwrap();
+        assert!(planner::build(&bad, &cfg).is_err(), "{pointer}");
+    }
+    let mut missing = base.clone();
+    missing["phases"][0]["scenario"]
+        .as_object_mut()
+        .unwrap()
+        .remove("rounds");
+    assert!(serde_json::from_value::<Manifest>(missing).is_err());
+    let mut unknown = base;
+    unknown["phases"][0]["scenario"]["rounds"][0]["repeat_forever"] = json!(true);
+    assert!(serde_json::from_value::<Manifest>(unknown).is_err());
 }

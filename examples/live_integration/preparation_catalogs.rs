@@ -30,11 +30,22 @@ pub struct CatalogPins {
 }
 impl CatalogPins {
     pub fn verify(&self, m: &Manifest, pins: &Pins) -> Result<()> {
-        unsigned_contract(
+        execution_contract(
             m,
             &pins.resolved_config,
             self.files.contains_key("client.sb"),
         )?;
+        self.verify_archive(m)?;
+        ensure!(
+            files::hash_file(&m.binary)? == pins.binary_sha256,
+            "prepared executable changed"
+        );
+        verify_build(&self.build, pins)?;
+        Ok(())
+    }
+    /// Validate immutable retained evidence without granting permission to run a
+    /// changed executable. Post-run observers may use a newer implementation.
+    pub fn verify_archive(&self, m: &Manifest) -> Result<Value> {
         files::directory(&self.directory)?;
         ensure!(
             self.directory == m.evidence_dir.join(&m.run_id),
@@ -63,28 +74,21 @@ impl CatalogPins {
                 "prepared artifact changed: {name}"
             );
         }
-        ensure!(
-            files::hash_file(&m.binary)? == pins.binary_sha256,
-            "prepared executable changed"
-        );
-        verify_build(&self.build, pins)?;
         let snapshot: Value =
-            serde_json::from_slice(&files::read(&self.directory.join("snapshot.json"))?)?;
+            serde_json::from_slice(&files::read_catalog(&self.directory.join("snapshot.json"))?)?;
         validate_cases(m, &snapshot)?;
-        let frozen: Value =
-            serde_json::from_slice(&files::read(&self.directory.join("frozen-snapshot.json"))?)?;
+        let frozen: Value = serde_json::from_slice(&files::read_catalog(
+            &self.directory.join("frozen-snapshot.json"),
+        )?)?;
+        validate_cases(m, &frozen)?;
         ensure!(
             snapshot["inventory"] == frozen["inventory"],
             "frozen catalog inventory changed"
         );
-        Ok(())
+        Ok(snapshot)
     }
 }
-fn unsigned_contract(m: &Manifest, config: &Value, confined: bool) -> Result<()> {
-    ensure!(
-        m.cases.iter().all(|c| c.unsigned),
-        "catalog runner currently requires exclusively unsigned cases"
-    );
+fn execution_contract(m: &Manifest, config: &Value, confined: bool) -> Result<()> {
     ensure!(
         matches!(m.catalog.execution, CatalogMode::Frozen),
         "catalog runner requires frozen execution"
@@ -99,18 +103,37 @@ fn unsigned_contract(m: &Manifest, config: &Value, confined: bool) -> Result<()>
                 && !m.network.require_isolation_evidence),
         "owned Tor qualification requires the supervised confined command; cannot downgrade to proxy-only"
     );
+    let managed = !m.start.pools.is_empty();
     ensure!(
         config["resolved_wallets"]
             .as_object()
             .context("missing wallets")?
             .values()
-            .all(|w| w["mode"] == "static"),
-        "unsigned preparation refuses managed profiles"
+            .all(|w| w["mode"] == if managed { "zcash_rotation" } else { "static" }),
+        "qualification cannot mix static and managed profiles"
     );
     ensure!(
-        config["source_management"].is_null() && config["funding"]["auto_fund"] != true,
-        "unsigned preparation refuses management/automatic funding"
+        managed || (m.cases.iter().all(|c| c.unsigned) && config["funding"]["auto_fund"] != true),
+        "unsigned preparation refuses payments/automatic funding"
     );
+    ensure!(
+        config["source_management"].is_null(),
+        "qualification refuses source management"
+    );
+    if managed {
+        ensure!(
+            m.limits.new_funding_jobs == 0 || config["funding"]["auto_fund"] == true,
+            "positive funding plan requires auto_fund=true"
+        );
+        ensure!(
+            config["treasury"]["id"] == m.treasury_id,
+            "managed qualification treasury differs"
+        );
+        ensure!(
+            config["funding"]["confidentiality"] == "public",
+            "managed qualification requires public swaps"
+        );
+    }
     Ok(())
 }
 fn verify_build(build: &BuildIdentity, pins: &Pins) -> Result<()> {
@@ -139,6 +162,10 @@ fn verify_build(build: &BuildIdentity, pins: &Pins) -> Result<()> {
     Ok(())
 }
 fn validate_cases(m: &Manifest, snapshot: &Value) -> Result<()> {
+    if snapshot.get("catalog_stages").is_some() {
+        let sources = snapshot["sources"].as_object().context("missing catalog sources")?.keys().cloned().collect();
+        crate::catalog_stages::project(snapshot, &sources, "inspection")?;
+    }
     crate::tor::outage::validate(m, snapshot)?;
     ensure!(
         snapshot["version"] == 1,
@@ -168,6 +195,12 @@ fn validate_cases(m: &Manifest, snapshot: &Value) -> Result<()> {
             &Value::Object(case.arguments.clone()),
         )
         .with_context(|| format!("case {} arguments cannot be certified", case.id))?;
+        if case.help_cache.is_some() {
+            ensure!(
+                case.unsigned && tool["help_url"].as_str().is_some(),
+                "help_cache requires an unsigned help-tool case"
+            );
+        }
     }
     Ok(())
 }
@@ -193,7 +226,7 @@ async fn inspect(
         &args,
         &BTreeMap::new(),
         directory,
-        files::DOCUMENT_BYTES,
+        files::CATALOG_BYTES,
         profile,
     )?;
     let evidence = child
@@ -203,11 +236,11 @@ async fn inspect(
             stop.clone(),
         )
         .await?;
-    files::publish(
+    files::publish_catalog(
         &directory.join(format!("{label}.stdout")),
         &evidence.stdout.bytes,
     )?;
-    files::publish(
+    files::publish_catalog(
         &directory.join(format!("{label}.stderr")),
         &evidence.stderr.bytes,
     )?;
@@ -241,7 +274,7 @@ pub async fn collect_catalogs_confined(
 ) -> Result<(Plan, Pins)> {
     eprintln!("qualification preparing binary/configuration provenance and frozen catalogs");
     let (plan, mut pins) = collect(m, state).await?;
-    unsigned_contract(m, &pins.resolved_config, profile.is_some())?;
+    execution_contract(m, &pins.resolved_config, profile.is_some())?;
     files::directory(&m.evidence_dir)?;
     let directory = m.evidence_dir.join(&m.run_id);
     files::create_dir(&directory)?; // Failed preparation evidence is never overwritten.
@@ -282,7 +315,7 @@ pub async fn collect_catalogs_confined(
                 .servers
                 .values()
                 .all(|s| s.source_management.is_none()),
-        "unsigned preparation refuses source management"
+        "qualification refuses source management"
     );
     for listener in config.servers.values() {
         ensure!(
@@ -292,7 +325,7 @@ pub async fn collect_catalogs_confined(
     }
     let mut artifacts = BTreeMap::new();
     let mut save = |name: String, bytes: &[u8]| -> Result<()> {
-        files::publish(&directory.join(&name), bytes)?;
+        files::publish_catalog(&directory.join(&name), bytes)?;
         artifacts.insert(name, files::hash(bytes));
         Ok(())
     };
@@ -317,9 +350,8 @@ pub async fn collect_catalogs_confined(
                 .context("missing resolved base URL")?
                 .into(),
         );
-        // Catalog snapshots do not probe. Serving this frozen catalog also must not
-        // change advertised prices behind the prepared inventory.
-        settings.probe_pricing = false;
+        // Inspection does not probe. Preserve serving policy; recorded startup
+        // price lines reconstruct expected descriptions before inventory checks.
         source.provider = toml::Value::try_from(settings)?
             .as_table()
             .context("source settings must be table")?
@@ -365,4 +397,23 @@ pub async fn collect_catalogs_confined(
     pins.qualification = "catalogs_prepared".into();
     pins.catalogs.as_ref().expect("just set").verify(m, &pins)?;
     Ok((plan, pins))
+}
+
+#[cfg(test)]
+mod help_contract_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn cache_assertions_require_a_reviewed_unsigned_help_tool() {
+        let mut m = crate::tests::manifest();
+        m.cases[0].help_cache = Some(crate::help::ExpectedCache::Hit);
+        let case = &m.cases[0];
+        let mut snapshot = json!({"version":1,"inventory":[{"server":case.server,"tools":[{"source":case.source,"name":case.tool,"input_schema":{"type":"object"}}]}]});
+        assert!(validate_cases(&m, &snapshot).is_err());
+        snapshot["inventory"][0]["tools"][0]["help_url"] =
+            json!("https://example.invalid/llms.txt");
+        assert!(validate_cases(&m, &snapshot).is_err());
+        m.cases[0].unsigned = true;
+        validate_cases(&m, &snapshot).unwrap();
+    }
 }

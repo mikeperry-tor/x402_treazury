@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Duration;
-const ORIGIN: &str = "https://1click.chaindefuser.com";
+pub const ORIGIN: &str = "https://1click.chaindefuser.com";
 const ZEC: &str = "nep141:zec.omft.near";
 const USDC: &str = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 #[derive(Clone, Serialize, Deserialize)]

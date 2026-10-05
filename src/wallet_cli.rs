@@ -65,6 +65,9 @@ enum Command {
     Sync {
         #[arg(long)]
         meta_config: PathBuf,
+        /// Internal supervisor lifetime pipe; EOF cancels and checkpoints sync.
+        #[arg(long, hide = true)]
+        qualification_parent_stdin: bool,
     },
     /// Read last persisted metadata without unlocking or network access.
     Status {
@@ -237,7 +240,10 @@ async fn execute_wallet_command(
             rebroadcast,
         } => reconcile(meta_config, operation_id, rebroadcast, network).await?,
 
-        Command::Sync { meta_config } => sync(meta_config, network).await?,
+        Command::Sync {
+            meta_config,
+            qualification_parent_stdin,
+        } => sync(meta_config, network, qualification_parent_stdin).await?,
 
         Command::Init {
             state_dir,
@@ -400,15 +406,25 @@ async fn reconcile(
 async fn sync(
     meta_config: PathBuf,
     network: crate::rotation::store::TreasuryNetwork,
+    supervised: bool,
 ) -> Result<crate::treasury::Treasury> {
+    let mut parent = crate::supervision::Parent::from_stdin(supervised)?;
     let (mut treasury, _) = configured(&meta_config, network).await?;
     let stop = tokio_util::sync::CancellationToken::new();
     let result = {
         let work = treasury.sync_once(&stop);
         tokio::pin!(work);
         tokio::select! {
+            biased;
+            closed = parent.closed() => {
+                eprintln!("treasury sync supervisor stopped: deliberately cancelling and checkpointing for wallet safety");
+                stop.cancel();
+                let _ = work.await;
+                closed.and_then(|()| anyhow::bail!("treasury sync cancelled by supervisor"))
+            }
             result = &mut work => result,
             signal = shutdown_signal() => {
+                eprintln!("treasury sync interrupted: deliberately cancelling and checkpointing for wallet safety");
                 stop.cancel();
                 let result = work.await;
                 signal?;

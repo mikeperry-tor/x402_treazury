@@ -268,7 +268,11 @@ impl ServerHandler for Server {
                     None,
                 )
             })?;
-        let invocation = self.invoke_output(&request.name, &arguments).await;
+        let call = self.invoke_output(&request.name, &arguments);
+        let invocation = match &claim {
+            Some(claim) => claim.invoke(call).await,
+            None => call.await,
+        };
         let failure = invocation
             .as_ref()
             .err()

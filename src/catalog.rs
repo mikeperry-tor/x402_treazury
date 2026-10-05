@@ -5,6 +5,33 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Fixed, content-free context for catalog failures. Retains the original error
+/// chain (including numeric HTTP status) without parsing human error messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadStage {
+    Headers,
+    Body,
+    LocalRead,
+    Parse,
+}
+impl LoadStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Headers => "headers",
+            Self::Body => "body",
+            Self::LocalRead => "local_read",
+            Self::Parse => "parse",
+        }
+    }
+}
+impl std::fmt::Display for LoadStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "catalog {} failed", self.label())
+    }
+}
+impl std::error::Error for LoadStage {}
+
 const DEFAULT_PRICE: &str =
     "Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).";
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
@@ -266,9 +293,10 @@ pub async fn load_json_with_limit(
             .send()
             .await
             .map_err(reqwest::Error::without_url)
-            .context("requesting catalog response headers")?
+            .context(LoadStage::Headers)?
             .error_for_status()
-            .map_err(reqwest::Error::without_url)?;
+            .map_err(reqwest::Error::without_url)
+            .context(LoadStage::Headers)?;
         tracing::info!(target: "x402_treazury::startup",
             headers_ms = started.elapsed().as_millis() as u64,
             "Catalog response headers received; reading body");
@@ -276,7 +304,7 @@ pub async fn load_json_with_limit(
         let body_started = std::time::Instant::now();
         let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
             .await
-            .context("reading catalog response body")?;
+            .context(LoadStage::Body)?;
         tracing::info!(target: "x402_treazury::startup",
             body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
             "Catalog response body complete");
@@ -284,9 +312,13 @@ pub async fn load_json_with_limit(
     } else {
         tokio::fs::read(source)
             .await
-            .with_context(|| format!("reading {source}"))?
+            .context(LoadStage::LocalRead)?
     };
-    Ok(serde_json::from_slice(&bytes)?)
+    let started = std::time::Instant::now();
+    let document = serde_json::from_slice(&bytes).context(LoadStage::Parse)?;
+    tracing::info!(target: "x402_treazury::startup", parse_ms = started.elapsed().as_millis() as u64,
+        bytes = bytes.len(), "Catalog JSON parse complete");
+    Ok(document)
 }
 
 fn resolve(root: &Value, node: &Value, seen: &mut BTreeSet<String>) -> Value {

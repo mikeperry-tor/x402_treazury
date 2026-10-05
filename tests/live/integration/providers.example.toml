@@ -1,0 +1,1245 @@
+# Reviewed 23-provider baseline: 22 paid calls, one unsigned directory call.
+# Help fetch/hit cases are unsigned. See PROVIDER_PRESETS.md for evidence and limits.
+# Copy and review deployment/state references; no new funding is permitted.
+# Zero window and placeholder UUID deliberately prevent execution.
+version = 1
+run_id = "replace_with_unique_run_id"
+treasury_id = "replace_with_treasury_uuid"
+deployment = "../../../examples/live-tor-providers.toml"
+binary = "../../../target/debug/treazury"
+evidence_dir = "../../../target/live-integration/replace_with_unique_run_id"
+registry_authorization = "replace_with_authorization_id"
+[start]
+mode = "funded_pools"
+pools = ["coverage_b"]
+[network]
+tor_mode = "owned"
+tor_binary = "/replace/with/installed/tor"
+confinement = "macos_sandbox"
+require_isolation_evidence = true
+[limits]
+api_reservation_usdc = "4.40"
+new_funding_jobs = 0
+source_exposure_zec = "0"
+max_in_flight = 2
+run_seconds = 14400
+phase_seconds = 1800
+call_seconds = 300
+cleanup_seconds = 900
+result_bytes = 16777216
+[catalog]
+execution = "frozen"
+record_live_discovery = true
+[[windows]]
+id = "main"
+not_before = 0
+not_after = 0
+
+# Each reservation must cover the configured wallet cap, not merely the quoted fee.
+
+
+[pricing_checks]
+agent402 = "disabled"
+agentfund = "disabled"
+agentutility = "disabled"
+arkham = "disabled"
+botsmith = "disabled"
+brazilayer = "disabled"
+concordance = "disabled"
+deepline = "disabled"
+exa = "disabled"
+genuinegood = "disabled"
+glassnode = "disabled"
+google_trends = "disabled"
+kronos = "disabled"
+locus = "disabled"
+lonestar = "disabled"
+otto = "disabled"
+pdl = "disabled"
+regimeshift = "disabled"
+socialfetch = "disabled"
+stableenrich = "disabled"
+straits = "disabled"
+x402_list = "disabled"
+x402stock = "disabled"
+
+[[cases]]
+id = "help_agent402_fetch"
+server = "b"
+source = "agent402"
+tool = "agent402_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_agent402_hit"
+server = "b"
+source = "agent402"
+tool = "agent402_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_agent402"
+server = "b"
+tool = "agent402_dns"
+arguments = { "name" = "example.com", "type" = "A" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "agent402"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/name"
+value = "example.com"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/type"
+value = "A"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/records/0"
+
+[[cases]]
+id = "sweep_agentfund"
+server = "b"
+tool = "agentfund_treasury_yield_curve"
+arguments = { "days" = 1 }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "agentfund"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/isError"
+value = false
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/content/0"
+
+[[cases]]
+id = "help_agentutility_fetch"
+server = "b"
+source = "agentutility"
+tool = "agentutility_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_agentutility_hit"
+server = "b"
+source = "agentutility"
+tool = "agentutility_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+# No successful body contract was observed; semantic qualification requires review.
+id = "sweep_agentutility"
+server = "b"
+tool = "agentutility_web_search"
+arguments = { "query" = "Rust language documentation", "num_results" = 1 }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "agentutility"
+
+[[cases]]
+id = "help_arkham_fetch"
+server = "b"
+source = "arkham"
+tool = "arkham_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_arkham_hit"
+server = "b"
+source = "arkham"
+tool = "arkham_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_arkham"
+server = "b"
+tool = "arkham_balances_address"
+arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "arkham"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/totalBalance"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/balances"
+
+[[cases]]
+id = "help_botsmith_fetch"
+server = "b"
+source = "botsmith"
+tool = "botsmith_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_botsmith_hit"
+server = "b"
+source = "botsmith"
+tool = "botsmith_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_botsmith"
+server = "b"
+tool = "botsmith_x_search"
+arguments = { "query" = "Rust language documentation", "type" = "Latest" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "botsmith"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/tweets/0"
+
+[[cases]]
+id = "help_brazilayer_fetch"
+server = "b"
+source = "brazilayer"
+tool = "brazilayer_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_brazilayer_hit"
+server = "b"
+source = "brazilayer"
+tool = "brazilayer_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_brazilayer"
+server = "b"
+tool = "brazilayer_cnpj_situacao_cnpj"
+arguments = { "cnpj" = "33000167000101" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "brazilayer"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/cnpj"
+value = "33000167000101"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/existe"
+value = true
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/situacao_cadastral"
+
+[[cases]]
+id = "help_concordance_fetch"
+server = "b"
+source = "concordance"
+tool = "concordance_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_concordance_hit"
+server = "b"
+source = "concordance"
+tool = "concordance_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_concordance"
+server = "b"
+tool = "concordance_search"
+arguments = { "query" = "Rust", "limit" = 1 }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "concordance"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/results/0"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/results/0/metadata/matched_query"
+value = "Rust"
+
+[[cases]]
+id = "sweep_deepline"
+server = "b"
+tool = "deepline_company_enrich"
+arguments = { "domain" = "stripe.com" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "deepline"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/status"
+value = "completed"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/result/data/status"
+value = "SUCCEEDED"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/result/data/output"
+
+[[cases]]
+id = "help_exa_fetch"
+server = "b"
+source = "exa"
+tool = "exa_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_exa_hit"
+server = "b"
+source = "exa"
+tool = "exa_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_exa"
+server = "b"
+tool = "exa_search"
+arguments = { "query" = "Rust language documentation", "numResults" = 1 }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "exa"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/results/0"
+
+[[cases]]
+id = "help_genuinegood_fetch"
+server = "b"
+source = "genuinegood"
+tool = "genuinegood_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_genuinegood_hit"
+server = "b"
+source = "genuinegood"
+tool = "genuinegood_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_genuinegood"
+server = "b"
+tool = "genuinegood_search_get"
+arguments = { "keyword" = "education", "rows" = 1 }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "genuinegood"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/opportunities/0"
+
+[[cases]]
+id = "help_glassnode_fetch"
+server = "b"
+source = "glassnode"
+tool = "glassnode_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_glassnode_hit"
+server = "b"
+source = "glassnode"
+tool = "glassnode_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_glassnode"
+server = "b"
+tool = "glassnode_metadata_assets"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "glassnode"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/data/0"
+
+[[cases]]
+id = "help_google_trends_fetch"
+server = "b"
+source = "google_trends"
+tool = "google_trends_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_google_trends_hit"
+server = "b"
+source = "google_trends"
+tool = "google_trends_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_google_trends"
+server = "b"
+tool = "google_trends_trend"
+arguments = { "keyword" = "rust" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "google_trends"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/keyword"
+value = "rust"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/series/0"
+
+[[cases]]
+id = "help_locus_fetch"
+server = "b"
+source = "locus"
+tool = "locus_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_locus_hit"
+server = "b"
+source = "locus"
+tool = "locus_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_locus"
+server = "b"
+tool = "locus_locus_place_report"
+arguments = { "address" = "1 E Edenton St, Raleigh, NC 27601" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "locus"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/records/0"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/summary"
+
+[[cases]]
+id = "help_lonestar_fetch"
+server = "b"
+source = "lonestar"
+tool = "lonestar_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_lonestar_hit"
+server = "b"
+source = "lonestar"
+tool = "lonestar_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_lonestar"
+server = "b"
+tool = "lonestar_rates_rates"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "lonestar"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/curve"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/credit"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/as_of"
+
+[[cases]]
+id = "help_otto_fetch"
+server = "b"
+source = "otto"
+tool = "otto_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_otto_hit"
+server = "b"
+source = "otto"
+tool = "otto_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_otto"
+server = "b"
+tool = "otto_crypto_news"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "otto"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/status"
+value = "success"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/meta/degraded"
+value = false
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/data/report"
+
+[[cases]]
+id = "sweep_pdl"
+server = "b"
+tool = "pdl_company_enrich"
+arguments = { "website" = "stripe.com" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "pdl"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/status"
+value = 200
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/website"
+value = "stripe.com"
+
+[[cases]]
+id = "help_socialfetch_fetch"
+server = "b"
+source = "socialfetch"
+tool = "socialfetch_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_socialfetch_hit"
+server = "b"
+source = "socialfetch"
+tool = "socialfetch_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_socialfetch"
+server = "b"
+tool = "socialfetch_twitter_profiles_handle"
+arguments = { "handle" = "rustlang" }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "socialfetch"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/data/lookupStatus"
+value = "found"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/data/profile"
+
+[[cases]]
+id = "help_stableenrich_fetch"
+server = "b"
+source = "stableenrich"
+tool = "stableenrich_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_stableenrich_hit"
+server = "b"
+source = "stableenrich"
+tool = "stableenrich_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_stableenrich"
+server = "b"
+tool = "stableenrich_exa_search"
+arguments = { "query" = "Rust language documentation", "numResults" = 1, "stream" = false }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "stableenrich"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/results/0"
+
+[[cases]]
+id = "help_straits_fetch"
+server = "b"
+source = "straits"
+tool = "straits_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_straits_hit"
+server = "b"
+source = "straits"
+tool = "straits_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_straits"
+server = "b"
+tool = "straits_brief"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "straits"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/fallback"
+value = false
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/bullets/0"
+
+[[cases]]
+id = "help_x402stock_fetch"
+server = "b"
+source = "x402stock"
+tool = "x402stock_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_x402stock_hit"
+server = "b"
+source = "x402stock"
+tool = "x402stock_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_x402stock"
+server = "b"
+tool = "x402stock_calendar_fomc"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "x402stock"
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/meetings/0"
+
+[[cases]]
+id = "help_regimeshift_fetch"
+server = "b"
+source = "regimeshift"
+tool = "regimeshift_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_regimeshift_hit"
+server = "b"
+source = "regimeshift"
+tool = "regimeshift_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_regimeshift"
+server = "b"
+tool = "regimeshift_rate_sofr_usd"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "regimeshift"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/ok"
+value = true
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/sources/aave_borrow_usdc/ok"
+value = true
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/sources/compound_borrow_usdc/ok"
+value = true
+
+[[cases]]
+id = "help_kronos_fetch"
+server = "b"
+source = "kronos"
+tool = "kronos_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_kronos_hit"
+server = "b"
+source = "kronos"
+tool = "kronos_help"
+arguments = {  }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "sweep_kronos"
+server = "b"
+tool = "kronos_forecast_btc"
+arguments = {  }
+reserve_usdc = "0.20"
+reviewed_read_only = true
+source = "kronos"
+[[cases.checks]]
+kind = "json_equals"
+pointer = "/stale"
+value = false
+[[cases.checks]]
+kind = "json_exists"
+pointer = "/forecast"
+
+[[cases]]
+id = "help_x402_list_fetch"
+server = "b"
+source = "x402_list"
+tool = "x402_list_help"
+arguments = {}
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "fetch"
+
+[[cases]]
+id = "help_x402_list_hit"
+server = "b"
+source = "x402_list"
+tool = "x402_list_help"
+arguments = {}
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+help_cache = "hit"
+
+[[cases]]
+id = "directory_x402_list"
+server = "b"
+source = "x402_list"
+tool = "x402_list_best"
+arguments = { "q" = "Rust language documentation", "limit" = 1 }
+reserve_usdc = "0"
+reviewed_read_only = true
+unsigned = true
+
+[[phases]]
+id = "help_agent402"
+window = "main"
+cases = ["help_agent402_fetch", "help_agent402_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "agent402"
+window = "main"
+cases = ["sweep_agent402"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "agentfund"
+window = "main"
+cases = ["sweep_agentfund"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_agentutility"
+window = "main"
+cases = ["help_agentutility_fetch", "help_agentutility_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "agentutility"
+window = "main"
+cases = ["sweep_agentutility"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_arkham"
+window = "main"
+cases = ["help_arkham_fetch", "help_arkham_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "arkham"
+window = "main"
+cases = ["sweep_arkham"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_botsmith"
+window = "main"
+cases = ["help_botsmith_fetch", "help_botsmith_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "botsmith"
+window = "main"
+cases = ["sweep_botsmith"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_brazilayer"
+window = "main"
+cases = ["help_brazilayer_fetch", "help_brazilayer_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "brazilayer"
+window = "main"
+cases = ["sweep_brazilayer"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_concordance"
+window = "main"
+cases = ["help_concordance_fetch", "help_concordance_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "concordance"
+window = "main"
+cases = ["sweep_concordance"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "deepline"
+window = "main"
+cases = ["sweep_deepline"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_exa"
+window = "main"
+cases = ["help_exa_fetch", "help_exa_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "exa"
+window = "main"
+cases = ["sweep_exa"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_genuinegood"
+window = "main"
+cases = ["help_genuinegood_fetch", "help_genuinegood_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "genuinegood"
+window = "main"
+cases = ["sweep_genuinegood"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_glassnode"
+window = "main"
+cases = ["help_glassnode_fetch", "help_glassnode_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "glassnode"
+window = "main"
+cases = ["sweep_glassnode"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_google_trends"
+window = "main"
+cases = ["help_google_trends_fetch", "help_google_trends_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "google_trends"
+window = "main"
+cases = ["sweep_google_trends"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_locus"
+window = "main"
+cases = ["help_locus_fetch", "help_locus_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "locus"
+window = "main"
+cases = ["sweep_locus"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_lonestar"
+window = "main"
+cases = ["help_lonestar_fetch", "help_lonestar_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "lonestar"
+window = "main"
+cases = ["sweep_lonestar"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_otto"
+window = "main"
+cases = ["help_otto_fetch", "help_otto_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "otto"
+window = "main"
+cases = ["sweep_otto"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "pdl"
+window = "main"
+cases = ["sweep_pdl"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_socialfetch"
+window = "main"
+cases = ["help_socialfetch_fetch", "help_socialfetch_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "socialfetch"
+window = "main"
+cases = ["sweep_socialfetch"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_stableenrich"
+window = "main"
+cases = ["help_stableenrich_fetch", "help_stableenrich_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "stableenrich"
+window = "main"
+cases = ["sweep_stableenrich"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_straits"
+window = "main"
+cases = ["help_straits_fetch", "help_straits_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "straits"
+window = "main"
+cases = ["sweep_straits"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_x402stock"
+window = "main"
+cases = ["help_x402stock_fetch", "help_x402stock_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "x402stock"
+window = "main"
+cases = ["sweep_x402stock"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_regimeshift"
+window = "main"
+cases = ["help_regimeshift_fetch", "help_regimeshift_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "regimeshift"
+window = "main"
+cases = ["sweep_regimeshift"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_kronos"
+window = "main"
+cases = ["help_kronos_fetch", "help_kronos_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "kronos"
+window = "main"
+cases = ["sweep_kronos"]
+pools = ["coverage_b"]
+required = true
+[phases.scenario]
+kind = "provider_sweep"
+
+[[phases]]
+id = "help_x402_list"
+window = "main"
+cases = ["help_x402_list_fetch", "help_x402_list_hit"]
+pools = []
+required = false
+[phases.scenario]
+kind = "unsigned"
+
+[[phases]]
+id = "x402_list"
+window = "main"
+cases = ["directory_x402_list"]
+pools = []
+required = true
+[phases.scenario]
+kind = "unsigned"

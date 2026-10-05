@@ -380,3 +380,66 @@ async fn oversized_legacy_challenge_is_rejected_before_signing() {
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     task.abort();
 }
+
+#[tokio::test]
+async fn catalog_failure_stages_preserve_http_status_without_urls_or_document_text() {
+    use x402_treazury::catalog::{LoadStage, load_json_with_limit};
+    let (base, task) = serve(
+        Router::new()
+            .route(
+                "/rejected",
+                get(|| async { (StatusCode::TOO_MANY_REQUESTS, "PRIVATE-CONTENT") }),
+            )
+            .route("/malformed", get(|| async { "PRIVATE-CONTENT" }))
+            .route("/large", get(|| async { "\"PRIVATE-CONTENT\"" })),
+    )
+    .await;
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    for (path, limit, stage, status) in [
+        ("rejected", 32, LoadStage::Headers, Some(429)),
+        ("malformed", 32, LoadStage::Parse, None),
+        ("large", 4, LoadStage::Body, None),
+    ] {
+        let error =
+            load_json_with_limit(&format!("{base}/{path}?secret=PRIVATE-TOKEN"), &http, limit)
+                .await
+                .unwrap_err();
+        assert_eq!(error.downcast_ref::<LoadStage>(), Some(&stage));
+        assert_eq!(
+            error
+                .downcast_ref::<reqwest::Error>()
+                .and_then(|e| e.status())
+                .map(|s| s.as_u16()),
+            status
+        );
+        let text = format!("{error:#}");
+        for private in [&base, "PRIVATE-TOKEN", "PRIVATE-CONTENT"] {
+            assert!(!text.contains(private), "private catalog detail in error");
+        }
+    }
+    task.abort();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("PRIVATE-PATH.json");
+    let error = load_json_with_limit(path.to_str().unwrap(), &http, 32)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<LoadStage>(),
+        Some(&LoadStage::LocalRead)
+    );
+    assert!(!format!("{error:#}").contains("PRIVATE-PATH"));
+    std::fs::write(&path, "PRIVATE-CONTENT").unwrap();
+    let error = load_json_with_limit(path.to_str().unwrap(), &http, 32)
+        .await
+        .unwrap_err();
+    assert_eq!(error.downcast_ref::<LoadStage>(), Some(&LoadStage::Parse));
+    // Local operator-authored specs deliberately retain the documented exemption
+    // from the remote download cap; typed staging must not change that policy.
+    std::fs::write(&path, "{\"paths\":{}}").unwrap();
+    assert_eq!(
+        load_json_with_limit(path.to_str().unwrap(), &http, 1)
+            .await
+            .unwrap(),
+        json!({"paths":{}})
+    );
+}

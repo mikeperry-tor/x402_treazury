@@ -760,6 +760,7 @@ fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
                         })
                         .collect(),
                     released: vec![],
+                    resolutions: Default::default(),
                 },
             )
             .unwrap();
@@ -888,6 +889,7 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
                             .map(|(id, _)| (id.clone(), alloy_primitives::U256::from(5_000_000)))
                             .collect(),
                         released: vec![],
+                        resolutions: Default::default(),
                     },
                 )?;
                 if promote_again {

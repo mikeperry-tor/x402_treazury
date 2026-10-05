@@ -92,3 +92,11 @@ libc = "0.2"
 
 [build-dependencies]
 sha2 = "0.10"
+
+[[example]]
+name = "live_integration"
+required-features = ["zcash"]
+
+[[test]]
+name = "integration_preparation"
+required-features = ["zcash"]

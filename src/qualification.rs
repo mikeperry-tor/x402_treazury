@@ -1,6 +1,22 @@
 //! Opt-in keyless qualification admission and private structured events.
 //! The parent owns the registry lock. This child may only claim an already
 //! dispatched case, once, and append its application observations.
+mod balance;
+mod observation;
+pub(crate) use observation::pool_observation;
+pub mod lifecycle;
+mod lifecycle_estimate;
+pub use balance::validate_admission_balance;
+pub use lifecycle_estimate::depletion_estimate;
+mod debit;
+pub mod funding;
+pub use debit::{receipt_expectation, reconcile_debit};
+mod payment;
+mod pricing;
+mod receipt;
+pub use payment::{HelpCache, payment_context, record_challenge, record_help, unsigned_case};
+pub use pricing::{PricingStage, record as record_pricing};
+
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
@@ -51,6 +67,7 @@ struct Guard {
     binding: Binding,
     slots: Arc<tokio::sync::Semaphore>,
     origin: Instant,
+    managed: bool,
 }
 fn identifier(s: &str) -> bool {
     !s.is_empty()
@@ -116,7 +133,7 @@ fn authority(db: &Connection, binding: &Binding, at: i64) -> Result<Value> {
         at < binding.expires_at,
         "qualification start authority expired"
     );
-    let registered:String=db.query_row("SELECT detail FROM events WHERE run=?1 AND kind='application_session' AND json_extract(detail,'$.session')=?2 ORDER BY seq DESC LIMIT 1",params![binding.run,binding.session],|r|r.get(0))?;
+    let registered:String=db.query_row("SELECT detail FROM events WHERE run=?1 AND kind='application_session' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.session')=?2 ORDER BY seq DESC LIMIT 1",params![binding.run,binding.session],|r|r.get(0))?;
     ensure!(
         bounded(registered)? == serde_json::to_value(binding)?,
         "qualification session binding differs from registry"
@@ -158,6 +175,9 @@ fn authority(db: &Connection, binding: &Binding, at: i64) -> Result<Value> {
         manifest["treasury_id"] == treasury,
         "qualification treasury binding differs"
     );
+    Ok(manifest)
+}
+fn require_unsigned(manifest: &Value) -> Result<()> {
     ensure!(
         manifest["cases"]
             .as_array()
@@ -166,9 +186,22 @@ fn authority(db: &Connection, binding: &Binding, at: i64) -> Result<Value> {
             .all(|c| c["unsigned"] == true),
         "qualification child requires all cases unsigned"
     );
-    Ok(manifest)
+    Ok(())
 }
 pub fn install(path: &Path, config: &Path) -> Result<()> {
+    install_mode(path, config, false)
+}
+pub fn install_managed(path: &Path, config: &Path) -> Result<()> {
+    install_mode(path, config, true)
+}
+pub fn managed_permits() -> Option<Arc<dyn crate::rotation::restriction::FundingPermits>> {
+    ACTIVE.get().filter(|g| g.managed).map(|g| {
+        Arc::new(funding::registry::RegistryPermits::new(g.binding.clone()))
+            as Arc<dyn crate::rotation::restriction::FundingPermits>
+    })
+}
+
+fn install_mode(path: &Path, config: &Path, managed: bool) -> Result<()> {
     use std::io::Read;
     private(path)?;
     let mut bytes = Vec::new();
@@ -189,7 +222,10 @@ pub fn install(path: &Path, config: &Path) -> Result<()> {
         "qualification configuration binding differs"
     );
     let db = connection(&binding)?;
-    let _ = authority(&db, &binding, now()?)?;
+    let manifest = authority(&db, &binding, now()?)?;
+    if !managed {
+        require_unsigned(&manifest)?;
+    }
     // The parent creates this unique index under exclusive supervisor ownership.
     let index: i64 = db.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='application_claim_once'",
@@ -200,10 +236,18 @@ pub fn install(path: &Path, config: &Path) -> Result<()> {
         index == 1,
         "qualification registry lacks durable single-claim enforcement"
     );
+    if managed {
+        let indexes: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('application_payment_case_once','application_payment_attempt_once')", [], |r| r.get(0))?;
+        ensure!(
+            indexes == 2,
+            "qualification registry lacks single-payment enforcement"
+        );
+    }
     ensure!(
         ACTIVE
             .set(Arc::new(Guard {
                 binding,
+                managed,
                 origin: Instant::now(),
                 slots: Arc::new(tokio::sync::Semaphore::new(64))
             }))
@@ -216,6 +260,7 @@ pub struct Claim {
     guard: Arc<Guard>,
     case: String,
     started: Instant,
+    unsigned: bool,
 }
 pub async fn claim(
     server: &str,
@@ -253,23 +298,27 @@ async fn claim_with(
         .context("qualification admission exceeds 64 concurrent checks")?;
     let work = guard.clone();
     let saved = case.clone();
-    tokio::task::spawn_blocking(move || -> Result<()> {
+    let unsigned = tokio::task::spawn_blocking(move || -> Result<bool> {
         let _permit=permit;
         let mut db=connection(&work.binding)?;
         let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let at=now()?;let manifest=authority(&tx,&work.binding,at)?;
+        if !work.managed { require_unsigned(&manifest)?; }
         let reviewed=manifest["cases"].as_array().context("qualification cases missing")?.iter().find(|c|c["id"]==saved).context("unreviewed qualification case")?;
         ensure!(reviewed["server"]==server && reviewed["tool"]==tool && reviewed["arguments"]==Value::Object(arguments),"qualification case listener/tool/arguments differ from review");
         let (state,start,end):(String,i64,i64)=tx.query_row("SELECT execution,window_start,window_end FROM cases WHERE run=?1 AND id=?2",params![work.binding.run,saved],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
         ensure!(state=="DISPATCHING" && at>=start && at<end,"qualification case is not dispatched within its authorized window");
-        let detail=json!({"case":saved,"session":work.binding.session,"server":server,"source":reviewed["source"],"tool":tool,"mode":"unsigned","started_micros":work.origin.elapsed().as_micros()});
+        let unsigned = reviewed["unsigned"].as_bool().context("qualification case mode missing")?;
+        if !unsigned { payment::reviewed_wallet(&tx, &work.binding, reviewed)?; }
+        let detail=json!({"case":saved,"session":work.binding.session,"server":server,"source":reviewed["source"],"tool":tool,"mode":if unsigned { "unsigned" } else { "managed" },"started_micros":work.origin.elapsed().as_micros()});
         tx.execute("INSERT INTO events(run,kind,detail,at) VALUES(?1,'application_claim',?2,?3)",params![work.binding.run,detail.to_string(),at]).context("qualification case already claimed or journal unavailable")?;
-        tx.commit()?;Ok(())
+        tx.commit()?;Ok(unsigned)
     }).await??;
     Ok(Claim {
         guard,
         case,
         started: Instant::now(),
+        unsigned,
     })
 }
 impl Claim {
@@ -334,7 +383,7 @@ mod tests {
             .finish(true, Some(category))
             .await
             .unwrap();
-        let recorded:String = db.query_row("SELECT json_extract(detail,'$.failure_category') FROM events WHERE kind='application_finished'",[],|r|r.get(0)).unwrap();
+        let recorded:String = db.query_row("SELECT json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.failure_category') FROM events WHERE kind='application_finished'",[],|r|r.get(0)).unwrap();
         assert_eq!(recorded, "http_connect");
     }
     pub(super) fn fixture() -> (tempfile::TempDir, Arc<Guard>, Connection) {
@@ -378,6 +427,7 @@ mod tests {
                 expires_at: now().unwrap() + 600,
             },
             origin: Instant::now(),
+            managed: false,
             slots: Arc::new(tokio::sync::Semaphore::new(64)),
         });
         db.execute(

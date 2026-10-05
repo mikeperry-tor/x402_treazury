@@ -14,7 +14,7 @@ use std::{
 };
 use x402_treazury::{
     catalog::{Config, build_tools, build_tools_with_prices},
-    pricing::PricingCache,
+    pricing::{CachePath, Outcome, PricingCache},
 };
 
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -91,11 +91,36 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
     let tools = build_tools(&cfg, &root, "api").unwrap();
     let cache = PricingCache::default();
     let (a, b) = tokio::join!(
-        cache.discover(&cfg, &root, &tools, &base),
-        cache.discover(&cfg, &root, &tools, &base)
+        cache.discover_observed(&cfg, &root, &tools, &base),
+        cache.discover_observed(&cfg, &root, &tools, &base)
     );
     let a = a.unwrap();
-    assert_eq!(a, b.unwrap());
+    let b = b.unwrap();
+    assert_eq!(a.prices, b.prices);
+    assert_eq!(a.evidence.eligible, 5);
+    assert_eq!(a.evidence.selected_tools, 9);
+    assert_eq!(a.evidence.skipped_embedded, 1);
+    assert_eq!(a.evidence.skipped_template, 1);
+    assert_eq!(a.evidence.skipped_method, 1);
+    assert_eq!(a.evidence.skipped_help, 1);
+    assert_eq!(a.evidence.outcomes[&Outcome::Discovered], 2);
+    assert_eq!(a.evidence.outcomes[&Outcome::MalformedChallenge], 1);
+    assert_eq!(a.evidence.http_statuses[&429], 1);
+    assert_eq!(a.evidence.http_statuses[&302], 1);
+    assert_eq!(
+        a.evidence
+            .cache
+            .get(&CachePath::Initialized)
+            .copied()
+            .unwrap_or(0)
+            + b.evidence
+                .cache
+                .get(&CachePath::Initialized)
+                .copied()
+                .unwrap_or(0),
+        5
+    );
+    let a = a.prices;
     assert_eq!(a.len(), 2);
     assert!(a[&("GET".into(), "/price".into())].contains("$0.014"));
     assert!(a[&("GET".into(), "/token".into())].contains("12345 atomic"));
@@ -118,13 +143,14 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
     );
     cfg.probe_ttl_seconds = 0.000_001;
     tokio::time::sleep(Duration::from_millis(1)).await;
-    assert!(
-        cache
-            .discover(&cfg, &root, &tools, &base)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let expired = cache
+        .discover_observed(&cfg, &root, &tools, &base)
+        .await
+        .unwrap();
+    assert!(expired.prices.is_empty());
+    assert_eq!(expired.evidence.expired, 5);
+    assert_eq!(expired.evidence.cache[&CachePath::Hit], 5);
+    assert_eq!(expired.evidence.available_prices, 0);
     let snapshot = counts.lock().unwrap().clone();
     assert_eq!(snapshot.len(), 5);
     assert!(snapshot.values().all(|n| *n == 1));
@@ -150,24 +176,24 @@ async fn probes_are_bounded_optional_and_validate_get_only() {
     let root = json!({"operations":[{"method":"GET","path":"/a"}]});
     let tools = build_tools(&cfg, &root, "test").unwrap();
     let cache = PricingCache::default();
-    assert!(
-        cache
-            .discover(&cfg, &root, &tools, "http://127.0.0.1:1")
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let disabled = cache
+        .discover_observed(&cfg, &root, &tools, "http://127.0.0.1:1")
+        .await
+        .unwrap();
+    assert!(!disabled.evidence.enabled);
+    assert_eq!(disabled.evidence.observed, 0);
+    disabled.evidence.validate().unwrap();
     let cfg = Config {
         probe_max_endpoints: 0,
         ..Default::default()
     };
-    assert!(
-        cache
-            .discover(&cfg, &root, &tools, "http://127.0.0.1:1")
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let capped = cache
+        .discover_observed(&cfg, &root, &tools, "http://127.0.0.1:1")
+        .await
+        .unwrap();
+    assert_eq!(capped.evidence.eligible, 1);
+    assert_eq!(capped.evidence.capped, 1);
+    assert_eq!(capped.evidence.observed, 0);
     let cfg = Config {
         probe_methods: vec!["POST".into()],
         ..Default::default()

@@ -73,7 +73,7 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
     let jobs = s.status().unwrap().funding_jobs;
     let revision = s.snapshot().unwrap().0;
     drop(s);
-    for version in 0..=10 {
+    for version in 0..=11 {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         fs::create_dir(&state).unwrap();
@@ -138,7 +138,7 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
         assert_eq!(
             s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
                 .unwrap(),
-            10
+            11
         );
         assert_eq!(s.snapshot().unwrap().0, revision);
         assert_eq!(
@@ -407,14 +407,14 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
             format!("prepared-{i}").as_bytes()
         );
     }
-    s.db.execute_batch("PRAGMA user_version=11;").unwrap();
+    s.db.execute_batch("PRAGMA user_version=12;").unwrap();
     drop(s);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err());
     let db = Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap(),
-        11
+        12
     );
     assert_eq!(
         db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r

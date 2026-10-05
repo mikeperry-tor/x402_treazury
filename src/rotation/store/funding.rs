@@ -291,6 +291,7 @@ impl Store {
         if next == FundingPhase::Preparing {
             self.funding_restriction
                 .require_new_funding("funding_preparation_start")?;
+            self.check_job_permit(id, 1)?;
         }
         let changed = self.db.execute(
             "UPDATE funding_progress SET phase=?3,last_error=CASE WHEN ?4 THEN last_error ELSE NULL END WHERE job_id=?1 AND phase=?2 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",

@@ -302,8 +302,12 @@ impl FundingBackend for Backend {
     async fn ready(&mut self, job: &FundingJob, _: &Quote) -> Result<()> {
         let (limits, _) = self.policy(job)?;
         let daily = self.daily_limit;
+        let job_id = job.id.clone();
         self.store
-            .call(move |s| s.check_funding_capacity(now()?, limits.max_input, daily))
+            .call(move |s| {
+                s.check_job_permit(&job_id, limits.max_input)?;
+                s.check_funding_capacity(now()?, limits.max_input, daily)
+            })
             .await
     }
     async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
@@ -520,6 +524,11 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
         == Some(&super::error::AdmissionError::FundingRestricted)
     {
         return "qualification_funding_denied; new funding limit is zero; preparation paused before calculation; existing active-wallet calls remain available";
+    }
+    if error.downcast_ref::<super::error::AdmissionError>()
+        == Some(&super::error::AdmissionError::FundingPermitDenied)
+    {
+        return "qualification_funding_denied; funding permit missing, exhausted, changed, or unavailable; inspect qualification registry; existing active-wallet calls remain available";
     }
     if error.is::<super::transaction::PreparationDeferred>() {
         return "treasury_preparation_deferred; pre-preparation sync unavailable; no calculation started; retrying";

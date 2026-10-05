@@ -14,3 +14,12 @@ pub mod outage;
 pub mod owned;
 #[path = "tor/session.rs"]
 pub mod session;
+
+#[path = "tor/archive.rs"]
+pub mod archive;
+
+#[path = "tor/scope.rs"]
+pub mod scope;
+
+#[path = "tor/resume.rs"]
+mod resume;

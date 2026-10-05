@@ -11,7 +11,26 @@ use std::{
 };
 use tokio::sync::{Mutex, OnceCell, Semaphore};
 
-type Entry = Arc<OnceCell<(Instant, Option<String>)>>;
+mod evidence;
+pub use evidence::{CachePath, Evidence, Outcome, Price, price_map};
+struct CachedProbe {
+    created: Instant,
+    line: Option<String>,
+    outcome: Outcome,
+    http_status: Option<u16>,
+}
+struct Observation {
+    line: Option<String>,
+    outcome: Outcome,
+    http_status: Option<u16>,
+    cache: CachePath,
+    expired: bool,
+}
+pub struct Discovery {
+    pub prices: BTreeMap<(String, String), String>,
+    pub evidence: Evidence,
+}
+type Entry = Arc<OnceCell<CachedProbe>>;
 #[derive(Default)]
 pub struct PricingCache {
     entries: Mutex<BTreeMap<(String, crate::network::HttpPolicy), Entry>>,
@@ -52,7 +71,7 @@ impl PricingCache {
         http: reqwest::Client,
         ttl: f64,
         policy: crate::network::HttpPolicy,
-    ) -> Option<String> {
+    ) -> Observation {
         let cell = self
             .entries
             .lock()
@@ -60,42 +79,38 @@ impl PricingCache {
             .entry((url.clone(), policy))
             .or_default()
             .clone();
-        let (created, line) = cell
+        let ready = cell.get().is_some();
+        let initialized = std::sync::atomic::AtomicBool::new(false);
+        let entry = cell
             .get_or_init(|| async {
+                initialized.store(true, std::sync::atomic::Ordering::Relaxed);
                 let _permit = LIMIT.acquire().await.expect("probe semaphore open");
-                let result = async {
-                    let response = http.get(&url).send().await.ok()?;
-                    crate::network::log_http(&response, "pricing");
-                    if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
-                        return None;
-                    }
-                    for name in ["payment-required", "x-payment-required"] {
-                        let Some(raw) = response.headers().get(name) else {
-                            continue;
-                        };
-                        let Some(decoded) = STANDARD.decode(raw.as_bytes()).ok() else {
-                            continue;
-                        };
-                        let Some(value) = serde_json::from_slice::<Value>(&decoded).ok() else {
-                            continue;
-                        };
-                        return challenge_line(value.get("accepts")?.get(0)?);
-                    }
-                    None
-                }
-                .await;
+                let (line, outcome, http_status) = probe_request(&http, &url).await;
                 tracing::debug!(
-                    url,
-                    discovered = result.is_some(),
+                    discovered = line.is_some(),
                     "pricing attempt cached; no automatic retry"
                 );
-                (Instant::now(), result)
+                CachedProbe {
+                    created: Instant::now(),
+                    line,
+                    outcome,
+                    http_status,
+                }
             })
             .await;
-        if created.elapsed().as_secs_f64() < ttl {
-            line.clone()
-        } else {
-            None
+        let expired = entry.created.elapsed().as_secs_f64() >= ttl;
+        Observation {
+            line: if expired { None } else { entry.line.clone() },
+            outcome: entry.outcome,
+            http_status: entry.http_status,
+            cache: if initialized.load(std::sync::atomic::Ordering::Relaxed) {
+                CachePath::Initialized
+            } else if ready {
+                CachePath::Hit
+            } else {
+                CachePath::Shared
+            },
+            expired,
         }
     }
     async fn probe<'a>(
@@ -103,7 +118,7 @@ impl PricingCache {
         cfg: &Config,
         tool: &'a ToolSpec,
         base: &str,
-    ) -> Result<(&'a ToolSpec, Option<String>)> {
+    ) -> Result<(&'a ToolSpec, Observation)> {
         let url = tool.route(base, &serde_json::Map::new())?.url;
         let http = crate::network::provider_discovery(
             &url,
@@ -123,9 +138,26 @@ impl PricingCache {
         tools: &[ToolSpec],
         base: &str,
     ) -> Result<BTreeMap<(String, String), String>> {
+        Ok(self.discover_observed(cfg, root, tools, base).await?.prices)
+    }
+    pub async fn discover_observed(
+        &self,
+        cfg: &Config,
+        root: &Value,
+        tools: &[ToolSpec],
+        base: &str,
+    ) -> Result<Discovery> {
         validate(cfg)?;
+        let mut evidence = Evidence {
+            enabled: cfg.probe_pricing,
+            selected_tools: tools.len(),
+            ..Default::default()
+        };
         if !cfg.probe_pricing {
-            return Ok(BTreeMap::new());
+            return Ok(Discovery {
+                prices: BTreeMap::new(),
+                evidence,
+            });
         }
         let priced: BTreeSet<_> = operations(root, cfg.pricing_key.as_deref())?
             .into_iter()
@@ -137,17 +169,26 @@ impl PricingCache {
                 )
             })
             .collect();
-        let mut candidates: Vec<_> = tools
-            .iter()
-            .filter(|t| {
-                t.method == "GET"
-                    && t.help_url.is_none()
-                    && !t.path.contains('{')
-                    && !priced.contains(&(t.method.clone(), t.path.clone()))
-            })
-            .collect();
+        let mut candidates = Vec::new();
+        for tool in tools {
+            if tool.help_url.is_some() {
+                evidence.skipped_help += 1;
+            } else if tool.method != "GET" {
+                evidence.skipped_method += 1;
+            } else if tool.path.contains('{') {
+                evidence.skipped_template += 1;
+            } else if priced.contains(&(tool.method.clone(), tool.path.clone())) {
+                evidence.skipped_embedded += 1;
+            } else {
+                candidates.push(tool);
+            }
+        }
         candidates.sort_by_key(|t| (&t.path, &t.method));
+        let before = candidates.len();
         candidates.dedup_by_key(|t| (&t.path, &t.method));
+        evidence.skipped_duplicate = before - candidates.len();
+        evidence.eligible = candidates.len();
+        evidence.capped = candidates.len().saturating_sub(cfg.probe_max_endpoints);
         if candidates.len() > cfg.probe_max_endpoints {
             tracing::warn!(
                 candidate_count = candidates.len(),
@@ -166,13 +207,79 @@ impl PricingCache {
         let mut pending =
             stream::iter(probes).buffer_unordered(cfg.probe_concurrency.min(CONCURRENCY));
         while let Some(result) = pending.next().await {
-            let (tool, line) = result?;
-            if let Some(line) = line {
+            let (tool, observation) = result?;
+            evidence.observed += 1;
+            evidence.expired += usize::from(observation.expired);
+            *evidence.cache.entry(observation.cache).or_default() += 1;
+            *evidence.outcomes.entry(observation.outcome).or_default() += 1;
+            if let Some(code) = observation.http_status {
+                *evidence.http_statuses.entry(code).or_default() += 1;
+            }
+            if let Some(line) = observation.line {
                 lines.insert((tool.method.clone(), tool.path.clone()), line);
             }
         }
-        Ok(lines)
+        evidence.available_prices = lines.len();
+        evidence.validate()?;
+        Ok(Discovery {
+            prices: lines,
+            evidence,
+        })
     }
+}
+async fn probe_request(
+    http: &reqwest::Client,
+    url: &str,
+) -> (Option<String>, Outcome, Option<u16>) {
+    let response = match http.get(url).send().await {
+        Ok(response) => response,
+        Err(e) => {
+            return (
+                None,
+                if e.is_timeout() {
+                    Outcome::HttpTimeout
+                } else if e.is_connect() {
+                    Outcome::HttpConnect
+                } else {
+                    Outcome::HttpTransport
+                },
+                None,
+            );
+        }
+    };
+    crate::network::log_http(&response, "pricing");
+    let status = Some(response.status().as_u16());
+    if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
+        return (None, Outcome::UnexpectedHttpStatus, status);
+    }
+    let mut outcome = Outcome::MissingHeader;
+    for name in ["payment-required", "x-payment-required"] {
+        let Some(raw) = response.headers().get(name) else {
+            continue;
+        };
+        outcome = Outcome::MalformedChallenge;
+        let Some(value) = STANDARD
+            .decode(raw.as_bytes())
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        else {
+            continue;
+        };
+        let line = value
+            .get("accepts")
+            .and_then(|v| v.get(0))
+            .and_then(challenge_line);
+        return (
+            line.clone(),
+            if line.is_some() {
+                Outcome::Discovered
+            } else {
+                Outcome::UnusableOffer
+            },
+            status,
+        );
+    }
+    (None, outcome, status)
 }
 fn challenge_line(c: &Value) -> Option<String> {
     let amount = c.get("amount").or_else(|| c.get("maxAmountRequired"))?;
