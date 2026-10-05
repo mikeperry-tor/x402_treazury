@@ -1246,8 +1246,8 @@ impl Store {
             tx.query_row("SELECT bootstrapped FROM pools WHERE id=?1", [pool], |r| {
                 r.get(0)
             })?;
-        apply_chain_view(&tx, pool, bootstrapped, &view)?;
-        tx.commit()?;
+        let depleted = apply_chain_view(&tx, pool, bootstrapped, &view)?;
+        commit_chain_view(tx, pool, &view, &depleted)?;
         Ok(())
     }
     /// Bind an operation's network identity before calculation; bindings are immutable.
@@ -1308,7 +1308,7 @@ impl Store {
             cost <= amount(&target)?,
             AdmissionError::PriceLimit("payment exceeds deposit_size")
         );
-        apply_chain_view(&tx, pool, bootstrapped, &view)?;
+        let depleted = apply_chain_view(&tx, pool, bootstrapped, &view)?;
         // Commit evidence even when not ready; payment failures must not lose reconciliation.
         let active: Option<String> = tx
             .query_row(
@@ -1318,7 +1318,7 @@ impl Store {
             )
             .optional()?;
         let Some(mut wallet) = active else {
-            tx.commit()?;
+            commit_chain_view(tx, pool, &view, &depleted)?;
             anyhow::bail!(AdmissionError::WalletNotReady(
                 "both bootstrap addresses require confirmed funding"
             ));
@@ -1339,7 +1339,7 @@ impl Store {
         if balance.saturating_sub(exposure) < cost {
             // A live authorization could explain depletion. Never churn a busy slot.
             if exposure > U256::ZERO {
-                tx.commit()?;
+                commit_chain_view(tx, pool, &view, &depleted)?;
                 anyhow::bail!(AdmissionError::PaymentPending("unresolved authorizations"));
             }
             let ready: Option<String> = tx
@@ -1350,13 +1350,13 @@ impl Store {
                 )
                 .optional()?;
             let Some(ready) = ready else {
-                tx.commit()?;
+                commit_chain_view(tx, pool, &view, &depleted)?;
                 anyhow::bail!(AdmissionError::FundingUnavailable(
                     "standby not ready; refill pending; inspect wallet status for funding errors and fund/sync the Zcash treasury if needed; no payment signed"
                 ));
             };
             if view.balances[&ready].saturating_sub(reserved(&ready)?) < cost {
-                tx.commit()?;
+                commit_chain_view(tx, pool, &view, &depleted)?;
                 anyhow::bail!(AdmissionError::FundingUnavailable(
                     "standby cannot cover payment"
                 ));
@@ -1367,7 +1367,7 @@ impl Store {
             {
                 // Preserve trusted reconciliation, but never change roles, generation,
                 // outbox or admission when a replacement allocation is forbidden.
-                tx.commit()?;
+                commit_chain_view(tx, pool, &view, &depleted)?;
                 return Err(error);
             }
             tx.execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])?;
@@ -1386,12 +1386,12 @@ impl Store {
             wallet = ready;
         }
         if expected.is_some_and(|e| e.wallet != wallet || e.generation != generation) {
-            tx.commit()?;
+            commit_chain_view(tx, pool, &view, &depleted)?;
             anyhow::bail!(AdmissionError::PayerChanged);
         }
         let id = Uuid::new_v4().to_string();
         tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES (?1,?2,?3,?4,?5,?6,'ADMITTED')",params![id,pool,wallet,generation,cost.to_string(),requirements_hash])?;
-        tx.commit()?;
+        commit_chain_view(tx, pool, &view, &depleted)?;
         let address =
             self.db
                 .query_row("SELECT address FROM wallets WHERE id=?1", [&wallet], |r| {
@@ -1503,12 +1503,35 @@ impl Store {
     }
 }
 
+/// Emit depletion only after reconciliation has durably committed. Reservations
+/// and unfunded allocations do not constitute a confirmed balance transition.
+fn commit_chain_view(
+    tx: rusqlite::Transaction<'_>,
+    pool: &str,
+    view: &super::base::ChainView,
+    depleted: &[String],
+) -> Result<()> {
+    tx.commit()?;
+    for wallet in depleted {
+        tracing::warn!(
+            category = "evm_wallet_depleted",
+            pool,
+            wallet,
+            block_height = view.anchor.height,
+            balance_atomic = 0,
+            "EVM wallet confirmed USDC balance reached zero; further payments require a funded standby or refill"
+        );
+    }
+    Ok(())
+}
+
 fn apply_chain_view(
     tx: &Connection,
     pool: &str,
     bootstrapped: bool,
     view: &super::base::ChainView,
-) -> Result<()> {
+) -> Result<Vec<String>> {
+    let mut depleted = Vec::new();
     for id in &view.released {
         tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
     }
@@ -1521,6 +1544,13 @@ fn apply_chain_view(
             ensure!(role == "RETIRED", "incomplete Base view");
             continue;
         };
+        let previous: String =
+            tx.query_row("SELECT balance FROM wallets WHERE id=?1", [id], |r| {
+                r.get(0)
+            })?;
+        if *balance == U256::ZERO && amount(&previous)? > U256::ZERO {
+            depleted.push(id.clone());
+        }
         tx.execute(
             "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
             params![
@@ -1547,7 +1577,7 @@ fn apply_chain_view(
         tx.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [pool])?;
     }
     tx.execute("INSERT INTO payment_anchors VALUES (?1,?2,?3) ON CONFLICT(pool_id) DO UPDATE SET height=excluded.height,hash=excluded.hash",params![pool,i64::try_from(view.anchor.height)?,view.anchor.hash])?;
-    Ok(())
+    Ok(depleted)
 }
 
 #[cfg(test)]
