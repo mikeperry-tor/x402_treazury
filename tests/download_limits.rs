@@ -161,11 +161,13 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         "雪\n[truncated by --max-response-chars]"
     );
     assert!(
-        x402_treazury::catalog::load_json_with_limit(&format!("{vendor}/spec"), &http, 8)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("max_spec_bytes=8 bytes")
+        format!(
+            "{:#}",
+            x402_treazury::catalog::load_json_with_limit(&format!("{vendor}/spec"), &http, 8)
+                .await
+                .unwrap_err()
+        )
+        .contains("max_spec_bytes=8 bytes")
     );
     // The SDK's incoming request limit remains a visible HTTP error, with a log.
     let rejected = http
