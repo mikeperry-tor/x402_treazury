@@ -5,6 +5,9 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 | Guide | Subject |
 | --- | --- |
+| [Configuration](configuration.md) | TOML composition, tool filters, provider compatibility and pricing |
+| [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
+| [Development](development.md) | Local checks, coverage and complexity tooling |
 | [Architecture](architecture.md) | Catalog generation, MCP execution, caching and module boundaries |
 | [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, double buffering, funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |

@@ -63,8 +63,8 @@ Branch collection is an optional separate invocation using a compatible nightly
 compiler and matching LLVM tooling: `RUSTUP_TOOLCHAIN=nightly scripts/coverage.sh
 --branch`. Stable region coverage is not branch coverage. Optional proving,
 consensus and Tor results remain distinct from default report percentages.
-The README's [coverage section](../README.md#local-coverage) documents setup and
-artifact locations; its [complexity section](../README.md#local-complexity-metrics)
+The development guide's [coverage section](development.md#local-coverage) documents setup and
+artifact locations; its [complexity section](development.md#local-complexity-metrics)
 documents the local rust-code-analysis workflow.
 
 Review uncovered regions by risk: financial release boundaries, grants, transport

@@ -33,7 +33,7 @@ Use listener tag/tool filters for multiple views of one shared source catalog.
 `--config providers/pdl.toml` runs a single provider. `--meta-config` loads
 sources, wallets and listeners. Add `--show-config` to either to inspect file
 composition and per-field origins without fetching specs or reading secret
-values. See [the README](../README.md) for complete usage.
+values. See the [configuration reference](../docs/configuration.md) for complete usage.
 
 | Provider | Definition | Catalog |
 | --- | --- | --- |

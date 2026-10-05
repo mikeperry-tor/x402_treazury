@@ -8,7 +8,7 @@ authoritative. Tests pin 840 tool contracts across 20 providers and settings for
 ## Reliability annotations
 
 The provider definitions contain `reliability_tags` and `reliability_note`
-observations. [Warning semantics and tag meanings](../README.md#provider-reliability-observations)
+observations. [Warning semantics and tag meanings](../docs/configuration.md#provider-reliability-observations)
 are separate from OpenAPI tool filtering.
 
 | Provider | Observed concern |

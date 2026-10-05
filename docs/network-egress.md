@@ -199,7 +199,7 @@ without weakening trust, redirect, retry or proxy policy. Catalog, pricing, help
 and paid requests carry the same source policy. Agent imports and dynamic paid
 bindings use strict defaults. Infrastructure adapters retain their existing
 policy; explicit cleartext HTTP remains unchanged. See the
-[configuration guide](../README.md#provider-http-and-tls-policy).
+[configuration guide](configuration.md#provider-http-and-tls-policy).
 
 Pool keys include protocol permissions as well as origin, isolation identity,
 timeout, runtime and public-destination policy. Catalog/pricing caches also

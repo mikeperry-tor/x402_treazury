@@ -5,7 +5,7 @@ virtual wallet is a durable pool with its own keys, balance reservations, paymen
 cap and active/standby roles. Names determine sharing across sources and MCP
 listeners; they are not interchangeable labels for one global payer.
 
-Use the [README wallet section](../README.md#treasury-and-managed-pools) for TOML,
+Use the [wallet CLI reference](wallet-cli.md#treasury-and-managed-pools) for TOML,
 initialization, receive addresses, status, backup and recovery commands. The
 [public demo runbook](public-swap-demo.md) supplies bounded operator examples.
 This document explains the implementation and its invariants, not permission to
