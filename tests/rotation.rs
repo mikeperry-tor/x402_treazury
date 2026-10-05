@@ -756,3 +756,85 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     );
     assert!(state.treasury_operations.is_empty());
 }
+
+#[test]
+fn treasury_insufficiency_warns_only_for_fresh_spendable_evidence() {
+    // Isolate tracing's callsite interest cache from concurrent tests that emit
+    // the same event without a subscriber.
+    const CHILD: &str = "TREAZURY_TEST_TREASURY_WARNING_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "treasury_insufficiency_warns_only_for_fresh_spendable_evidence",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        return;
+    }
+    use std::sync::{Arc, Mutex};
+    use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let capture = Capture(Arc::default());
+    let sink = capture.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || sink.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = create(dir.path());
+    let observation = SyncObservation {
+        phase: SyncPhase::Ready,
+        last_error: None,
+        snapshot_revision: 0,
+        checked_at: Some(100),
+        checkpoint_at: 0,
+        scanned_blocks: 1,
+        target_height: Some(2_000_000),
+        height: Some(2_000_000),
+        confirmations: 3,
+        max_age_seconds: 10,
+        confirmed_pool_balances_zatoshis: None,
+        confirmed_shielded_zatoshis: 0,
+        spendable_shielded_zatoshis: 0,
+    };
+    store
+        .save_sync_snapshot(1, b"empty", Some(observation))
+        .unwrap();
+    assert_eq!(
+        store.require_spend_ready(111, 1).unwrap_err().to_string(),
+        "treasury_sync_stale"
+    );
+    assert!(capture.0.lock().unwrap().is_empty());
+    assert_eq!(
+        store.require_spend_ready(100, 10).unwrap_err().to_string(),
+        "treasury_insufficient_spendable_funds"
+    );
+    let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("WARN"));
+    assert!(logs.contains("treasury_insufficient_spendable_funds"));
+    assert!(logs.contains("required_zatoshis=10"));
+    assert!(logs.contains("spendable_zatoshis=0"));
+    assert!(logs.contains("existing funded EVM wallets remain usable"));
+    assert!(store.status().unwrap().treasury_operations.is_empty());
+}

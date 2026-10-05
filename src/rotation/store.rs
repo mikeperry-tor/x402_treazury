@@ -483,6 +483,15 @@ impl Store {
             observation.fresh(now, status.snapshot_revision),
             "treasury_sync_stale"
         );
+        if input_zatoshis > observation.spendable_shielded_zatoshis {
+            tracing::warn!(
+                category = "treasury_insufficient_spendable_funds",
+                required_zatoshis = input_zatoshis,
+                spendable_zatoshis = observation.spendable_shielded_zatoshis,
+                confirmed_shielded_zatoshis = observation.confirmed_shielded_zatoshis,
+                "Zcash treasury cannot fund this refill; fund and sync the treasury; existing funded EVM wallets remain usable"
+            );
+        }
         ensure!(
             input_zatoshis > 0 && input_zatoshis <= observation.spendable_shielded_zatoshis,
             "treasury_insufficient_spendable_funds"
