@@ -7,8 +7,8 @@ private_key_env = "PUBLIC_DEMO_EVM_PRIVATE_KEY"
 max_price_usd = "0.05"
 
 [sources.socialfetch]
-extends = "../providers/socialfetch.toml"
-spec = "../tests/fixtures/socialfetch_openapi.json"
+extends = "../../providers/socialfetch.toml"
+spec = "../../tests/fixtures/socialfetch_openapi.json"
 probe_pricing = false
 
 [servers.demo]

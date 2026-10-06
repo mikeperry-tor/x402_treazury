@@ -47,15 +47,14 @@ Authenticated confidential swaps remain unqualified.
 
 ## Quickstart: Zcash and Tor
 
-Run these commands from the repository root. This example exposes a SocialFetch
-profile lookup and its help tool through one managed wallet group.
+Run these commands from the repository root. This example groups Botsmith, Exa,
+PDL, Google Trends and Genuine Good Grants behind one managed wallet pool.
 
 ### 1. Build and start Tor
 
 ```sh
 scripts/zcash.sh build
-cp examples/privacy.toml examples/privacy.local.toml
-cp examples/network-tor.toml examples/privacy-network.local.toml
+cp examples/deployments/privacy.toml examples/deployments/privacy.local.toml
 ```
 
 The wrapper uses the pinned Rust/Cargo toolchain and supplies protoc. Zcash support
@@ -67,42 +66,39 @@ Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started
 the application. The example connects to Tor Browser's `127.0.0.1:9150` SOCKS port.
 For a dedicated daemon, use a listener such as
 `SocksPort 127.0.0.1:9050 IsolateSOCKSAuth` and change `network.socks_endpoint` in
-both local copies. The network-only file supplies the wallet initialization policy;
-the deployment file owns the serving and sync policy. Keep that Tor process running through initialization and serving.
+your local deployment file. That same file controls initialization, synchronization
+and serving. Keep Tor running throughout.
 
 ### 2. Create the treasury
 
-Set the indexer and transaction-submission endpoints in your shell. Set
-`TREAZURY_MCP_TOKEN` to a private bearer token for your MCP client; for example,
-generate one with `openssl rand -hex 32` and store it in your local secret manager.
+The default Zcash indexer and submission endpoint is `https://zec.rocks:443`;
+no endpoint environment variables are required. Set `TREAZURY_MCP_TOKEN` to a
+private bearer token for your MCP client (for example, generate one with
+`openssl rand -hex 32` and store it in your secret manager).
 
 ```sh
-export ZCASH_INDEXER_URL=https://zec.rocks:443
-export ZCASH_SUBMISSION_URL=https://zec.rocks:443
-
-mkdir -p state secrets
-chmod 700 secrets
-target/debug/treazury wallet init \
-  --state-dir state/privacy --key-file secrets/privacy.key \
-  --network-config examples/privacy-network.local.toml
-
-target/debug/treazury wallet addresses \
-  --state-dir state/privacy --key-file secrets/privacy.key
+target/debug/treazury wallet init --config examples/deployments/privacy.local.toml
+target/debug/treazury wallet addresses --config examples/deployments/privacy.local.toml
 ```
 
-Initialization creates a seed and discovers the birthday through Tor. The state
-and key destinations must be new; use `wallet addresses` to display the saved
-receive address again. Replace `treasury.id` in `privacy.local.toml` with the
-returned `treasury_id`. A seed import instead requires its original birthday;
-see the [wallet CLI reference](docs/wallet-cli.md).
+Initialization creates the wallet directory, generates a seed and discovers its
+birthday through Tor. The treasury ID is read automatically from wallet state;
+there is no ID to copy into TOML. Initialization refuses an existing wallet. Imports
+require an explicit birthday; see the [wallet reference](docs/wallet-cli.md).
 
-Before funding, back up the wallet and encryption key. Replace `TREASURY_UUID`
-with the same ID; the backup destination must not already exist.
+The default encryption key is `wallet.key` inside the owner-only wallet directory.
+Anyone obtaining that entire directory obtains both state and decryption material.
+Set `treasury.key_file` to keep the key elsewhere if your storage or backup policy
+needs separation. No password or OS-keychain protection is implied.
+
+Before funding, back up the wallet and encryption key. Create a private backup
+parent directory; the backup destination itself must not already exist.
 
 ```sh
+mkdir -p secrets
+chmod 700 secrets
 target/debug/treazury wallet backup \
-  --state-dir state/privacy --key-file secrets/privacy.key \
-  --treasury-id TREASURY_UUID --destination secrets/privacy-backup
+  --config examples/deployments/privacy.local.toml --destination secrets/privacy-backup
 ```
 
 Keep the backup secure: it contains spending material. Never operate the original
@@ -113,11 +109,11 @@ and a restored copy concurrently.
 ```sh
 # Offline: inspect wallet bindings, funding targets and network policy.
 target/debug/treazury \
-  --meta-config examples/privacy.local.toml --show-config
+  --config examples/deployments/privacy.local.toml --show-config
 
 # Fetch the catalog through Tor and validate selected tools; no payments.
 target/debug/treazury \
-  --meta-config examples/privacy.local.toml --check
+  --config examples/deployments/privacy.local.toml --check
 ```
 
 Send ZEC to the treasury's **shielded receive address**. Budget for both wallet
@@ -130,23 +126,26 @@ per-payment caps are not lifetime budgets.
 
 ```sh
 target/debug/treazury wallet sync \
-  --meta-config examples/privacy.local.toml
-target/debug/treazury wallet status --state-dir state/privacy
+  --config examples/deployments/privacy.local.toml
+target/debug/treazury wallet status --config examples/deployments/privacy.local.toml
 ```
 
 Once the confirmed spendable balance is sufficient and you have reviewed those
-limits, set `funding.auto_fund = true` in the local file. This enables real ZEC
-spending for bootstrap and later refills. Ensure `TREAZURY_MCP_TOKEN` is set, then:
+limits, launch the server. **Managed serving automatically funds the initial pair
+and later replacements**, using real ZEC within the configured limits. Set
+`funding.auto_fund = false` to pause automatic funding. Initialization, inspection,
+backup and `wallet sync` never start funding workers. Ensure `TREAZURY_MCP_TOKEN`
+is set, then:
 
 ```sh
-target/debug/treazury --meta-config examples/privacy.local.toml
+target/debug/treazury --config examples/deployments/privacy.local.toml
 ```
 
 Connect your MCP client to **`http://127.0.0.1:8000/mcp`**, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`. Wait for an active wallet and a
-ready standby before paid use. The client can call `socialfetch_help` and
-`socialfetch_twitter_profiles_handle` (with a `handle` argument). Help is fetched
-on demand and cached for the process.
+ready standby before paid use. List tools in your MCP client, read the provider
+help, and select a request within the configured payment cap. Help is fetched on
+demand and cached for the process.
 
 `wallet status` reports persisted progress. Stop with Ctrl-C and allow the announced
 transaction-safety drain to finish. Wallet administration commands that need
@@ -194,8 +193,8 @@ retain priority. `--show-config` displays the resolved bindings and combined
 active-plus-standby target before allocating anything. That target excludes fees
 and bridge-minimum increases.
 
-See [automatic wallets](examples/servers-auto-wallets.toml),
-[multiple managed listeners](examples/servers-managed.toml), and the
+See [automatic wallets](examples/deployments/servers-auto-wallets.toml),
+[multiple managed listeners](examples/deployments/servers-managed.toml), and the
 [composition reference](docs/configuration.md#multiple-mcp-ports-from-one-configuration).
 
 ## Bring your APIs
@@ -222,7 +221,7 @@ entire large catalog to the agent.
 Optional [agent source management](docs/agent-sources.md) lets authorized agents
 inspect and add OpenAPI sources within configured listener, process or persistent
 scope. It is disabled by default; grants control destinations, persistence and wallet
-bindings. Start with [the managed example](examples/agent-sources-managed.toml),
+bindings. Start with [the managed example](examples/deployments/agent-sources-managed.toml),
 which shares an explicit wallet for agent-added sources to avoid a funded pool per
 addition. Discovery does not grant spending or source-registration authority.
 
@@ -247,8 +246,8 @@ For a simpler static-key stdio setup, provide `EVM_PRIVATE_KEY` through the envi
 or a private `.env` file:
 
 ```sh
-target/debug/treazury --config providers/socialfetch.toml \
-  --network-config examples/network-tor.toml --env-file .env
+target/debug/treazury --provider providers/socialfetch.toml \
+  --network-config examples/network/tor.toml --env-file .env
 ```
 
 This uses Tor but does not rotate or fund the static wallet. MCP clients should spawn

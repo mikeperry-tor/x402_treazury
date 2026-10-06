@@ -4,6 +4,24 @@ For a Zcash-and-Tor walkthrough, start with the [README](../README.md).
 This reference covers TOML composition, tool selection, transport and pricing.
 Commands run from the repository root.
 
+## Configuration file roles
+
+`--config FILE` selects a deployment: sources, listeners, wallets and network
+policy. Wallet commands accept the same file without loading API sources.
+`--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
+provider for standalone serving; the former provider meaning of `--config` is
+replaced by this explicit flag. `--network-config FILE` is an optional network-only
+file for standalone operations, not an override for deployments.
+
+Ordinary deployment examples live in `examples/deployments/`, standalone network policies in
+`examples/network/`, and reusable APIs in `providers/`. Paths resolve from the file
+that declares them. Existing user-owned local copies are not moved automatically.
+
+Managed serving defaults to automatic bootstrap/refill funding; explicitly set
+`funding.auto_fund = false` to pause it. Merely inspecting a config or compiling
+Zcash support does not spend funds. Source limits remain required. See the
+[wallet defaults and commands](wallet-cli.md#one-configuration-for-wallet-commands).
+
 ## Multiple MCP ports from one configuration
 
 Deployment catalogs load concurrently through a rolling queue. The default is 2
@@ -33,16 +51,16 @@ are read independently; documents are not cached across deployment loads.
 Pricing discovery rolls across sources and endpoints with a shared 16-request cap.
 
 
-[examples/servers.toml](../examples/servers.toml) exposes PDL and LoneStar through
+[examples/deployments/servers.toml](../examples/deployments/servers.toml) exposes PDL and LoneStar through
 separate research and company MCP listeners sharing one static wallet profile:
 
 ```sh
 target/debug/treazury \
-  --meta-config examples/servers.toml --check
+  --config examples/deployments/servers.toml --check
 target/debug/treazury \
-  --meta-config examples/servers.toml --list-tools
+  --config examples/deployments/servers.toml --list-tools
 target/debug/treazury \
-  --meta-config examples/servers.toml --env-file .env
+  --config examples/deployments/servers.toml --env-file .env
 ```
 
 Serving this example requires `EVM_PRIVATE_KEY`, `RESEARCH_MCP_TOKEN` and
@@ -122,7 +140,7 @@ Inspection never reads wallet secrets or opens treasury state.
 
 To avoid repeating managed wallet definitions, define one template and an
 automatic assignment policy. A complete deployment is in
-[servers-auto-wallets.toml](../examples/servers-auto-wallets.toml):
+[servers-auto-wallets.toml](../examples/deployments/servers-auto-wallets.toml):
 
 ```toml
 [wallet_templates.small]
@@ -220,7 +238,7 @@ hidden truncation.
 
 `--show-config` prints the composed file settings and per-source field origins,
 including defaults, without reading secrets or loading specs. It accepts only
-`--config` or `--meta-config`; CLI/environment runtime overrides are outside
+`--provider` or `--config`; CLI/environment runtime overrides are outside
 this file inspection command. Wallet/token fields show environment variable
 names, never their values.
 
@@ -229,7 +247,7 @@ JSON including source attribution. `--list-tags` reports unfiltered source tag
 counts. These commands do not create signers, bind ports, probe prices, or fetch
 help documents. Remote specs still require network access. Only `--env-file`,
 `--check`, `--list-tools`, `--list-tags`, and `--show-config` may accompany
-`--meta-config`; deployment settings do not inherit single-source CLI overrides.
+`--config`; deployment settings do not inherit single-source CLI overrides.
 
 Startup validates credentials and binds every listener before serving any.
 A bind failure releases listeners already acquired. Both standalone HTTP and
@@ -296,7 +314,7 @@ exceeding it returns HTTP 413 with the limit in its message and a stderr warning
   completion. This API is for static profiles. Managed profiles acquire an
   immutable signer lease after challenge validation and durable admission.
 
-The CLI supports `--spec`, `--config`, `--base-url`, `--prefix`, `--include`,
+The CLI supports `--spec`, `--provider`, `--base-url`, `--prefix`, `--include`,
 `--exclude`, `--tags`, `--exclude-tags`, `--timeout`, `--max-response-chars`,
 `--transport`, `--host`, `--port`, `--bearer-token`, and `--env-file`.
 Filters accept comma-separated values. Supported
@@ -311,8 +329,8 @@ method, URL, query and JSON body without making a request or loading a signer.
 
 Authorize agents to register public OpenAPI sources in a running multi-server
 HTTP deployment with `[source_management]` and per-listener grants. The
-[static-wallet example](../examples/agent-sources.toml) and
-[managed-wallet example](../examples/agent-sources-managed.toml) use one named
+[static-wallet example](../examples/deployments/agent-sources.toml) and
+[managed-wallet example](../examples/deployments/agent-sources-managed.toml) use one named
 `agent_shared` wallet for all added APIs. At a $5 managed deposit size, that is
 one $10 active-plus-standby target regardless of how many APIs are registered.
 Registration does not create wallet pools or trigger funding.
@@ -346,7 +364,7 @@ Directory results are leads, not automatically imported schemas.
 See [agent source management](agent-sources.md) for the complete configuration,
 agent workflow, limits, wallet/privacy behavior and recovery procedures.
 `--show-config` inspects grants and wallet bindings offline;
-`treazury sources inspect --meta-config FILE` inspects saved registrations.
+`treazury sources inspect --config FILE` inspects saved registrations.
 
 ## Provider reliability observations
 
@@ -394,12 +412,12 @@ and disables pricing probes because credit prices are embedded in the spec.
 The server instructions explain the credit unit and metering caveats.
 
 ```sh
-target/debug/treazury --config providers/socialfetch.toml --list-tags
-target/debug/treazury --config providers/socialfetch.toml --tags Twitter,YouTube --list-tools
-target/debug/treazury --meta-config examples/socialfetch.toml --env-file .env
+target/debug/treazury --provider providers/socialfetch.toml --list-tags
+target/debug/treazury --provider providers/socialfetch.toml --tags Twitter,YouTube --list-tools
+target/debug/treazury --config examples/deployments/socialfetch.toml --env-file .env
 ```
 
-[examples/socialfetch.toml](../examples/socialfetch.toml) configures a selected
+[examples/deployments/socialfetch.toml](../examples/deployments/socialfetch.toml) configures a selected
 platform set. TOML sources accept `tags` and `exclude_tags`: each specified list
 replaces the corresponding provider list; omission inherits it, and `[]`
 clears it. Matching is exact and case-sensitive. Include tags match any listed
@@ -446,11 +464,10 @@ payment authorization expiry, NEAR quote expiry or experiment deadlines.
 For standalone serving or wallet commands, use the same table in a separate file:
 
 ```sh
-treazury --config providers/socialfetch.toml \
-  --network-config examples/network-tor.toml --list-tools
+treazury --provider providers/socialfetch.toml \
+  --network-config examples/network/tor.toml --list-tools
 treazury wallet init --state-dir state/public-demo \
-  --key-file secrets/public-demo.key \
-  --network-config examples/network-tor.toml
+  --network-config examples/network/tor.toml
 ```
 
 Paths above assume the repository root as the current directory. Meta-config wallet

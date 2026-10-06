@@ -9,7 +9,7 @@ max_price_usd = "0.05"
 
 [source_management]
 wallet = "agent_shared"
-registry_file = "../state/agent-sources.sqlite"
+registry_file = "../../state/agent-sources.sqlite"
 max_sources = 16
 max_tools_per_source = 100
 max_tools_per_server = 200
@@ -19,9 +19,9 @@ fetch_timeout_seconds = 30
 # allowed_origins = ["https://api.example.com"]
 
 [sources.directory]
-extends = "../providers/x402-list.toml"
+extends = "../../providers/x402-list.toml"
 # Offline startup snapshot; the actual directory tool calls use its live API.
-spec = "../tests/fixtures/x402_list_openapi.json"
+spec = "../../tests/fixtures/x402_list_openapi.json"
 wallet = "agent_shared"
 
 [servers.research]

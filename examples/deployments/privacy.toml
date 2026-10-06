@@ -1,5 +1,4 @@
-# README quickstart: copy to privacy.local.toml, initialize a new treasury,
-# replace treasury.id, then enable auto_fund after reviewing the spending limits.
+# README quickstart: copy to privacy.local.toml and initialize its treasury.
 version = 1
 
 [network]
@@ -11,16 +10,12 @@ connect_timeout_seconds = 120
 request_timeout_seconds = 240
 
 [treasury]
-id = "11111111-1111-4111-8111-111111111111"
-state_dir = "../state/privacy"
-key_file = "../secrets/privacy.key"
-indexer_url_env = "ZCASH_INDEXER_URL"
-submission_url_env = "ZCASH_SUBMISSION_URL"
+state_dir = "../../state/privacy"
 daily_input_zec = "0.012"
 shield_max_fee_zec = "0.0003"
 
 [funding]
-auto_fund = false
+# Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 confidentiality = "public"
 # Leave BASE_RPC_URL unset to use the built-in Base RPC failover list.
 base_rpc_url_env = "BASE_RPC_URL"
@@ -33,23 +28,22 @@ max_input_zec = "0.006"
 max_fee_bps = 500
 
 [sources.botsmith]
-extends = "../providers/botsmith.toml"
+extends = "../../providers/botsmith.toml"
 
 [sources.exa]
-extends = "../providers/exa.toml"
+extends = "../../providers/exa.toml"
 
 [sources.pdl]
-extends = "../providers/pdl.toml"
+extends = "../../providers/pdl.toml"
 
 [sources.googletrends]
-extends = "../providers/google-trends.toml"
+extends = "../../providers/google-trends.toml"
 
 [sources.genuinegood]
-extends = "../providers/genuinegood.toml"
+extends = "../../providers/genuinegood.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "research"
 sources = ["botsmith", "exa", "pdl", "googletrends", "genuinegood"]
-include_tools = ["socialfetch_twitter_profiles_handle", "socialfetch_help"]

@@ -109,7 +109,7 @@ async def run(args, label, binary, path, catalog_only=False, require_learning=Tr
         raise ValueError(f'Measurement {label} already exists; choose a new --label')
     command = ['/usr/bin/time', '-l', '-o', str(prefix.with_suffix('.resources')),
                '/usr/bin/sandbox-exec', '-f', str(args.output / 'socks-only.sb'),
-               str(binary), '--meta-config', str(path)]
+               str(binary), '--config', str(path)]
     if catalog_only:
         command.append('--catalog-only')
     started = time.monotonic()

@@ -142,7 +142,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
         "version = 1\nservers = {}\n[source_management]\nwallet = 'unused'\nregistry_file = 'registry.sqlite'\n",
     )
     .unwrap();
-    let inspect = ["sources", "inspect", "--meta-config", "registry.toml"];
+    let inspect = ["sources", "inspect", "--config", "registry.toml"];
     bad(run(dir, &inspect, &[]).await);
     assert!(!dir.join("registry.sqlite").exists());
     let db = rusqlite::Connection::open(dir.join("registry.sqlite")).unwrap();
@@ -180,7 +180,7 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         ("X402_MCP_GENERIC_BASE_URL", "https://env.example.com"),
     ];
     assert_eq!(
-        good(run(dir, &["--config", "provider.toml", "--list-tools"], &env).await)[0]["name"],
+        good(run(dir, &["--provider", "provider.toml", "--list-tools"], &env).await)[0]["name"],
         "environment_root"
     );
     std::fs::write(
@@ -193,7 +193,7 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
             run(
                 dir,
                 &[
-                    "--config",
+                    "--provider",
                     "provider.toml",
                     "--env-file",
                     "env",
@@ -209,7 +209,7 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         run(
             dir,
             &[
-                "--config",
+                "--provider",
                 "provider.toml",
                 "--env-file",
                 "env",
@@ -228,7 +228,13 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
     let cleared = good(
         run(
             dir,
-            &["--config", "provider.toml", "--include", "", "--list-tools"],
+            &[
+                "--provider",
+                "provider.toml",
+                "--include",
+                "",
+                "--list-tools",
+            ],
             &[],
         )
         .await,
@@ -238,7 +244,7 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         bad(run(
             dir,
             &[
-                "--config",
+                "--provider",
                 "provider.toml",
                 "--timeout",
                 invalid,
@@ -281,7 +287,7 @@ async fn wallet_recovery_argument_errors_are_legible_without_submission_credenti
         assert!(
             bad(run(
                 tmp.path(),
-                &["wallet", command, "--meta-config", "missing.toml"],
+                &["wallet", command, "--config", "missing.toml"],
                 &[]
             )
             .await)
@@ -292,7 +298,7 @@ async fn wallet_recovery_argument_errors_are_legible_without_submission_credenti
             &[
                 "wallet",
                 command,
-                "--meta-config",
+                "--config",
                 "missing.toml",
                 flag,
                 "00000000-0000-0000-0000-000000000000",
@@ -331,7 +337,7 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
     assert!(
         bad(run(
             dir,
-            &["--meta-config", "servers.toml", "--transport", "stdio"],
+            &["--config", "servers.toml", "--transport", "stdio"],
             &[]
         )
         .await)
@@ -340,7 +346,7 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
     let key = format!("{:064x}", 1);
     let error = bad(run(
         dir,
-        &["--meta-config", "servers.toml"],
+        &["--config", "servers.toml"],
         &[("KEY", &key), ("TOKEN", "test-token")],
     )
     .await);
@@ -353,11 +359,11 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
 async fn qualification_restriction_requires_serving_meta_config() {
     let tmp = tempfile::tempdir().unwrap();
     let flag = "--qualification-no-new-funding";
-    assert!(bad(run(tmp.path(), &[flag], &[]).await).contains("--meta-config"));
+    assert!(bad(run(tmp.path(), &[flag], &[]).await).contains("--config"));
     for inspection in ["--check", "--show-config", "--list-tools", "--list-tags"] {
         let error = bad(run(
             tmp.path(),
-            &[flag, "--meta-config", "missing.toml", inspection],
+            &[flag, "--config", "missing.toml", inspection],
             &[],
         )
         .await);
@@ -374,7 +380,7 @@ async fn unsigned_qualification_cannot_use_stdio_or_dotenv_or_inspection_modes()
         let error = bad(run(
             tmp.path(),
             &[
-                "--meta-config",
+                "--config",
                 "missing.toml",
                 unsigned,
                 "--qualification-parent-stdin",
@@ -388,7 +394,7 @@ async fn unsigned_qualification_cannot_use_stdio_or_dotenv_or_inspection_modes()
     let error = bad(run(
         tmp.path(),
         &[
-            "--meta-config",
+            "--config",
             "missing.toml",
             unsigned,
             "--qualification-parent-stdin",

@@ -89,7 +89,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-        .args(["--meta-config", path.to_str().unwrap(), "--show-config"])
+        .args(["--config", path.to_str().unwrap(), "--show-config"])
         .output()
         .unwrap();
     assert!(
@@ -108,7 +108,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-        .args(["--meta-config", path.to_str().unwrap(), "--check"])
+        .args(["--config", path.to_str().unwrap(), "--check"])
         .output()
         .unwrap();
     assert!(

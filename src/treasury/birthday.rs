@@ -4,7 +4,7 @@ use std::time::Duration;
 use zingo_netutils::Indexer;
 
 /// Public mainnet endpoint used by the reference Zodl wallets.
-pub const DEFAULT_INDEXER: &str = "https://zec.rocks:443";
+pub const DEFAULT_INDEXER: &str = crate::rotation::config::DEFAULT_ZCASH_INDEXER;
 /// Scan a small overlap to tolerate ordinary tip movement and shallow reorgs.
 pub const BIRTHDAY_REWIND: u32 = 100;
 

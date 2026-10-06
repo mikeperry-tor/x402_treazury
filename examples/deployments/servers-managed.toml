@@ -1,19 +1,13 @@
 # Build with scripts/zcash.sh. Initialize the treasury explicitly before serving.
-# Set auto_fund=true to enable real ZEC deposits; default serving only syncs.
 version = 1
 
 [treasury]
-id = "11111111-1111-4111-8111-111111111111" # Replace with wallet init's treasury_id.
-state_dir = "../state/treasury"
-key_file = "../secrets/treasury.key"
-indexer_url_env = "ZCASH_INDEXER_URL"
-submission_url_env = "ZCASH_SUBMISSION_URL"
+state_dir = "../../state/treasury"
 daily_input_zec = "0.10"
 shield_max_fee_zec = "0.001"
 
 [funding]
-# Enable source spending deliberately for a funded demo; operator recovery commands are documented in ../docs/wallet-cli.md.
-auto_fund = false
+# Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 # near_api_key_env = "NEAR_PARTNER_KEY"
 # near_user_session_env = "NEAR_USER_SESSION"
 base_rpc_url_env = "BASE_RPC_URL"
@@ -36,7 +30,7 @@ max_input_zec = "0.04"
 max_fee_bps = 500
 
 [sources.socialfetch]
-extends = "../providers/socialfetch.toml"
+extends = "../../providers/socialfetch.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"

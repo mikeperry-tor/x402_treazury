@@ -302,7 +302,7 @@ fn paid_success_requires_actual_debit_but_unsigned_help_does_not() {
 fn funding_launch_requires_explicit_flag_and_zero_authority_never_enables_it() {
     let mut m = manifest();
     let mut config: x402_treazury::deployment::MetaConfig =
-        toml::from_str(include_str!("../public-swap-demo.toml")).unwrap();
+        toml::from_str(include_str!("../deployments/public-swap-demo.toml")).unwrap();
     config.funding.as_mut().unwrap().auto_fund = true;
     assert!(!super::execution::funding_enabled(&m, &config, true).unwrap());
     m.limits.new_funding_jobs = 2;

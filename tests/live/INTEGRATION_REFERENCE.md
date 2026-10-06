@@ -479,12 +479,12 @@ these operations need no runner, registry or matching source checkout.
 target/debug/treazury wallet init \
   --state-dir state/new-integration-wallet \
   --key-file secrets/new-integration-wallet.key \
-  --network-config examples/network-tor.toml
+  --network-config examples/network/tor.toml
 target/debug/treazury wallet addresses \
   --state-dir state/new-integration-wallet \
   --key-file secrets/new-integration-wallet.key
 # Set treasury references and network policy in deployment.toml, then synchronize:
-target/debug/treazury wallet sync --meta-config deployment.toml
+target/debug/treazury wallet sync --config deployment.toml
 # With serving stopped, save an owner-only backup including its key:
 target/debug/treazury wallet backup \
   --state-dir state/new-integration-wallet \
@@ -636,7 +636,7 @@ or financial cancellation.
 ## Production restriction for supervised existing-wallet runs
 
 The production executable accepts the internal serving-only option
-`--qualification-no-new-funding` with `--meta-config`. It uses the same
+`--qualification-no-new-funding` with `--config`. It uses the same
 `Deployment::bind_restricted` path available to fixtures and installs the
 restriction before managed pool configuration/allocation, independently of
 `funding.auto_fund`. A missing managed pool fails startup without creating its
@@ -668,7 +668,7 @@ funding requires separate allocation permits.
 ## Keyless child and parent lifetime
 
 The executable's internal `--qualification-unsigned` option requires
-`--qualification-parent-stdin` and `--meta-config`. It serves the normal authenticated
+`--qualification-parent-stdin` and `--config`. It serves the normal authenticated
 MCP inventory with keyless clients: configured static key references are not read,
 treasury state is not opened, and any declared managed wallet, `auto_fund=true` or
 source-management configuration is refused. It also rejects `--env-file`; the

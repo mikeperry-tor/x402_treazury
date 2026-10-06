@@ -103,9 +103,32 @@ age includes sync time; never renew freshness at completion. Persist the final
 Expiry recovery requires equality on both syncs before releasing reservations.
 The treasury is exclusively spent here; accepted lag must appear in logs/CLI output.
 
+## Configuration and wallet workflow
+
+`--config FILE` selects a deployment; `--meta-config` is its compatibility alias.
+`--provider FILE` selects standalone reusable provider settings. Wallet commands
+accept the same deployment file, consuming treasury/network settings without
+loading catalogs, requiring listener tokens or starting funding workers. Do not
+combine deployment configuration with standalone location/network overrides.
+User-facing deployment examples live in `examples/deployments/`; network-only examples in
+`examples/network/`. Preserve user-owned local copies when changing layouts.
+
+An omitted treasury ID resolves from existing state at runtime; a supplied ID is
+an assertion, never permission to adopt another wallet. Offline `--show-config`
+reports that resolution policy without opening state. An omitted key path resolves
+to `wallet.key` inside the owner-only state directory; the whole directory contains
+sufficient decryption material. External key paths remain supported. Never replace
+existing state on init. Endpoint defaults are shared with birthday lookup; explicit
+missing environment references fail, and submission otherwise follows the indexer.
+
+Managed serving defaults to automatic bootstrap and replacement funding, within
+required source/fee limits. `auto_fund=false` pauses it; build features, inspection,
+wallet initialization and sync never authorize automatic funding. Qualification
+restrictions remain authoritative, and bounded live demos retain explicit opt-outs.
+
 ## Commands and test discipline
 
-`scripts/check.sh` runs the complete sequence below, including all-feature
+`scripts/check.sh` validates only the default Zcash build, including all-feature
 Clippy and dependency compatibility. See `scripts/README.md` for optional vector
 regeneration. Individual commands:
 
@@ -113,7 +136,6 @@ regeneration. Individual commands:
 scripts/zcash.sh build
 scripts/zcash.sh test --all-targets -- --test-threads=1
 scripts/zcash.sh clippy --all-targets -- -D warnings
-cargo test --locked --no-default-features --all-targets
 cargo fmt --check
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
@@ -138,7 +160,11 @@ may fetch public proving parameters; Cargo/build traffic is outside runtime Tor 
 
 Tests use temporary state and public unfunded deterministic keys. Never load real
 wallet keys or seeds into default tests. Local fixtures require localhost binding.
-Run no-default-feature and default CLI suites sequentially: both build the same executable path.
+Do not run no-default-feature builds, tests or Clippy unless the user explicitly requests
+that configuration. Zcash is included in the standard build; static-wallet deployments
+simply do not configure a treasury. Use focused tests for changes and avoid repeating
+full suites after a localized fix. If explicitly requested, run feature suites
+sequentially because their CLI tests share the same executable path.
 `tests/stdio.rs` tests the real process; provider snapshots test full tool contracts.
 Python is optional development tooling, never an application/runtime dependency.
 Consensus tests need Docker and explicit ignored-test invocation; see `tests/REGTEST.md`.
@@ -279,7 +305,7 @@ uses one immutable policy: direct by default or strict authenticated Tor SOCKS5.
 Meta-config accepts `[network]`; standalone/wallet/example commands accept
 `--network-config FILE`. They cannot override a meta-config's policy. No isolation
 key file is used. Canonical typed identities produce deterministic SHA-256 tokens;
-see `docs/network-egress.md` and `examples/network-tor.toml`.
+see `docs/network-egress.md` and `examples/network/tor.toml`.
 
 Tor defaults to 120-second connection establishment and a 240-second complete
 request floor (`request_timeout_seconds`). Effective HTTP timeout is the maximum

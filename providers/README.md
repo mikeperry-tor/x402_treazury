@@ -30,7 +30,7 @@ can be overridden at the source, including `spec`, `base_url`, `prefix`,
 `include`, `exclude`, `tags`, `exclude_tags`, descriptions and probe settings.
 Use listener tag/tool filters for multiple views of one shared source catalog.
 
-`--config providers/pdl.toml` runs a single provider. `--meta-config` loads
+`--provider providers/pdl.toml` runs a single provider. `--config` loads
 sources, wallets and listeners. Add `--show-config` to either to inspect file
 composition and per-field origins without fetching specs or reading secret
 values. See the [configuration reference](../docs/configuration.md) for complete usage.
@@ -93,7 +93,7 @@ context. See Exa in [the caveats](CAVEATS.md) for this pattern.
 
 Agent402 has a much larger catalog than most providers. Its default `tags = ["web"]`
 produces 48 API tools plus help in the fixture; `--tags data,crypto` replaces that
-selection. Run `--config providers/agent402.toml --list-tags` to inspect the vendor's
+selection. Run `--provider providers/agent402.toml --list-tags` to inspect the vendor's
 24 tags. Counts there describe the source before exclusions, not necessarily the
 selected inventory. See [Agent402 caveats](CAVEATS.md#agent402toml--agent402tools)
 for supported subsets, excluded workflows and examples.

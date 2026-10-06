@@ -120,7 +120,7 @@ fn spawn(dir: &Path, piped: bool) -> tokio::process::Child {
         .env("TOKEN", TOKEN)
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
         .args([
-            "--meta-config",
+            "--config",
             "config.toml",
             "--qualification-unsigned",
             "--qualification-parent-stdin",

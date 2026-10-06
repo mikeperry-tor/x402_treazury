@@ -137,7 +137,7 @@ impl<'a> Application<'a> {
 impl Launcher<'_> {
     fn arguments(&self, binding_file: &Path) -> Vec<String> {
         let mut args = vec![
-            "--meta-config".into(),
+            "--config".into(),
             self.frozen.to_string_lossy().into_owned(),
             if self.managed {
                 "--qualification-managed"

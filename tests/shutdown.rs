@@ -92,10 +92,10 @@ async fn scenario(meta: bool, signal: &str, finish: bool) {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     if meta {
-        command.args(["--meta-config", "config.toml"]);
+        command.args(["--config", "config.toml"]);
     } else {
         command.args([
-            "--config",
+            "--provider",
             "config.toml",
             "--transport",
             "http",

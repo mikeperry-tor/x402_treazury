@@ -140,7 +140,7 @@ async fn executable_startup_and_inspection_do_not_print_environment_secrets() {
             .env("EVM_PRIVATE_KEY", "DUMMY_PRIVATE_KEY")
             .env("X402_MCP_BEARER_TOKEN", "DUMMY_BEARER")
             .env("NEAR_USER_SESSION", "DUMMY_SESSION")
-            .args(["--config", "config.toml"])
+            .args(["--provider", "config.toml"])
             .kill_on_drop(true);
         if inspect {
             cmd.arg("--show-config");

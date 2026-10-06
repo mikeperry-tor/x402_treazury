@@ -771,8 +771,9 @@ fn managed_environment(
         .context("managed treasury missing")?;
     let funding = config.funding.as_ref().context("managed funding missing")?;
     let mut names = BTreeMap::new();
-    names.insert(treasury.indexer_url_env.as_str(), true);
-    names.insert(treasury.submission_url_env.as_str(), true);
+    for name in [&treasury.indexer_url_env, &treasury.submission_url_env] {
+        if !name.is_empty() { names.insert(name.as_str(), true); }
+    }
     names
         .entry(funding.base_rpc_url_env.as_str())
         .and_modify(|required| *required |= funding.base_rpc_url_env != "BASE_RPC_URL")
@@ -833,8 +834,11 @@ mod environment_tests {
     #[test]
     fn managed_child_receives_only_explicit_transport_environment() {
         let mut config: MetaConfig =
-            toml::from_str(include_str!("../public-swap-demo.toml")).unwrap();
-        let treasury = config.treasury.as_ref().unwrap();
+            toml::from_str(include_str!("../deployments/public-swap-demo.toml")).unwrap();
+        // Explicit overrides are independent of the demo's default endpoints.
+        let treasury = config.treasury.as_mut().unwrap();
+        treasury.indexer_url_env = "TEST_INDEXER_URL".into();
+        treasury.submission_url_env = "TEST_SUBMISSION_URL".into();
         let expected = std::collections::BTreeSet::from([
             treasury.indexer_url_env.clone(),
             treasury.submission_url_env.clone(),

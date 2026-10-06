@@ -346,7 +346,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     )
     .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
-        .args(["--show-config", "--config"])
+        .args(["--show-config", "--provider"])
         .arg(&source)
         .output()
         .unwrap();
@@ -361,7 +361,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     )
     .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
-        .args(["--show-config", "--config"])
+        .args(["--show-config", "--provider"])
         .arg(&source)
         .arg("--network-config")
         .arg(&policy)
@@ -378,7 +378,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert_eq!(value["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(value["network"]["socks_auth"], "tor_extended");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
-        .args(["--meta-config", "missing.toml", "--network-config"])
+        .args(["--config", "missing.toml", "--network-config"])
         .arg(policy)
         .output()
         .unwrap();

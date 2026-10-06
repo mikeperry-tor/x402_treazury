@@ -1,5 +1,5 @@
-# For standalone CLI/wallet commands: --network-config examples/network-tor.toml
-# For a deployment, put this table directly in its --meta-config file.
+# For standalone CLI/wallet commands: --network-config examples/network/tor.toml
+# For a deployment, put this table directly in its --config file.
 # Tor Browser must already be running on the configured SOCKS port.
 [network]
 mode = "tor"

@@ -249,7 +249,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
             .env_clear()
             .current_dir(tmp.path())
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-            .args(["--config", "provider.toml", "--list-tools"])
+            .args(["--provider", "provider.toml", "--list-tools"])
             .kill_on_drop(true);
         if override_limit {
             command.args(["--max-spec-bytes", "1024"]);
@@ -276,7 +276,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
         .env_clear()
         .current_dir(tmp.path())
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-        .args(["--meta-config", "servers.toml", "--check"])
+        .args(["--config", "servers.toml", "--check"])
         .kill_on_drop(true)
         .output()
         .await

@@ -7,8 +7,8 @@ any working directory unless a command explicitly supplies relative data paths.
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
 | `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
-| `check.sh` | Format, vendor provenance, both feature configurations, all-feature Clippy and compatibility suite |
-| `check.sh --no-default-features` | Only the tests and Clippy without the embedded wallet, plus format/provenance |
+| `check.sh` | Format, vendor provenance, default Zcash tests, all-feature Clippy and compatibility suite |
+| `check.sh --no-default-features` | Explicit opt-in only: tests and Clippy without the embedded wallet, plus format/provenance |
 | `python3 scripts/complexity.py` | Pinned source complexity metrics; ranked Markdown and complete JSON/CSV under `target/complexity` |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
 | `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
@@ -19,7 +19,10 @@ any working directory unless a command explicitly supplies relative data paths.
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 
-Run feature suites sequentially: CLI tests share `target/debug/treazury`.
+Do not run the no-default-feature checks during ordinary development unless explicitly
+requested. The standard build includes Zcash; static-wallet deployments need no treasury
+configuration. If both variants are requested, run them sequentially: CLI tests share
+`target/debug/treazury`.
 `check.sh` leaves the Zcash-enabled executable available at that path.
 All default checks use local fixtures and public test keys; none reads `.env` or
 performs funded transactions. Local socket tests require permission to bind localhost.

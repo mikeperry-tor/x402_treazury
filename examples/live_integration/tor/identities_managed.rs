@@ -142,15 +142,15 @@ fn managed_map_inner(
         );
     }
     ensure!(
-        treasury.id == status.treasury_id,
+        treasury.id.is_empty() || treasury.id == status.treasury_id,
         "configured treasury differs from durable identity"
     );
     let funding = config.funding.as_ref().context("funding config missing")?;
     let indexer = target(
-        &lookup(&treasury.indexer_url_env).context("indexer endpoint environment missing")?,
+        &treasury.indexer_endpoint(&lookup)?,
     )?;
     let submission = target(
-        &lookup(&treasury.submission_url_env).context("submission endpoint environment missing")?,
+        &treasury.submission_endpoint(&lookup)?,
     )?;
     let mut wallet_targets = BTreeSet::new();
     for url in funding.base_rpc_urls(&lookup)? {

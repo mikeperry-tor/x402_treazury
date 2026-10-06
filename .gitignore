@@ -23,6 +23,7 @@ target/
 
 # Local copies of runnable demo profiles
 /examples/*.local.toml
+/examples/**/*.local.toml
 
 # Generated live summaries belong in target/ or private external storage.
 /tests/live/reports/

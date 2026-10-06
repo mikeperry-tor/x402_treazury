@@ -5,6 +5,48 @@ This reference covers treasury commands, funding controls and operator recovery.
 For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
 Commands run from the repository root; `treazury` means the built executable on PATH.
 
+## One configuration for wallet commands
+
+Use the same deployment file for initialization, inspection, backup, sync and
+serving. `--meta-config` remains an alias for `--config`. Wallet commands consume
+only treasury/network settings: they do not fetch provider catalogs, need listener
+tokens, allocate pools automatically or start funding workers.
+
+```sh
+treazury wallet init --config examples/deployments/privacy.local.toml
+treazury wallet addresses --config examples/deployments/privacy.local.toml
+treazury wallet status --config examples/deployments/privacy.local.toml
+treazury wallet backup --config examples/deployments/privacy.local.toml --destination secrets/backup
+treazury wallet sync --config examples/deployments/privacy.local.toml
+```
+
+Only `treasury.state_dir`, `daily_input_zec` and `shield_max_fee_zec` are required
+in the treasury table. The default key is `wallet.key` inside the wallet directory;
+set `key_file` for separate storage. Possession of the complete default directory
+is sufficient to decrypt the wallet. Owner-only permissions are not a password or
+OS keychain. Initialization creates missing state parent directories, refuses an
+existing state/key destination, and never silently imports or replaces a wallet.
+
+Omit `treasury.id` to read the persisted UUID at runtime. An explicit ID asserts an
+expected wallet and must match; omit it for new-wallet initialization. Inspection
+reports `treasury_identity = "from_wallet_state_at_runtime"` without reading state.
+The durable identity, exclusive ownership and authenticated store checks remain.
+Live qualification manifests retain their explicit treasury binding.
+
+Endpoints default to `https://zec.rocks:443`; submission follows the selected
+indexer unless overridden. Set `indexer_url` / `submission_url` for explicit URLs,
+or `indexer_url_env` / `submission_url_env` for required environment references.
+A URL and environment reference for the same role are mutually exclusive. Missing
+or empty explicitly referenced variables are errors, never a fallback. Prefer
+environment references for credential-bearing URLs. Config-driven initialization
+uses this same endpoint policy. Standalone initialization retains its optional
+`ZCASH_INDEXER_URL` fallback for existing scripts.
+
+Standalone `--state-dir` remains available; `--key-file` defaults inside that
+directory and `--treasury-id` is an optional assertion. Do not combine those
+location overrides or `--network-config` with `--config`: the deployment owns its
+paths and network policy. `--birthday` and import options remain command-specific.
+
 ## Treasury and managed pools
 
 Build or test the embedded wallet with the shell wrapper, which supplies a
@@ -34,10 +76,10 @@ treazury wallet init --state-dir /private/state/treasury \
 # Status reads persisted metadata and needs neither key nor network access.
 treazury wallet status --state-dir /private/state/treasury
 
-# Use the treasury_id returned by init. This allocates two keys and queued jobs;
+# This allocates two keys and queued jobs;
 # it does not contact NEAR, transfer ZEC, or fund either EVM address.
 treazury wallet pool --state-dir /private/state/treasury \
-  --key-file /private/keys/treasury.key --treasury-id UUID \
+  --key-file /private/keys/treasury.key \
   --name research --deposit-size 5.00
 
 # Display existing receive addresses without derivation or network access.
@@ -47,14 +89,15 @@ treazury wallet addresses --state-dir /private/state/treasury \
 
 # Derive another shielded receive address and save its snapshot before returning it.
 treazury wallet address --state-dir /private/state/treasury \
-  --key-file /private/keys/treasury.key --treasury-id UUID
+  --key-file /private/keys/treasury.key
 ```
 
 Use `target/debug/treazury` or put the built binary on
 PATH. Mnemonic files must be owner-only and are never passed as seed arguments.
 `wallet addresses` reads the encrypted snapshot without changing address indices,
-snapshot revision, or sync readiness. `wallet address` creates a new address and
-requires the treasury UUID shown by init/status, not an account number such as `0`.
+snapshot revision, or sync readiness. `wallet address` creates a new address.
+For either command, an optional `--treasury-id` must be the UUID shown by init/status,
+not an account number such as `0`.
 Expected CLI failures print a concise error and cause chain to stderr and return
 a nonzero exit code, even when `RUST_BACKTRACE` is enabled.
 Initialization refuses existing state/key paths; a partial initialization failure
@@ -63,7 +106,7 @@ written as an authenticated encrypted snapshot. The wallet's internal path uses 
 private temporary directory, separate from the durable database. Upstream plaintext
 save tasks are never started. These commands never broadcast or fund anything.
 
-New-wallet initialization queries `ZCASH_INDEXER_URL` when set, otherwise
+Standalone new-wallet initialization queries `ZCASH_INDEXER_URL` when set, otherwise
 `https://zec.rocks:443`, and records the mainnet tip minus 100 blocks as its
 birthday. `--indexer-url-env NAME` selects another environment variable. Lookup
 must succeed before any seed, key or state is created; it checks the network and
@@ -91,8 +134,8 @@ complete chain data. No check is required before activation.
 Both reference Zodl apps default to `zec.rocks:443`. They also list regional
 `na`, `sa`, `eu`, and `ap.zec.rocks` endpoints, and `us.zec.stardust.rest` and
 `eu.zec.stardust.rest`. These public lightwalletd services need no partner key.
-Serving and sync still use the explicitly configured indexer and submission
-environment variables; initialization does not change them. For example:
+Environment overrides are optional. To use the following variables, explicitly
+reference them with `indexer_url_env` and `submission_url_env` in TOML:
 
 ```sh
 export ZCASH_INDEXER_URL=https://zec.rocks:443
@@ -106,11 +149,10 @@ servers. Selecting a Zodl endpoint does not implement its failover or privacy
 transport. Full treasury sync and funded swaps against these public endpoints
 remain part of live qualification.
 
-To sync an existing treasury, export the environment variable named by
-`treasury.indexer_url_env` and run:
+To sync an existing treasury using the selected endpoint policy, run:
 
 ```sh
-treazury wallet sync --meta-config examples/servers-managed.toml
+treazury wallet sync --config examples/deployments/servers-managed.toml
 ```
 
 This command reads `[treasury]`, resolves state/key paths relative to the TOML,
@@ -187,9 +229,11 @@ finish even when a reply receiver is dropped. `rotation/store/funding.rs` journa
 immutable operation IDs, encrypted quotes, guarded phases and persistent fair
 scheduling; status includes funding progress. Preparing a journaled funding job
 commits its PREPARED phase together with the wallet snapshot and signed bytes.
-Set `[funding].auto_fund = true` to dispatch funding commands while serving;
-the default is false and performs treasury sync only. This opt-in can spend ZEC
-within the configured limits. `near_api_key_env` names the partner credential;
+Managed serving defaults to `[funding].auto_fund = true`: it funds the initial
+active/standby pair and later replacements within configured limits. Set it false
+to pause automatic funding; reconciliation and treasury sync remain available.
+This default applies only to configured managed serving, not wallet commands or
+static wallets. Bounded qualification examples explicitly opt out. `near_api_key_env` names the partner credential;
 `near_user_session_env` optionally names a separate user-session bearer token.
 Tokens stay in environment variables and are sent only to the fixed NEAR origin.
 Session issuance/refresh and authenticated access still require qualification.
@@ -218,17 +262,17 @@ With serving stopped, prepare shielding for exactly one refund address:
 
 ```sh
 target/debug/treazury wallet shield-refunds \
-  --meta-config servers.toml --job-id JOB_UUID
+  --config servers.toml --job-id JOB_UUID
 ```
 
 This calculates and journals one transaction without broadcasting. Submit its
-operation ID with `wallet reconcile --meta-config servers.toml --operation-id UUID
+operation ID with `wallet reconcile --config servers.toml --operation-id UUID
 --rebroadcast`. The command enforces `shield_max_fee_zec` and the daily budget;
 only the fee counts as new expense. Each proposal selects one address, never
 combining unrelated swaps. Both calculation and submission use the existing
 restart-safe outgoing journal. Refund principal becomes shielded spendable only
 after the shielding transaction confirms. For an expired deposit or shielding operation, use
-`wallet recover-expired --meta-config servers.toml --operation-id UUID` with serving
+`wallet recover-expired --config servers.toml --operation-id UUID` with serving
 stopped. It requires a fresh tip beyond expiry by the configured confirmation
 count, no positive indexer inclusion, synced invalidation, and confirmed unspent inputs
 matched against the immutable preparation snapshot. It then releases the reservation
@@ -251,7 +295,7 @@ atomically commits the encrypted post-calculation wallet and signed bytes with
 transaction ID, expiry, amount and fee. The reservation shrinks to actual cost.
 An error/cancellation after reservation poisons the in-memory owner; close and
 reopen it before further preparation. Unprepared reservations remain conservative
-until explicitly abandoned through the store's guarded recovery API. The opt-in funding coordinator calls this API through the serialized owner.
+until explicitly abandoned through the store's guarded recovery API. The automatic funding coordinator calls this API through the serialized owner.
 
 `rotation/near.rs` supports public and confidential foreign-chain EXACT_OUTPUT swaps.
 The demo configurations explicitly select `funding.confidentiality = "public"`:
@@ -297,9 +341,9 @@ Recovery requires exclusive ownership. Without `--rebroadcast`, this command onl
 syncs and looks up the saved transaction and needs no submission credential:
 
 ```sh
-treazury wallet reconcile --meta-config servers.toml --operation-id UUID
+treazury wallet reconcile --config servers.toml --operation-id UUID
 # Explicitly allow resubmission of the SAME saved bytes, within deadline/expiry:
-treazury wallet reconcile --meta-config servers.toml --operation-id UUID --rebroadcast
+treazury wallet reconcile --config servers.toml --operation-id UUID --rebroadcast
 ```
 
 Confirmation releases the send gate only when fresh wallet sync and exact-byte
@@ -368,15 +412,15 @@ effects still require recovery; absence of signed bytes alone never permits retr
 Recovery status retains its preceding failure instead of clearing it.
 
 Managed profiles connect these transitions to the x402 request path using a
-trusted Base RPC. [servers-managed.toml](../examples/servers-managed.toml) contains
+trusted Base RPC. [servers-managed.toml](../examples/deployments/servers-managed.toml) contains
 a complete deployment example. Inspect it without credentials or state access:
 
 ```sh
 target/debug/treazury \
-  --meta-config examples/servers-managed.toml --show-config
+  --config examples/deployments/servers-managed.toml --show-config
 ```
 
-Serve with the Zcash-enabled binary using the same `--meta-config` and an
+Serve with the Zcash-enabled binary using the same `--config` and an
 `--env-file` containing the referenced endpoints and listener tokens. Paths are
 relative to the deployment file. `[treasury]` identifies an already initialized
 wallet; serving never creates/imports a Zcash seed. All declared managed profiles
@@ -492,7 +536,7 @@ to wallet state:
 
 ```sh
 scripts/zcash.sh run --example diagnose_credit -- \
-  --network-config examples/network-tor.toml --state-dir state/demo \
+  --network-config examples/network/tor.toml --state-dir state/demo \
   --rpc-url "$BASE_RPC_URL" --rounds 3
 ```
 
@@ -578,4 +622,3 @@ offline CLI; two more test managed multi-listener serving and generated-pool
 identity across template edits and scope changes. Local gRPC fixtures exercise
 real zingolib sync, wrong-network rejection, periodic checkpoints, cancellation,
 and encrypted restart/resume without real funds or external indexers.
-

@@ -29,6 +29,7 @@ fn executable_name_version_and_example_inspection_are_portable() {
     );
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for example in [
+        "privacy.toml",
         "servers.toml",
         "socialfetch.toml",
         "servers-auto-wallets.toml",
@@ -36,8 +37,11 @@ fn executable_name_version_and_example_inspection_are_portable() {
         "public-swap-demo.toml",
         "public-payment-demo.toml",
     ] {
-        let path = root.join("examples").join(example);
-        let shown = run(&["--meta-config", path.to_str().unwrap(), "--show-config"]);
+        let path = root.join("examples/deployments").join(example);
+        let shown = run(&["--config", path.to_str().unwrap(), "--show-config"]);
+        let legacy = run(&["--meta-config", path.to_str().unwrap(), "--show-config"]);
+        assert!(legacy.status.success());
+        assert_eq!(shown.stdout, legacy.stdout);
         assert!(
             shown.status.success(),
             "{example}: {}",

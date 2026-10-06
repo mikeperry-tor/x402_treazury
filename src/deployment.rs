@@ -248,7 +248,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -387,7 +387,10 @@ impl Deployment {
             let dir = t.state_dir.clone();
             let state =
                 tokio::task::spawn_blocking(move || crate::rotation::store::status(&dir)).await??;
-            ensure!(state.treasury_id == t.id, "state identity mismatch");
+            ensure!(
+                t.id.is_empty() || state.treasury_id == t.id,
+                "state identity mismatch"
+            );
             for pool in state.pools {
                 ensure!(
                     !self.wallet_resolution.wallets.contains_key(&pool.name),
@@ -449,11 +452,11 @@ impl Deployment {
                 let f = self.config.funding.as_ref().unwrap();
                 // Resolve endpoints now; the treasury sync worker starts only when serving.
                 let sync_settings = crate::treasury::SyncSettings::new(
-                    secret(&t.indexer_url_env)?,
+                    t.indexer_endpoint(|name| env.get(name).cloned())?,
                     t.confirmations,
                     t.max_sync_age_seconds,
                 )?;
-                secure_endpoint(&secret(&t.submission_url_env)?)?;
+                secure_endpoint(&t.submission_endpoint(|name| env.get(name).cloned())?)?;
                 if let Some(key) = &f.near_api_key_env {
                     secret(key)?;
                 }
@@ -471,7 +474,7 @@ impl Deployment {
                 let mut owner = crate::treasury::Treasury::open(
                     t.state_dir.clone(),
                     t.key_file.clone(),
-                    t.id.clone(),
+                    t.runtime_id()?,
                 )
                 .await?;
                 owner.configure_sync(sync_settings);
@@ -530,6 +533,8 @@ impl Deployment {
                         wallets.insert(name.clone(), PaidClient::managed(manager));
                     }
                 }
+                tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
+                    "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to source limits and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
                 if f.auto_fund {
                     let (handle, commands) = crate::treasury::actor::channel();
                     let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
@@ -549,8 +554,8 @@ impl Deployment {
                         )?)?,
                     };
                     let sender = crate::treasury::submission::GrpcSubmission::new(
-                        secret(&t.submission_url_env)?,
-                        secret(&t.indexer_url_env)?,
+                        t.submission_endpoint(|name| env.get(name).cloned())?,
+                        t.indexer_endpoint(|name| env.get(name).cloned())?,
                     )?;
                     funding_runtime = Some((
                         commands,

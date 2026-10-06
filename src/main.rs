@@ -16,7 +16,8 @@ use x402_treazury::{
     after_help = "Treasury commands: wallet --help (init/addresses/address/pool require the zcash feature)"
 )]
 struct Args {
-    #[arg(long)]
+    /// Deployment configuration for serving and inspection.
+    #[arg(long = "config", alias = "meta-config")]
     meta_config: Option<std::path::PathBuf>,
     /// Internal qualification restriction; never enables calls or funding.
     #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
@@ -46,7 +47,8 @@ struct Args {
     qualification_binding: Option<std::path::PathBuf>,
     #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
     show_config: bool,
-    #[arg(long)]
+    /// Reusable provider configuration for standalone serving.
+    #[arg(long = "provider")]
     config: Option<String>,
     #[arg(long)]
     spec: Option<String>,
@@ -283,8 +285,8 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "qualification_binding"
                     ]
                     .contains(&id.as_str()),
-                    "--meta-config cannot be combined with --{}; configure it in the TOML file",
-                    id.as_str().replace('_', "-")
+                    "--config cannot be combined with --{}; configure it in the TOML file",
+                    argument.get_long().unwrap_or(id.as_str())
                 );
             }
         }
@@ -299,7 +301,7 @@ async fn show_config(args: &Args, matches: &clap::ArgMatches) -> Result<()> {
             ensure!(
                 ["show_config", "config", "meta_config", "network_config"].contains(&id.as_str()),
                 "--show-config resolves configuration files only; omit --{}",
-                id.as_str().replace('_', "-")
+                argument.get_long().unwrap_or(id.as_str())
             );
         }
     }
@@ -309,7 +311,7 @@ async fn show_config(args: &Args, matches: &clap::ArgMatches) -> Result<()> {
         let path = args
             .config
             .as_ref()
-            .context("--show-config requires --config or --meta-config")?;
+            .context("--show-config requires --provider or --config")?;
         serde_json::to_value(x402_treazury::config::load(std::path::Path::new(path)).await?)?
     };
     if args.meta_config.is_none() {

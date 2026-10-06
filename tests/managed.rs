@@ -700,6 +700,7 @@ submission_url_env="SUBMIT"
 daily_input_zec="0.1"
 shield_max_fee_zec="0.001"
 [funding]
+auto_fund=false
 base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.research]
@@ -856,10 +857,14 @@ sources=["api"]
             .defer_funding(&job.id, i64::MAX as u64, None, false)
             .unwrap();
     }
+    let treasury_id = state.id().to_owned();
     drop(state);
+    // Omitted ID resolves from durable state; omitted auto_fund now starts workers.
     std::fs::write(
         &path,
-        config.replace("[funding]", "[funding]\nauto_fund=true"),
+        config
+            .replace("auto_fund=false\n", "")
+            .replace(&format!("id=\"{treasury_id}\"\n"), ""),
     )
     .unwrap();
     let running = Deployment::load(&path)

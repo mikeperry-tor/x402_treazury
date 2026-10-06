@@ -4,6 +4,7 @@ use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+pub const DEFAULT_ZCASH_INDEXER: &str = "https://zec.rocks:443";
 pub const DEFAULT_BASE_RPC_URLS: [&str; 3] = [
     "https://base-rpc.publicnode.com",
     "https://base.drpc.org",
@@ -11,6 +12,9 @@ pub const DEFAULT_BASE_RPC_URLS: [&str; 3] = [
 ];
 fn base_rpc_env() -> String {
     "BASE_RPC_URL".into()
+}
+fn enabled() -> bool {
+    true
 }
 fn cap() -> String {
     "1.00".into()
@@ -138,14 +142,54 @@ fn env_name(s: &str) -> Result<()> {
     );
     Ok(())
 }
+fn nonempty_string<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<String, D::Error> {
+    let value = String::deserialize(d)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "omit optional values instead of setting an empty string",
+        ));
+    }
+    Ok(value)
+}
+fn empty_path(path: &Path) -> bool {
+    path.as_os_str().is_empty()
+}
+fn nonempty_path<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<PathBuf, D::Error> {
+    nonempty_string(d).map(PathBuf::from)
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TreasuryConfig {
+    /// Optional expected identity; empty until resolved from existing state at runtime.
+    #[serde(
+        default,
+        deserialize_with = "nonempty_string",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub id: String,
     pub state_dir: PathBuf,
+    #[serde(
+        default,
+        deserialize_with = "nonempty_path",
+        skip_serializing_if = "empty_path"
+    )]
     pub key_file: PathBuf,
+    #[serde(
+        default,
+        deserialize_with = "nonempty_string",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub indexer_url_env: String,
+    #[serde(
+        default,
+        deserialize_with = "nonempty_string",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub submission_url_env: String,
+    pub indexer_url: Option<String>,
+    pub submission_url: Option<String>,
     pub daily_input_zec: String,
     pub shield_max_fee_zec: String,
     #[serde(default = "confirmations")]
@@ -154,16 +198,72 @@ pub struct TreasuryConfig {
     pub max_sync_age_seconds: u64,
 }
 impl TreasuryConfig {
+    pub fn indexer_endpoint(&self, lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
+        self.endpoint(self.indexer_url.as_deref(), &self.indexer_url_env, &lookup)
+            .map(|v| v.unwrap_or_else(|| DEFAULT_ZCASH_INDEXER.into()))
+    }
+    pub fn submission_endpoint(&self, lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
+        match self.endpoint(
+            self.submission_url.as_deref(),
+            &self.submission_url_env,
+            &lookup,
+        )? {
+            Some(value) => Ok(value),
+            None => self.indexer_endpoint(lookup),
+        }
+    }
+    fn endpoint(
+        &self,
+        url: Option<&str>,
+        env: &str,
+        lookup: &impl Fn(&str) -> Option<String>,
+    ) -> Result<Option<String>> {
+        let value = if !env.is_empty() {
+            Some(
+                lookup(env)
+                    .filter(|v| !v.trim().is_empty())
+                    .with_context(|| {
+                        format!("required endpoint environment variable {env} is missing or empty")
+                    })?,
+            )
+        } else {
+            url.map(str::to_owned)
+        };
+        if let Some(value) = &value {
+            super::base::secure_endpoint(value)?;
+        }
+        Ok(value)
+    }
+    /// State inspection is runtime-only. Opening the store still authenticates this ID.
+    pub fn runtime_id(&self) -> Result<String> {
+        if !self.id.is_empty() {
+            return Ok(self.id.clone());
+        }
+        Ok(super::store::status(&self.state_dir)?.treasury_id)
+    }
     pub fn validate(&self) -> Result<()> {
-        uuid::Uuid::parse_str(&self.id)?;
+        if !self.id.is_empty() {
+            uuid::Uuid::parse_str(&self.id)?;
+        }
         ensure!(
-            !self.state_dir.as_os_str().is_empty()
-                && !self.key_file.as_os_str().is_empty()
-                && self.state_dir != self.key_file,
+            !self.state_dir.as_os_str().is_empty() && self.state_dir != self.key_file,
             "invalid state/key paths"
         );
-        env_name(&self.indexer_url_env)?;
-        env_name(&self.submission_url_env)?;
+        for (url, env) in [
+            (&self.indexer_url, &self.indexer_url_env),
+            (&self.submission_url, &self.submission_url_env),
+        ] {
+            ensure!(
+                url.is_none() || env.is_empty(),
+                "choose an endpoint URL or environment reference, not both"
+            );
+            if !env.is_empty() {
+                env_name(env)?;
+            }
+            if let Some(url) = url {
+                super::base::secure_endpoint(url)?;
+            }
+        }
         zatoshis(&self.daily_input_zec)?;
         zatoshis(&self.shield_max_fee_zec)?;
         ensure!(
@@ -179,7 +279,9 @@ impl TreasuryConfig {
         if self.state_dir.is_relative() {
             self.state_dir = base.join(&self.state_dir);
         }
-        if self.key_file.is_relative() {
+        if self.key_file.as_os_str().is_empty() {
+            self.key_file = self.state_dir.join("wallet.key");
+        } else if self.key_file.is_relative() {
             self.key_file = base.join(&self.key_file);
         }
     }
@@ -187,8 +289,8 @@ impl TreasuryConfig {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FundingConfig {
-    /// Explicit opt-in: starts source deposits, not merely chain reconciliation.
-    #[serde(default)]
+    /// Managed serving funds bootstrap and replacement wallets unless disabled.
+    #[serde(default = "enabled")]
     pub auto_fund: bool,
     pub near_user_session_env: Option<String>,
     #[serde(default = "base_rpc_env")]

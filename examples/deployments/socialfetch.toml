@@ -1,7 +1,7 @@
 version = 1
 
 [sources.socialfetch]
-extends = "../providers/socialfetch.toml"
+extends = "../../providers/socialfetch.toml"
 tags = ["Twitter", "YouTube", "LinkedIn"]
 timeout = 90
 

@@ -817,7 +817,7 @@ bearer_token_env="TOKEN"
     std::fs::write(&m.deployment, deployment).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
         .env_clear()
-        .arg("--meta-config")
+        .arg("--config")
         .arg(&m.deployment)
         .arg("--qualification-snapshot")
         .output()
@@ -978,7 +978,7 @@ spec="missing.json"
             .kill_on_drop(true)
             .env_clear()
             .env("INDEXER", &endpoint)
-            .args(["wallet", "sync", "--meta-config"])
+            .args(["wallet", "sync", "--config"])
             .arg(&config)
             .output(),
     )

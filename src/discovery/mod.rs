@@ -914,7 +914,7 @@ pub async fn inspect_cli() -> Result<()> {
     #[derive(clap::Subcommand)]
     enum Command {
         Inspect {
-            #[arg(long)]
+            #[arg(long = "config", alias = "meta-config")]
             meta_config: PathBuf,
         },
     }

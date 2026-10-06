@@ -1,6 +1,6 @@
 # Initialize the treasury first; build the server with scripts/zcash.sh.
 # This example creates two pools, each targeting 5 USDC active + 5 USDC standby.
-# Funding jobs are queued; automatic NEAR funding is not yet implemented.
+# Serving funds the initial pairs and subsequent replacements within the limits below.
 version = 1
 
 [wallet_assignment]
@@ -15,23 +15,20 @@ max_input_zec = "0.02"
 max_fee_bps = 500
 
 [treasury]
-id = "11111111-1111-4111-8111-111111111111" # Replace with wallet init's treasury_id.
-state_dir = "../state/treasury"
-key_file = "../secrets/treasury.key"
-indexer_url_env = "ZCASH_INDEXER_URL"
-submission_url_env = "ZCASH_SUBMISSION_URL"
+state_dir = "../../state/treasury"
 daily_input_zec = "0.10"
 shield_max_fee_zec = "0.001"
 
 [funding]
+# Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 base_rpc_url_env = "BASE_RPC_URL"
 confidentiality = "public" # No NEAR signup; public settlement.
 
 [sources.pdl]
-extends = "../providers/pdl.toml"
+extends = "../../providers/pdl.toml"
 
 [sources.socialfetch]
-extends = "../providers/socialfetch.toml"
+extends = "../../providers/socialfetch.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"

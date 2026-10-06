@@ -194,3 +194,73 @@ fn public_funding_is_explicit_and_needs_no_near_credentials() {
     let f: FundingConfig = toml::from_str("base_rpc_url_env='BASE'").unwrap();
     assert_eq!(f.confidentiality, "basic"); // Existing configs never silently lose confidentiality.
 }
+
+#[tokio::test]
+async fn ergonomic_treasury_defaults_remain_offline_and_funding_is_explicitly_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployment.toml");
+    let text = config()
+        .replace("id = \"11111111-1111-4111-8111-111111111111\"\n", "")
+        .replace("key_file = \"secrets/treasury.key\"\n", "")
+        .replace("indexer_url_env = \"INDEXER\"\n", "")
+        .replace("submission_url_env = \"SUBMISSION\"\n", "");
+    std::fs::write(&path, &text).unwrap();
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(shown["treasury_identity"], "from_wallet_state_at_runtime");
+    assert!(shown["treasury"]["id"].is_null());
+    assert_eq!(
+        shown["treasury"]["key_file"],
+        dir.path()
+            .join("state/treasury/wallet.key")
+            .to_str()
+            .unwrap()
+    );
+    assert_eq!(shown["funding"]["auto_fund"], true);
+    assert!(!dir.path().join("state").exists());
+    std::fs::write(
+        &path,
+        text.replace("[funding]", "[funding]\nauto_fund=false"),
+    )
+    .unwrap();
+    assert_eq!(
+        Deployment::show_config(&path).await.unwrap()["funding"]["auto_fund"],
+        false
+    );
+}
+
+#[test]
+fn treasury_endpoint_defaults_overrides_and_missing_references() {
+    use x402_treazury::{deployment::MetaConfig, rotation::config::TreasuryConfig};
+    let mut t: TreasuryConfig = toml::from_str::<MetaConfig>(&config())
+        .unwrap()
+        .treasury
+        .unwrap();
+    assert!(t.indexer_endpoint(|_| None).is_err());
+    assert!(t.submission_endpoint(|_| None).is_err());
+    t.indexer_url_env.clear();
+    t.submission_url_env.clear();
+    assert_eq!(
+        t.indexer_endpoint(|_| panic!("unexpected env lookup"))
+            .unwrap(),
+        "https://zec.rocks:443"
+    );
+    t.indexer_url = Some("https://indexer.example:443".into());
+    assert_eq!(
+        t.submission_endpoint(|_| None).unwrap(),
+        "https://indexer.example:443"
+    );
+    t.submission_url = Some("https://submit.example:443".into());
+    assert_eq!(
+        t.submission_endpoint(|_| None).unwrap(),
+        "https://submit.example:443"
+    );
+    t.indexer_url_env = "INDEXER".into();
+    assert!(t.validate().is_err()); // Never silently pick between conflicting settings.
+    t.indexer_url = None;
+    assert!(t.indexer_endpoint(|_| Some("".into())).is_err());
+    assert_eq!(
+        t.indexer_endpoint(|_| Some("https://custom.example".into()))
+            .unwrap(),
+        "https://custom.example"
+    );
+}

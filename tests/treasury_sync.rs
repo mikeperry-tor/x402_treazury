@@ -411,7 +411,7 @@ spec="nonexistent.json"
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env("INDEXER", endpoint)
-            .args(["wallet", "sync", "--meta-config"])
+            .args(["wallet", "sync", "--config"])
             .arg(config)
             .output()
             .unwrap()
@@ -618,6 +618,63 @@ async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
 }
 
 #[tokio::test]
+async fn config_driven_initialization_uses_tor_and_no_endpoint_environment() {
+    let (endpoint, calls, server, _) = mock("main").await;
+    let dir = tempfile::tempdir().unwrap();
+    let proxy = socks::Socks::start(
+        std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
+        socks::Fault::None,
+    )
+    .await;
+    let config = dir.path().join("deployment.toml");
+    std::fs::write(
+        &config,
+        format!(
+            r#"version=1
+servers={{}}
+[treasury]
+state_dir="wallet"
+indexer_url="{endpoint}"
+daily_input_zec="0.01"
+shield_max_fee_zec="0.001"
+[network]
+mode="tor"
+socks_endpoint="{}"
+[sources.unloaded]
+spec="nonexistent.json"
+"#,
+            proxy.address
+        ),
+    )
+    .unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .args(["wallet", "init", "--config"])
+        .arg(&config)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["state"]["birthday"], TIP - 100);
+    assert!(dir.path().join("wallet/wallet.key").is_file());
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    let records = proxy.records.lock().unwrap();
+    assert!(!records.is_empty());
+    assert!(
+        records
+            .iter()
+            .all(|r| r.user == "<torS0X>0" && !r.password.is_empty() && r.upstream_peer.is_some())
+    );
+    server.abort();
+}
+
+#[tokio::test]
 async fn birthday_discovery_rejects_wrong_network_without_creating_state() {
     let (endpoint, _, server, _) = mock("test").await;
     let dir = tempfile::tempdir().unwrap();
@@ -797,12 +854,7 @@ spec="nonexistent.json"
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("INDEXER", &endpoint)
-        .args([
-            "wallet",
-            "sync",
-            "--qualification-parent-stdin",
-            "--meta-config",
-        ])
+        .args(["wallet", "sync", "--qualification-parent-stdin", "--config"])
         .arg(&config)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

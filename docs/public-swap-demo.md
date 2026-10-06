@@ -28,11 +28,11 @@ From the repository root:
 ```sh
 scripts/zcash.sh build --offline
 target/debug/treazury \
-  --meta-config examples/public-swap-demo.toml --show-config
+  --config examples/deployments/public-swap-demo.toml --show-config
 target/debug/treazury \
-  --meta-config examples/public-swap-demo.toml --check
+  --config examples/deployments/public-swap-demo.toml --check
 target/debug/treazury \
-  --meta-config examples/public-swap-demo.toml --list-tools
+  --config examples/deployments/public-swap-demo.toml --list-tools
 ```
 
 The example uses a committed request schema, disables pricing probes and exposes
@@ -56,34 +56,45 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 
 ## Treasury-funded test
 
-1. Supply mainnet `ZCASH_INDEXER_URL`, `ZCASH_SUBMISSION_URL`, `BASE_RPC_URL` and
-   `PUBLIC_DEMO_MCP_TOKEN` through the environment. The indexer and submission
-   endpoints are independently configured; use authenticated/TLS endpoints where
-   appropriate. Zodl's default public endpoint, `https://zec.rocks:443`, can be
-   used for both Zcash roles.
-2. Create the treasury; initialization discovers the current mainnet tip from
-   `ZCASH_INDEXER_URL` and rewinds 100 blocks for the new wallet birthday:
+1. Supply `PUBLIC_DEMO_MCP_TOKEN` through the environment. `BASE_RPC_URL` is
+   optional; omitted values use the default RPC failover list. Zcash indexer and
+   submission endpoints default to `https://zec.rocks:443`, with optional overrides
+   in `[treasury]`. No Zcash environment variables are required.
+2. Copy the deployment before creating the treasury, so initialization and serving
+   use the same paths and network policy:
 
    ```sh
+   cp examples/deployments/public-swap-demo.toml \
+     examples/deployments/public-swap-demo.local.toml
    target/debug/treazury wallet init \
-     --state-dir state/public-demo --key-file secrets/public-demo.key
-   cp examples/public-swap-demo.toml \
-     examples/public-swap-demo.local.toml
+     --config examples/deployments/public-swap-demo.local.toml
+   target/debug/treazury wallet addresses \
+     --config examples/deployments/public-swap-demo.local.toml
    ```
 
-   An explicit `--birthday HEIGHT` keeps initialization offline. Seed imports
-   require `--mnemonic-file FILE --birthday HEIGHT`, using a height at or before
-   the original wallet's first use. Lookup failure creates no wallet state.
+   Initialization discovers the mainnet tip and rewinds 100 blocks for the birthday.
+   It creates `state/public-demo/wallet.key` inside the owner-only wallet directory.
+   The treasury ID is discovered from state; there is no UUID to copy into TOML.
+   Anyone obtaining the complete directory obtains both wallet state and its key.
+   An external `treasury.key_file` remains available when separate storage is needed.
 
-   Replace the copied file's placeholder `treasury.id` with the returned
-   `treasury_id`. Paths remain correct because the copy stays beside the example.
-   Local copies are gitignored. Keep `auto_fund = false`.
+   If this treasury already exists, skip `init` and use `addresses`; initialization
+   never overwrites it. An explicit `--birthday HEIGHT` keeps new initialization
+   offline. Seed imports require `--mnemonic-file FILE --birthday HEIGHT`, using a
+   height at or before the original wallet's first use. Lookup failure creates no
+   wallet state. Local copies are gitignored. Keep `auto_fund = false`.
+
+   This demo defaults to direct networking. For Tor, add the `[network]` table from
+   `examples/network/tor.toml` to the local deployment before initialization or sync,
+   and start Tor on its configured SOCKS port.
 3. Back up the newly initialized state and key before funding:
 
    ```sh
+   mkdir -p secrets
+   chmod 700 secrets
    target/debug/treazury wallet backup \
-     --state-dir state/public-demo --key-file secrets/public-demo.key \
-     --treasury-id TREASURY_UUID --destination secrets/public-demo-backup
+     --config examples/deployments/public-swap-demo.local.toml \
+     --destination secrets/public-demo-backup
    ```
 
    The backup directory must not exist. Store it securely; it contains spending
@@ -98,9 +109,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 
    ```sh
    target/debug/treazury wallet sync \
-     --meta-config examples/public-swap-demo.local.toml
+     --config examples/deployments/public-swap-demo.local.toml
    target/debug/treazury wallet status \
-     --state-dir state/public-demo
+     --config examples/deployments/public-swap-demo.local.toml
    ```
 
    Require a fresh ready sync and enough confirmed shielded spendable balance for
@@ -111,7 +122,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 
    ```sh
    target/debug/treazury \
-     --meta-config examples/public-swap-demo.local.toml
+     --config examples/deployments/public-swap-demo.local.toml
    ```
 
    Start with no MCP clients issuing tool calls. Observe the two funding jobs,
@@ -137,7 +148,7 @@ trigger a demonstration.
 
 ## Funded EVM-key alternative
 
-Use `examples/public-payment-demo.toml` with `PUBLIC_DEMO_EVM_PRIVATE_KEY` and
+Use `examples/deployments/public-payment-demo.toml` with `PUBLIC_DEMO_EVM_PRIVATE_KEY` and
 `PUBLIC_DEMO_MCP_TOKEN` in the environment. The key must hold USDC on Base; this
 exact EIP-3009 test does not require Permit2 approval. Inspect with `--show-config`
 and `--list-tools`, then start serving and perform only the single approved call
@@ -151,9 +162,9 @@ This qualification cannot substitute for the treasury-funded test.
 | Quote rejected, route unavailable or rate limited | Inspect the sanitized job error. Bounded retries/backoff are automatic; do not silently relax caps or select a confidential mode. |
 | Insufficient shielded balance or daily budget | Keep the active EVM wallet usable; fund/sync or wait for budget. No signed operation is created by this wait. |
 | Swap timeout | Pool status becomes degraded; slower reconciliation continues with the same operation. Do not issue another deposit. |
-| Ambiguous source submission | Stop serving before `wallet reconcile --meta-config FILE --operation-id UUID`. `--rebroadcast` explicitly permits only the same bytes while still valid. |
+| Ambiguous source submission | Stop serving before `wallet reconcile --config FILE --operation-id UUID`. `--rebroadcast` explicitly permits only the same bytes while still valid. |
 | Expired source transaction | Use `wallet recover-expired`; it requires canonical synced unspent-input evidence. Refused recovery keeps the reservation. Never delete its journal. |
-| Failed/refunded swap | NEAR status does not credit funds. Sync discovers confirmed refund outputs and credits returned principal once. With serving stopped, use `wallet shield-refunds --meta-config FILE --job-id UUID`, then explicitly submit the returned operation via `wallet reconcile --rebroadcast`. Refund jobs remain operator-visible; shielding does not automatically retry the failed swap. |
+| Failed/refunded swap | NEAR status does not credit funds. Sync discovers confirmed refund outputs and credits returned principal once. With serving stopped, use `wallet shield-refunds --config FILE --job-id UUID`, then explicitly submit the returned operation via `wallet reconcile --rebroadcast`. Refund jobs remain operator-visible; shielding does not automatically retry the failed swap. |
 | Interrupted preparation with no signed bytes | `wallet recover-unprepared` archives old bindings and creates a fresh operation identity. It refuses every operation with signed bytes. |
 | Reorg of accounted source spend/refund/expiry evidence | Treasury readiness fails closed; retain state and investigate. Do not reset consumed accounting or run a restored copy alongside the original. |
 

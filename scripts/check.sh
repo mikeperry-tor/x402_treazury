@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run feature suites sequentially: their CLI tests share target/debug/treazury.
+# Validate the default Zcash build. Reduced-build checks are explicit opt-in only.
 set -eu
 with_zcash=true
 case ${1:-} in
@@ -21,10 +21,11 @@ scripts/tests/coverage.sh
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
-cargo test --locked --no-default-features --all-targets
-cargo clippy --locked --no-default-features --all-targets -- -D warnings
 if [ "$with_zcash" = true ]; then
     scripts/zcash.sh test --all-targets -- --test-threads=1
     scripts/zcash.sh clippy --all-targets --features zcash-regtest -- -D warnings
     python3 scripts/check_compat.py
+else
+    cargo test --locked --no-default-features --all-targets
+    cargo clippy --locked --no-default-features --all-targets -- -D warnings
 fi

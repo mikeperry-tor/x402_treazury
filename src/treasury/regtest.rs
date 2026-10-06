@@ -211,7 +211,7 @@ database.path = "/tmp/indexer"
             "/usr/local/bin/zainod",
             ZAINO,
             "start",
-            "--config",
+            "--provider",
             "/config/zaino.toml",
         ])?;
         Ok(chain)
@@ -1059,7 +1059,7 @@ impl RecoveryCli {
         expected_error: Option<&str>,
     ) -> Result<Value> {
         eprintln!("regtest recovery CLI: {name} (rebroadcast={rebroadcast})");
-        let mut args = vec!["wallet", name, "--meta-config", "recovery.toml", flag, id];
+        let mut args = vec!["wallet", name, "--config", "recovery.toml", flag, id];
         if rebroadcast {
             args.push("--rebroadcast");
         }

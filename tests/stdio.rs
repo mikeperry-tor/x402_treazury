@@ -64,7 +64,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
-        .arg("--config")
+        .arg("--provider")
         .arg(&config)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

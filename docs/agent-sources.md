@@ -1,9 +1,9 @@
 # Agent API discovery and source management
 
 Treazury can let an agent register public OpenAPI APIs at runtime. This is optional
-and available in `--meta-config` HTTP deployments. Standalone stdio/HTTP provider
-commands remain static. Start with [the static-wallet example](../examples/agent-sources.toml)
-or [the managed-wallet example](../examples/agent-sources-managed.toml).
+and available in `--config` HTTP deployments. Standalone stdio/HTTP provider
+commands remain static. Start with [the static-wallet example](../examples/deployments/agent-sources.toml)
+or [the managed-wallet example](../examples/deployments/agent-sources-managed.toml).
 
 Both examples use **one named `agent_shared` wallet** for all added APIs on both
 listeners. A managed profile with a $5 deposit target has a $10 active-plus-standby
@@ -19,13 +19,13 @@ and synchronize through normal startup; automatic funding still requires `auto_f
 ```sh
 cargo build --locked
 # Offline composition and permissions; no keys, spec requests or registry access:
-target/debug/treazury --meta-config examples/agent-sources.toml --show-config
+target/debug/treazury --config examples/deployments/agent-sources.toml --show-config
 # Checks the example's committed directory spec, without credentials or probes:
-target/debug/treazury --meta-config examples/agent-sources.toml --check
+target/debug/treazury --config examples/deployments/agent-sources.toml --check
 # Serving needs EVM_PRIVATE_KEY and the two configured MCP bearer tokens:
-target/debug/treazury --meta-config examples/agent-sources.toml --env-file .env
+target/debug/treazury --config examples/deployments/agent-sources.toml --env-file .env
 # Offline saved-record inspection; does not create a missing registry:
-target/debug/treazury sources inspect --meta-config examples/agent-sources.toml
+target/debug/treazury sources inspect --config examples/deployments/agent-sources.toml
 ```
 
 Use `scripts/zcash.sh build` for the managed example and initialize its treasury
