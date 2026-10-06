@@ -54,29 +54,42 @@ max_price_usd = "0.10"
 max_input_zec = "0.006"
 max_fee_bps = 500
 
+# Source instructions_text is agent-facing guidance. Each MCP server listener
+# combines instructions from sources with selected tools into the MCP server's
+# instructions for the agent, labeled with [source_id], and appends a
+# pricing caveat. For example, social contributes [social] only to servers.social.
+# A local value REPLACES the provider's inherited instructions_text; there is no
+# automatic append. Keep relevant provider constraints when tailoring the text.
+# Tool descriptions are configured separately through source overrides.
+
 # SocialFetch appears in two contexts with overlapping Reddit coverage,
 # demonstrating that even the same provider/tool can use different payers.
 # Using different wallets keeps the social queries to SocialFetch unlinked and
 # isolated from the webinfo queries.
 [sources.social]
 extends = "../../providers/socialfetch.toml"
+instructions_text = "Research people and communities using the selected SocialFetch platforms. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live payment challenge controls the charge. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
 tags = ["Bluesky", "Facebook", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter"]
 exclude_tools = ["socialfetch_help"]
 
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
+instructions_text = "Research websites, developer communities, business reviews and Reddit using this SocialFetch subset. This source belongs to the web research context; social-platform queries on the social listener use a separate payment wallet. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live challenge controls the charge. Preserve argument casing, lookupStatus, partial-result and provenance fields. Use Exa for broader web discovery and page retrieval."
 tags = ["Web", "Reddit", "Hacker News", "Github", "Yelp"]
 exclude_tools = ["socialfetch_help"]
 
 # Exa is reused unchanged across web and company listeners. Its complete
 # curated toolset includes help; subset providers below omit broad vendor guides.
+# Its source-level guidance appears on both listeners under the same [exa] label.
 [sources.exa]
 extends = "../../providers/exa.toml"
+instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. This source is shared by the web and company listeners, each with its own payment wallet. Treazury handles x402 without an Exa API key. Prefer small result/page counts and highlights; charges vary with options and the live challenge is authoritative. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
 # above its $0.05 cap; paid matches require a deliberate cap increase.
 [sources.pdl_people]
 extends = "../../providers/pdl.toml"
+instructions_text = "People Data Labs person enrichment and structured person search support the social research context. Use known identifiers for enrichment and small result batches for search; preserve confidence and provenance. Vendor-listed matched results cost $0.28 each, above this example's $0.05 social payment cap. Paid matches require an operator to raise that cap; agents cannot change it. Do not interpret a rejected payment or failed lookup as evidence that a person does not exist."
 include_tools = ["pdl_person_*"]
 
 # Structured company discovery complements Deepline enrichment.
@@ -84,6 +97,7 @@ include_tools = ["pdl_person_*"]
 # wallet cap.
 [sources.pdl_company]
 extends = "../../providers/pdl.toml"
+instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1: the catalog lists $0.10 per result, matching this example's company payment cap; larger batches may be refused. Paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
 include_tools = ["pdl_company_search"]
 
 # Tool-name allowlists keep the company toolset small as upstream catalogs grow.
@@ -131,6 +145,7 @@ instructions_text = "US public-company research: resolve symbols with tickers, t
 
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
+instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
 
 # GenuineGood is a grant discovery service. Only search and detail tools
 # fit within the $0.10 price cap.
