@@ -206,7 +206,15 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
     assert_eq!(response.status(), 200);
     assert!(response.headers().get("mcp-session-id").is_none());
     let initialized: Value = response.json().await.unwrap();
-    assert_eq!(initialized["result"]["instructions"], "Read help first");
+    let instructions = initialized["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.starts_with("Read help first\n\n"));
+    assert_eq!(
+        instructions
+            .matches("Prices are estimates or sampled payment offers")
+            .count(),
+        1
+    );
+    assert!(instructions.ends_with("Unknown does not mean free."));
     assert_ne!(
         initialized["result"]["capabilities"]["tools"]["listChanged"],
         true

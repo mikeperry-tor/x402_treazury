@@ -91,6 +91,9 @@ struct Args {
     no_auth: bool,
     #[arg(long)]
     list_tools: bool,
+    /// Add unsigned startup pricing discovery to --list-tools; respects provider probe policy.
+    #[arg(long, requires = "list_tools", conflicts_with_all = ["check", "route_tool"])]
+    discover_pricing: bool,
     #[arg(long, conflicts_with_all = ["list_tools", "check", "route_tool"])]
     list_tags: bool,
     #[arg(long)]
@@ -199,6 +202,12 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     x402_treazury::pricing::validate(&cfg)?;
     let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
     if args.list_tools {
+        if args.discover_pricing {
+            let prices = x402_treazury::pricing::process_cache()
+                .discover(&cfg, &root, &tools, &base)
+                .await?;
+            tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
+        }
         println!("{}", serde_json::to_string_pretty(&tools)?);
         return Ok(());
     }
@@ -286,6 +295,7 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                         "check",
                         "show_config",
                         "list_tools",
+                        "discover_pricing",
                         "list_tags",
                         "env_file",
                         "qualification_no_new_funding",
@@ -387,7 +397,7 @@ async fn run_deployment(
             x402_treazury::deployment::Deployment::load_for_serving(path).await
         }
     };
-    let deployment = tokio::select! {
+    let mut deployment = tokio::select! {
         result = loading => result?,
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog startup; no server started"); }
     };
@@ -399,6 +409,9 @@ async fn run_deployment(
         return Ok(());
     }
     if args.list_tools {
+        if args.discover_pricing {
+            deployment.discover_prices().await?;
+        }
         println!("{}", serde_json::to_string_pretty(&deployment.inventory())?);
         return Ok(());
     }

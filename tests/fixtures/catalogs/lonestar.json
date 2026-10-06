@@ -1,7 +1,7 @@
 [
   {
     "name": "lonestar_aero_pool",
-    "description": "Aerodrome (Base DEX) liquidity-pool APR, TVL and reward data. Pass ?pool=. Price: $0.05 per call (vendor spec).",
+    "description": "Aerodrome (Base DEX) liquidity-pool APR, TVL and reward data. Pass ?pool=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/aero/pool",
     "input_schema": {
@@ -24,7 +24,7 @@
   },
   {
     "name": "lonestar_africa_pulse",
-    "description": "Sub-Saharan Africa macro and stress pulse across 12 economies. Price: $0.05 per call (vendor spec).",
+    "description": "Sub-Saharan Africa macro and stress pulse across 12 economies. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/africa/pulse",
     "input_schema": {
@@ -37,7 +37,7 @@
   },
   {
     "name": "lonestar_agri_report",
-    "description": "Grain, softs and livestock commodity prices and momentum. Price: $0.03 per call (vendor spec).",
+    "description": "Grain, softs and livestock commodity prices and momentum. Cost: ~$0.03/call [spec].",
     "method": "GET",
     "path": "/agri/report",
     "input_schema": {
@@ -50,7 +50,7 @@
   },
   {
     "name": "lonestar_analyst_ratings",
-    "description": "Analyst consensus rating, price target, upside and recent upgrades/downgrades. Pass ?symbol=. Price: $0.05 per call (vendor spec).",
+    "description": "Analyst consensus rating, price target, upside and recent upgrades/downgrades. Pass ?symbol=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/analyst/ratings",
     "input_schema": {
@@ -71,7 +71,7 @@
   },
   {
     "name": "lonestar_asia_pulse",
-    "description": "Asia-Pacific macro and stress pulse across 12 economies. Price: $0.05 per call (vendor spec).",
+    "description": "Asia-Pacific macro and stress pulse across 12 economies. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/asia/pulse",
     "input_schema": {
@@ -84,7 +84,7 @@
   },
   {
     "name": "lonestar_bundle_info",
-    "description": "Info Free — no payment required (vendor spec).",
+    "description": "Info Cost: free [spec].",
     "method": "GET",
     "path": "/bundle/info",
     "input_schema": {
@@ -97,7 +97,7 @@
   },
   {
     "name": "lonestar_bundle_scan",
-    "description": "Detects bundled buys and sniper wallets at token launch. Pass ?address=. Price: $0.10 per call (vendor spec).",
+    "description": "Detects bundled buys and sniper wallets at token launch. Pass ?address=. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/bundle/scan",
     "input_schema": {
@@ -121,7 +121,7 @@
   },
   {
     "name": "lonestar_capitol_signal",
-    "description": "Aggregate congressional buy/sell signal (last 30d) Price: $0.05 per call (vendor spec).",
+    "description": "Aggregate congressional buy/sell signal (last 30d) Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/capitol/signal",
     "input_schema": {
@@ -134,7 +134,7 @@
   },
   {
     "name": "lonestar_capitol_trades",
-    "description": "US Senate and House stock-trade disclosures plus a 30-day buy/sell signal. Pass ?symbol= or /signal. Price: $0.05 per call (vendor spec).",
+    "description": "US Senate and House stock-trade disclosures plus a 30-day buy/sell signal. Pass ?symbol= or /signal. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/capitol/trades",
     "input_schema": {
@@ -160,7 +160,7 @@
   },
   {
     "name": "lonestar_cascade_cascade",
-    "description": "Simulate cascade liquidations if a token drops by X percent. Price: $0.10 per call (vendor spec).",
+    "description": "Simulate cascade liquidations if a token drops by X percent. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/cascade/cascade",
     "input_schema": {
@@ -196,7 +196,7 @@
   },
   {
     "name": "lonestar_cascade_report",
-    "description": "Full market-by-market liquidation report for Morpho Blue. Price: $0.10 per call (vendor spec).",
+    "description": "Full market-by-market liquidation report for Morpho Blue. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/cascade/report",
     "input_schema": {
@@ -218,7 +218,7 @@
   },
   {
     "name": "lonestar_cascade_risk",
-    "description": "Cross-market systemic and contagion-cascade risk signal. /risk, /cascade. Price: $0.10 per call (vendor spec).",
+    "description": "Cross-market systemic and contagion-cascade risk signal. /risk, /cascade. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/cascade/risk",
     "input_schema": {
@@ -231,7 +231,7 @@
   },
   {
     "name": "lonestar_chainscout_narrative",
-    "description": "Claude-written on-chain intel brief. Price: $0.05 per call (vendor spec).",
+    "description": "Claude-written on-chain intel brief. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/chainscout/narrative",
     "input_schema": {
@@ -244,7 +244,7 @@
   },
   {
     "name": "lonestar_chainscout_report",
-    "description": "On-chain intel for any token, whales, trending, TVL, holders and narrative signals. Pass ?address=&chain=. Price: $0.05 per call (vendor spec).",
+    "description": "On-chain intel for any token, whales, trending, TVL, holders and narrative signals. Pass ?address=&chain=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/chainscout/report",
     "input_schema": {
@@ -257,7 +257,7 @@
   },
   {
     "name": "lonestar_chainscout_trending",
-    "description": "Trending tokens by volume and momentum. Price: $0.05 per call (vendor spec).",
+    "description": "Trending tokens by volume and momentum. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/chainscout/trending",
     "input_schema": {
@@ -270,7 +270,7 @@
   },
   {
     "name": "lonestar_chainscout_tvl",
-    "description": "DeFi protocol TVL movements on Base. Price: $0.05 per call (vendor spec).",
+    "description": "DeFi protocol TVL movements on Base. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/chainscout/tvl",
     "input_schema": {
@@ -283,7 +283,7 @@
   },
   {
     "name": "lonestar_chainscout_whales",
-    "description": "Large transfers on Base + Ethereum in last 24h. Price: $0.05 per call (vendor spec).",
+    "description": "Large transfers on Base + Ethereum in last 24h. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/chainscout/whales",
     "input_schema": {
@@ -296,7 +296,7 @@
   },
   {
     "name": "lonestar_compute_report",
-    "description": "GPU and AI-compute pricing, availability and demand signal. Price: $0.05 per call (vendor spec).",
+    "description": "GPU and AI-compute pricing, availability and demand signal. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/compute/report",
     "input_schema": {
@@ -309,7 +309,7 @@
   },
   {
     "name": "lonestar_computeindex_index",
-    "description": "Energy cost per GPU-hour by US power region + regional basis Price: $0.10 per call (vendor spec).",
+    "description": "Energy cost per GPU-hour by US power region + regional basis Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/computeindex/index",
     "input_schema": {
@@ -322,7 +322,7 @@
   },
   {
     "name": "lonestar_conflict_conflict",
-    "description": "Per-country conflict and media-attention signal from GDELT. Pass ?country=. Price: $0.05 per call (vendor spec).",
+    "description": "Per-country conflict and media-attention signal from GDELT. Pass ?country=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/conflict/conflict",
     "input_schema": {
@@ -357,7 +357,7 @@
   },
   {
     "name": "lonestar_consumer_consumer",
-    "description": "US retail-sales and consumer-demand signal. Census data. Price: $0.05 per call (vendor spec).",
+    "description": "US retail-sales and consumer-demand signal. Census data. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/consumer/consumer",
     "input_schema": {
@@ -370,7 +370,7 @@
   },
   {
     "name": "lonestar_content_repurpose",
-    "description": "Turn a URL or article into repurposed social and blog content. POST /repurpose. Price: $0.15 per call (vendor spec).",
+    "description": "Turn a URL or article into repurposed social and blog content. POST /repurpose. Cost: ~$0.15/call [spec].",
     "method": "POST",
     "path": "/content/repurpose",
     "input_schema": {
@@ -404,7 +404,7 @@
   },
   {
     "name": "lonestar_contract_verify",
-    "description": "Fast safety check for any EVM contract, verified source, proxy, owner privileges and red flags. Pass ?address=. Price: $0.05 per call (vendor spec).",
+    "description": "Fast safety check for any EVM contract, verified source, proxy, owner privileges and red flags. Pass ?address=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/contract/verify",
     "input_schema": {
@@ -433,7 +433,7 @@
   },
   {
     "name": "lonestar_copperhead_audit",
-    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Price: $2.00 per call (vendor spec).",
+    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Cost: ~$2.00/call [spec].",
     "method": "POST",
     "path": "/copperhead/audit",
     "input_schema": {
@@ -498,7 +498,7 @@
   },
   {
     "name": "lonestar_cot_cot",
-    "description": "CFTC Commitments-of-Traders futures positioning vs history (crude, gold, S&P, bonds, bitcoin). Pass ?market=. Price: $0.05 per call (vendor spec).",
+    "description": "CFTC Commitments-of-Traders futures positioning vs history (crude, gold, S&P, bonds, bitcoin). Pass ?market=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/cot/cot",
     "input_schema": {
@@ -521,7 +521,7 @@
   },
   {
     "name": "lonestar_cottonmouth_audit",
-    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Price: $2.00 per call (vendor spec).",
+    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Cost: ~$2.00/call [spec].",
     "method": "POST",
     "path": "/cottonmouth/audit",
     "input_schema": {
@@ -586,7 +586,7 @@
   },
   {
     "name": "lonestar_crownblock_history",
-    "description": "Historical commodity and refined product prices for a specific date (YYYY-MM-DD).\nSourced from EIA and FRED. Data available from early 1990s to present. Free — no payment required (vendor spec).",
+    "description": "Historical commodity and refined product prices for a specific date (YYYY-MM-DD).\nSourced from EIA and FRED. Data available from early 1990s to present. Cost: free [spec].",
     "method": "GET",
     "path": "/crownblock/history",
     "input_schema": {
@@ -609,7 +609,7 @@
   },
   {
     "name": "lonestar_crownblock_region_name",
-    "description": "Single-region brief. Price: $1.00 per call (vendor spec).",
+    "description": "Single-region brief. Cost: ~$1.00/call [spec].",
     "method": "GET",
     "path": "/crownblock/region/{name}",
     "input_schema": {
@@ -632,7 +632,7 @@
   },
   {
     "name": "lonestar_crownblock_report",
-    "description": "Crude, natural gas and refined-product pricing, spreads and market signals. Price: $1.00 per call (vendor spec).",
+    "description": "Crude, natural gas and refined-product pricing, spreads and market signals. Cost: ~$1.00/call [spec].",
     "method": "GET",
     "path": "/crownblock/report",
     "input_schema": {
@@ -645,7 +645,7 @@
   },
   {
     "name": "lonestar_cycle_cycle",
-    "description": "US inventory-to-production bullwhip and business-cycle signal. Census data. Price: $0.05 per call (vendor spec).",
+    "description": "US inventory-to-production bullwhip and business-cycle signal. Census data. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/cycle/cycle",
     "input_schema": {
@@ -658,7 +658,7 @@
   },
   {
     "name": "lonestar_defi_risk",
-    "description": "DeFi protocol risk score plus live APY yields. Pass ?protocol=. Price: $0.10 per call (vendor spec).",
+    "description": "DeFi protocol risk score plus live APY yields. Pass ?protocol=. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/defi/risk",
     "input_schema": {
@@ -696,7 +696,7 @@
   },
   {
     "name": "lonestar_defi_top_yields",
-    "description": "Cross-protocol risk-adjusted DeFi yield screener: ranks pools by REAL base APY (separated from reward/emission APY), flags yield traps, adds a 0-10 risk overlay. $0.10/query via x402.",
+    "description": "Cross-protocol risk-adjusted DeFi yield screener: ranks pools by REAL base APY (separated from reward/emission APY), flags yield traps, adds a 0-10 risk overlay. $0.10/query via x402. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/defi/top-yields",
     "input_schema": {
@@ -746,7 +746,7 @@
   },
   {
     "name": "lonestar_doc_convert",
-    "description": "Convert documents between formats. POST /convert. Price: $0.05 per call (vendor spec).",
+    "description": "Convert documents between formats. POST /convert. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/doc/convert",
     "input_schema": {
@@ -777,7 +777,7 @@
   },
   {
     "name": "lonestar_doc_report",
-    "description": "GET wrapper for AW compatibility. Pass ?url=<pdf_url> as query param. Free — no payment required (vendor spec).",
+    "description": "GET wrapper for AW compatibility. Pass ?url=<pdf_url> as query param. Cost: free [spec].",
     "method": "GET",
     "path": "/doc/report",
     "input_schema": {
@@ -804,7 +804,7 @@
   },
   {
     "name": "lonestar_earnings_calendar",
-    "description": "Upcoming US earnings dates, estimates and surprises for any ticker. Pass ?ticker=. Price: $0.03 per call (vendor spec).",
+    "description": "Upcoming US earnings dates, estimates and surprises for any ticker. Pass ?ticker=. Cost: ~$0.03/call [spec].",
     "method": "GET",
     "path": "/earnings/calendar",
     "input_schema": {
@@ -833,7 +833,7 @@
   },
   {
     "name": "lonestar_energy_energy",
-    "description": "US energy inventory catalyst signal (crude, gasoline, distillate and natural-gas builds/draws) plus the upcoming EIA report calendar, for trading or assessing energy around data releases. Price: $0.05 per call (vendor spec).",
+    "description": "US energy inventory catalyst signal (crude, gasoline, distillate and natural-gas builds/draws) plus the upcoming EIA report calendar, for trading or assessing energy around data releases. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/energy/energy",
     "input_schema": {
@@ -853,7 +853,7 @@
   },
   {
     "name": "lonestar_equity_equity",
-    "description": "Fundamentals, valuation and a buy/sell/strong-buy signal with analyst price-target upside for any US stock or ETF. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "description": "Fundamentals, valuation and a buy/sell/strong-buy signal with analyst price-target upside for any US stock or ETF. Pass ?ticker=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/equity/equity",
     "input_schema": {
@@ -876,7 +876,7 @@
   },
   {
     "name": "lonestar_europe_pulse",
-    "description": "Europe macro and stress pulse across 12 economies. Price: $0.05 per call (vendor spec).",
+    "description": "Europe macro and stress pulse across 12 economies. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/europe/pulse",
     "input_schema": {
@@ -889,7 +889,7 @@
   },
   {
     "name": "lonestar_floyd_hire",
-    "description": "Autonomous AI agent for research, web search and coding tasks. POST /hire with a task. Price: $0.50 per call (vendor spec).",
+    "description": "Autonomous AI agent for research, web search and coding tasks. POST /hire with a task. Cost: ~$0.50/call [spec].",
     "method": "POST",
     "path": "/floyd/hire",
     "input_schema": {
@@ -922,7 +922,7 @@
   },
   {
     "name": "lonestar_funding_extremes",
-    "description": "Top extreme rates — agent-optimized Price: $0.05 per call (vendor spec).",
+    "description": "Top extreme rates — agent-optimized Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/funding/extremes",
     "input_schema": {
@@ -935,7 +935,7 @@
   },
   {
     "name": "lonestar_funding_rates",
-    "description": "Perpetual-futures funding rates, extremes and a positioning signal across exchanges. /rates, /extremes, /signal. Price: $0.05 per call (vendor spec).",
+    "description": "Perpetual-futures funding rates, extremes and a positioning signal across exchanges. /rates, /extremes, /signal. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/funding/rates",
     "input_schema": {
@@ -963,7 +963,7 @@
   },
   {
     "name": "lonestar_funding_signal",
-    "description": "Signal only — ultra-lightweight Price: $0.05 per call (vendor spec).",
+    "description": "Signal only — ultra-lightweight Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/funding/signal",
     "input_schema": {
@@ -976,7 +976,7 @@
   },
   {
     "name": "lonestar_funds_funds",
-    "description": "Institutional 13F flow (accumulation/distribution), ownership percent and top holders. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "description": "Institutional 13F flow (accumulation/distribution), ownership percent and top holders. Pass ?ticker=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/funds/funds",
     "input_schema": {
@@ -999,7 +999,7 @@
   },
   {
     "name": "lonestar_geo_risk",
-    "description": "Per-country geopolitical risk signal from live media and event data. Pass ?country=. Price: $0.07 per call (vendor spec).",
+    "description": "Per-country geopolitical risk signal from live media and event data. Pass ?country=. Cost: ~$0.07/call [spec].",
     "method": "GET",
     "path": "/geo/risk",
     "input_schema": {
@@ -1030,7 +1030,7 @@
   },
   {
     "name": "lonestar_govedge_opportunities",
-    "description": "Fetch upcoming federal contract solicitations from SAM.gov. Price: $0.20 per call (vendor spec).",
+    "description": "Fetch upcoming federal contract solicitations from SAM.gov. Cost: ~$0.20/call [spec].",
     "method": "GET",
     "path": "/govedge/opportunities",
     "input_schema": {
@@ -1066,7 +1066,7 @@
   },
   {
     "name": "lonestar_govedge_report",
-    "description": "US federal spending, awards and SAM.gov contract opportunities. /report and /opportunities. Price: $0.20 per call (vendor spec).",
+    "description": "US federal spending, awards and SAM.gov contract opportunities. /report and /opportunities. Cost: ~$0.20/call [spec].",
     "method": "GET",
     "path": "/govedge/report",
     "input_schema": {
@@ -1108,7 +1108,7 @@
   },
   {
     "name": "lonestar_grid_region_code",
-    "description": "Single region detail. Price: $0.03 per call (vendor spec).",
+    "description": "Single region detail. Cost: ~$0.03/call [spec].",
     "method": "GET",
     "path": "/grid/region/{code}",
     "input_schema": {
@@ -1131,7 +1131,7 @@
   },
   {
     "name": "lonestar_grid_report",
-    "description": "US electricity grid demand, generation mix and stress signal. Price: $0.03 per call (vendor spec).",
+    "description": "US electricity grid demand, generation mix and stress signal. Cost: ~$0.03/call [spec].",
     "method": "GET",
     "path": "/grid/report",
     "input_schema": {
@@ -1144,7 +1144,7 @@
   },
   {
     "name": "lonestar_hazard_hazard",
-    "description": "Natural-hazard and disaster alert signal (quake, cyclone, flood, volcano, wildfire) from GDACS/USGS. ?country= or global. Price: $0.05 per call (vendor spec).",
+    "description": "Natural-hazard and disaster alert signal (quake, cyclone, flood, volcano, wildfire) from GDACS/USGS. ?country= or global. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/hazard/hazard",
     "input_schema": {
@@ -1178,7 +1178,7 @@
   },
   {
     "name": "lonestar_insider_trades",
-    "description": "Recent SEC Form 4 insider buys and sells for any US ticker. Pass ?ticker=. Price: $0.03 per call (vendor spec).",
+    "description": "Recent SEC Form 4 insider buys and sells for any US ticker. Pass ?ticker=. Cost: ~$0.03/call [spec].",
     "method": "GET",
     "path": "/insider/trades",
     "input_schema": {
@@ -1215,7 +1215,7 @@
   },
   {
     "name": "lonestar_kya_check",
-    "description": "KYA / counterparty check for a wallet (and optional name) with a signed verdict Price: $0.10 per call (vendor spec).",
+    "description": "KYA / counterparty check for a wallet (and optional name) with a signed verdict Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/kya/check",
     "input_schema": {
@@ -1249,7 +1249,7 @@
   },
   {
     "name": "lonestar_kya_signer",
-    "description": "Signer Free — no payment required (vendor spec).",
+    "description": "Signer Cost: free [spec].",
     "method": "GET",
     "path": "/kya/signer",
     "input_schema": {
@@ -1262,7 +1262,7 @@
   },
   {
     "name": "lonestar_labor_labor",
-    "description": "US jobs, unemployment, wages and JOLTS signal. BLS data. Price: $0.05 per call (vendor spec).",
+    "description": "US jobs, unemployment, wages and JOLTS signal. BLS data. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/labor/labor",
     "input_schema": {
@@ -1275,7 +1275,7 @@
   },
   {
     "name": "lonestar_latam_report",
-    "description": "Latin America macro and country-risk pulse. Price: $0.05 per call (vendor spec).",
+    "description": "Latin America macro and country-risk pulse. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/latam/report",
     "input_schema": {
@@ -1288,7 +1288,7 @@
   },
   {
     "name": "lonestar_launches_scan",
-    "description": "Newly launched tokens with liquidity, volume and early-risk screen. Pass ?chain=. Price: $0.05 per call (vendor spec).",
+    "description": "Newly launched tokens with liquidity, volume and early-risk screen. Pass ?chain=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/launches/scan",
     "input_schema": {
@@ -1327,7 +1327,7 @@
   },
   {
     "name": "lonestar_lease_report",
-    "description": "Offshore Gulf of Mexico oil and gas lease-sale and block data. Price: $0.15 per call (vendor spec).",
+    "description": "Offshore Gulf of Mexico oil and gas lease-sale and block data. Cost: ~$0.15/call [spec].",
     "method": "GET",
     "path": "/lease/report",
     "input_schema": {
@@ -1363,7 +1363,7 @@
   },
   {
     "name": "lonestar_liq_biggest",
-    "description": "Top liquidation events across all assets Price: $0.10 per call (vendor spec).",
+    "description": "Top liquidation events across all assets Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/liq/biggest",
     "input_schema": {
@@ -1376,7 +1376,7 @@
   },
   {
     "name": "lonestar_liq_liquidations",
-    "description": "Recent liquidations, biggest events and a squeeze signal across crypto perps. /liquidations, /biggest, /signal. Price: $0.10 per call (vendor spec).",
+    "description": "Recent liquidations, biggest events and a squeeze signal across crypto perps. /liquidations, /biggest, /signal. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/liq/liquidations",
     "input_schema": {
@@ -1389,7 +1389,7 @@
   },
   {
     "name": "lonestar_liq_signal",
-    "description": "Signal + totals only — ultra-lightweight Price: $0.10 per call (vendor spec).",
+    "description": "Signal + totals only — ultra-lightweight Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/liq/signal",
     "input_schema": {
@@ -1402,7 +1402,7 @@
   },
   {
     "name": "lonestar_liquidity_liquidity",
-    "description": "US net liquidity (Fed balance sheet minus RRP minus TGA) with trend and regime. FRED data. Price: $0.05 per call (vendor spec).",
+    "description": "US net liquidity (Fed balance sheet minus RRP minus TGA) with trend and regime. FRED data. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/liquidity/liquidity",
     "input_schema": {
@@ -1415,7 +1415,7 @@
   },
   {
     "name": "lonestar_macro_macro",
-    "description": "US macro snapshot, CPI/inflation, rates, growth and unemployment with a regime signal. FRED data. Price: $0.05 per call (vendor spec).",
+    "description": "US macro snapshot, CPI/inflation, rates, growth and unemployment with a regime signal. FRED data. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/macro/macro",
     "input_schema": {
@@ -1428,7 +1428,7 @@
   },
   {
     "name": "lonestar_mena_pulse",
-    "description": "MENA macro and geopolitical stress pulse, FX pegs, Brent and gas. Price: $0.05 per call (vendor spec).",
+    "description": "MENA macro and geopolitical stress pulse, FX pegs, Brent and gas. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/mena/pulse",
     "input_schema": {
@@ -1441,7 +1441,7 @@
   },
   {
     "name": "lonestar_metals_report",
-    "description": "Copper, aluminum, steel and industrial-metals pricing and momentum. Price: $0.05 per call (vendor spec).",
+    "description": "Copper, aluminum, steel and industrial-metals pricing and momentum. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/metals/report",
     "input_schema": {
@@ -1454,7 +1454,7 @@
   },
   {
     "name": "lonestar_minerals_minerals",
-    "description": "Critical-minerals supply concentration and US import-reliance. Pass ?commodity=. Price: $0.05 per call (vendor spec).",
+    "description": "Critical-minerals supply concentration and US import-reliance. Pass ?commodity=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/minerals/minerals",
     "input_schema": {
@@ -1474,7 +1474,7 @@
   },
   {
     "name": "lonestar_news_news",
-    "description": "Aggregated bullish/bearish news sentiment signal for any crypto asset or ticker. Pass ?symbol=. Price: $0.05 per call (vendor spec).",
+    "description": "Aggregated bullish/bearish news sentiment signal for any crypto asset or ticker. Pass ?symbol=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/news/news",
     "input_schema": {
@@ -1503,7 +1503,7 @@
   },
   {
     "name": "lonestar_oi_extremes",
-    "description": "Top movers by OI delta — agent-optimized Price: $0.05 per call (vendor spec).",
+    "description": "Top movers by OI delta — agent-optimized Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/oi/extremes",
     "input_schema": {
@@ -1516,7 +1516,7 @@
   },
   {
     "name": "lonestar_oi_oi",
-    "description": "Futures open-interest levels, extremes and a positioning signal. /oi, /extremes, /signal. Price: $0.05 per call (vendor spec).",
+    "description": "Futures open-interest levels, extremes and a positioning signal. /oi, /extremes, /signal. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/oi/oi",
     "input_schema": {
@@ -1529,7 +1529,7 @@
   },
   {
     "name": "lonestar_oi_signal",
-    "description": "Signal only — ultra-lightweight Price: $0.05 per call (vendor spec).",
+    "description": "Signal only — ultra-lightweight Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/oi/signal",
     "input_schema": {
@@ -1542,7 +1542,7 @@
   },
   {
     "name": "lonestar_options_flow",
-    "description": "Options flow, implied-volatility skew and put/call ratio signal for US stocks and crypto (BTC/ETH/SOL). Pass ?ticker=. Price: $0.01 per call (vendor spec).",
+    "description": "Options flow, implied-volatility skew and put/call ratio signal for US stocks and crypto (BTC/ETH/SOL). Pass ?ticker=. Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/options/flow",
     "input_schema": {
@@ -1571,7 +1571,7 @@
   },
   {
     "name": "lonestar_pharma_catalysts",
-    "description": "Upcoming Phase 2/3 clinical-trial readouts and catalyst signal for biotech tickers. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "description": "Upcoming Phase 2/3 clinical-trial readouts and catalyst signal for biotech tickers. Pass ?ticker=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/pharma/catalysts",
     "input_schema": {
@@ -1602,7 +1602,7 @@
   },
   {
     "name": "lonestar_pnl_pnl",
-    "description": "Realized and unrealized trading PnL for any wallet. Pass ?wallet=. Price: $0.20 per call (vendor spec).",
+    "description": "Realized and unrealized trading PnL for any wallet. Pass ?wallet=. Cost: ~$0.20/call [spec].",
     "method": "GET",
     "path": "/pnl/pnl",
     "input_schema": {
@@ -1635,7 +1635,7 @@
   },
   {
     "name": "lonestar_portfolio_analyze",
-    "description": "Risk, volatility, drawdown and correlation breakdown for a portfolio of tickers. Pass ?tickers=. Price: $0.10 per call (vendor spec).",
+    "description": "Risk, volatility, drawdown and correlation breakdown for a portfolio of tickers. Pass ?tickers=. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/portfolio/analyze",
     "input_schema": {
@@ -1671,7 +1671,7 @@
   },
   {
     "name": "lonestar_rates_rates",
-    "description": "US bond-market signal: yield curve (2s10s / 3m10y with inversion & recession flag), IG/HY credit spreads scored vs 1-year history, real yields and inflation breakevens, and a combined rates regime. FRED data. Price: $0.05 per call (vendor spec).",
+    "description": "US bond-market signal: yield curve (2s10s / 3m10y with inversion & recession flag), IG/HY credit spreads scored vs 1-year history, real yields and inflation breakevens, and a combined rates regime. FRED data. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/rates/rates",
     "input_schema": {
@@ -1684,7 +1684,7 @@
   },
   {
     "name": "lonestar_rattler_audit",
-    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Price: $2.00 per call (vendor spec).",
+    "description": "Deep AI plus Slither security audit for a Solidity smart contract. POST /audit. Cost: ~$2.00/call [spec].",
     "method": "POST",
     "path": "/rattler/audit",
     "input_schema": {
@@ -1736,7 +1736,7 @@
   },
   {
     "name": "lonestar_rattler_fix",
-    "description": "Generate a patch fix for a specific bug reported in a GitHub issue.\nFetches the contract, runs Slither, and outputs a patch-format fix ready for a PR. Free — no payment required (vendor spec).",
+    "description": "Generate a patch fix for a specific bug reported in a GitHub issue.\nFetches the contract, runs Slither, and outputs a patch-format fix ready for a PR. Cost: free [spec].",
     "method": "POST",
     "path": "/rattler/fix",
     "input_schema": {
@@ -1783,7 +1783,7 @@
   },
   {
     "name": "lonestar_read_read",
-    "description": "Read Price: $0.005 per call (vendor spec).",
+    "description": "Read Cost: ~$0.005/call [spec].",
     "method": "GET",
     "path": "/read/read",
     "input_schema": {
@@ -1834,7 +1834,7 @@
   },
   {
     "name": "lonestar_realestate_report",
-    "description": "US housing, mortgage rates and home-price momentum signal. Price: $0.03 per call (vendor spec).",
+    "description": "US housing, mortgage rates and home-price momentum signal. Cost: ~$0.03/call [spec].",
     "method": "GET",
     "path": "/realestate/report",
     "input_schema": {
@@ -1847,7 +1847,7 @@
   },
   {
     "name": "lonestar_rwa_rwa_risk",
-    "description": "Risk scoring for tokenized real-world-asset vaults and protocols. Pass ?vault= or ?protocol=. Price: $0.10 per call (vendor spec).",
+    "description": "Risk scoring for tokenized real-world-asset vaults and protocols. Pass ?vault= or ?protocol=. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/rwa/rwa-risk",
     "input_schema": {
@@ -1872,7 +1872,7 @@
   },
   {
     "name": "lonestar_sanctions_screen",
-    "description": "OFAC SDN sanctions screening by name, entity or wallet. Pass ?name= or ?wallet=. Price: $0.05 per call (vendor spec).",
+    "description": "OFAC SDN sanctions screening by name, entity or wallet. Pass ?name= or ?wallet=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/sanctions/screen",
     "input_schema": {
@@ -1912,7 +1912,7 @@
   },
   {
     "name": "lonestar_smartmoney_smartmoney",
-    "description": "One call returns the composite smart-money signal on a stock: SEC Form 4 insider buys, congressional STOCK Act disclosures, 13F institutional flow, and Wall Street analyst consensus, each reduced to bullish/neutral/bearish, plus a conviction count. Pass ?ticker=SYMBOL. Price: $0.10 per call (vendor spec).",
+    "description": "One call returns the composite smart-money signal on a stock: SEC Form 4 insider buys, congressional STOCK Act disclosures, 13F institutional flow, and Wall Street analyst consensus, each reduced to bullish/neutral/bearish, plus a conviction count. Pass ?ticker=SYMBOL. Cost: ~$0.10/call [spec].",
     "method": "GET",
     "path": "/smartmoney/smartmoney",
     "input_schema": {
@@ -1942,7 +1942,7 @@
   },
   {
     "name": "lonestar_sovereign_sovereign",
-    "description": "Per-country sovereign economic and default-risk score (IMF plus World Bank). Pass ?country=. Price: $0.05 per call (vendor spec).",
+    "description": "Per-country sovereign economic and default-risk score (IMF plus World Bank). Pass ?country=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/sovereign/sovereign",
     "input_schema": {
@@ -1965,7 +1965,7 @@
   },
   {
     "name": "lonestar_spark_power",
-    "description": "Wholesale US power prices, volatility and battery-arbitrage signal (CAISO/ERCOT), real-time and day-ahead $/MWh. Price: $0.05 per call (vendor spec).",
+    "description": "Wholesale US power prices, volatility and battery-arbitrage signal (CAISO/ERCOT), real-time and day-ahead $/MWh. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/spark/power",
     "input_schema": {
@@ -1978,7 +1978,7 @@
   },
   {
     "name": "lonestar_squeeze_squeeze",
-    "description": "Short-squeeze setup signal from short-percent-float, days-to-cover and momentum. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "description": "Short-squeeze setup signal from short-percent-float, days-to-cover and momentum. Pass ?ticker=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/squeeze/squeeze",
     "input_schema": {
@@ -2001,7 +2001,7 @@
   },
   {
     "name": "lonestar_stable_pulse",
-    "description": "Stablecoin peg, reserves and depeg-risk monitor across major stables. /pulse, /symbol/{sym}. Price: $0.05 per call (vendor spec).",
+    "description": "Stablecoin peg, reserves and depeg-risk monitor across major stables. /pulse, /symbol/{sym}. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/stable/pulse",
     "input_schema": {
@@ -2014,7 +2014,7 @@
   },
   {
     "name": "lonestar_stable_risk_summary",
-    "description": "Risk Summary Price: $0.05 per call (vendor spec).",
+    "description": "Risk Summary Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/stable/risk-summary",
     "input_schema": {
@@ -2027,7 +2027,7 @@
   },
   {
     "name": "lonestar_stable_symbol_symbol",
-    "description": "Symbol Price: $0.05 per call (vendor spec).",
+    "description": "Symbol Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/stable/symbol/{symbol}",
     "input_schema": {
@@ -2050,7 +2050,7 @@
   },
   {
     "name": "lonestar_stake_report",
-    "description": "Live staking yields and validator data for major proof-of-stake assets (ETH/SOL/DOT/AVAX). Price: $0.05 per call (vendor spec).",
+    "description": "Live staking yields and validator data for major proof-of-stake assets (ETH/SOL/DOT/AVAX). Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/stake/report",
     "input_schema": {
@@ -2070,7 +2070,7 @@
   },
   {
     "name": "lonestar_supply_report",
-    "description": "Global supply-chain pressure, freight and logistics stress signal. Price: $0.05 per call (vendor spec).",
+    "description": "Global supply-chain pressure, freight and logistics stress signal. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/supply/report",
     "input_schema": {
@@ -2083,7 +2083,7 @@
   },
   {
     "name": "lonestar_ta_analyze",
-    "description": "Full technical analysis report for any ticker. Price: $0.05 per call (vendor spec).",
+    "description": "Full technical analysis report for any ticker. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/ta/analyze",
     "input_schema": {
@@ -2110,7 +2110,7 @@
   },
   {
     "name": "lonestar_ta_scan",
-    "description": "Technical-analysis scan, RSI, moving averages, trend and momentum signal for stocks or crypto. Pass ?ticker=. Price: $0.05 per call (vendor spec).",
+    "description": "Technical-analysis scan, RSI, moving averages, trend and momentum signal for stocks or crypto. Pass ?ticker=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/ta/scan",
     "input_schema": {
@@ -2131,7 +2131,7 @@
   },
   {
     "name": "lonestar_token_report",
-    "description": "Honeypot, ownership, liquidity and holder-concentration risk scan for any EVM or Solana token, returns a 0-10 risk score. Pass ?address=&chain=. Price: $0.15 per call (vendor spec).",
+    "description": "Honeypot, ownership, liquidity and holder-concentration risk scan for any EVM or Solana token, returns a 0-10 risk score. Pass ?address=&chain=. Cost: ~$0.15/call [spec].",
     "method": "GET",
     "path": "/token/report",
     "input_schema": {
@@ -2160,7 +2160,7 @@
   },
   {
     "name": "lonestar_trade_trade",
-    "description": "International trade-flow and tariff data by commodity or HS code. Pass ?category=. Price: $0.05 per call (vendor spec).",
+    "description": "International trade-flow and tariff data by commodity or HS code. Pass ?category=. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/trade/trade",
     "input_schema": {
@@ -2180,7 +2180,7 @@
   },
   {
     "name": "lonestar_wallet_score",
-    "description": "Risk score and behavioral profile for any EVM wallet, exposure, age and activity. Pass ?address=. Price: $0.15 per call (vendor spec).",
+    "description": "Risk score and behavioral profile for any EVM wallet, exposure, age and activity. Pass ?address=. Cost: ~$0.15/call [spec].",
     "method": "GET",
     "path": "/wallet/score",
     "input_schema": {
@@ -2209,7 +2209,7 @@
   },
   {
     "name": "lonestar_wealth_analyze",
-    "description": "Wealth allocation and diversification analysis across asset classes. Price: $0.25 per call (vendor spec).",
+    "description": "Wealth allocation and diversification analysis across asset classes. Cost: ~$0.25/call [spec].",
     "method": "GET",
     "path": "/wealth/analyze",
     "input_schema": {
@@ -2239,7 +2239,7 @@
   },
   {
     "name": "lonestar_weather_forecast",
-    "description": "Seven-model consensus temperature and precipitation forecast for any location. Pass ?location=. Price: $0.02 per call (vendor spec).",
+    "description": "Seven-model consensus temperature and precipitation forecast for any location. Pass ?location=. Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/weather/forecast",
     "input_schema": {
@@ -2279,7 +2279,7 @@
   },
   {
     "name": "lonestar_whale_whales",
-    "description": "Large whale transactions and accumulation/distribution flow for tokens. Price: $0.05 per call (vendor spec).",
+    "description": "Large whale transactions and accumulation/distribution flow for tokens. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/whale/whales",
     "input_schema": {

@@ -302,17 +302,16 @@ fn challenge_line(c: &Value) -> Option<String> {
     } else {
         (format!("{atomic} atomic"), format!("asset {asset}"))
     };
-    let tail = if network.is_empty() {
-        asset
+    let denomination = if usdc {
+        String::new()
+    } else if network.is_empty() {
+        format!("; {asset}")
     } else {
-        format!("{asset} on {network}")
+        format!("; {asset} on {network}")
     };
-    Some(format!(
-        "{} {amount} per call (x402 {scheme}, {tail}).",
-        if scheme == "upto" {
-            "Metered: up to"
-        } else {
-            "Price:"
-        }
-    ))
+    Some(match scheme {
+        "exact" => format!("Cost: ~{amount}/call [x402 probe{denomination}]."),
+        "upto" => format!("Max: {amount}/call [x402 probe{denomination}]."),
+        _ => format!("Amount: {amount} [x402 probe; scheme {scheme}{denomination}]."),
+    })
 }

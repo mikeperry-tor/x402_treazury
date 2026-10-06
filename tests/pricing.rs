@@ -123,7 +123,13 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
     let a = a.prices;
     assert_eq!(a.len(), 2);
     assert!(a[&("GET".into(), "/price".into())].contains("$0.014"));
+    assert!(a[&("GET".into(), "/price".into())].contains("Cost: ~$0.014/call [x402 probe]."));
+    assert!(a[&("GET".into(), "/price".into())].contains("[x402 probe]"));
     assert!(a[&("GET".into(), "/token".into())].contains("12345 atomic"));
+    assert!(a[&("GET".into(), "/token".into())].contains("Max:"));
+    assert!(
+        a[&("GET".into(), "/token".into())].contains("[x402 probe; asset OTHER on eip155:8453]")
+    );
     let rendered = build_tools_with_prices(&cfg, &root, "api", &a).unwrap();
     assert_eq!(
         rendered
@@ -493,4 +499,33 @@ async fn rolling_probes_pass_stalled_member_and_cancel_without_losing_completed_
     );
     assert!(arrivals.try_recv().is_err(), "unexpected extra probe");
     vendor.abort();
+}
+
+#[test]
+fn advertised_prices_preserve_provenance_even_when_amounts_appear_in_prose() {
+    let root = json!({"operations":[
+        {"method":"GET","path":"/fixed","description":"A $0.15 example, with $0.10 mentioned elsewhere.","pricing":{"amount":"0.10","currency":"USD"}},
+        {"method":"GET","path":"/range","pricing":{"min":"0.10","max":"2.00","currency":"USD"}},
+        {"method":"GET","path":"/dynamic","pricing":{"amount":"0.10","currency":"USD","mode":"dynamic"}},
+        {"method":"GET","path":"/free","pricing":{"authMode":"free"}},
+        {"method":"GET","path":"/unit","pricing":{"amount":"0.01","currency":"USD","unit":"token"}},
+        {"method":"GET","path":"/unknown"}
+    ]});
+    let tools = build_tools(&Config::default(), &root, "api").unwrap();
+    let desc = |path: &str| {
+        tools
+            .iter()
+            .find(|t| t.path == path)
+            .unwrap()
+            .description
+            .as_str()
+    };
+    assert!(desc("/fixed").contains("Cost: ~$0.10/call [spec]."));
+    assert!(desc("/fixed").contains("[spec]"));
+    assert!(desc("/range").contains("Cost: ~$0.10–$2.00/call [spec]."));
+    assert!(desc("/dynamic").contains("[spec, dynamic]"));
+    assert!(desc("/free").contains("Cost: free [spec]."));
+    assert!(desc("/unit").contains("Cost: ~$0.01/token [spec]."));
+    assert!(desc("/unknown").contains("Cost: unknown."));
+    assert!(!desc("/unknown").contains("X402_MAX_PRICE_USD"));
 }

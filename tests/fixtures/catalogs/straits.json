@@ -14,7 +14,7 @@
   },
   {
     "name": "straits_brief",
-    "description": "AI-assisted daily situation brief as structured JSON, by date or latest Price: $0.01 per call (vendor spec).",
+    "description": "AI-assisted daily situation brief as structured JSON, by date or latest Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/premium/brief",
     "input_schema": {
@@ -64,7 +64,7 @@
   },
   {
     "name": "straits_bunker",
-    "description": "Bunker & marine-fuel prices ($/tonne): current VLSFO/IFO380/MGO for Fujairah, Singapore, Rotterdam, plus the derived Fujairah premium over each benchmark hub Price: $0.02 per call (vendor spec).",
+    "description": "Bunker & marine-fuel prices ($/tonne): current VLSFO/IFO380/MGO for Fujairah, Singapore, Rotterdam, plus the derived Fujairah premium over each benchmark hub Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/premium/bunker",
     "input_schema": {
@@ -166,7 +166,7 @@
   },
   {
     "name": "straits_export",
-    "description": "Bulk history export: index-5min, stranded, and ais-gaps cap at 365 days of retained history; transits returns its full retained history instead Price: $0.25 per call (vendor spec).",
+    "description": "Bulk history export: index-5min, stranded, and ais-gaps cap at 365 days of retained history; transits returns its full retained history instead Cost: ~$0.25/call [spec].",
     "method": "GET",
     "path": "/api/premium/export",
     "input_schema": {
@@ -234,7 +234,7 @@
   },
   {
     "name": "straits_history_feed",
-    "description": "Historical series: stranded and AIS-gap counts (hourly, capped at one year, growing), 5-min index, daily transits Price: $0.01 per call (vendor spec).",
+    "description": "Historical series: stranded and AIS-gap counts (hourly, capped at one year, growing), 5-min index, daily transits Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/premium/history/{feed}",
     "input_schema": {
@@ -271,7 +271,7 @@
   },
   {
     "name": "straits_hormuz_flags",
-    "description": "Hormuz flag rollup: live-AIS vessel population by flag state, with per-flag sanctioned tallies Price: $0.01 per call (vendor spec).",
+    "description": "Hormuz flag rollup: live-AIS vessel population by flag state, with per-flag sanctioned tallies Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/premium/hormuz/flags",
     "input_schema": {
@@ -284,7 +284,7 @@
   },
   {
     "name": "straits_hormuz_risk_screen",
-    "description": "Shadow-fleet risk screen: the live-AIS vessel population ranked worst-first, each hull with its risk band, typed reasons, and sanctions-body matches (flagged hulls by default; ?all=1 for every screened hull) Price: $0.02 per call (vendor spec).",
+    "description": "Shadow-fleet risk screen: the live-AIS vessel population ranked worst-first, each hull with its risk band, typed reasons, and sanctions-body matches (flagged hulls by default; ?all=1 for every screened hull) Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/premium/hormuz/risk-screen",
     "input_schema": {
@@ -457,7 +457,7 @@
   },
   {
     "name": "straits_risk_premium",
-    "description": "War-risk transit premium nowcast: a live modeled war-risk insurance multiple (Nx over the peace baseline, 1x-80x scale) for the strait, recomputed every 5 minutes from throughput, escalation, OVX, and event signals, with the standing straits.live insurance-estimate multiple carried as a static reference Price: $0.05 per call (vendor spec).",
+    "description": "War-risk transit premium nowcast: a live modeled war-risk insurance multiple (Nx over the peace baseline, 1x-80x scale) for the strait, recomputed every 5 minutes from throughput, escalation, OVX, and event signals, with the standing straits.live insurance-estimate multiple carried as a static reference Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/api/premium/risk-premium",
     "input_schema": {
@@ -506,7 +506,7 @@
   },
   {
     "name": "straits_snapshot",
-    "description": "One-call snapshot: everything the Strait of Hormuz crisis monitor knows Price: $0.02 per call (vendor spec).",
+    "description": "One-call snapshot: everything the Strait of Hormuz crisis monitor knows Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/premium/snapshot",
     "input_schema": {
@@ -646,7 +646,7 @@
   },
   {
     "name": "straits_vessel_imo",
-    "description": "Single-vessel sanctions + risk dossier by IMO: unified multi-body (OFAC + UK) sanctions, identity, risk band, dark-activity Price: $0.02 per call (vendor spec).",
+    "description": "Single-vessel sanctions + risk dossier by IMO: unified multi-body (OFAC + UK) sanctions, identity, risk band, dark-activity Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/premium/vessel/{imo}",
     "input_schema": {
@@ -670,7 +670,7 @@
   },
   {
     "name": "straits_vessels",
-    "description": "Per-vessel intelligence: live-AIS manifest, sanctioned-in-strait, risk bands, raw AIS positions Price: $0.02 per call (vendor spec).",
+    "description": "Per-vessel intelligence: live-AIS manifest, sanctioned-in-strait, risk bands, raw AIS positions Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/premium/vessels",
     "input_schema": {

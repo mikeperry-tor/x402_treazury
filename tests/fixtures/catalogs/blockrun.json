@@ -1,7 +1,7 @@
 [
   {
     "name": "blockrun_chat_completions",
-    "description": "Access 86 frontier LLMs with OpenAI-compatible API. Price depends on model and token usage. Price: $0.0001–$5.00 per call, scaling with usage (vendor spec).",
+    "description": "Access 86 frontier LLMs with OpenAI-compatible API. Price depends on model and token usage. Cost: ~$0.0001–$5.00/call [spec].",
     "method": "POST",
     "path": "/api/v1/chat/completions",
     "input_schema": {
@@ -156,7 +156,7 @@
   },
   {
     "name": "blockrun_exa_answer",
-    "description": "Get an AI-generated answer to a question grounded in live web search results. Price: $0.011 per call (vendor spec).",
+    "description": "Get an AI-generated answer to a question grounded in live web search results. Cost: ~$0.011/call [spec].",
     "method": "POST",
     "path": "/api/v1/exa/answer",
     "input_schema": {
@@ -184,7 +184,7 @@
   },
   {
     "name": "blockrun_exa_contents",
-    "description": "Extract full text content from one or more URLs. Total = urls.length × $0.002 plus one transaction fee: $0.003 for a single URL, $0.201 at the 100-URL maximum.",
+    "description": "Extract full text content from one or more URLs. Total = urls.length × $0.002 plus one transaction fee: $0.003 for a single URL, $0.201 at the 100-URL maximum. Cost: ~$0.003–$0.201/call [spec].",
     "method": "POST",
     "path": "/api/v1/exa/contents",
     "input_schema": {
@@ -228,7 +228,7 @@
   },
   {
     "name": "blockrun_exa_find_similar",
-    "description": "Find pages semantically similar to a given URL. Price: $0.011 per call (vendor spec).",
+    "description": "Find pages semantically similar to a given URL. Cost: ~$0.011/call [spec].",
     "method": "POST",
     "path": "/api/v1/exa/find-similar",
     "input_schema": {
@@ -263,7 +263,7 @@
   },
   {
     "name": "blockrun_exa_search",
-    "description": "Neural and keyword web search powered by Exa. Optional category filter: company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report. Price: $0.011 per call (vendor spec).",
+    "description": "Neural and keyword web search powered by Exa. Optional category filter: company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report. Cost: ~$0.011/call [spec].",
     "method": "POST",
     "path": "/api/v1/exa/search",
     "input_schema": {
@@ -344,7 +344,7 @@
   },
   {
     "name": "blockrun_search",
-    "description": "Real-time web and news search powered by xAI Grok with live data access. Price: $0.025–$1.25 per call, scaling with usage (vendor spec).",
+    "description": "Real-time web and news search powered by xAI Grok with live data access. Cost: ~$0.025–$1.25/call [spec].",
     "method": "POST",
     "path": "/api/v1/search",
     "input_schema": {

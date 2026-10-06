@@ -6,6 +6,16 @@ use serde_json::Map;
 use std::{collections::BTreeMap, sync::Arc};
 mod auth;
 
+const PRICING_GUIDANCE: &str = "Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.";
+
+fn pricing_instructions(authored: Option<&str>) -> String {
+    match authored.filter(|text| !text.is_empty()) {
+        Some(text) if text.contains(PRICING_GUIDANCE) => text.to_owned(),
+        Some(text) => format!("{text}\n\n{PRICING_GUIDANCE}"),
+        None => PRICING_GUIDANCE.to_owned(),
+    }
+}
+
 #[derive(Clone)]
 pub struct Server {
     pub catalog: Arc<CatalogState>,
@@ -186,7 +196,7 @@ impl Server {
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
-        info.instructions = self.instructions.clone();
+        info.instructions = Some(pricing_instructions(self.instructions.as_deref()));
         info.server_info = Implementation::new(self.name.clone(), env!("CARGO_PKG_VERSION"));
         info
     }
@@ -412,4 +422,18 @@ pub async fn serve_http(
     }
     signal.context("shutdown signal handler failed")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod pricing_instruction_tests {
+    use super::*;
+    #[test]
+    fn shared_caveat_preserves_authored_instructions_and_is_added_once() {
+        assert_eq!(pricing_instructions(None), PRICING_GUIDANCE);
+        assert_eq!(pricing_instructions(Some("")), PRICING_GUIDANCE);
+        let text = pricing_instructions(Some("Read help first."));
+        assert!(text.starts_with("Read help first.\n\n"));
+        assert_eq!(text.matches(PRICING_GUIDANCE).count(), 1);
+        assert_eq!(pricing_instructions(Some(&text)), text);
+    }
 }

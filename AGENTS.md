@@ -238,8 +238,13 @@ and [the runtime architecture](docs/architecture.md).
   body argument and restore its original body key on the wire. Header parameters
   are not agent-settable. Normalize OpenAPI boolean exclusive bounds to numeric ones.
 - Startup pricing is unsigned GET-only, bounded and cached including failures;
-  expiration never triggers refresh. Help is lazy and cached after success.
-- HTTP MCP is bearer-gated, stateless and JSON-response based. Never remove the gate.
+  expiration never triggers refresh. `--list-tools --discover-pricing` explicitly
+  reuses that path without signers, wallet access or listeners; ordinary inspection
+  never probes. Respect source probe opt-outs. Distinguish advertised estimates,
+  observed probe prices, metered maximums and unknown prices in descriptions.
+  Help is lazy and cached after success.
+- HTTP MCP is stateless and JSON-response based, with bearer auth enabled by default.
+  Disabling the gate requires the explicit configured or standalone opt-out.
 - Typed results flow through `PaidClient::execute_response`, `BoundTool::invoke_output`
   and `Server::invoke_output`, including dynamic fallback. PNG/JPEG/WebP bytes and
   explicit method/path JSON base64/data-URI mappings produce MCP image blocks.

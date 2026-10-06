@@ -1,7 +1,7 @@
 [
   {
     "name": "stableenrich_companyenrich_org_enrich",
-    "description": "CompanyEnrich Organization Enrich — full company profile by domain. employees/revenue are range strings. Known issue: openai.com resolves to wrong entity. x.com returns 404 — use twitter.com. total_funding may lag funding array; M&A not included. Verify domain before expand: workforce. Price: $0.06 per call (vendor spec).",
+    "description": "CompanyEnrich Organization Enrich — full company profile by domain. employees/revenue are range strings. Known issue: openai.com resolves to wrong entity. x.com returns 404 — use twitter.com. total_funding may lag funding array; M&A not included. Verify domain before expand: workforce. Cost: ~$0.06/call [spec].",
     "method": "POST",
     "path": "/api/companyenrich/org-enrich",
     "input_schema": {
@@ -39,7 +39,7 @@
   },
   {
     "name": "stableenrich_companyenrich_properties_enrich",
-    "description": "CompanyEnrich Enrich by properties — match by name or social URL when domain is unknown. Best-match disambiguation; verify returned domain before downstream people searches. employees/revenue are range strings. expand: workforce adds +5 upstream credits. Price: $0.06 per call (vendor spec).",
+    "description": "CompanyEnrich Enrich by properties — match by name or social URL when domain is unknown. Best-match disambiguation; verify returned domain before downstream people searches. employees/revenue are range strings. expand: workforce adds +5 upstream credits. Cost: ~$0.06/call [spec].",
     "method": "POST",
     "path": "/api/companyenrich/properties-enrich",
     "input_schema": {
@@ -103,7 +103,7 @@
   },
   {
     "name": "stableenrich_exa_answer",
-    "description": "Exa Answer - Get AI-generated answers with citations Price: $0.01 per call (vendor spec).",
+    "description": "Exa Answer - Get AI-generated answers with citations Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/exa/answer",
     "input_schema": {
@@ -143,7 +143,7 @@
   },
   {
     "name": "stableenrich_exa_contents",
-    "description": "Exa Contents - Retrieve content from URLs Price: $0.002 per call (vendor spec).",
+    "description": "Exa Contents - Retrieve content from URLs Cost: ~$0.002/call [spec].",
     "method": "POST",
     "path": "/api/exa/contents",
     "input_schema": {
@@ -316,7 +316,7 @@
   },
   {
     "name": "stableenrich_exa_find_similar",
-    "description": "Exa Find Similar - Find pages similar to a given URL Price: $0.01 per call (vendor spec).",
+    "description": "Exa Find Similar - Find pages similar to a given URL Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/exa/find-similar",
     "input_schema": {
@@ -518,7 +518,7 @@
   },
   {
     "name": "stableenrich_exa_search",
-    "description": "Exa Search - Neural search across the web Price: $0.01 per call (vendor spec).",
+    "description": "Exa Search - Neural search across the web Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/exa/search",
     "input_schema": {
@@ -771,7 +771,7 @@
   },
   {
     "name": "stableenrich_firecrawl_scrape",
-    "description": "Firecrawl Scrape - Scrape a URL with full JavaScript rendering. Use as a fallback when WebFetch returns empty/JS-only content or 403s. Price: $0.0126 per call (vendor spec).",
+    "description": "Firecrawl Scrape - Scrape a URL with full JavaScript rendering. Use as a fallback when WebFetch returns empty/JS-only content or 403s. Cost: ~$0.0126/call [spec].",
     "method": "POST",
     "path": "/api/firecrawl/scrape",
     "input_schema": {
@@ -794,7 +794,7 @@
   },
   {
     "name": "stableenrich_firecrawl_search",
-    "description": "Firecrawl Search - Search the web Price: $0.0252 per call (vendor spec).",
+    "description": "Firecrawl Search - Search the web Cost: ~$0.0252/call [spec].",
     "method": "POST",
     "path": "/api/firecrawl/search",
     "input_schema": {
@@ -825,7 +825,7 @@
   },
   {
     "name": "stableenrich_fullenrich_company_search",
-    "description": "FullEnrich Company Search — filter by domain, name, LinkedIn URL/ID, industry, type, HQ, headcount, founding year, keywords, specialties, and company IDs. Requires at least one filter; offset alone → 400. Paginate via search_after. Returns up to 10 results. $0.15 if results; free if empty. Legal names not brands (Anysphere≠Cursor).",
+    "description": "FullEnrich Company Search — filter by domain, name, LinkedIn URL/ID, industry, type, HQ, headcount, founding year, keywords, specialties, and company IDs. Requires at least one filter; offset alone → 400. Paginate via search_after. Returns up to 10 results. $0.15 if results; free if empty. Legal names not brands (Anysphere≠Cursor). Cost: ~$0.15/call [spec].",
     "method": "POST",
     "path": "/api/fullenrich/company-search",
     "input_schema": {
@@ -2397,7 +2397,7 @@
   },
   {
     "name": "stableenrich_fullenrich_people_search",
-    "description": "FullEnrich People Search — filter by company domain/name/LinkedIn URL, seniority, title, location, skills, and 20+ FullEnrich filters. Default lean roster: companies map + company_id refs; include_employment_history or verbose for full history. $0.15 when results found; free when no matches.",
+    "description": "FullEnrich People Search — filter by company domain/name/LinkedIn URL, seniority, title, location, skills, and 20+ FullEnrich filters. Default lean roster: companies map + company_id refs; include_employment_history or verbose for full history. $0.15 when results found; free when no matches. Cost: ~$0.15/call [spec].",
     "method": "POST",
     "path": "/api/fullenrich/people-search",
     "input_schema": {
@@ -5742,7 +5742,7 @@
   },
   {
     "name": "stableenrich_google_maps_nearby_search_full",
-    "description": "Google Maps Nearby Search (Full). Finds places near a latitude/longitude using Google Places supported type filters. Use google-maps/text-search/full for natural-language searches like \"wedding planner\" or \"event planner\". Price: $0.08 per call (vendor spec).",
+    "description": "Google Maps Nearby Search (Full). Finds places near a latitude/longitude using Google Places supported type filters. Use google-maps/text-search/full for natural-language searches like \"wedding planner\" or \"event planner\". Cost: ~$0.08/call [spec].",
     "method": "POST",
     "path": "/api/google-maps/nearby-search/full",
     "input_schema": {
@@ -5849,7 +5849,7 @@
   },
   {
     "name": "stableenrich_google_maps_nearby_search_partial",
-    "description": "Google Maps Nearby Search (Partial). Finds places near a latitude/longitude using Google Places supported type filters. Use google-maps/text-search/partial for natural-language searches like \"wedding planner\" or \"event planner\". Price: $0.02 per call (vendor spec).",
+    "description": "Google Maps Nearby Search (Partial). Finds places near a latitude/longitude using Google Places supported type filters. Use google-maps/text-search/partial for natural-language searches like \"wedding planner\" or \"event planner\". Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/api/google-maps/nearby-search/partial",
     "input_schema": {
@@ -5956,7 +5956,7 @@
   },
   {
     "name": "stableenrich_google_maps_place_details_full",
-    "description": "Google Maps Place Details (Full) Price: $0.05 per call (vendor spec).",
+    "description": "Google Maps Place Details (Full) Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/api/google-maps/place-details/full",
     "input_schema": {
@@ -6001,7 +6001,7 @@
   },
   {
     "name": "stableenrich_google_maps_place_details_partial",
-    "description": "Google Maps Place Details (Partial) Price: $0.02 per call (vendor spec).",
+    "description": "Google Maps Place Details (Partial) Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/google-maps/place-details/partial",
     "input_schema": {
@@ -6046,7 +6046,7 @@
   },
   {
     "name": "stableenrich_google_maps_solar_building_insights",
-    "description": "Google Solar API - Closest building roof insights including imageryDate Price: $0.02 per call (vendor spec).",
+    "description": "Google Solar API - Closest building roof insights including imageryDate Cost: ~$0.02/call [spec].",
     "method": "GET",
     "path": "/api/google-maps/solar/building-insights",
     "input_schema": {
@@ -6086,7 +6086,7 @@
   },
   {
     "name": "stableenrich_google_maps_solar_data_layers",
-    "description": "Google Solar API - Aerial GeoTIFF data layers (rgbUrl, dsmUrl, fluxUrl) with imageryDate Price: $0.08 per call (vendor spec).",
+    "description": "Google Solar API - Aerial GeoTIFF data layers (rgbUrl, dsmUrl, fluxUrl) with imageryDate Cost: ~$0.08/call [spec].",
     "method": "GET",
     "path": "/api/google-maps/solar/data-layers",
     "input_schema": {
@@ -6155,7 +6155,7 @@
   },
   {
     "name": "stableenrich_google_maps_solar_rgb_image",
-    "description": "Google Solar API - Render a Solar GeoTIFF layer (rgb, dsm, flux, shade, or mask) as PNG/JPEG. Pass either a GeoTIFF id or latitude/longitude. Returns JSON with a public image url and metadata. monthlyFlux supports one month or a 4x3 grid; hourlyShade supports one hour or a 6x4 grid. Price: $0.05 per call (vendor spec).",
+    "description": "Google Solar API - Render a Solar GeoTIFF layer (rgb, dsm, flux, shade, or mask) as PNG/JPEG. Pass either a GeoTIFF id or latitude/longitude. Returns JSON with a public image url and metadata. monthlyFlux supports one month or a 4x3 grid; hourlyShade supports one hour or a 6x4 grid. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/api/google-maps/solar/rgb-image",
     "input_schema": {
@@ -6250,7 +6250,7 @@
   },
   {
     "name": "stableenrich_google_maps_text_search_full",
-    "description": "Google Maps Text Search (Full). Pagination: repeat the full original body including textQuery on every page; pageToken is only valid for the search that produced it. Price: $0.08 per call (vendor spec).",
+    "description": "Google Maps Text Search (Full). Pagination: repeat the full original body including textQuery on every page; pageToken is only valid for the search that produced it. Cost: ~$0.08/call [spec].",
     "method": "POST",
     "path": "/api/google-maps/text-search/full",
     "input_schema": {
@@ -6367,7 +6367,7 @@
   },
   {
     "name": "stableenrich_google_maps_text_search_partial",
-    "description": "Google Maps Text Search (Partial). Pagination: repeat the full original body including textQuery on every page; pageToken is only valid for the search that produced it. Price: $0.02 per call (vendor spec).",
+    "description": "Google Maps Text Search (Partial). Pagination: repeat the full original body including textQuery on every page; pageToken is only valid for the search that produced it. Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/api/google-maps/text-search/partial",
     "input_schema": {
@@ -6497,7 +6497,7 @@
   },
   {
     "name": "stableenrich_minerva_enrich",
-    "description": "Minerva Enrich - Enrich person records with demographics, work history, education, contact info, addresses, and financial signals. Supports lookup by Minerva PID, LinkedIn URL, or name/email/phone. Field aliases: email→emails in match_condition_fields, education→education_experience in return_fields. Price: $0.05 per call (vendor spec).",
+    "description": "Minerva Enrich - Enrich person records with demographics, work history, education, contact info, addresses, and financial signals. Supports lookup by Minerva PID, LinkedIn URL, or name/email/phone. Field aliases: email→emails in match_condition_fields, education→education_experience in return_fields. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/minerva/enrich",
     "input_schema": {
@@ -6587,7 +6587,7 @@
   },
   {
     "name": "stableenrich_minerva_resolve",
-    "description": "Minerva Resolve - Resolve person identity to a Minerva PID and LinkedIn URL. Supports fuzzy matching and reverse lookup by email or phone only. Price: $0.02 per call (vendor spec).",
+    "description": "Minerva Resolve - Resolve person identity to a Minerva PID and LinkedIn URL. Supports fuzzy matching and reverse lookup by email or phone only. Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/api/minerva/resolve",
     "input_schema": {
@@ -6661,7 +6661,7 @@
   },
   {
     "name": "stableenrich_minerva_validate_emails",
-    "description": "Minerva Validate Emails - Check if email addresses exist in the Minerva database and retrieve validation status and last seen timestamps. Price: $0.01 per call (vendor spec).",
+    "description": "Minerva Validate Emails - Check if email addresses exist in the Minerva database and retrieve validation status and last seen timestamps. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/minerva/validate-emails",
     "input_schema": {
@@ -6688,7 +6688,7 @@
   },
   {
     "name": "stableenrich_pdl_people_enrich",
-    "description": "PDL Person Enrich — career history, emails, phone. Requires one of: `email`, `profile` (LinkedIn URL), or `first_name` + `last_name` + (`company_name` OR `company_domain`). `{ first_name, last_name }` alone returns 400. Prefer `email` when known, then `profile`. No match: HTTP 200, status 404, data null — not billed. Match: $0.28.",
+    "description": "PDL Person Enrich — career history, emails, phone. Requires one of: `email`, `profile` (LinkedIn URL), or `first_name` + `last_name` + (`company_name` OR `company_domain`). `{ first_name, last_name }` alone returns 400. Prefer `email` when known, then `profile`. No match: HTTP 200, status 404, data null — not billed. Match: $0.28. Cost: ~$0.28/call [spec].",
     "method": "POST",
     "path": "/api/pdl/people-enrich",
     "input_schema": {
@@ -6732,7 +6732,7 @@
   },
   {
     "name": "stableenrich_reddit_post_comments",
-    "description": "Reddit Post Comments - Get post details and comments Price: $0.02 per call (vendor spec).",
+    "description": "Reddit Post Comments - Get post details and comments Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/api/reddit/post-comments",
     "input_schema": {
@@ -6760,7 +6760,7 @@
   },
   {
     "name": "stableenrich_reddit_search",
-    "description": "Reddit Search - Search Reddit posts Price: $0.02 per call (vendor spec).",
+    "description": "Reddit Search - Search Reddit posts Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/api/reddit/search",
     "input_schema": {
@@ -6821,7 +6821,7 @@
   },
   {
     "name": "stableenrich_serper_images",
-    "description": "Serper - Google Images search Price: $0.04 per call (vendor spec).",
+    "description": "Serper - Google Images search Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/api/serper/images",
     "input_schema": {
@@ -6870,7 +6870,7 @@
   },
   {
     "name": "stableenrich_serper_lens",
-    "description": "Serper - Google Lens reverse image search Price: $0.20 per call (vendor spec).",
+    "description": "Serper - Google Lens reverse image search Cost: ~$0.20/call [spec].",
     "method": "POST",
     "path": "/api/serper/lens",
     "input_schema": {
@@ -6906,7 +6906,7 @@
   },
   {
     "name": "stableenrich_serper_news",
-    "description": "Serper - Google News search Price: $0.04 per call (vendor spec).",
+    "description": "Serper - Google News search Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/api/serper/news",
     "input_schema": {
@@ -6955,7 +6955,7 @@
   },
   {
     "name": "stableenrich_serper_people_image_search",
-    "description": "Serper - Google Images search tuned for people/headshots. For ambiguous people, resolve the profile slug/company/title first. LinkedIn photos may be non-public; if LinkedIn reports a default avatar or the first search fails, research the profile for alternate disambiguators and retry with public non-LinkedIn source terms. Price: $0.04 per call (vendor spec).",
+    "description": "Serper - Google Images search tuned for people/headshots. For ambiguous people, resolve the profile slug/company/title first. LinkedIn photos may be non-public; if LinkedIn reports a default avatar or the first search fails, research the profile for alternate disambiguators and retry with public non-LinkedIn source terms. Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/api/serper/people-image-search",
     "input_schema": {
@@ -7004,7 +7004,7 @@
   },
   {
     "name": "stableenrich_serper_shopping",
-    "description": "Serper - Google Shopping search Price: $0.04 per call (vendor spec).",
+    "description": "Serper - Google Shopping search Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/api/serper/shopping",
     "input_schema": {
@@ -7053,7 +7053,7 @@
   },
   {
     "name": "stableenrich_whitepages_person_search",
-    "description": "Whitepages Person Search - Find people by name, phone, address Price: $0.22 per call (vendor spec).",
+    "description": "Whitepages Person Search - Find people by name, phone, address Cost: ~$0.22/call [spec].",
     "method": "POST",
     "path": "/api/whitepages/person-search",
     "input_schema": {
@@ -7135,7 +7135,7 @@
   },
   {
     "name": "stableenrich_whitepages_property_search",
-    "description": "Whitepages Property Search — property ownership and residents by address. Use street (aliases: address, street_line, street_address), state_code (not state), zipcode (not zip/postal_code). No indexed property record returns 200 { result: null }, not 404. Price: $0.22 per call (vendor spec).",
+    "description": "Whitepages Property Search — property ownership and residents by address. Use street (aliases: address, street_line, street_address), state_code (not state), zipcode (not zip/postal_code). No indexed property record returns 200 { result: null }, not 404. Cost: ~$0.22/call [spec].",
     "method": "POST",
     "path": "/api/whitepages/property-search",
     "input_schema": {

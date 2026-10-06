@@ -1,7 +1,7 @@
 [
   {
     "name": "locus_call",
-    "description": "Call a free Locus tool by name with JSON arguments. Use this for no-charge coverage checks, lane availability, parcel facts, source-card provenance, citation verification, and other bounded local-context reads. This endpoint does not return paid briefs or full paid reports; buy the x402/MPP endpoints only after a free preflight says there is substance here. CALL FORMAT: The free /tools/call endpoint requires a WRAPPED body: {\"name\": \"<tool>\", \"arguments\": { ... }}. Tool inputs go inside `arguments`, NOT at the top level. Paid /api/<slug> routes are the opposite (flat body). Pick `name` from the locus_list catalog and pass that tool's input object as `arguments`. Free — no payment required ($0); this server never charges for it.",
+    "description": "Call a free Locus tool by name with JSON arguments. Use this for no-charge coverage checks, lane availability, parcel facts, source-card provenance, citation verification, and other bounded local-context reads. This endpoint does not return paid briefs or full paid reports; buy the x402/MPP endpoints only after a free preflight says there is substance here. CALL FORMAT: The free /tools/call endpoint requires a WRAPPED body: {\"name\": \"<tool>\", \"arguments\": { ... }}. Tool inputs go inside `arguments`, NOT at the top level. Paid /api/<slug> routes are the opposite (flat body). Pick `name` from the locus_list catalog and pass that tool's input object as `arguments`. Free — no payment required ($0); this server never charges for it. Cost: ~$0/call [spec].",
     "method": "POST",
     "path": "/tools/call",
     "input_schema": {
@@ -158,7 +158,7 @@
   },
   {
     "name": "locus_list",
-    "description": "Discovery endpoint for Locus free tools. Returns coverage, lane availability, source-card, citation, parcel, policy-source, and environmental read endpoints. Full briefs and full reports remain x402/MPP-paid. Use ?compact=1 for a small name/title/description/category/coverageScope catalog, and ?category=<cat> to filter by compact/full category. Free — no payment required ($0); this server never charges for it.",
+    "description": "Discovery endpoint for Locus free tools. Returns coverage, lane availability, source-card, citation, parcel, policy-source, and environmental read endpoints. Full briefs and full reports remain x402/MPP-paid. Use ?compact=1 for a small name/title/description/category/coverageScope catalog, and ?category=<cat> to filter by compact/full category. Free — no payment required ($0); this server never charges for it. Cost: ~$0/call [spec].",
     "method": "GET",
     "path": "/tools/list",
     "input_schema": {
@@ -182,7 +182,7 @@
   },
   {
     "name": "locus_locus_air_quality_history",
-    "description": "EPA AQS annual monitors, exact-point NOAA HMS satellite smoke days, and separate CDC county modeled PM2.5 when a year lacks nearby AQS PM2.5. For past air context. Missing mirror years are disclosed, not treated as clean air; no source-fire attribution or property safety finding. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "EPA AQS annual monitors, exact-point NOAA HMS satellite smoke days, and separate CDC county modeled PM2.5 when a year lacks nearby AQS PM2.5. For past air context. Missing mirror years are disclosed, not treated as clean air; no source-fire attribution or property safety finding. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-air-quality-history",
     "input_schema": {
@@ -244,7 +244,7 @@
   },
   {
     "name": "locus_locus_appeal_window",
-    "description": "Cited property-value appeal deadline for owners in a covered state; returns the rule, statute, source, computed dates when inputs support them, caveats, and verify-next, for a notice date or protest window. Returns the same records as locus_appeal_window. Use this when your client can only call paid x402 routes. Use locus_appeal_window instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Cited property-value appeal deadline for owners in a covered state; returns the rule, statute, source, computed dates when inputs support them, caveats, and verify-next, for a notice date or protest window. Returns the same records as locus_appeal_window. Use this when your client can only call paid x402 routes. Use locus_appeal_window instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-appeal-window",
     "input_schema": {
@@ -310,7 +310,7 @@
   },
   {
     "name": "locus_locus_area_crime_report",
-    "description": "Reported area incidents for an address from covered municipal feeds, with counts and categories where wired; elsewhere links to NC SBI, SC SLED, or FBI CDE. Returns the same records as locus_area_incidents. Use this when your client can only call paid x402 routes. Use locus_area_incidents instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Reported area incidents for an address from covered municipal feeds, with counts and categories where wired; elsewhere links to NC SBI, SC SLED, or FBI CDE. Returns the same records as locus_area_incidents. Use this when your client can only call paid x402 routes. Use locus_area_incidents instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-area-crime-report",
     "input_schema": {
@@ -348,7 +348,7 @@
   },
   {
     "name": "locus_locus_assessment_position",
-    "description": "Same-roll assessment-uniformity percentile, state appeal-deadline rule, and local or state filing guide for an owner. Shows where the assessment sits among similar properties on the same roll, with deadline and filing steps. No dollar figure, value endorsement, or recommendation to appeal. npx @velinussage/locus-agent-skill add. Price: $0.10 per call (vendor spec).",
+    "description": "Same-roll assessment-uniformity percentile, state appeal-deadline rule, and local or state filing guide for an owner. Shows where the assessment sits among similar properties on the same roll, with deadline and filing steps. No dollar figure, value endorsement, or recommendation to appeal. npx @velinussage/locus-agent-skill add. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/locus-assessment-position",
     "input_schema": {
@@ -393,7 +393,7 @@
   },
   {
     "name": "locus_locus_before_you_sign",
-    "description": "Parcel, local-change, and bill or ordinance records for one street address after free lane preflight. After settlement or seller-escrow, parcelFacts may show the cited assessor owner-of-record for the same exact parcel, not a contact. Optional context frames output, never changes access. npx @velinussage/locus-agent-skill add. Price: $0.07 per call (vendor spec).",
+    "description": "Parcel, local-change, and bill or ordinance records for one street address after free lane preflight. After settlement or seller-escrow, parcelFacts may show the cited assessor owner-of-record for the same exact parcel, not a contact. Optional context frames output, never changes access. npx @velinussage/locus-agent-skill add. Cost: ~$0.07/call [spec].",
     "method": "POST",
     "path": "/api/locus-before-you-sign",
     "input_schema": {
@@ -443,7 +443,7 @@
   },
   {
     "name": "locus_locus_capital_projects",
-    "description": "Official capital projects and special assessments near an address, with status, dates, and links. Returns the same records as locus_capital_projects. Use this when your client can only call paid x402 routes. Use locus_capital_projects instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Official capital projects and special assessments near an address, with status, dates, and links. Returns the same records as locus_capital_projects. Use this when your client can only call paid x402 routes. Use locus_capital_projects instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-capital-projects",
     "input_schema": {
@@ -485,7 +485,7 @@
   },
   {
     "name": "locus_locus_cleanup_sites",
-    "description": "EPA cleanup and Superfund/NPL sites near an address for agents; Returns Cleanups in My Community and Superfund/NPL records with program and status fields, EPA links, and a brownfields candidate flag. Returns the same records as locus_cleanup_sites. Use this when your client can only call paid x402 routes. Use locus_cleanup_sites instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "EPA cleanup and Superfund/NPL sites near an address for agents; Returns Cleanups in My Community and Superfund/NPL records with program and status fields, EPA links, and a brownfields candidate flag. Returns the same records as locus_cleanup_sites. Use this when your client can only call paid x402 routes. Use locus_cleanup_sites instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-cleanup-sites",
     "input_schema": {
@@ -526,7 +526,7 @@
   },
   {
     "name": "locus_locus_cmbs_loan_context",
-    "description": "When does the public CMBS loan on this commercial property mature, and is it with a special servicer? Returns the filed maturity date, debt coverage, occupancy, and largest lease expirations, from SEC ABS-EE filings. Registered CMBS only; no match does not prove there is no loan. npx @velinussage/locus-agent-skill add. Price: $0.10 per call (vendor spec).",
+    "description": "When does the public CMBS loan on this commercial property mature, and is it with a special servicer? Returns the filed maturity date, debt coverage, occupancy, and largest lease expirations, from SEC ABS-EE filings. Registered CMBS only; no match does not prove there is no loan. npx @velinussage/locus-agent-skill add. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/locus-cmbs-loan-context",
     "input_schema": {
@@ -550,7 +550,7 @@
   },
   {
     "name": "locus_locus_cmbs_maturity_wall",
-    "description": "How much public CMBS debt in this county matures in the next 6, 12, 18 and 24 months, by property type, and how much is with a special servicer? From SEC ABS-EE filings; months count from the filing period. No match does not prove there is no loan. npx @velinussage/locus-agent-skill add. Price: $0.25 per call (vendor spec).",
+    "description": "How much public CMBS debt in this county matures in the next 6, 12, 18 and 24 months, by property type, and how much is with a special servicer? From SEC ABS-EE filings; months count from the filing period. No match does not prove there is no loan. npx @velinussage/locus-agent-skill add. Cost: ~$0.25/call [spec].",
     "method": "POST",
     "path": "/api/locus-cmbs-maturity-wall",
     "input_schema": {
@@ -577,7 +577,7 @@
   },
   {
     "name": "locus_locus_coastal_overlays",
-    "description": "Same coastal parcel overlays as locus_coastal_county_overlays for agents: ArcGIS point facts for parcel, zoning, flood, and wetlands or coastal context across SC, NC, GA, and FL Atlantic, Gulf and Panhandle (Miami-Dade through Escambia). Returns the same records as locus_coastal_county_overlays. Use this when your client can only call paid x402 routes. Use locus_coastal_county_overlays instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Same coastal parcel overlays as locus_coastal_county_overlays for agents: ArcGIS point facts for parcel, zoning, flood, and wetlands or coastal context across SC, NC, GA, and FL Atlantic, Gulf and Panhandle (Miami-Dade through Escambia). Returns the same records as locus_coastal_county_overlays. Use this when your client can only call paid x402 routes. Use locus_coastal_county_overlays instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-coastal-overlays",
     "input_schema": {
@@ -672,7 +672,7 @@
   },
   {
     "name": "locus_locus_comps_brief",
-    "description": "County assessor and parcel sales within 1500m over 24 months for one US address or point. Rows include parcel, site address, date, price, and land-area price where published; returns median, range, and coarse trend. Arithmetic, not a valuation; thin areas are charge-free. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "County assessor and parcel sales within 1500m over 24 months for one US address or point. Rows include parcel, site address, date, price, and land-area price where published; returns median, range, and coarse trend. Arithmetic, not a valuation; thin areas are charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-comps-brief",
     "input_schema": {
@@ -748,7 +748,7 @@
   },
   {
     "name": "locus_locus_data_center_watch",
-    "description": "Keyword-filtered official development, permit, and capital records, with official-source search of agendas, GIS, utilities, and ordinances, for compute-campus or crypto-mining activity near one US place. Each record cites a URL; news or social are unverified leads. Misses are charge-free. npx @velinussage/locus-agent-skill add. Price: $0.07 per call (vendor spec).",
+    "description": "Keyword-filtered official development, permit, and capital records, with official-source search of agendas, GIS, utilities, and ordinances, for compute-campus or crypto-mining activity near one US place. Each record cites a URL; news or social are unverified leads. Misses are charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.07/call [spec].",
     "method": "POST",
     "path": "/api/locus-data-center-watch",
     "input_schema": {
@@ -809,7 +809,7 @@
   },
   {
     "name": "locus_locus_development_cases",
-    "description": "Planning and zoning-board cases near an address: applications, rezonings, subdivisions, and variances with status and source links. Returns the same records as locus_development_cases. Use this when your client can only call paid x402 routes. Use locus_development_cases instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Planning and zoning-board cases near an address: applications, rezonings, subdivisions, and variances with status and source links. Returns the same records as locus_development_cases. Use this when your client can only call paid x402 routes. Use locus_development_cases instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-development-cases",
     "input_schema": {
@@ -851,7 +851,7 @@
   },
   {
     "name": "locus_locus_drinking_water_violations",
-    "description": "EPA SDWIS drinking-water violations for a water system or area, for agents. Returns the same records as locus_drinking_water_violations. Use this when your client can only call paid x402 routes. Use locus_drinking_water_violations instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "EPA SDWIS drinking-water violations for a water system or area, for agents. Returns the same records as locus_drinking_water_violations. Use this when your client can only call paid x402 routes. Use locus_drinking_water_violations instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-drinking-water-violations",
     "input_schema": {
@@ -909,7 +909,7 @@
   },
   {
     "name": "locus_locus_electricity_context",
-    "description": "Mapped HIFLD transmission-line proximity and EIA statewide residential price context for a US point before utility diligence. Returns up to 10 lines and state price context, not service, capacity, reliability, tariff, interconnection, timing, or a project cost. Charge-free for an unresolved point or when neither source answers. Price: $0.01 per call (vendor spec).",
+    "description": "Mapped HIFLD transmission-line proximity and EIA statewide residential price context for a US point before utility diligence. Returns up to 10 lines and state price context, not service, capacity, reliability, tariff, interconnection, timing, or a project cost. Charge-free for an unresolved point or when neither source answers. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-electricity-context",
     "input_schema": {
@@ -951,7 +951,7 @@
   },
   {
     "name": "locus_locus_environmental_context",
-    "description": "EPA TRI and RCRA proximity plus SDWIS water systems from an address, point, or state and county. For agents checking nearby environmental public records. Heavier call: allow 60-90 seconds. Returns provenance and verification links; facility context is not incident confirmation. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "EPA TRI and RCRA proximity plus SDWIS water systems from an address, point, or state and county. For agents checking nearby environmental public records. Heavier call: allow 60-90 seconds. Returns provenance and verification links; facility context is not incident confirmation. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-environmental-context",
     "input_schema": {
@@ -1026,7 +1026,7 @@
   },
   {
     "name": "locus_locus_environmental_history_lookup",
-    "description": "EPA TRI and RCRA facilities, nearest large-quantity generator, and county radon and background composite for an address, for buyer, owner and lender agents. Returns the same records as locus_environmental_history. Use this when your client can only call paid x402 routes. Use locus_environmental_history instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "EPA TRI and RCRA facilities, nearest large-quantity generator, and county radon and background composite for an address, for buyer, owner and lender agents. Returns the same records as locus_environmental_history. Use this when your client can only call paid x402 routes. Use locus_environmental_history instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-environmental-history-lookup",
     "input_schema": {
@@ -1082,7 +1082,7 @@
   },
   {
     "name": "locus_locus_environmental_records_screen",
-    "description": "NPL, CERCLIS/state cleanup, RCRA CORRACTS/TSD, RCRA generators, UST/LUST, and TRI rows (name, distance, ids) at ASTM E1527-21 distances, for buyer, owner and lender agents. Use this when you need full source-backed environmental rows. Use locus_environmental_records_screen instead when you only need a bounded environmental public-record screen. Price: $0.05 per call (vendor spec).",
+    "description": "NPL, CERCLIS/state cleanup, RCRA CORRACTS/TSD, RCRA generators, UST/LUST, and TRI rows (name, distance, ids) at ASTM E1527-21 distances, for buyer, owner and lender agents. Use this when you need full source-backed environmental rows. Use locus_environmental_records_screen instead when you only need a bounded environmental public-record screen. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-environmental-records-screen",
     "input_schema": {
@@ -1117,7 +1117,7 @@
   },
   {
     "name": "locus_locus_evaluation_packet",
-    "description": "Loan evaluation packet below the appraisal threshold, in Interagency Appraisal and Evaluation Guidelines order. Parcel, zoning, permits, transfers, house-price index, SFHDF flood, ASTM E1527-21 screen, tax distress, and treasurer status, each source stamped. For lender agents; no value stated. National. Price: $0.35 per call (vendor spec).",
+    "description": "Loan evaluation packet below the appraisal threshold, in Interagency Appraisal and Evaluation Guidelines order. Parcel, zoning, permits, transfers, house-price index, SFHDF flood, ASTM E1527-21 screen, tax distress, and treasurer status, each source stamped. For lender agents; no value stated. National. Cost: ~$0.35/call [spec].",
     "method": "POST",
     "path": "/api/locus-evaluation-packet",
     "input_schema": {
@@ -1152,7 +1152,7 @@
   },
   {
     "name": "locus_locus_fair_market_rents",
-    "description": "HUD Fair Market Rents for a US county by fiscal year, efficiency through 4-bedroom, from the HUD USER API, for program-rent questions. Returns the same records as locus_fair_market_rents. Use this when your client can only call paid x402 routes. Use locus_fair_market_rents instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "HUD Fair Market Rents for a US county by fiscal year, efficiency through 4-bedroom, from the HUD USER API, for program-rent questions. Returns the same records as locus_fair_market_rents. Use this when your client can only call paid x402 routes. Use locus_fair_market_rents instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-fair-market-rents",
     "input_schema": {
@@ -1215,7 +1215,7 @@
   },
   {
     "name": "locus_locus_fema_events",
-    "description": "FEMA disaster declarations by county, NFIP flood-claim history by ZIP, and preliminary FIRM panels at a point for agents checking past events. Returns the same records as locus_fema_events. Use this when your client can only call paid x402 routes. Use locus_fema_events instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "FEMA disaster declarations by county, NFIP flood-claim history by ZIP, and preliminary FIRM panels at a point for agents checking past events. Returns the same records as locus_fema_events. Use this when your client can only call paid x402 routes. Use locus_fema_events instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-fema-events",
     "input_schema": {
@@ -1269,7 +1269,7 @@
   },
   {
     "name": "locus_locus_flood_gauges",
-    "description": "USGS stream and river gauges with latest stage and flow, plus NOAA/NWS threshold metadata within the search radius, for buyer, owner and lender agents. Returns the same records as locus_flood_gauges. Use this when your client can only call paid x402 routes. Use locus_flood_gauges instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "USGS stream and river gauges with latest stage and flow, plus NOAA/NWS threshold metadata within the search radius, for buyer, owner and lender agents. Returns the same records as locus_flood_gauges. Use this when your client can only call paid x402 routes. Use locus_flood_gauges instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-flood-gauges",
     "input_schema": {
@@ -1310,7 +1310,7 @@
   },
   {
     "name": "locus_locus_flood_premium_context",
-    "description": "Median and quartiles of annual NFIP policy cost and FEMA full-risk premium for policies in force in the ZIP, split by rated zone (SFHA vs minimal hazard), from OpenFEMA NFIP Policies v3 (monthly), for buyer, owner and lender agents. Returns the same records as locus_flood_premium_context. Use this when your client can only call paid x402 routes. Use locus_flood_premium_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Median and quartiles of annual NFIP policy cost and FEMA full-risk premium for policies in force in the ZIP, split by rated zone (SFHA vs minimal hazard), from OpenFEMA NFIP Policies v3 (monthly), for buyer, owner and lender agents. Returns the same records as locus_flood_premium_context. Use this when your client can only call paid x402 routes. Use locus_flood_premium_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-flood-premium-context",
     "input_schema": {
@@ -1345,7 +1345,7 @@
   },
   {
     "name": "locus_locus_flood_zone",
-    "description": "FEMA NFHL flood zone, 0.2%-annual-chance and BFE/floodway flags at the geocoded point, for buyer, owner and lender agents. Returns the same records as locus_flood_zone. Use this when your client can only call paid x402 routes. Use locus_flood_zone instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "FEMA NFHL flood zone, 0.2%-annual-chance and BFE/floodway flags at the geocoded point, for buyer, owner and lender agents. Returns the same records as locus_flood_zone. Use this when your client can only call paid x402 routes. Use locus_flood_zone instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-flood-zone",
     "input_schema": {
@@ -1380,7 +1380,7 @@
   },
   {
     "name": "locus_locus_fraud_alert_pointer",
-    "description": "Cited county recorder property-fraud alert and title-notification programs for buyer, owner and lender agents. Returns the same records as locus_fraud_alert_pointer. Use this when your client can only call paid x402 routes. Use locus_fraud_alert_pointer instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Cited county recorder property-fraud alert and title-notification programs for buyer, owner and lender agents. Returns the same records as locus_fraud_alert_pointer. Use this when your client can only call paid x402 routes. Use locus_fraud_alert_pointer instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-fraud-alert-pointer",
     "input_schema": {
@@ -1408,7 +1408,7 @@
   },
   {
     "name": "locus_locus_governing_districts",
-    "description": "US congressional, state senate, and state house districts for an address, for agents asking who represents a location, from Census TIGERweb. Returns the same records as locus_governing_districts. Use this when your client can only call paid x402 routes. Use locus_governing_districts instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "US congressional, state senate, and state house districts for an address, for agents asking who represents a location, from Census TIGERweb. Returns the same records as locus_governing_districts. Use this when your client can only call paid x402 routes. Use locus_governing_districts instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-governing-districts",
     "input_schema": {
@@ -1443,7 +1443,7 @@
   },
   {
     "name": "locus_locus_groundwater_context",
-    "description": "USGS distance-banded monitoring wells, aquifer codes and names, construction depths, and static water levels for an address, from USGS Water Data. Returns the same records as locus_groundwater_context. Use this when your client can only call paid x402 routes. Use locus_groundwater_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "USGS distance-banded monitoring wells, aquifer codes and names, construction depths, and static water levels for an address, from USGS Water Data. Returns the same records as locus_groundwater_context. Use this when your client can only call paid x402 routes. Use locus_groundwater_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-groundwater-context",
     "input_schema": {
@@ -1489,7 +1489,7 @@
   },
   {
     "name": "locus_locus_homeowners_insurance_context",
-    "description": "ACS 2023 median annual homeowners-insurance cost band by mortgage status and median monthly owner costs at ZIP, county, and state, for agents. Returns the same records as locus_homeowners_insurance_context. Use this when your client can only call paid x402 routes. Use locus_homeowners_insurance_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "ACS 2023 median annual homeowners-insurance cost band by mortgage status and median monthly owner costs at ZIP, county, and state, for agents. Returns the same records as locus_homeowners_insurance_context. Use this when your client can only call paid x402 routes. Use locus_homeowners_insurance_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-homeowners-insurance-context",
     "input_schema": {
@@ -1524,7 +1524,7 @@
   },
   {
     "name": "locus_locus_house_price_index",
-    "description": "FRED-hosted FHFA all-transactions house price index for the state of a US point: latest index, year-over-year percent change, and units, for agents, from FHFA via FRED. Returns the same records as locus_house_price_index. Use this when your client can only call paid x402 routes. Use locus_house_price_index instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "FRED-hosted FHFA all-transactions house price index for the state of a US point: latest index, year-over-year percent change, and units, for agents, from FHFA via FRED. Returns the same records as locus_house_price_index. Use this when your client can only call paid x402 routes. Use locus_house_price_index instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-house-price-index",
     "input_schema": {
@@ -1559,7 +1559,7 @@
   },
   {
     "name": "locus_locus_housing_stock",
-    "description": "Census ACS tract-level housing-stock characteristics near a point: units, age, tenure, and vacancy for agents researching an area. Returns the same records as locus_housing_stock. Use this when your client can only call paid x402 routes. Use locus_housing_stock instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Census ACS tract-level housing-stock characteristics near a point: units, age, tenure, and vacancy for agents researching an area. Returns the same records as locus_housing_stock. Use this when your client can only call paid x402 routes. Use locus_housing_stock instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-housing-stock",
     "input_schema": {
@@ -1594,7 +1594,7 @@
   },
   {
     "name": "locus_locus_housing_supply_balance",
-    "description": "BLS QCEW employment change over Census BPS permitted units, the permits share of ACS housing stock, cited benchmarks, and published critiques, for an address, for agents. Returns the same records as locus_housing_supply_balance. Use this when your client can only call paid x402 routes. Use locus_housing_supply_balance instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "BLS QCEW employment change over Census BPS permitted units, the permits share of ACS housing stock, cited benchmarks, and published critiques, for an address, for agents. Returns the same records as locus_housing_supply_balance. Use this when your client can only call paid x402 routes. Use locus_housing_supply_balance instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-housing-supply-balance",
     "input_schema": {
@@ -1636,7 +1636,7 @@
   },
   {
     "name": "locus_locus_insurance_context",
-    "description": "FEMA parcel flood zone and federal purchase rule, ZIP NFIP in-force policy costs, ACS 2023 homeowners-insurance cost band at ZIP, county, and state, and a county rebuild-cost proxy per sq ft for a US address. For an insurance-cost question: sourced estimates, not a quote. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "FEMA parcel flood zone and federal purchase rule, ZIP NFIP in-force policy costs, ACS 2023 homeowners-insurance cost band at ZIP, county, and state, and a county rebuild-cost proxy per sq ft for a US address. For an insurance-cost question: sourced estimates, not a quote. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-insurance-context",
     "input_schema": {
@@ -1671,7 +1671,7 @@
   },
   {
     "name": "locus_locus_landslide_diligence",
-    "description": "USGS landslide inventory history and separate source-native n10 90-meter susceptibility for one US property point. Returns cited unanswered questions and professional follow-up. No probability, property safety label, or engineering conclusion; charge-free unless both components answer. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "USGS landslide inventory history and separate source-native n10 90-meter susceptibility for one US property point. Returns cited unanswered questions and professional follow-up. No probability, property safety label, or engineering conclusion; charge-free unless both components answer. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-landslide-diligence",
     "input_schema": {
@@ -1714,7 +1714,7 @@
   },
   {
     "name": "locus_locus_large_site_satellite_change",
-    "description": "Two dated Copernicus Sentinel-2 images for WGS84 bbox and ordered beforeDate/afterDate. Use locus_satellite_area_prepare for addresses. Area 1-100 sq km; sides >=500m, aspect <=8:1. Metadata by default; includeImagery inlines PNGs. No change detection; source failure is free. REST-only. npx @velinussage/locus-agent-skill add. Price: $0.15 per call (vendor spec).",
+    "description": "Two dated Copernicus Sentinel-2 images for WGS84 bbox and ordered beforeDate/afterDate. Use locus_satellite_area_prepare for addresses. Area 1-100 sq km; sides >=500m, aspect <=8:1. Metadata by default; includeImagery inlines PNGs. No change detection; source failure is free. REST-only. npx @velinussage/locus-agent-skill add. Cost: ~$0.15/call [spec].",
     "method": "POST",
     "path": "/api/locus-large-site-satellite-change",
     "input_schema": {
@@ -1786,7 +1786,7 @@
   },
   {
     "name": "locus_locus_listing_claim_batch",
-    "description": "The same claim check, in the same three document modes, for two or three explicitly identified US addresses in one settlement. No ranking, no winner, no recommendation: every subject carries its own coverage, identity, and source states. Billing is binary - if any submitted subject produced no cited official evidence, the whole batch returns charged:false. npx @velinussage/locus-agent-skill add. Price: $0.65 per call (vendor spec).",
+    "description": "The same claim check, in the same three document modes, for two or three explicitly identified US addresses in one settlement. No ranking, no winner, no recommendation: every subject carries its own coverage, identity, and source states. Billing is binary - if any submitted subject produced no cited official evidence, the whole batch returns charged:false. npx @velinussage/locus-agent-skill add. Cost: ~$0.65/call [spec].",
     "method": "POST",
     "path": "/api/locus-listing-claim-batch",
     "input_schema": {
@@ -2010,7 +2010,7 @@
   },
   {
     "name": "locus_locus_listing_claim_check",
-    "description": "Hold what a document says about one US address next to dated official records. Modes: listing (advertised area, year built, additions, permits vs parcel and permit records), assessment_notice (figures and the notice's own printed date vs the roll and the cited statutory appeal rule), inspection_excerpt (observations mapped to the records that publish that work, plus questions for a pro). Charge-free without cited evidence. npx @velinussage/locus-agent-skill add. Price: $0.25 per call (vendor spec).",
+    "description": "Hold what a document says about one US address next to dated official records. Modes: listing (advertised area, year built, additions, permits vs parcel and permit records), assessment_notice (figures and the notice's own printed date vs the roll and the cited statutory appeal rule), inspection_excerpt (observations mapped to the records that publish that work, plus questions for a pro). Charge-free without cited evidence. npx @velinussage/locus-agent-skill add. Cost: ~$0.25/call [spec].",
     "method": "POST",
     "path": "/api/locus-listing-claim-check",
     "input_schema": {
@@ -2234,7 +2234,7 @@
   },
   {
     "name": "locus_locus_local_fiscal_context",
-    "description": "Reviewed, checksum-bound local-government finances and audits with aligned trends and peers. Parcel context needs an official action-and-geography link; proximity proves nothing. For fiscal research, not eligibility or place selection. Missing, stale, or thin data is charge-free. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "Reviewed, checksum-bound local-government finances and audits with aligned trends and peers. Parcel context needs an official action-and-geography link; proximity proves nothing. For fiscal research, not eligibility or place selection. Missing, stale, or thin data is charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-local-fiscal-context",
     "input_schema": {
@@ -2275,7 +2275,7 @@
   },
   {
     "name": "locus_locus_local_legislation",
-    "description": "Returns one LegiScan or Legistar headline bill for an address, covering zoning, ADU, rental or tax items. Returns the same records as locus_local_legislation. Use this when your client can only call paid x402 routes. Use locus-local-policy-brief instead when you need the full matched set, bill-text provisions, status history and property-class mapping. Not legal advice. Price: $0.05 per call (vendor spec).",
+    "description": "Returns one LegiScan or Legistar headline bill for an address, covering zoning, ADU, rental or tax items. Returns the same records as locus_local_legislation. Use this when your client can only call paid x402 routes. Use locus-local-policy-brief instead when you need the full matched set, bill-text provisions, status history and property-class mapping. Not legal advice. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-local-legislation",
     "input_schema": {
@@ -2327,7 +2327,7 @@
   },
   {
     "name": "locus_locus_local_policy_brief",
-    "description": "Property-policy brief with cited bills, agendas, ordinances, and zoning, tax, fee, bond, housing, or permit-change records for an address, ZIP, city, or county. Use this when you need the full matched set, bill-text provisions, status history and property-class mapping. Use locus_local_legislation instead when you only need one current headline bill for an address. Check the cited rule and date; no legal or political advice or forecast. npx @velinussage/locus-agent-skill add. Price: $0.07 per call (vendor spec).",
+    "description": "Property-policy brief with cited bills, agendas, ordinances, and zoning, tax, fee, bond, housing, or permit-change records for an address, ZIP, city, or county. Use this when you need the full matched set, bill-text provisions, status history and property-class mapping. Use locus_local_legislation instead when you only need one current headline bill for an address. Check the cited rule and date; no legal or political advice or forecast. npx @velinussage/locus-agent-skill add. Cost: ~$0.07/call [spec].",
     "method": "POST",
     "path": "/api/locus-local-policy-brief",
     "input_schema": {
@@ -2387,7 +2387,7 @@
   },
   {
     "name": "locus_locus_local_trend_brief",
-    "description": "Official monthly permit, 311, and code-violation counts and year-over-year change for a neighborhood, ZIP, city, or county. Each series cites its dataset. Coverage follows the source-card registry and lane availability; unsupported or thin places get a charge-free diagnostic. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "Official monthly permit, 311, and code-violation counts and year-over-year change for a neighborhood, ZIP, city, or county. Each series cites its dataset. Coverage follows the source-card registry and lane availability; unsupported or thin places get a charge-free diagnostic. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-local-trend-brief",
     "input_schema": {
@@ -2447,7 +2447,7 @@
   },
   {
     "name": "locus_locus_market_context",
-    "description": "Returns the same Realtor.com-on-FRED listing series and ACS home value and rent as the free route, for agents comparing a county and ZIP. Returns the same records as locus_market_context. Use this when your client can only call paid x402 routes. Use locus_market_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same Realtor.com-on-FRED listing series and ACS home value and rent as the free route, for agents comparing a county and ZIP. Returns the same records as locus_market_context. Use this when your client can only call paid x402 routes. Use locus_market_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-market-context",
     "input_schema": {
@@ -2482,7 +2482,7 @@
   },
   {
     "name": "locus_locus_metro_permits",
-    "description": "Building permits for an address, parcel set, or point, newest or nearest first with distance: number, type, status, dates, and in Chicago, New York City, Austin, and Seattle the contractor companies named plus cost, trade, and scope filters. Returns the same records as locus_metro_permits. Use this when your client can only call paid x402 routes. Use locus_metro_permits instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Building permits for an address, parcel set, or point, newest or nearest first with distance: number, type, status, dates, and in Chicago, New York City, Austin, and Seattle the contractor companies named plus cost, trade, and scope filters. Returns the same records as locus_metro_permits. Use this when your client can only call paid x402 routes. Use locus_metro_permits instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-metro-permits",
     "input_schema": {
@@ -2647,7 +2647,7 @@
   },
   {
     "name": "locus_locus_mitigation_incentives",
-    "description": "Returns the same cited grants, insurance-discount mandates, disaster-assistance windows, flood-map corrections, and rebate rows as the free route for a US place. Returns the same records as locus_mitigation_incentives. Use this when your client can only call paid x402 routes. Use locus_mitigation_incentives instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same cited grants, insurance-discount mandates, disaster-assistance windows, flood-map corrections, and rebate rows as the free route for a US place. Returns the same records as locus_mitigation_incentives. Use this when your client can only call paid x402 routes. Use locus_mitigation_incentives instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-mitigation-incentives",
     "input_schema": {
@@ -2686,7 +2686,7 @@
   },
   {
     "name": "locus_locus_nearby_places",
-    "description": "Returns the same OpenStreetMap places as the free route, with category, distance, and direction from a US address, for agents asking what is nearby. Returns the same records as locus_nearby_places. Use this when your client can only call paid x402 routes. Use locus_nearby_places instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Returns the same OpenStreetMap places as the free route, with category, distance, and direction from a US address, for agents asking what is nearby. Returns the same records as locus_nearby_places. Use this when your client can only call paid x402 routes. Use locus_nearby_places instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-nearby-places",
     "input_schema": {
@@ -2728,7 +2728,7 @@
   },
   {
     "name": "locus_locus_nei_emissions_nearby",
-    "description": "EPA National Emissions Inventory facility and pollutant rows near an address for agents reviewing distance-ranked tonnage. Bounded summary or detailLevel=full facility-pollutant matrix. Periodic inventory estimates, not monitoring, exposure, or a burden score. Charge-free when no facility rows resolve. Price: $0.01 per call (vendor spec).",
+    "description": "EPA National Emissions Inventory facility and pollutant rows near an address for agents reviewing distance-ranked tonnage. Bounded summary or detailLevel=full facility-pollutant matrix. Periodic inventory estimates, not monitoring, exposure, or a burden score. Charge-free when no facility rows resolve. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-nei-emissions-nearby",
     "input_schema": {
@@ -2789,7 +2789,7 @@
   },
   {
     "name": "locus_locus_nfip_claims",
-    "description": "Returns the same OpenFEMA NFIP county claim totals as the free route: count, total paid for building and contents, year range, and top rated flood zones. Returns the same records as locus_nfip_claims. Use this when your client can only call paid x402 routes. Use locus_nfip_claims instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same OpenFEMA NFIP county claim totals as the free route: count, total paid for building and contents, year range, and top rated flood zones. Returns the same records as locus_nfip_claims. Use this when your client can only call paid x402 routes. Use locus_nfip_claims instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-nfip-claims",
     "input_schema": {
@@ -2824,7 +2824,7 @@
   },
   {
     "name": "locus_locus_noise_proximity",
-    "description": "Returns same airport, major-road, and railway distances as the free route for an address. Returns the same records as locus_noise_proximity. Use this when your client can only call paid x402 routes. Use locus_noise_proximity instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns same airport, major-road, and railway distances as the free route for an address. Returns the same records as locus_noise_proximity. Use this when your client can only call paid x402 routes. Use locus_noise_proximity instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-noise-proximity",
     "input_schema": {
@@ -2859,7 +2859,7 @@
   },
   {
     "name": "locus_locus_nyc_recording_history",
-    "description": "Returns the same NYC ACRIS rows as the free route for one borough-block-lot or NYC address: ids, types, dates, source-published amounts, query limits, and citations. Returns the same records as locus_nyc_recording_history. Use this when your client can only call paid x402 routes. Use locus_nyc_recording_history instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same NYC ACRIS rows as the free route for one borough-block-lot or NYC address: ids, types, dates, source-published amounts, query limits, and citations. Returns the same records as locus_nyc_recording_history. Use this when your client can only call paid x402 routes. Use locus_nyc_recording_history instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-nyc-recording-history",
     "input_schema": {
@@ -2896,7 +2896,7 @@
   },
   {
     "name": "locus_locus_opportunity_zone",
-    "description": "Returns the same HUD-cited 2018 Qualified Opportunity Zone designation as the free route for a US address. Returns the same records as locus_opportunity_zone. Use this when your client can only call paid x402 routes. Use locus_opportunity_zone instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Returns the same HUD-cited 2018 Qualified Opportunity Zone designation as the free route for a US address. Returns the same records as locus_opportunity_zone. Use this when your client can only call paid x402 routes. Use locus_opportunity_zone instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-opportunity-zone",
     "input_schema": {
@@ -2931,7 +2931,7 @@
   },
   {
     "name": "locus_locus_owner_action_brief",
-    "description": "Owner-action review for one US address: programs and dates, state appeal rule, tax framing and county pointer, FEMA LOMA point screen, and parcel special-valuation screen. For follow-up, not eligibility advice. Charge-free unless two sections are substantive. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "Owner-action review for one US address: programs and dates, state appeal rule, tax framing and county pointer, FEMA LOMA point screen, and parcel special-valuation screen. For follow-up, not eligibility advice. Charge-free unless two sections are substantive. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-owner-action-brief",
     "input_schema": {
@@ -2971,7 +2971,7 @@
   },
   {
     "name": "locus_locus_owner_cost_review",
-    "description": "Non-PII RentCast tax history, cited owner programs, work items, and validated nextCalls for one exact property. For owner research, not an eligibility, savings, appeal, or property recommendation. Unpaid POST checks provider readiness, reserves nothing. Private, no-store. npx @velinussage/locus-agent-skill add. Price: $0.25 per call (vendor spec).",
+    "description": "Non-PII RentCast tax history, cited owner programs, work items, and validated nextCalls for one exact property. For owner research, not an eligibility, savings, appeal, or property recommendation. Unpaid POST checks provider readiness, reserves nothing. Private, no-store. npx @velinussage/locus-agent-skill add. Cost: ~$0.25/call [spec].",
     "method": "POST",
     "path": "/api/locus-owner-cost-review",
     "input_schema": {
@@ -3006,7 +3006,7 @@
   },
   {
     "name": "locus_locus_owner_programs",
-    "description": "Returns the same cited owner-program rows as the free route, plus statewide property-tax rows from Locus tax and appeal registries, for a US place. Returns the same records as locus_owner_programs. Use this when your client can only call paid x402 routes. Use locus_owner_programs instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same cited owner-program rows as the free route, plus statewide property-tax rows from Locus tax and appeal registries, for a US place. Returns the same records as locus_owner_programs. Use this when your client can only call paid x402 routes. Use locus_owner_programs instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-owner-programs",
     "input_schema": {
@@ -3083,7 +3083,7 @@
   },
   {
     "name": "locus_locus_ownership_loop",
-    "description": "Returns the same development, capital-project, sale, FEMA, and tax-calendar scan as the free route, for an owner or manager checking what changed nearby. Returns the same records as locus_ownership_loop. Use this when your client can only call paid x402 routes. Use locus_ownership_loop instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Returns the same development, capital-project, sale, FEMA, and tax-calendar scan as the free route, for an owner or manager checking what changed nearby. Returns the same records as locus_ownership_loop. Use this when your client can only call paid x402 routes. Use locus_ownership_loop instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-ownership-loop",
     "input_schema": {
@@ -3153,7 +3153,7 @@
   },
   {
     "name": "locus_locus_parcel_lookup",
-    "description": "Returns cited land use, acreage, year built and legal jurisdiction for an address or jurisdiction-scoped parcel id. Returns the same records as locus_parcel_lookup. Use this when your client can only call paid x402 routes. Use locus-parcel-value instead when you need assessed value and sale fields from the resolved official parcel. Wired official parcel sources only. No owner or mailing fields. Price: $0.01 per call (vendor spec).",
+    "description": "Returns cited land use, acreage, year built and legal jurisdiction for an address or jurisdiction-scoped parcel id. Returns the same records as locus_parcel_lookup. Use this when your client can only call paid x402 routes. Use locus-parcel-value instead when you need assessed value and sale fields from the resolved official parcel. Wired official parcel sources only. No owner or mailing fields. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-parcel-lookup",
     "input_schema": {
@@ -3209,7 +3209,7 @@
   },
   {
     "name": "locus_locus_parcel_set",
-    "description": "Returns the same parcel-set facts as the free route for up to 25 addresses or jurisdiction-scoped parcel ids. Returns the same records as locus_parcel_set. Use this when your client can only call paid x402 routes. Use locus_parcel_set instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same parcel-set facts as the free route for up to 25 addresses or jurisdiction-scoped parcel ids. Returns the same records as locus_parcel_set. Use this when your client can only call paid x402 routes. Use locus_parcel_set instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-parcel-set",
     "input_schema": {
@@ -3260,7 +3260,7 @@
   },
   {
     "name": "locus_locus_parcel_transfers",
-    "description": "Returns the same recorded nearby sales as the free route, plus Chatham County COMPER, within 90 days and 500 meters: site address, date, and price. Returns the same records as locus_parcel_transfers. Use this when your client can only call paid x402 routes. Use locus_parcel_transfers instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns the same recorded nearby sales as the free route, plus Chatham County COMPER, within 90 days and 500 meters: site address, date, and price. Returns the same records as locus_parcel_transfers. Use this when your client can only call paid x402 routes. Use locus_parcel_transfers instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-parcel-transfers",
     "input_schema": {
@@ -3309,7 +3309,7 @@
   },
   {
     "name": "locus_locus_parcel_value",
-    "description": "Returns recorded sale price and assessed value for one parcel, cited to the county assessor, for a last-sale or tax-roll check. Use this when you need assessed value and sale fields from the resolved official parcel. Use locus_parcel_lookup instead when you only need parcel identity, land use, acreage or year built. Price: $0.01 per call (vendor spec).",
+    "description": "Returns recorded sale price and assessed value for one parcel, cited to the county assessor, for a last-sale or tax-roll check. Use this when you need assessed value and sale fields from the resolved official parcel. Use locus_parcel_lookup instead when you only need parcel identity, land use, acreage or year built. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-parcel-value",
     "input_schema": {
@@ -3365,7 +3365,7 @@
   },
   {
     "name": "locus_locus_permit_closeout_check",
-    "description": "Parcel permit closeout status from the jurisdiction's system of record. Coverage: Raleigh, Durham, Wake County, Austin, Seattle, Chicago, Los Angeles, New York City. For agents checking open work before closing; uncertain or unavailable evidence is charge-free. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "Parcel permit closeout status from the jurisdiction's system of record. Coverage: Raleigh, Durham, Wake County, Austin, Seattle, Chicago, Los Angeles, New York City. For agents checking open work before closing; uncertain or unavailable evidence is charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-permit-closeout-check",
     "input_schema": {
@@ -3459,7 +3459,7 @@
   },
   {
     "name": "locus_locus_pfas_occurrence",
-    "description": "EPA UCMR 5 PFAS results for an address or PWSIDs. EPA service-area point-in-polygon with provider or machine-modeled confidence; containment is not proof of service. Detect and non-detect counts stay distinct; lithium is excluded. Entry-point samples, not a tap reading. Charge-free when unresolved or out of coverage. Price: $0.01 per call (vendor spec).",
+    "description": "EPA UCMR 5 PFAS results for an address or PWSIDs. EPA service-area point-in-polygon with provider or machine-modeled confidence; containment is not proof of service. Detect and non-detect counts stay distinct; lithium is excluded. Entry-point samples, not a tap reading. Charge-free when unresolved or out of coverage. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-pfas-occurrence",
     "input_schema": {
@@ -3503,7 +3503,7 @@
   },
   {
     "name": "locus_locus_place_facts",
-    "description": "Parcel, flood, district, transportation, and tax-rate records where sources are wired, for one US address, for agents. Returns the same records as locus_place_facts. Use this when your client can only call paid x402 routes. Use locus_place_facts instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Parcel, flood, district, transportation, and tax-rate records where sources are wired, for one US address, for agents. Returns the same records as locus_place_facts. Use this when your client can only call paid x402 routes. Use locus_place_facts instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-place-facts",
     "input_schema": {
@@ -3527,7 +3527,7 @@
   },
   {
     "name": "locus_locus_place_report",
-    "description": "Public-record report for a street address or ZIP after free preflight. After settlement or seller-escrow, locus_parcel_financials may show the cited assessor owner-of-record for the same exact parcel, not a contact. Canonical storage remains owner-free; no valuation or screening. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "Public-record report for a street address or ZIP after free preflight. After settlement or seller-escrow, locus_parcel_financials may show the cited assessor owner-of-record for the same exact parcel, not a contact. Canonical storage remains owner-free; no valuation or screening. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-place-report",
     "input_schema": {
@@ -3779,7 +3779,7 @@
   },
   {
     "name": "locus_locus_plan_research",
-    "description": "LLM-assisted research plan for one goal. Selects and ranks inside the closed Locus catalog; the server joins rail, price, scope, and availability. For choosing the next record call. A deterministic charge-free fallback returns on no key, model failure, or too few valid selections. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "LLM-assisted research plan for one goal. Selects and ranks inside the closed Locus catalog; the server joins rail, price, scope, and availability. For choosing the next record call. A deterministic charge-free fallback returns on no key, model failure, or too few valid selections. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-plan-research",
     "input_schema": {
@@ -3829,7 +3829,7 @@
   },
   {
     "name": "locus_locus_power_water_evidence_pack",
-    "description": "HIFLD transmission lines, EIA power plants, county public-water-system context, and official FCC broadband map for one US address or point. Site evidence before a utility call. No grid capacity, substation, interconnection, service availability, timing, cost, or performance finding. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "HIFLD transmission lines, EIA power plants, county public-water-system context, and official FCC broadband map for one US address or point. Site evidence before a utility call. No grid capacity, substation, interconnection, service availability, timing, cost, or performance finding. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-power-water-evidence-pack",
     "input_schema": {
@@ -3884,7 +3884,7 @@
   },
   {
     "name": "locus_locus_practitioner_read",
-    "description": "Hedged prose from cited property records for one place. Each reading names the confirming record; an optional question sets the audience and focus. No value, person motive, or buildability finding. Allow at least 60 seconds (90 recommended). If disconnected, retry the same request for the same payer with fresh valid payment within 15 minutes; no charge occurs for the disconnected run. npx @velinussage/locus-agent-skill add. Price: $0.29 per call (vendor spec).",
+    "description": "Hedged prose from cited property records for one place. Each reading names the confirming record; an optional question sets the audience and focus. No value, person motive, or buildability finding. Allow at least 60 seconds (90 recommended). If disconnected, retry the same request for the same payer with fresh valid payment within 15 minutes; no charge occurs for the disconnected run. npx @velinussage/locus-agent-skill add. Cost: ~$0.29/call [spec].",
     "method": "POST",
     "path": "/api/locus-practitioner-read",
     "input_schema": {
@@ -3936,7 +3936,7 @@
   },
   {
     "name": "locus_locus_program_windows",
-    "description": "Exact dated owner-program windows for a US place, for agents. Returns the same records as locus_program_windows. Use this when your client can only call paid x402 routes. Use locus_program_windows instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Exact dated owner-program windows for a US place, for agents. Returns the same records as locus_program_windows. Use this when your client can only call paid x402 routes. Use locus_program_windows instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-program-windows",
     "input_schema": {
@@ -3982,7 +3982,7 @@
   },
   {
     "name": "locus_locus_property_flyer",
-    "description": "Just-listed, open-house, or coming-soon 4:5 PNG for one address with agent colors, logo, contact, and headshot. With no licensed subject photo, uses an aerial hero and official parcel outline when available; the model supplies only decorative skin. No valuation or ranking. npx @velinussage/locus-agent-skill add. Price: $0.99 per call (vendor spec).",
+    "description": "Just-listed, open-house, or coming-soon 4:5 PNG for one address with agent colors, logo, contact, and headshot. With no licensed subject photo, uses an aerial hero and official parcel outline when available; the model supplies only decorative skin. No valuation or ranking. npx @velinussage/locus-agent-skill add. Cost: ~$0.99/call [spec].",
     "method": "POST",
     "path": "/api/locus-property-flyer",
     "input_schema": {
@@ -4448,7 +4448,7 @@
   },
   {
     "name": "locus_locus_property_tax",
-    "description": "RentCast residential record for one US street address: assessment, tax, five-year history, effective rate, deeds, and owner-occupied proxy from assessor and recorder data. Not an official bill or valuation; no owner names or mailing. Commercial or uncovered is charge-free. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "RentCast residential record for one US street address: assessment, tax, five-year history, effective rate, deeds, and owner-occupied proxy from assessor and recorder data. Not an official bill or valuation; no owner names or mailing. Commercial or uncovered is charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-property-tax",
     "input_schema": {
@@ -4472,7 +4472,7 @@
   },
   {
     "name": "locus_locus_property_tax_context",
-    "description": "ACS 2023 median real-estate taxes paid (B25103), median owner-occupied home value (B25077), and the effective rate they imply at ZIP, county, and state, with the Lincoln Institute 50-state study linked. Returns the same records as locus_property_tax_context. Use this when your client can only call paid x402 routes. Use locus_property_tax_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "ACS 2023 median real-estate taxes paid (B25103), median owner-occupied home value (B25077), and the effective rate they imply at ZIP, county, and state, with the Lincoln Institute 50-state study linked. Returns the same records as locus_property_tax_context. Use this when your client can only call paid x402 routes. Use locus_property_tax_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-property-tax-context",
     "input_schema": {
@@ -4507,7 +4507,7 @@
   },
   {
     "name": "locus_locus_property_tax_estimate",
-    "description": "Official NCDOR property-tax rate context for a geocoded NC address. Returns the same records as locus_property_tax_estimate. Use this when your client can only call paid x402 routes. Use locus_property_tax_estimate instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Official NCDOR property-tax rate context for a geocoded NC address. Returns the same records as locus_property_tax_estimate. Use this when your client can only call paid x402 routes. Use locus_property_tax_estimate instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-property-tax-estimate",
     "input_schema": {
@@ -4531,7 +4531,7 @@
   },
   {
     "name": "locus_locus_property_tax_rates",
-    "description": "Cited adopted property-tax rate components for a city, county, ZIP, or address, for buyer, owner and lender agents, from NCDOR and selected TN, TX, and FL adapters. Returns the same records as locus_property_tax_rates. Use this when your client can only call paid x402 routes. Use locus_property_tax_rates instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Cited adopted property-tax rate components for a city, county, ZIP, or address, for buyer, owner and lender agents, from NCDOR and selected TN, TX, and FL adapters. Returns the same records as locus_property_tax_rates. Use this when your client can only call paid x402 routes. Use locus_property_tax_rates instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-property-tax-rates",
     "input_schema": {
@@ -4559,7 +4559,7 @@
   },
   {
     "name": "locus_locus_public_utilities",
-    "description": "Nearest OpenStreetMap fire station, hospital, police, hydrant, substation, and water tower for a US address, for buyer, owner and lender agents. Returns the same records as locus_public_utilities. Use this when your client can only call paid x402 routes. Use locus_public_utilities instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Nearest OpenStreetMap fire station, hospital, police, hydrant, substation, and water tower for a US address, for buyer, owner and lender agents. Returns the same records as locus_public_utilities. Use this when your client can only call paid x402 routes. Use locus_public_utilities instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-public-utilities",
     "input_schema": {
@@ -4601,7 +4601,7 @@
   },
   {
     "name": "locus_locus_radon_zone",
-    "description": "EPA Map of Radon Zones county designation (1, 2, or 3) for an address, point, or state and county, for buyer, owner and lender agents. Returns the same records as locus_radon_zone. Use this when your client can only call paid x402 routes. Use locus_radon_zone instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "EPA Map of Radon Zones county designation (1, 2, or 3) for an address, point, or state and county, for buyer, owner and lender agents. Returns the same records as locus_radon_zone. Use this when your client can only call paid x402 routes. Use locus_radon_zone instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-radon-zone",
     "input_schema": {
@@ -4650,7 +4650,7 @@
   },
   {
     "name": "locus_locus_rcra_handlers",
-    "description": "Cited EPA RCRAInfo hazardous-waste handler records for a state and county or ZIP, for buyer, owner and lender agents, via EPA Envirofacts. Returns the same records as locus_rcra_handlers. Use this when your client can only call paid x402 routes. Use locus_rcra_handlers instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Cited EPA RCRAInfo hazardous-waste handler records for a state and county or ZIP, for buyer, owner and lender agents, via EPA Envirofacts. Returns the same records as locus_rcra_handlers. Use this when your client can only call paid x402 routes. Use locus_rcra_handlers instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-rcra-handlers",
     "input_schema": {
@@ -4713,7 +4713,7 @@
   },
   {
     "name": "locus_locus_rebuild_cost_context",
-    "description": "Single-family rebuild-cost proxy for buyer, owner and lender agents: Census Building Permits Survey value per unit, trended by the BLS construction-input PPI, as a $/sq ft range under a stated size, floored at FEMA $100. Returns the same records as locus_rebuild_cost_context. Use this when your client can only call paid x402 routes. Use locus_rebuild_cost_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Single-family rebuild-cost proxy for buyer, owner and lender agents: Census Building Permits Survey value per unit, trended by the BLS construction-input PPI, as a $/sq ft range under a stated size, floored at FEMA $100. Returns the same records as locus_rebuild_cost_context. Use this when your client can only call paid x402 routes. Use locus_rebuild_cost_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-rebuild-cost-context",
     "input_schema": {
@@ -4748,7 +4748,7 @@
   },
   {
     "name": "locus_locus_regulated_facility_compliance",
-    "description": "EPA ECHO All-Media facilities near a point with program IDs, inspection and enforcement summary, and Detailed Facility Report links. Returns the same records as locus_regulated_facility_compliance. Use this when your client can only call paid x402 routes. Use locus_regulated_facility_compliance instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "EPA ECHO All-Media facilities near a point with program IDs, inspection and enforcement summary, and Detailed Facility Report links. Returns the same records as locus_regulated_facility_compliance. Use this when your client can only call paid x402 routes. Use locus_regulated_facility_compliance instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-regulated-facility-compliance",
     "input_schema": {
@@ -4789,7 +4789,7 @@
   },
   {
     "name": "locus_locus_renovation_site_context",
-    "description": "Parcel, exact-subject permits, USDA soils, terrain, FEMA flood, wetlands, and EPA county radon for one exact property. For basement, addition, foundation, grading, or retaining-wall research. Thin evidence is charge-free; no feasibility or design conclusion. npx @velinussage/locus-agent-skill add. Price: $0.10 per call (vendor spec).",
+    "description": "Parcel, exact-subject permits, USDA soils, terrain, FEMA flood, wetlands, and EPA county radon for one exact property. For basement, addition, foundation, grading, or retaining-wall research. Thin evidence is charge-free; no feasibility or design conclusion. npx @velinussage/locus-agent-skill add. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/locus-renovation-site-context",
     "input_schema": {
@@ -4826,7 +4826,7 @@
   },
   {
     "name": "locus_locus_rent_estimate",
-    "description": "RentCast residential rent estimate, range, and comparable count for one US address, plus HUD Fair Market Rent area anchor when available. For buyer or owner rent context. Not a Locus valuation or rent prediction; commercial or uncovered results are charge-free. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "RentCast residential rent estimate, range, and comparable count for one US address, plus HUD Fair Market Rent area anchor when available. For buyer or owner rent context. Not a Locus valuation or rent prediction; commercial or uncovered results are charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-rent-estimate",
     "input_schema": {
@@ -4850,7 +4850,7 @@
   },
   {
     "name": "locus_locus_rental_operations_brief",
-    "description": "Non-PII RentCast facts, rent estimate, ZIP context, Locus and HUD checks, work items, and validated nextCalls for one rental property. For owner research, not screening, rent-setting, or valuation. Unpaid preflight POST checks readiness, reserves nothing. Private, no-store. npx @velinussage/locus-agent-skill add. Price: $0.79 per call (vendor spec).",
+    "description": "Non-PII RentCast facts, rent estimate, ZIP context, Locus and HUD checks, work items, and validated nextCalls for one rental property. For owner research, not screening, rent-setting, or valuation. Unpaid preflight POST checks readiness, reserves nothing. Private, no-store. npx @velinussage/locus-agent-skill add. Cost: ~$0.79/call [spec].",
     "method": "POST",
     "path": "/api/locus-rental-operations-brief",
     "input_schema": {
@@ -4874,7 +4874,7 @@
   },
   {
     "name": "locus_locus_rental_registration_check",
-    "description": "Exact-building registration, license, or enforcement status. Returns the same records as locus_rental_registration_check. Use this when your client can only call paid x402 routes. Use locus_rental_registration_check instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Exact-building registration, license, or enforcement status. Returns the same records as locus_rental_registration_check. Use this when your client can only call paid x402 routes. Use locus_rental_registration_check instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-rental-registration-check",
     "input_schema": {
@@ -4898,7 +4898,7 @@
   },
   {
     "name": "locus_locus_report_compose",
-    "description": "Compare two or three homes from caller-supplied allowlisted free and paid results. Returns cited HTML and JSON plus optional share proof, without new research or provider calls. No winner, valuation, or recommendation. Charge-free when evidence is too thin. npx @velinussage/locus-agent-skill add. Price: $0.10 per call (vendor spec).",
+    "description": "Compare two or three homes from caller-supplied allowlisted free and paid results. Returns cited HTML and JSON plus optional share proof, without new research or provider calls. No winner, valuation, or recommendation. Charge-free when evidence is too thin. npx @velinussage/locus-agent-skill add. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/locus-report-compose",
     "input_schema": {
@@ -5033,7 +5033,7 @@
   },
   {
     "name": "locus_locus_representatives",
-    "description": "Census TIGERweb US House and state legislative districts for an address, with current legislators and state executives where Open States has records and a key. Returns the same records as locus_representatives. Use this when your client can only call paid x402 routes. Use locus_representatives instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Census TIGERweb US House and state legislative districts for an address, with current legislators and state executives where Open States has records and a key. Returns the same records as locus_representatives. Use this when your client can only call paid x402 routes. Use locus_representatives instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-representatives",
     "input_schema": {
@@ -5068,7 +5068,7 @@
   },
   {
     "name": "locus_locus_road_access",
-    "description": "Nearest mapped public road to a geocoded US address or point for rural or set-back research. Adjacency is at the geocoded point, not the parcel boundary. It does not establish legal access, parcel frontage, or a landlocked finding. npx @velinussage/locus-agent-skill add. Price: $0.05 per call (vendor spec).",
+    "description": "Nearest mapped public road to a geocoded US address or point for rural or set-back research. Adjacency is at the geocoded point, not the parcel boundary. It does not establish legal access, parcel frontage, or a landlocked finding. npx @velinussage/locus-agent-skill add. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-road-access",
     "input_schema": {
@@ -5123,7 +5123,7 @@
   },
   {
     "name": "locus_locus_seismic_design",
-    "description": "Returns USGS NEHRP-2020 values at a US address (Ss, S1, PGA, SDS, SD1, site class, risk category, and seismic design category where USGS has finite values), for engineering agents. Returns the same records as locus_seismic_design. Use this when your client can only call paid x402 routes. Use locus_seismic_design instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Returns USGS NEHRP-2020 values at a US address (Ss, S1, PGA, SDS, SD1, site class, risk category, and seismic design category where USGS has finite values), for engineering agents. Returns the same records as locus_seismic_design. Use this when your client can only call paid x402 routes. Use locus_seismic_design instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-seismic-design",
     "input_schema": {
@@ -5158,7 +5158,7 @@
   },
   {
     "name": "locus_locus_soil_context",
-    "description": "Returns USDA SSURGO dominant-component suitability for septic, foundation, and drainage at an address via USDA Soil Data Access, for agents checking soil limits. Returns the same records as locus_soil_context. Use this when your client can only call paid x402 routes. Use locus_soil_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns USDA SSURGO dominant-component suitability for septic, foundation, and drainage at an address via USDA Soil Data Access, for agents checking soil limits. Returns the same records as locus_soil_context. Use this when your client can only call paid x402 routes. Use locus_soil_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-soil-context",
     "input_schema": {
@@ -5193,7 +5193,7 @@
   },
   {
     "name": "locus_locus_solar_property_comparison",
-    "description": "Three US addresses compared using verified parcels, dated Google Solar roof evidence, utility candidates, programs, and a historical GridPulse reference. No score or property recommendation. Licensed results stay private and no-store; thin physical coverage is charge-free. npx @velinussage/locus-agent-skill add. Price: $1.09 per call (vendor spec).",
+    "description": "Three US addresses compared using verified parcels, dated Google Solar roof evidence, utility candidates, programs, and a historical GridPulse reference. No score or property recommendation. Licensed results stay private and no-store; thin physical coverage is charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$1.09/call [spec].",
     "method": "POST",
     "path": "/api/locus-solar-property-comparison",
     "input_schema": {
@@ -5238,7 +5238,7 @@
   },
   {
     "name": "locus_locus_solar_property_screen",
-    "description": "Verified parcel, dated Google Solar roof data, utility candidates, programs, and historical GridPulse reference for one US address. For solar diligence, not installation advice, current incentive, or utility-service finding. Private, no-store; missing or mismatched evidence is charge-free. npx @velinussage/locus-agent-skill add. Price: $0.49 per call (vendor spec).",
+    "description": "Verified parcel, dated Google Solar roof data, utility candidates, programs, and historical GridPulse reference for one US address. For solar diligence, not installation advice, current incentive, or utility-service finding. Private, no-store; missing or mismatched evidence is charge-free. npx @velinussage/locus-agent-skill add. Cost: ~$0.49/call [spec].",
     "method": "POST",
     "path": "/api/locus-solar-property-screen",
     "input_schema": {
@@ -5277,7 +5277,7 @@
   },
   {
     "name": "locus_locus_sole_source_aquifer",
-    "description": "Returns EPA Sole Source Aquifer designation containment and Federal Register citations for an address, for agents. Returns the same records as locus_sole_source_aquifer. Use this when your client can only call paid x402 routes. Use locus_sole_source_aquifer instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns EPA Sole Source Aquifer designation containment and Federal Register citations for an address, for agents. Returns the same records as locus_sole_source_aquifer. Use this when your client can only call paid x402 routes. Use locus_sole_source_aquifer instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-sole-source-aquifer",
     "input_schema": {
@@ -5312,7 +5312,7 @@
   },
   {
     "name": "locus_locus_special_district_levy",
-    "description": "Texas TCEQ districts whose boundary contains a point, with type, id, and boundary citation, plus adopted total, M&O, and I&S rates and levy from the Texas Comptroller report. Returns the same records as locus_special_district_levy. Use this when your client can only call paid x402 routes. Use locus_special_district_levy instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Texas TCEQ districts whose boundary contains a point, with type, id, and boundary citation, plus adopted total, M&O, and I&S rates and levy from the Texas Comptroller report. Returns the same records as locus_special_district_levy. Use this when your client can only call paid x402 routes. Use locus_special_district_levy instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-special-district-levy",
     "input_schema": {
@@ -5347,7 +5347,7 @@
   },
   {
     "name": "locus_locus_special_valuation_screen",
-    "description": "Returns safe parcel fields plus state rows for special valuation, historic incentives, and solar exemptions, for agents checking cited programs. Returns the same records as locus_special_valuation_screen. Use this when your client can only call paid x402 routes. Use locus_special_valuation_screen instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns safe parcel fields plus state rows for special valuation, historic incentives, and solar exemptions, for agents checking cited programs. Returns the same records as locus_special_valuation_screen. Use this when your client can only call paid x402 routes. Use locus_special_valuation_screen instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-special-valuation-screen",
     "input_schema": {
@@ -5371,7 +5371,7 @@
   },
   {
     "name": "locus_locus_storm_events",
-    "description": "Returns dated NOAA Storm Events Database records for a county from 1950 to present: event type, date, damage estimates, and narrative. Returns the same records as locus_storm_events. Use this when your client can only call paid x402 routes. Use locus_storm_events instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns dated NOAA Storm Events Database records for a county from 1950 to present: event type, date, damage estimates, and narrative. Returns the same records as locus_storm_events. Use this when your client can only call paid x402 routes. Use locus_storm_events instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-storm-events",
     "input_schema": {
@@ -5448,7 +5448,7 @@
   },
   {
     "name": "locus_locus_tax_liens",
-    "description": "Returns itemized tax-delinquency, tax-lien, and foreclosure rows near an address from official county, treasurer, and sheriff sources, for agents reading cited public records. Use this when you need itemized public lien records and citations. Use locus_tax_distress instead when you only need a nearby count and breakdown, without individual lien records. Price: $0.01 per call (vendor spec).",
+    "description": "Returns itemized tax-delinquency, tax-lien, and foreclosure rows near an address from official county, treasurer, and sheriff sources, for agents reading cited public records. Use this when you need itemized public lien records and citations. Use locus_tax_distress instead when you only need a nearby count and breakdown, without individual lien records. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-tax-liens",
     "input_schema": {
@@ -5507,7 +5507,7 @@
   },
   {
     "name": "locus_locus_three_property_buyer_comparison",
-    "description": "Exactly three US addresses compared using non-PII RentCast records, bounded Locus checks, deterministic differences, work items, and validated nextCalls. For buyer agents; no winner, value, or recommendation. Unpaid POST checks provider readiness but reserves nothing. Private, no-store. npx @velinussage/locus-agent-skill add. Price: $2.49 per call (vendor spec).",
+    "description": "Exactly three US addresses compared using non-PII RentCast records, bounded Locus checks, deterministic differences, work items, and validated nextCalls. For buyer agents; no winner, value, or recommendation. Unpaid POST checks provider readiness but reserves nothing. Private, no-store. npx @velinussage/locus-agent-skill add. Cost: ~$2.49/call [spec].",
     "method": "POST",
     "path": "/api/locus-three-property-buyer-comparison",
     "input_schema": {
@@ -5537,7 +5537,7 @@
   },
   {
     "name": "locus_locus_toxic_releases",
-    "description": "Returns EPA TRI facilities with detail links, plus NRC and PHMSA verify links, for an address, place, point, or state plus county. Returns the same records as locus_toxic_releases. Use this when your client can only call paid x402 routes. Use locus_toxic_releases instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns EPA TRI facilities with detail links, plus NRC and PHMSA verify links, for an address, place, point, or state plus county. Returns the same records as locus_toxic_releases. Use this when your client can only call paid x402 routes. Use locus_toxic_releases instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-toxic-releases",
     "input_schema": {
@@ -5593,7 +5593,7 @@
   },
   {
     "name": "locus_locus_traffic_crash_context",
-    "description": "Returns small-cell-suppressed crash-count aggregates near an address, with explicit severity classes, for agents checking crash context. Returns the same records as locus_traffic_crash_context. Use this when your client can only call paid x402 routes. Use locus_traffic_crash_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Returns small-cell-suppressed crash-count aggregates near an address, with explicit severity classes, for agents checking crash context. Returns the same records as locus_traffic_crash_context. Use this when your client can only call paid x402 routes. Use locus_traffic_crash_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-traffic-crash-context",
     "input_schema": {
@@ -5657,7 +5657,7 @@
   },
   {
     "name": "locus_locus_transaction_follow_up",
-    "description": "Public-record packet for homebuyer, investor, developer, tenant, or renovation profiles. Renovation adds parcel, exact-subject permits, USDA soil, terrain, flood, wetlands, and county radon. Profiles control evidence and charges. Thin evidence is free; no readiness or approval finding. npx @velinussage/locus-agent-skill add. Price: $0.10 per call (vendor spec).",
+    "description": "Public-record packet for homebuyer, investor, developer, tenant, or renovation profiles. Renovation adds parcel, exact-subject permits, USDA soil, terrain, flood, wetlands, and county radon. Profiles control evidence and charges. Thin evidence is free; no readiness or approval finding. npx @velinussage/locus-agent-skill add. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/locus-transaction-follow-up",
     "input_schema": {
@@ -5802,7 +5802,7 @@
   },
   {
     "name": "locus_locus_transit_context",
-    "description": "Transit-agency stops, amenities, and deduped routes near an address. Returns the same records as locus_transit_context. Use this when your client can only call paid x402 routes. Use locus_transit_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Transit-agency stops, amenities, and deduped routes near an address. Returns the same records as locus_transit_context. Use this when your client can only call paid x402 routes. Use locus_transit_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-transit-context",
     "input_schema": {
@@ -5844,7 +5844,7 @@
   },
   {
     "name": "locus_locus_transportation_context",
-    "description": "State DOT funded projects and AADT counts near an address. Returns the same records as locus_transportation_context. Use this when your client can only call paid x402 routes. Use locus_transportation_context instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "State DOT funded projects and AADT counts near an address. Returns the same records as locus_transportation_context. Use this when your client can only call paid x402 routes. Use locus_transportation_context instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-transportation-context",
     "input_schema": {
@@ -5886,7 +5886,7 @@
   },
   {
     "name": "locus_locus_underground_storage_tanks",
-    "description": "EPA UST Finder tank facilities and leaking-tank releases near an address, for buyer, owner and lender agents. Returns the same records as locus_underground_storage_tanks. Use this when your client can only call paid x402 routes. Use locus_underground_storage_tanks instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "EPA UST Finder tank facilities and leaking-tank releases near an address, for buyer, owner and lender agents. Returns the same records as locus_underground_storage_tanks. Use this when your client can only call paid x402 routes. Use locus_underground_storage_tanks instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-underground-storage-tanks",
     "input_schema": {
@@ -5927,7 +5927,7 @@
   },
   {
     "name": "locus_locus_unemployment",
-    "description": "County unemployment rate and 6-month trend from BLS Local Area Unemployment Statistics, for buyer, owner and lender agents. Returns the same records as locus_unemployment. Use this when your client can only call paid x402 routes. Use locus_unemployment instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "County unemployment rate and 6-month trend from BLS Local Area Unemployment Statistics, for buyer, owner and lender agents. Returns the same records as locus_unemployment. Use this when your client can only call paid x402 routes. Use locus_unemployment instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-unemployment",
     "input_schema": {
@@ -5962,7 +5962,7 @@
   },
   {
     "name": "locus_locus_utility_credits",
-    "description": "Cited utility credits and infrastructure cost-share programs for a US place, for buyer, owner and lender agents. Returns the same records as locus_utility_credits. Use this when your client can only call paid x402 routes. Use locus_utility_credits instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Cited utility credits and infrastructure cost-share programs for a US place, for buyer, owner and lender agents. Returns the same records as locus_utility_credits. Use this when your client can only call paid x402 routes. Use locus_utility_credits instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-utility-credits",
     "input_schema": {
@@ -5990,7 +5990,7 @@
   },
   {
     "name": "locus_locus_valuation_challenge",
-    "description": "Challenge a supplied price or assessment notice for one US address against cited sales, parcel, permit, tax, zoning, and same-roll uniformity records. Protest mode does not create or endorse a price or investment score. Charge-free below two substantive sections. npx @velinussage/locus-agent-skill add. Price: $0.10 per call (vendor spec).",
+    "description": "Challenge a supplied price or assessment notice for one US address against cited sales, parcel, permit, tax, zoning, and same-roll uniformity records. Protest mode does not create or endorse a price or investment score. Charge-free below two substantive sections. npx @velinussage/locus-agent-skill add. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/locus-valuation-challenge",
     "input_schema": {
@@ -6068,7 +6068,7 @@
   },
   {
     "name": "locus_locus_water_systems",
-    "description": "Active EPA SDWIS public water systems for an address, place, point, or state and county, with system type, population served, and ECHO violation links. Returns the same records as locus_water_systems. Use this when your client can only call paid x402 routes. Use locus_water_systems instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.05 per call (vendor spec).",
+    "description": "Active EPA SDWIS public water systems for an address, place, point, or state and county, with system type, population served, and ECHO violation links. Returns the same records as locus_water_systems. Use this when your client can only call paid x402 routes. Use locus_water_systems instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/api/locus-water-systems",
     "input_schema": {
@@ -6124,7 +6124,7 @@
   },
   {
     "name": "locus_locus_wikimedia_commons_area_context",
-    "description": "Geotagged Wikimedia Commons media with item-level license metadata for area research. Returns source and image URLs with license and attribution leads; no pixels stored. Nearby context, not premises or condition proof; metadata alone is not reuse permission. Charge-free on no eligible media or source failure. Price: $0.01 per call (vendor spec).",
+    "description": "Geotagged Wikimedia Commons media with item-level license metadata for area research. Returns source and image URLs with license and attribution leads; no pixels stored. Nearby context, not premises or condition proof; metadata alone is not reuse permission. Charge-free on no eligible media or source failure. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-wikimedia-commons-area-context",
     "input_schema": {
@@ -6179,7 +6179,7 @@
   },
   {
     "name": "locus_locus_wikipedia_place_context",
-    "description": "Geotagged English Wikipedia articles near a point for area reference research, with page, revision, distance, and provenance. Geosearch can return places, institutions, events, or people. Not official, property, resident, screening, or current-condition evidence. Charge-free on no match or source failure. Price: $0.01 per call (vendor spec).",
+    "description": "Geotagged English Wikipedia articles near a point for area reference research, with page, revision, distance, and provenance. Geosearch can return places, institutions, events, or people. Not official, property, resident, screening, or current-condition evidence. Charge-free on no match or source failure. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-wikipedia-place-context",
     "input_schema": {
@@ -6234,7 +6234,7 @@
   },
   {
     "name": "locus_locus_wildfire_history",
-    "description": "WFIGS interagency historical wildfire perimeters within about 5 miles of a US point, for buyer, owner and lender agents. Returns the same records as locus_wildfire_history. Use this when your client can only call paid x402 routes. Use locus_wildfire_history instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "WFIGS interagency historical wildfire perimeters within about 5 miles of a US point, for buyer, owner and lender agents. Returns the same records as locus_wildfire_history. Use this when your client can only call paid x402 routes. Use locus_wildfire_history instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-wildfire-history",
     "input_schema": {
@@ -6269,7 +6269,7 @@
   },
   {
     "name": "locus_locus_wildfire_risk",
-    "description": "FEMA National Risk Index wildfire rating and score for the census tract at an address, for buyer, owner and lender agents. Returns the same records as locus_wildfire_risk. Use this when your client can only call paid x402 routes. Use locus_wildfire_risk instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "FEMA National Risk Index wildfire rating and score for the census tract at an address, for buyer, owner and lender agents. Returns the same records as locus_wildfire_risk. Use this when your client can only call paid x402 routes. Use locus_wildfire_risk instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-wildfire-risk",
     "input_schema": {
@@ -6304,7 +6304,7 @@
   },
   {
     "name": "locus_locus_workplace_employment_context",
-    "description": "Census LODES workplace jobs and broad industry sectors within a radius for commercial site research. Annual block-level aggregates, with no worker demographics; not shoppers, visits, foot traffic, sales, demand, or a forecast. Charge-free when a state snapshot is missing, stale, unavailable, or no blocks fall in radius. Price: $0.01 per call (vendor spec).",
+    "description": "Census LODES workplace jobs and broad industry sectors within a radius for commercial site research. Annual block-level aggregates, with no worker demographics; not shoppers, visits, foot traffic, sales, demand, or a forecast. Charge-free when a state snapshot is missing, stale, unavailable, or no blocks fall in radius. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-workplace-employment-context",
     "input_schema": {
@@ -6377,7 +6377,7 @@
   },
   {
     "name": "locus_locus_zoning",
-    "description": "Zoning district and overlays for an address from wired municipal and county layers, for agents. Returns the same records as locus_zoning. Use this when your client can only call paid x402 routes. Use locus_zoning instead when you can call Locus free tools (REST tools/call or MCP). Price: $0.01 per call (vendor spec).",
+    "description": "Zoning district and overlays for an address from wired municipal and county layers, for agents. Returns the same records as locus_zoning. Use this when your client can only call paid x402 routes. Use locus_zoning instead when you can call Locus free tools (REST tools/call or MCP). Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/api/locus-zoning",
     "input_schema": {

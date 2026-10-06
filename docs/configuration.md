@@ -260,9 +260,10 @@ names, never their values.
 
 `--check` validates and reports inventories; `--list-tools` prints per-server
 JSON including source attribution. `--list-tags` reports unfiltered source tag
-counts. These commands do not create signers, bind ports, probe prices, or fetch
-help documents. Remote specs still require network access. Only `--env-file`,
-`--check`, `--list-tools`, `--list-tags`, and `--show-config` may accompany
+counts. These commands do not create signers, bind ports, or fetch help documents.
+Pricing probes require the explicit `--list-tools --discover-pricing` combination.
+Remote specs still require network access. Only `--env-file`,
+`--check`, `--list-tools`, `--discover-pricing`, `--list-tags`, and `--show-config` may accompany
 `--config`; deployment settings do not inherit single-source CLI overrides.
 
 Startup validates credentials and binds every listener before serving any.
@@ -597,7 +598,20 @@ scoped status and experimental limitations. Periodic/randomized PINGs are not im
 Serving can discover missing prices once at startup through unsigned GETs.
 Provider settings enable this by default (`probe_pricing = false` disables it).
 Inline sources use the same defaults; a deployment source can override the
-provider setting. Validation, inventory and `--route-tool` never probe.
+provider setting. Validation, ordinary inventory and `--route-tool` never probe.
+To inspect descriptions with unsigned discovery enabled, without wallet keys,
+listener tokens, wallet state access or starting a server:
+
+```sh
+treazury --provider providers/botsmith.toml --list-tools --discover-pricing
+treazury --config examples/deployments/privacy.local.toml --list-tools --discover-pricing
+```
+
+The flag requires `--list-tools` and respects `probe_pricing = false`, route
+eligibility, caps, timeouts and the configured direct/Tor policy. Each invocation
+is a new process, so repeated CLI invocations can repeat probes. Failed or skipped
+discovery leaves prices explicitly unavailable; unpaid success does not establish
+that an API is free.
 
 Only tools selected by at least one listener are candidates. Routes with vendor
 pricing, templated paths, help tools and non-GET methods are skipped. Candidates
@@ -623,8 +637,25 @@ unavailable to later catalog builds without making another request. Tool
 catalogs already built remain unchanged, so `tools/list` never performs network
 requests. Restarting the process resets discovery; there is no disk cache.
 
-Prices from v1/v2 challenge headers appear in tool descriptions; unknown assets
-retain atomic units, while recognized USDC uses six decimal places. Authored
+Pricing suffixes use compact provenance labels:
+
+- `Cost: ~$0.015/call [spec].` or `Cost: ~$0.01–$0.20/call [spec].`
+- `Cost: ~$0.015/call [x402 probe].`
+- `Max: $0.05/call [x402 probe].` for an `upto` offer.
+- `Cost: free [spec].` or `Cost: unknown.`
+
+An explicit vendor `unit` is preserved instead of `/call`. Dynamic fixed estimates
+use `[spec, dynamic]`; unrecognized vendor pricing structures retain their details
+with `[spec]`. Unknown assets retain their denomination and network information.
+Dollar amounts elsewhere in prose do not suppress the suffix: only an identical
+suffix already at the end is omitted.
+
+MCP server instructions preserve authored guidance and include this caveat once:
+
+> Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.
+
+Prices from v1/v2 challenge headers retain atomic units for unknown assets, while
+recognized USDC uses six decimal places. Authored
 description overrides apply last, and description limits remain explicit.
 Cached prices are informational: each paid invocation still obtains a fresh
 challenge and enforces its spend cap before signing.

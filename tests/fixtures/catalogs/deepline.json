@@ -1,7 +1,7 @@
 [
   {
     "name": "deepline_ads_search",
-    "description": "Ad Intelligence — a company's active ads on Facebook, Google, LinkedIn, or TikTok (via Adyntel): creative copy, spend signals, and targeting. Price: $0.02 per call (vendor spec).",
+    "description": "Ad Intelligence — a company's active ads on Facebook, Google, LinkedIn, or TikTok (via Adyntel): creative copy, spend signals, and targeting. Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/api/ads/search",
     "input_schema": {
@@ -55,7 +55,7 @@
   },
   {
     "name": "deepline_company_enrich",
-    "description": "Enrich Company — merged 30+ field profile from Apollo, Crustdata, and PeopleDataLabs: revenue, headcount, industry, funding, valuation, tech stack, social profiles, SIC/NAICS codes, HQ address. Price: $0.10 per call (vendor spec).",
+    "description": "Enrich Company — merged 30+ field profile from Apollo, Crustdata, and PeopleDataLabs: revenue, headcount, industry, funding, valuation, tech stack, social profiles, SIC/NAICS codes, HQ address. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/company/enrich",
     "input_schema": {
@@ -85,7 +85,7 @@
   },
   {
     "name": "deepline_contacts_by_role",
-    "description": "Find Decision Makers — accumulate contacts at a company matching the given roles (and optional seniority) across Dropleads, Apollo, Icypeas, Prospeo, and Crustdata. Price: $0.25 per call (vendor spec).",
+    "description": "Find Decision Makers — accumulate contacts at a company matching the given roles (and optional seniority) across Dropleads, Apollo, Icypeas, Prospeo, and Crustdata. Cost: ~$0.25/call [spec].",
     "method": "POST",
     "path": "/api/contacts/by-role",
     "input_schema": {
@@ -143,7 +143,7 @@
   },
   {
     "name": "deepline_email_from_linkedin",
-    "description": "Email from LinkedIn — waterfall search (Findymail, Prospeo, Lusha, …) that resolves a LinkedIn profile URL into a verified work email. Price: $0.17 per call (vendor spec).",
+    "description": "Email from LinkedIn — waterfall search (Findymail, Prospeo, Lusha, …) that resolves a LinkedIn profile URL into a verified work email. Cost: ~$0.17/call [spec].",
     "method": "POST",
     "path": "/api/email/from-linkedin",
     "input_schema": {
@@ -167,7 +167,7 @@
   },
   {
     "name": "deepline_email_personal",
-    "description": "Find Personal Email — waterfall search (Dropleads, LeadMagic, PeopleDataLabs) for a personal email address. Best coverage with a LinkedIn URL plus first and last name. Price: $0.10 per call (vendor spec).",
+    "description": "Find Personal Email — waterfall search (Dropleads, LeadMagic, PeopleDataLabs) for a personal email address. Best coverage with a LinkedIn URL plus first and last name. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/email/personal",
     "input_schema": {
@@ -213,7 +213,7 @@
   },
   {
     "name": "deepline_email_validate",
-    "description": "Validate Email — ZeroBounce deliverability check for an email address (valid / catch-all / invalid). Price: $0.03 per call (vendor spec).",
+    "description": "Validate Email — ZeroBounce deliverability check for an email address (valid / catch-all / invalid). Cost: ~$0.03/call [spec].",
     "method": "POST",
     "path": "/api/email/validate",
     "input_schema": {
@@ -242,7 +242,7 @@
   },
   {
     "name": "deepline_email_work",
-    "description": "Find Work Email — waterfall search across 79+ providers (Apollo, Hunter, Prospeo, …) for a verified work email from a name and company domain. Stops at the first provider that returns a hit. Price: $0.04 per call (vendor spec).",
+    "description": "Find Work Email — waterfall search across 79+ providers (Apollo, Hunter, Prospeo, …) for a verified work email from a name and company domain. Stops at the first provider that returns a hit. Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/api/email/work",
     "input_schema": {
@@ -290,7 +290,7 @@
   },
   {
     "name": "deepline_linkedin_find",
-    "description": "Find LinkedIn Profile — resolve a person into their LinkedIn profile URL from name plus company domain, company name, or email. Price: $0.10 per call (vendor spec).",
+    "description": "Find LinkedIn Profile — resolve a person into their LinkedIn profile URL from name plus company domain, company name, or email. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/api/linkedin/find",
     "input_schema": {
@@ -336,7 +336,7 @@
   },
   {
     "name": "deepline_person_from_email",
-    "description": "Person from Email — reverse an email address into the person behind it: name, title, company, and LinkedIn URL. Price: $0.12 per call (vendor spec).",
+    "description": "Person from Email — reverse an email address into the person behind it: name, title, company, and LinkedIn URL. Cost: ~$0.12/call [spec].",
     "method": "POST",
     "path": "/api/person/from-email",
     "input_schema": {
@@ -361,7 +361,7 @@
   },
   {
     "name": "deepline_person_job_change",
-    "description": "Job Change Check — detect whether a contact has changed jobs by comparing their LinkedIn profile against the company domain you have on record. Price: $0.15 per call (vendor spec).",
+    "description": "Job Change Check — detect whether a contact has changed jobs by comparing their LinkedIn profile against the company domain you have on record. Cost: ~$0.15/call [spec].",
     "method": "POST",
     "path": "/api/person/job-change",
     "input_schema": {
@@ -390,7 +390,7 @@
   },
   {
     "name": "deepline_phone_find",
-    "description": "Find Mobile Phone — locate a validated mobile number with automatic region-based provider routing. Strongest coverage in US/CA and Western Europe. Price: $0.50 per call (vendor spec).",
+    "description": "Find Mobile Phone — locate a validated mobile number with automatic region-based provider routing. Strongest coverage in US/CA and Western Europe. Cost: ~$0.50/call [spec].",
     "method": "POST",
     "path": "/api/phone/find",
     "input_schema": {

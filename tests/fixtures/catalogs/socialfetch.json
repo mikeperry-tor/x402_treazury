@@ -1,7 +1,7 @@
 [
   {
     "name": "socialfetch_amazon_shop",
-    "description": "Get a creator Amazon Shop storefront by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a creator Amazon Shop storefront by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/amazon/shop",
     "input_schema": {
@@ -32,7 +32,7 @@
   },
   {
     "name": "socialfetch_apple_music_album",
-    "description": "Get an Apple Music album by id or album URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get an Apple Music album by id or album URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/apple-music/album",
     "input_schema": {
@@ -60,7 +60,7 @@
   },
   {
     "name": "socialfetch_apple_music_artist",
-    "description": "Get an Apple Music artist by id or artist URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get an Apple Music artist by id or artist URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/apple-music/artist",
     "input_schema": {
@@ -88,7 +88,7 @@
   },
   {
     "name": "socialfetch_apple_music_search",
-    "description": "Search the Apple Music catalog by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search the Apple Music catalog by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/apple-music/search",
     "input_schema": {
@@ -127,7 +127,7 @@
   },
   {
     "name": "socialfetch_apple_music_track",
-    "description": "Get an Apple Music track by id or track URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get an Apple Music track by id or track URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/apple-music/track",
     "input_schema": {
@@ -155,7 +155,7 @@
   },
   {
     "name": "socialfetch_bluesky_posts",
-    "description": "Get a single Bluesky post by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single Bluesky post by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/bluesky/posts",
     "input_schema": {
@@ -179,7 +179,7 @@
   },
   {
     "name": "socialfetch_bluesky_profiles_handle",
-    "description": "Get a Bluesky profile for a creator or account. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Bluesky profile for a creator or account. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/bluesky/profiles/{handle}",
     "input_schema": {
@@ -203,7 +203,7 @@
   },
   {
     "name": "socialfetch_bluesky_profiles_handle_posts",
-    "description": "List posts from a Bluesky profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List posts from a Bluesky profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/bluesky/profiles/{handle}/posts",
     "input_schema": {
@@ -239,7 +239,7 @@
   },
   {
     "name": "socialfetch_facebook_ad_library_ads",
-    "description": "Get a single Facebook Ad Library ad by archive id or public Ad Library URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single Facebook Ad Library ad by archive id or public Ad Library URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/ad-library/ads",
     "input_schema": {
@@ -277,7 +277,7 @@
   },
   {
     "name": "socialfetch_facebook_ad_library_ads_search",
-    "description": "Search Facebook Ad Library ads by keyword and filters. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Facebook Ad Library ads by keyword and filters. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/ad-library/ads/search",
     "input_schema": {
@@ -381,7 +381,7 @@
   },
   {
     "name": "socialfetch_facebook_ad_library_companies_ads",
-    "description": "List ads a company or Page is running in the Facebook Ad Library. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List ads a company or Page is running in the Facebook Ad Library. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/ad-library/companies/ads",
     "input_schema": {
@@ -473,7 +473,7 @@
   },
   {
     "name": "socialfetch_facebook_ad_library_companies_search",
-    "description": "Search Facebook Ad Library companies / advertisers by name. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Facebook Ad Library companies / advertisers by name. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/ad-library/companies/search",
     "input_schema": {
@@ -497,7 +497,7 @@
   },
   {
     "name": "socialfetch_facebook_events",
-    "description": "List Facebook events for a city by explore URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List Facebook events for a city by explore URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/events",
     "input_schema": {
@@ -537,7 +537,7 @@
   },
   {
     "name": "socialfetch_facebook_events_details",
-    "description": "Get a Facebook event by URL or event id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Facebook event by URL or event id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/events/details",
     "input_schema": {
@@ -565,7 +565,7 @@
   },
   {
     "name": "socialfetch_facebook_events_search",
-    "description": "Search Facebook events by name. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Facebook events by name. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/events/search",
     "input_schema": {
@@ -595,7 +595,7 @@
   },
   {
     "name": "socialfetch_facebook_groups",
-    "description": "Get a Facebook group by URL or group id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Facebook group by URL or group id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/groups",
     "input_schema": {
@@ -624,7 +624,7 @@
   },
   {
     "name": "socialfetch_facebook_groups_posts",
-    "description": "List posts from a Facebook group by group URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List posts from a Facebook group by group URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/groups/posts",
     "input_schema": {
@@ -665,7 +665,7 @@
   },
   {
     "name": "socialfetch_facebook_marketplace_items",
-    "description": "Get details for a Facebook Marketplace listing by item URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get details for a Facebook Marketplace listing by item URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/marketplace/items",
     "input_schema": {
@@ -693,7 +693,7 @@
   },
   {
     "name": "socialfetch_facebook_marketplace_locations_search",
-    "description": "Search Facebook Marketplace locations to obtain coordinates for listing search. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Facebook Marketplace locations to obtain coordinates for listing search. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/marketplace/locations/search",
     "input_schema": {
@@ -717,7 +717,7 @@
   },
   {
     "name": "socialfetch_facebook_marketplace_search",
-    "description": "Search Facebook Marketplace listings by keyword near a latitude and longitude. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Facebook Marketplace listings by keyword near a latitude and longitude. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/marketplace/search",
     "input_schema": {
@@ -846,7 +846,7 @@
   },
   {
     "name": "socialfetch_facebook_posts",
-    "description": "Get a Facebook post or Reel by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Facebook post or Reel by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/posts",
     "input_schema": {
@@ -880,7 +880,7 @@
   },
   {
     "name": "socialfetch_facebook_posts_comments",
-    "description": "List comments on a Facebook post or Reel by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List comments on a Facebook post or Reel by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/posts/comments",
     "input_schema": {
@@ -913,7 +913,7 @@
   },
   {
     "name": "socialfetch_facebook_posts_comments_replies",
-    "description": "List replies to a Facebook comment. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List replies to a Facebook comment. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/posts/comments/replies",
     "input_schema": {
@@ -936,7 +936,7 @@
   },
   {
     "name": "socialfetch_facebook_posts_transcript",
-    "description": "Get the transcript for a Facebook post or Reel by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the transcript for a Facebook post or Reel by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/posts/transcript",
     "input_schema": {
@@ -960,7 +960,7 @@
   },
   {
     "name": "socialfetch_facebook_profiles",
-    "description": "Get a Facebook profile or Page by URL or username. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Facebook profile or Page by URL or username. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/profiles",
     "input_schema": {
@@ -989,7 +989,7 @@
   },
   {
     "name": "socialfetch_facebook_profiles_events",
-    "description": "List events hosted by a Facebook profile or Page. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List events hosted by a Facebook profile or Page. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/profiles/events",
     "input_schema": {
@@ -1020,7 +1020,7 @@
   },
   {
     "name": "socialfetch_facebook_profiles_photos",
-    "description": "List photos from a Facebook profile or Page. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List photos from a Facebook profile or Page. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/profiles/photos",
     "input_schema": {
@@ -1056,7 +1056,7 @@
   },
   {
     "name": "socialfetch_facebook_profiles_posts",
-    "description": "List posts from a Facebook profile or Page. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List posts from a Facebook profile or Page. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/profiles/posts",
     "input_schema": {
@@ -1095,7 +1095,7 @@
   },
   {
     "name": "socialfetch_facebook_profiles_reels",
-    "description": "List Reels from a Facebook profile or Page. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List Reels from a Facebook profile or Page. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/facebook/profiles/reels",
     "input_schema": {
@@ -1131,7 +1131,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle",
-    "description": "Get a GitHub profile for a user or organization. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a GitHub profile for a user or organization. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}",
     "input_schema": {
@@ -1155,7 +1155,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle_activity",
-    "description": "List recent public activity for a GitHub profile, one month per request. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List recent public activity for a GitHub profile, one month per request. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}/activity",
     "input_schema": {
@@ -1192,7 +1192,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle_contributions",
-    "description": "Get the contribution graph for a GitHub profile for a given year. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the contribution graph for a GitHub profile for a given year. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}/contributions",
     "input_schema": {
@@ -1223,7 +1223,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle_followers",
-    "description": "List followers for a GitHub profile. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List followers for a GitHub profile. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}/followers",
     "input_schema": {
@@ -1253,7 +1253,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle_following",
-    "description": "List accounts a GitHub profile follows. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List accounts a GitHub profile follows. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}/following",
     "input_schema": {
@@ -1283,7 +1283,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle_pull_requests",
-    "description": "List pull requests authored by a GitHub user. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List pull requests authored by a GitHub user. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}/pull-requests",
     "input_schema": {
@@ -1325,7 +1325,7 @@
   },
   {
     "name": "socialfetch_github_profiles_handle_repositories",
-    "description": "List repositories for a GitHub user or organization. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List repositories for a GitHub user or organization. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/profiles/{handle}/repositories",
     "input_schema": {
@@ -1385,7 +1385,7 @@
   },
   {
     "name": "socialfetch_github_repositories",
-    "description": "Get a single GitHub repository by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single GitHub repository by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/repositories",
     "input_schema": {
@@ -1409,7 +1409,7 @@
   },
   {
     "name": "socialfetch_github_trending_developers",
-    "description": "List trending GitHub developers for a language and time window. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List trending GitHub developers for a language and time window. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/trending/developers",
     "input_schema": {
@@ -1439,7 +1439,7 @@
   },
   {
     "name": "socialfetch_github_trending_repositories",
-    "description": "List trending GitHub repositories for a language and time window. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List trending GitHub repositories for a language and time window. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/github/trending/repositories",
     "input_schema": {
@@ -1475,7 +1475,7 @@
   },
   {
     "name": "socialfetch_google_ad_library_ads",
-    "description": "Get a single Google Ad Transparency creative by public Ad Transparency URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single Google Ad Transparency creative by public Ad Transparency URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/google/ad-library/ads",
     "input_schema": {
@@ -1499,7 +1499,7 @@
   },
   {
     "name": "socialfetch_google_ad_library_advertisers_search",
-    "description": "Search Google Ad Transparency advertisers by name. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Google Ad Transparency advertisers by name. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/google/ad-library/advertisers/search",
     "input_schema": {
@@ -1528,7 +1528,7 @@
   },
   {
     "name": "socialfetch_google_ad_library_companies_ads",
-    "description": "List ads a company or advertiser is running in Google Ad Transparency. Pricing: \"25 credits per successful request.\" (vendor spec extension).",
+    "description": "List ads a company or advertiser is running in Google Ad Transparency. Pricing: \"25 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/google/ad-library/companies/ads",
     "input_schema": {
@@ -1610,7 +1610,7 @@
   },
   {
     "name": "socialfetch_hackernews_comments_id_context",
-    "description": "Get a Hacker News comment with its ancestor chain to the root story. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "Get a Hacker News comment with its ancestor chain to the root story. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/comments/{id}/context",
     "input_schema": {
@@ -1635,7 +1635,7 @@
   },
   {
     "name": "socialfetch_hackernews_feeds_feed",
-    "description": "List a Hacker News feed by type (top, new, best, ask, show, or jobs). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List a Hacker News feed by type (top, new, best, ask, show, or jobs). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/feeds/{feed}",
     "input_schema": {
@@ -1680,7 +1680,7 @@
   },
   {
     "name": "socialfetch_hackernews_items_id",
-    "description": "Get a Hacker News item by id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Hacker News item by id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/items/{id}",
     "input_schema": {
@@ -1705,7 +1705,7 @@
   },
   {
     "name": "socialfetch_hackernews_jobs_who_is_hiring",
-    "description": "List top-level jobs from the monthly Hacker News Who is Hiring thread (latest thread, or a YYYY-MM month). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List top-level jobs from the monthly Hacker News Who is Hiring thread (latest thread, or a YYYY-MM month). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/jobs/who-is-hiring",
     "input_schema": {
@@ -1740,7 +1740,7 @@
   },
   {
     "name": "socialfetch_hackernews_maxitem",
-    "description": "Get the current largest Hacker News item id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the current largest Hacker News item id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/maxitem",
     "input_schema": {
@@ -1752,7 +1752,7 @@
   },
   {
     "name": "socialfetch_hackernews_search",
-    "description": "Search Hacker News by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Hacker News by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/search",
     "input_schema": {
@@ -1902,7 +1902,7 @@
   },
   {
     "name": "socialfetch_hackernews_stories_id",
-    "description": "Get a Hacker News story by id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Hacker News story by id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/stories/{id}",
     "input_schema": {
@@ -1927,7 +1927,7 @@
   },
   {
     "name": "socialfetch_hackernews_stories_id_comments",
-    "description": "List comments on a Hacker News story by id. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List comments on a Hacker News story by id. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/stories/{id}/comments",
     "input_schema": {
@@ -1965,7 +1965,7 @@
   },
   {
     "name": "socialfetch_hackernews_updates",
-    "description": "Get recently changed Hacker News item ids and usernames. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get recently changed Hacker News item ids and usernames. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/updates",
     "input_schema": {
@@ -1977,7 +1977,7 @@
   },
   {
     "name": "socialfetch_hackernews_users_username",
-    "description": "Get a Hacker News user profile by username. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Hacker News user profile by username. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/users/{username}",
     "input_schema": {
@@ -2002,7 +2002,7 @@
   },
   {
     "name": "socialfetch_hackernews_users_username_comments",
-    "description": "List a Hacker News user's comments (newest first). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List a Hacker News user's comments (newest first). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/users/{username}/comments",
     "input_schema": {
@@ -2042,7 +2042,7 @@
   },
   {
     "name": "socialfetch_hackernews_users_username_favorites",
-    "description": "List favorites for a Hacker News user by username. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List favorites for a Hacker News user by username. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/users/{username}/favorites",
     "input_schema": {
@@ -2074,7 +2074,7 @@
   },
   {
     "name": "socialfetch_hackernews_users_username_submissions",
-    "description": "List a Hacker News user's stories, polls, and jobs (newest first). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List a Hacker News user's stories, polls, and jobs (newest first). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/hackernews/users/{username}/submissions",
     "input_schema": {
@@ -2127,7 +2127,7 @@
   },
   {
     "name": "socialfetch_instagram_audio_audioid_reels",
-    "description": "List Instagram Reels that use a specific audio track, with track metadata, tagged users, and coauthors when Instagram exposes them. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List Instagram Reels that use a specific audio track, with track metadata, tagged users, and coauthors when Instagram exposes them. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/audio/{audioId}/reels",
     "input_schema": {
@@ -2156,7 +2156,7 @@
   },
   {
     "name": "socialfetch_instagram_highlights_highlightid",
-    "description": "Get stories inside a saved Instagram highlight by highlight id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get stories inside a saved Instagram highlight by highlight id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/highlights/{highlightId}",
     "input_schema": {
@@ -2178,7 +2178,7 @@
   },
   {
     "name": "socialfetch_instagram_posts",
-    "description": "Get a single Instagram post or Reel by URL. Pricing: \"1 credit base. With `downloadMedia`, Hosted media download. Up to 11 credits max.\" (vendor spec extension).",
+    "description": "Get a single Instagram post or Reel by URL. Pricing: \"1 credit base. With `downloadMedia`, Hosted media download. Up to 11 credits max.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/posts",
     "input_schema": {
@@ -2217,7 +2217,7 @@
   },
   {
     "name": "socialfetch_instagram_posts_comments",
-    "description": "List comments on an Instagram post or Reel by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List comments on an Instagram post or Reel by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/posts/comments",
     "input_schema": {
@@ -2247,7 +2247,7 @@
   },
   {
     "name": "socialfetch_instagram_posts_comments_replies",
-    "description": "List replies to a comment on an Instagram post or Reel. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List replies to a comment on an Instagram post or Reel. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/posts/comments/replies",
     "input_schema": {
@@ -2284,7 +2284,7 @@
   },
   {
     "name": "socialfetch_instagram_posts_download",
-    "description": "Download Instagram post or reel media Pricing: \"11 credits per successful request.\" (vendor spec extension).",
+    "description": "Download Instagram post or reel media Pricing: \"11 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/posts/download",
     "input_schema": {
@@ -2313,7 +2313,7 @@
   },
   {
     "name": "socialfetch_instagram_posts_transcript",
-    "description": "Get the spoken transcript for an Instagram post or Reel by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the spoken transcript for an Instagram post or Reel by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/posts/transcript",
     "input_schema": {
@@ -2337,7 +2337,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_handle",
-    "description": "Get a full Instagram profile by handle (bio, counts, and related fields). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a full Instagram profile by handle (bio, counts, and related fields). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{handle}",
     "input_schema": {
@@ -2361,7 +2361,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_handle_engagement",
-    "description": "Get Instagram profile engagement audit Pricing: \"5 credits per successful request.\" (vendor spec extension).",
+    "description": "Get Instagram profile engagement audit Pricing: \"5 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{handle}/engagement",
     "input_schema": {
@@ -2385,7 +2385,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_handle_highlights",
-    "description": "List story highlight albums for an Instagram profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List story highlight albums for an Instagram profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{handle}/highlights",
     "input_schema": {
@@ -2409,7 +2409,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_handle_posts",
-    "description": "List posts from an Instagram profile by handle. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List posts from an Instagram profile by handle. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{handle}/posts",
     "input_schema": {
@@ -2444,7 +2444,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_handle_reels",
-    "description": "List Reels from one specific Instagram profile by handle (not a keyword search — use instagram.search.reels.list for that; not trending — use instagram.reels.trending.list for that). Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List Reels from one specific Instagram profile by handle (not a keyword search — use instagram.search.reels.list for that; not trending — use instagram.reels.trending.list for that). Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{handle}/reels",
     "input_schema": {
@@ -2479,7 +2479,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_userid_basic",
-    "description": "Get a lightweight Instagram profile by numeric user ID when you already have the id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a lightweight Instagram profile by numeric user ID when you already have the id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{userId}/basic",
     "input_schema": {
@@ -2504,7 +2504,7 @@
   },
   {
     "name": "socialfetch_instagram_profiles_userid_tagged_posts",
-    "description": "List Instagram posts a user is tagged in, by user id. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List Instagram posts a user is tagged in, by user id. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/profiles/{userId}/tagged-posts",
     "input_schema": {
@@ -2540,7 +2540,7 @@
   },
   {
     "name": "socialfetch_instagram_reels_trending",
-    "description": "List currently trending Instagram Reels (not a keyword search, profile-scoped, or audio-page list — use instagram.search.reels.list, instagram.profile.reels.list, or instagram.audio.reels.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List currently trending Instagram Reels (not a keyword search, profile-scoped, or audio-page list — use instagram.search.reels.list, instagram.profile.reels.list, or instagram.audio.reels.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/reels/trending",
     "input_schema": {
@@ -2552,7 +2552,7 @@
   },
   {
     "name": "socialfetch_instagram_search",
-    "description": "Search Instagram accounts, hashtags, and places by keyword (not posts — use instagram.search.popular.list; not profile discovery — use instagram.search.profiles.list). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Instagram accounts, hashtags, and places by keyword (not posts — use instagram.search.popular.list; not profile discovery — use instagram.search.profiles.list). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/search",
     "input_schema": {
@@ -2576,7 +2576,7 @@
   },
   {
     "name": "socialfetch_instagram_search_hashtags",
-    "description": "Search public Instagram posts and Reels by hashtag. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search public Instagram posts and Reels by hashtag. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/search/hashtags",
     "input_schema": {
@@ -2627,7 +2627,7 @@
   },
   {
     "name": "socialfetch_instagram_search_popular",
-    "description": "Search Instagram's curated Popular topics by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Instagram's curated Popular topics by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/search/popular",
     "input_schema": {
@@ -2657,7 +2657,7 @@
   },
   {
     "name": "socialfetch_instagram_search_profiles",
-    "description": "Search Instagram profiles by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Instagram profiles by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/search/profiles",
     "input_schema": {
@@ -2687,7 +2687,7 @@
   },
   {
     "name": "socialfetch_instagram_search_reels",
-    "description": "Search Reels site-wide by keyword (not scoped to one profile — use instagram.profile.reels.list; not trending — use instagram.reels.trending.list; not audio-page — use instagram.audio.reels.list). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Reels site-wide by keyword (not scoped to one profile — use instagram.profile.reels.list; not trending — use instagram.reels.trending.list; not audio-page — use instagram.audio.reels.list). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/instagram/search/reels",
     "input_schema": {
@@ -2729,7 +2729,7 @@
   },
   {
     "name": "socialfetch_linkedin_ad_library_ads",
-    "description": "Get a LinkedIn Ad Library ad by ad id or Ad Library URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a LinkedIn Ad Library ad by ad id or Ad Library URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/ad-library/ads",
     "input_schema": {
@@ -2757,7 +2757,7 @@
   },
   {
     "name": "socialfetch_linkedin_ad_library_ads_search",
-    "description": "Search LinkedIn Ad Library ads by company, keyword, or company id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search LinkedIn Ad Library ads by company, keyword, or company id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/ad-library/ads/search",
     "input_schema": {
@@ -2817,7 +2817,7 @@
   },
   {
     "name": "socialfetch_linkedin_companies",
-    "description": "Get a LinkedIn company page by company URL — use GET /v2/linkedin/organizations/resolve then GET /v2/linkedin/organizations for schools and mixed organization pages. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a LinkedIn company page by company URL — use GET /v2/linkedin/organizations/resolve then GET /v2/linkedin/organizations for schools and mixed organization pages. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/companies",
     "input_schema": {
@@ -2841,7 +2841,7 @@
   },
   {
     "name": "socialfetch_linkedin_companies_posts",
-    "description": "List posts from one specific LinkedIn company page by URL (not a keyword search — use linkedin.posts.search.list to search across public posts). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List posts from one specific LinkedIn company page by URL (not a keyword search — use linkedin.posts.search.list to search across public posts). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/companies/posts",
     "input_schema": {
@@ -2872,7 +2872,7 @@
   },
   {
     "name": "socialfetch_linkedin_jobs",
-    "description": "Get LinkedIn job postings by job URL. Pricing: \"3 maximum credits per completed job URL. Technical failures are not charged. Up to 50 jobs per request (150 credits max).\" (vendor spec extension).",
+    "description": "Get LinkedIn job postings by job URL. Pricing: \"3 maximum credits per completed job URL. Technical failures are not charged. Up to 50 jobs per request (150 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/jobs",
     "input_schema": {
@@ -2902,7 +2902,7 @@
   },
   {
     "name": "socialfetch_linkedin_jobs_search",
-    "description": "Search LinkedIn jobs by keyword and filters. Pricing: \"2 credits attempt fee plus 2 credits per returned record. Up to 1000 per request (2002 credits max). `limit` default: 10.\" (vendor spec extension).",
+    "description": "Search LinkedIn jobs by keyword and filters. Pricing: \"2 credits attempt fee plus 2 credits per returned record. Up to 1000 per request (2002 credits max). `limit` default: 10.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/jobs/search",
     "input_schema": {
@@ -3011,7 +3011,7 @@
   },
   {
     "name": "socialfetch_linkedin_organizations",
-    "description": "Legacy URL lookup for LinkedIn company, school, or organization pages. New work should use GET /v2/linkedin/organizations/resolve and GET /v2/linkedin/organizations. Pricing: \"9 maximum credits per completed organization URL. Technical failures are not charged. Up to 50 organizations per request (450 credits max).\" (vendor spec extension).",
+    "description": "Legacy URL lookup for LinkedIn company, school, or organization pages. New work should use GET /v2/linkedin/organizations/resolve and GET /v2/linkedin/organizations. Pricing: \"9 maximum credits per completed organization URL. Technical failures are not charged. Up to 50 organizations per request (450 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/organizations",
     "input_schema": {
@@ -3041,7 +3041,7 @@
   },
   {
     "name": "socialfetch_linkedin_people_search",
-    "description": "Search LinkedIn people by first and/or last name. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Search LinkedIn people by first and/or last name. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/people/search",
     "input_schema": {
@@ -3067,7 +3067,7 @@
   },
   {
     "name": "socialfetch_linkedin_posts",
-    "description": "Get a LinkedIn post or article by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a LinkedIn post or article by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/posts",
     "input_schema": {
@@ -3091,7 +3091,7 @@
   },
   {
     "name": "socialfetch_linkedin_posts_search",
-    "description": "Search public LinkedIn posts site-wide by keyword (not scoped to one profile or company — use linkedin.profiles.posts.list or linkedin.company.posts.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search public LinkedIn posts site-wide by keyword (not scoped to one profile or company — use linkedin.profiles.posts.list or linkedin.company.posts.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/posts/search",
     "input_schema": {
@@ -3133,7 +3133,7 @@
   },
   {
     "name": "socialfetch_linkedin_posts_transcript",
-    "description": "Get the transcript for a LinkedIn post video by URL. Pricing: \"1 credit when a transcript is found; no charge when a transcript is unavailable.\" (vendor spec extension).",
+    "description": "Get the transcript for a LinkedIn post video by URL. Pricing: \"1 credit when a transcript is found; no charge when a transcript is unavailable.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/posts/transcript",
     "input_schema": {
@@ -3157,7 +3157,7 @@
   },
   {
     "name": "socialfetch_linkedin_profiles",
-    "description": "Get LinkedIn person profiles by URL or handle. Pricing: \"3 credits per profile URL requested. Up to 50 profiles per request (150 credits max).\" (vendor spec extension).",
+    "description": "Get LinkedIn person profiles by URL or handle. Pricing: \"3 credits per profile URL requested. Up to 50 profiles per request (150 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/profiles",
     "input_schema": {
@@ -3187,7 +3187,7 @@
   },
   {
     "name": "socialfetch_linkedin_profiles_posts",
-    "description": "List posts from one specific LinkedIn person profile by URL (not a keyword search — use linkedin.posts.search.list to search across public posts). Pricing: \"2 credits attempt fee plus 2 credits per returned record. Up to 200 per request (402 credits max). `limit` default: 10.\" (vendor spec extension).",
+    "description": "List posts from one specific LinkedIn person profile by URL (not a keyword search — use linkedin.posts.search.list to search across public posts). Pricing: \"2 credits attempt fee plus 2 credits per returned record. Up to 200 per request (402 credits max). `limit` default: 10.\" [spec].",
     "method": "GET",
     "path": "/v1/linkedin/profiles/posts",
     "input_schema": {
@@ -3236,7 +3236,7 @@
   },
   {
     "name": "socialfetch_linktree_profiles_handle",
-    "description": "Get a public Linktree profile by handle, including links and socials. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a public Linktree profile by handle, including links and socials. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/linktree/profiles/{handle}",
     "input_schema": {
@@ -3260,7 +3260,7 @@
   },
   {
     "name": "socialfetch_pinterest_boards_pins",
-    "description": "List public pins on a Pinterest board by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List public pins on a Pinterest board by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/pinterest/boards/pins",
     "input_schema": {
@@ -3295,7 +3295,7 @@
   },
   {
     "name": "socialfetch_pinterest_pins",
-    "description": "Fetch a public Pinterest pin by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Fetch a public Pinterest pin by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/pinterest/pins",
     "input_schema": {
@@ -3324,7 +3324,7 @@
   },
   {
     "name": "socialfetch_pinterest_profiles_handle_boards",
-    "description": "List public boards for a Pinterest profile. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List public boards for a Pinterest profile. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/pinterest/profiles/{handle}/boards",
     "input_schema": {
@@ -3359,7 +3359,7 @@
   },
   {
     "name": "socialfetch_pinterest_search",
-    "description": "Search public Pinterest pins by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search public Pinterest pins by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/pinterest/search",
     "input_schema": {
@@ -3394,7 +3394,7 @@
   },
   {
     "name": "socialfetch_reddit_posts",
-    "description": "Get a Reddit post by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Reddit post by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/posts",
     "input_schema": {
@@ -3418,7 +3418,7 @@
   },
   {
     "name": "socialfetch_reddit_posts_comments",
-    "description": "List comments on a Reddit post by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List comments on a Reddit post by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/posts/comments",
     "input_schema": {
@@ -3453,7 +3453,7 @@
   },
   {
     "name": "socialfetch_reddit_posts_transcript",
-    "description": "Get captions transcript for a Reddit video post. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get captions transcript for a Reddit video post. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/posts/transcript",
     "input_schema": {
@@ -3484,7 +3484,7 @@
   },
   {
     "name": "socialfetch_reddit_search",
-    "description": "Search Reddit posts site-wide by keyword (not scoped to one subreddit — use reddit.subreddit.search.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Reddit posts site-wide by keyword (not scoped to one subreddit — use reddit.subreddit.search.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/search",
     "input_schema": {
@@ -3541,7 +3541,7 @@
   },
   {
     "name": "socialfetch_reddit_subreddits",
-    "description": "Get details for a Reddit community (subreddit). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get details for a Reddit community (subreddit). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/subreddits",
     "input_schema": {
@@ -3569,7 +3569,7 @@
   },
   {
     "name": "socialfetch_reddit_subreddits_search",
-    "description": "Search posts within one subreddit (not site-wide — use reddit.search.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search posts within one subreddit (not site-wide — use reddit.search.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/subreddits/search",
     "input_schema": {
@@ -3631,7 +3631,7 @@
   },
   {
     "name": "socialfetch_reddit_subreddits_subreddit_posts",
-    "description": "List a subreddit's post feed (hot/new/top, no keyword) — use reddit.subreddit.search.list to search within it by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List a subreddit's post feed (hot/new/top, no keyword) — use reddit.subreddit.search.list to search within it by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/reddit/subreddits/{subreddit}/posts",
     "input_schema": {
@@ -3685,7 +3685,7 @@
   },
   {
     "name": "socialfetch_rumble_channels_videos",
-    "description": "List videos and Shorts from a Rumble channel. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List videos and Shorts from a Rumble channel. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/rumble/channels/videos",
     "input_schema": {
@@ -3715,7 +3715,7 @@
   },
   {
     "name": "socialfetch_rumble_search",
-    "description": "Search Rumble for videos and Shorts by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Rumble for videos and Shorts by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/rumble/search",
     "input_schema": {
@@ -3745,7 +3745,7 @@
   },
   {
     "name": "socialfetch_rumble_videos",
-    "description": "Get metadata for a Rumble video by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get metadata for a Rumble video by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/rumble/videos",
     "input_schema": {
@@ -3769,7 +3769,7 @@
   },
   {
     "name": "socialfetch_rumble_videos_comments",
-    "description": "List top-level comments on a Rumble video. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List top-level comments on a Rumble video. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/rumble/videos/comments",
     "input_schema": {
@@ -3793,7 +3793,7 @@
   },
   {
     "name": "socialfetch_rumble_videos_transcript",
-    "description": "Get captions for a Rumble video when available. Pricing: \"1 credit when a transcript is found; no charge when captions are unavailable.\" (vendor spec extension).",
+    "description": "Get captions for a Rumble video when available. Pricing: \"1 credit when a transcript is found; no charge when captions are unavailable.\" [spec].",
     "method": "GET",
     "path": "/v1/rumble/videos/transcript",
     "input_schema": {
@@ -3817,7 +3817,7 @@
   },
   {
     "name": "socialfetch_soundcloud_profiles_handle",
-    "description": "Get a SoundCloud profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a SoundCloud profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/soundcloud/profiles/{handle}",
     "input_schema": {
@@ -3841,7 +3841,7 @@
   },
   {
     "name": "socialfetch_soundcloud_profiles_handle_tracks",
-    "description": "List a SoundCloud profile's tracks, newest first. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List a SoundCloud profile's tracks, newest first. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/soundcloud/profiles/{handle}/tracks",
     "input_schema": {
@@ -3872,7 +3872,7 @@
   },
   {
     "name": "socialfetch_soundcloud_tracks",
-    "description": "Get a SoundCloud track by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a SoundCloud track by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/soundcloud/tracks",
     "input_schema": {
@@ -3896,7 +3896,7 @@
   },
   {
     "name": "socialfetch_spotify_album",
-    "description": "Get a Spotify album by id or album URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Spotify album by id or album URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/spotify/album",
     "input_schema": {
@@ -3924,7 +3924,7 @@
   },
   {
     "name": "socialfetch_spotify_artist",
-    "description": "Get a Spotify artist by id or profile URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Spotify artist by id or profile URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/spotify/artist",
     "input_schema": {
@@ -3952,7 +3952,7 @@
   },
   {
     "name": "socialfetch_spotify_track",
-    "description": "Get a Spotify track by id or track URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Spotify track by id or track URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/spotify/track",
     "input_schema": {
@@ -3980,7 +3980,7 @@
   },
   {
     "name": "socialfetch_telegram_channels_handle",
-    "description": "Get metadata for a public Telegram channel or group by username. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get metadata for a public Telegram channel or group by username. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/telegram/channels/{handle}",
     "input_schema": {
@@ -4004,7 +4004,7 @@
   },
   {
     "name": "socialfetch_telegram_channels_handle_posts",
-    "description": "List recent posts from a public Telegram channel. Groups are not supported. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List recent posts from a public Telegram channel. Groups are not supported. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/telegram/channels/{handle}/posts",
     "input_schema": {
@@ -4033,7 +4033,7 @@
   },
   {
     "name": "socialfetch_telegram_channels_handle_posts_postid",
-    "description": "Get a single public post from a Telegram channel by handle and post ID. Groups are not supported. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single public post from a Telegram channel by handle and post ID. Groups are not supported. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/telegram/channels/{handle}/posts/{postId}",
     "input_schema": {
@@ -4064,7 +4064,7 @@
   },
   {
     "name": "socialfetch_threads_posts",
-    "description": "Get a single Threads post by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single Threads post by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/threads/posts",
     "input_schema": {
@@ -4093,7 +4093,7 @@
   },
   {
     "name": "socialfetch_threads_profiles_handle",
-    "description": "Get a Threads profile for a creator or account. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Threads profile for a creator or account. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/threads/profiles/{handle}",
     "input_schema": {
@@ -4117,7 +4117,7 @@
   },
   {
     "name": "socialfetch_threads_profiles_handle_posts",
-    "description": "List posts from a Threads profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List posts from a Threads profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/threads/profiles/{handle}/posts",
     "input_schema": {
@@ -4146,7 +4146,7 @@
   },
   {
     "name": "socialfetch_threads_search",
-    "description": "Search Threads posts by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Threads posts by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/threads/search",
     "input_schema": {
@@ -4187,7 +4187,7 @@
   },
   {
     "name": "socialfetch_threads_users_search",
-    "description": "Search Threads users by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Threads users by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/threads/users/search",
     "input_schema": {
@@ -4211,7 +4211,7 @@
   },
   {
     "name": "socialfetch_tiktok_ad_library_ads",
-    "description": "Get a single TikTok Ad Library or Top Ads creative by ad id or public ad URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single TikTok Ad Library or Top Ads creative by ad id or public ad URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/ad-library/ads",
     "input_schema": {
@@ -4239,7 +4239,7 @@
   },
   {
     "name": "socialfetch_tiktok_ad_library_ads_search",
-    "description": "Search the public TikTok Ads Library by keyword or advertiser name. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search the public TikTok Ads Library by keyword or advertiser name. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/ad-library/ads/search",
     "input_schema": {
@@ -4272,7 +4272,7 @@
   },
   {
     "name": "socialfetch_tiktok_collections_videos",
-    "description": "List videos in a public TikTok collection by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List videos in a public TikTok collection by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/collections/videos",
     "input_schema": {
@@ -4302,7 +4302,7 @@
   },
   {
     "name": "socialfetch_tiktok_feed_trending",
-    "description": "List currently trending TikTok posts for a region. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List currently trending TikTok posts for a region. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/feed/trending",
     "input_schema": {
@@ -4329,7 +4329,7 @@
   },
   {
     "name": "socialfetch_tiktok_live",
-    "description": "Get current room details and engagement counts for a TikTok live broadcast. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get current room details and engagement counts for a TikTok live broadcast. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/live",
     "input_schema": {
@@ -4361,7 +4361,7 @@
   },
   {
     "name": "socialfetch_tiktok_music_clipid_videos",
-    "description": "List TikTok videos that use a specific music clip. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List TikTok videos that use a specific music clip. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/music/{clipId}/videos",
     "input_schema": {
@@ -4390,7 +4390,7 @@
   },
   {
     "name": "socialfetch_tiktok_products",
-    "description": "Get details for a TikTok Shop product by product id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get details for a TikTok Shop product by product id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/products",
     "input_schema": {
@@ -4437,7 +4437,7 @@
   },
   {
     "name": "socialfetch_tiktok_products_reviews",
-    "description": "List buyer reviews for a TikTok Shop product by product id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List buyer reviews for a TikTok Shop product by product id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/products/reviews",
     "input_schema": {
@@ -4493,7 +4493,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle",
-    "description": "Get a TikTok profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a TikTok profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}",
     "input_schema": {
@@ -4517,7 +4517,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_audience",
-    "description": "Get audience location demographics for a TikTok profile by handle. Pricing: \"30 credits per successful request.\" (vendor spec extension).",
+    "description": "Get audience location demographics for a TikTok profile by handle. Pricing: \"30 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/audience",
     "input_schema": {
@@ -4541,7 +4541,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_engagement",
-    "description": "Get TikTok profile engagement audit Pricing: \"5 credits per successful request.\" (vendor spec extension).",
+    "description": "Get TikTok profile engagement audit Pricing: \"5 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/engagement",
     "input_schema": {
@@ -4565,7 +4565,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_followers",
-    "description": "List followers of a TikTok profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List followers of a TikTok profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/followers",
     "input_schema": {
@@ -4606,7 +4606,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_following",
-    "description": "List accounts followed by a TikTok profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List accounts followed by a TikTok profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/following",
     "input_schema": {
@@ -4641,7 +4641,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_live",
-    "description": "Check whether a TikTok creator is currently live by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Check whether a TikTok creator is currently live by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/live",
     "input_schema": {
@@ -4665,7 +4665,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_region",
-    "description": "Get the region code reported for a TikTok profile by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the region code reported for a TikTok profile by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/region",
     "input_schema": {
@@ -4689,7 +4689,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_showcase_products",
-    "description": "List products featured on a creator's TikTok showcase by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List products featured on a creator's TikTok showcase by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/showcase-products",
     "input_schema": {
@@ -4724,7 +4724,7 @@
   },
   {
     "name": "socialfetch_tiktok_profiles_handle_videos",
-    "description": "List videos from a TikTok profile by handle. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" (vendor spec extension).",
+    "description": "List videos from a TikTok profile by handle. Pricing: \"1 credit base. With `hostMedia`, +2 credits per hosted asset (up to 24 assets, 49 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/profiles/{handle}/videos",
     "input_schema": {
@@ -4784,7 +4784,7 @@
   },
   {
     "name": "socialfetch_tiktok_search",
-    "description": "Search TikTok videos by free-text keyword (not hashtag — use tiktok.search.hashtag.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search TikTok videos by free-text keyword (not hashtag — use tiktok.search.hashtag.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/search",
     "input_schema": {
@@ -4847,7 +4847,7 @@
   },
   {
     "name": "socialfetch_tiktok_search_hashtags",
-    "description": "Search TikTok videos by hashtag (not free-text keyword — use tiktok.search.videos.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search TikTok videos by hashtag (not free-text keyword — use tiktok.search.videos.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/search/hashtags",
     "input_schema": {
@@ -4888,7 +4888,7 @@
   },
   {
     "name": "socialfetch_tiktok_search_suggestions",
-    "description": "Get TikTok search suggestions by query. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get TikTok search suggestions by query. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/search/suggestions",
     "input_schema": {
@@ -4917,7 +4917,7 @@
   },
   {
     "name": "socialfetch_tiktok_search_top",
-    "description": "Search TikTok Top results by keyword (not videos-only — use tiktok.search.videos.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search TikTok Top results by keyword (not videos-only — use tiktok.search.videos.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/search/top",
     "input_schema": {
@@ -4975,7 +4975,7 @@
   },
   {
     "name": "socialfetch_tiktok_shop_products",
-    "description": "List products in a TikTok Shop store by shop id or URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List products in a TikTok Shop store by shop id or URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/shop/products",
     "input_schema": {
@@ -5029,7 +5029,7 @@
   },
   {
     "name": "socialfetch_tiktok_shop_products_search",
-    "description": "Search products in TikTok Shop by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search products in TikTok Shop by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/shop/products/search",
     "input_schema": {
@@ -5082,7 +5082,7 @@
   },
   {
     "name": "socialfetch_tiktok_songs",
-    "description": "Get details for a TikTok song or sound by id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get details for a TikTok song or sound by id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/songs",
     "input_schema": {
@@ -5105,7 +5105,7 @@
   },
   {
     "name": "socialfetch_tiktok_users_search",
-    "description": "Search TikTok users by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search TikTok users by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/users/search",
     "input_schema": {
@@ -5135,7 +5135,7 @@
   },
   {
     "name": "socialfetch_tiktok_videos",
-    "description": "Get a single TikTok video by URL. Pricing: \"1 credit base. With `downloadMedia`, Hosted media download. Up to 11 credits max.\" (vendor spec extension).",
+    "description": "Get a single TikTok video by URL. Pricing: \"1 credit base. With `downloadMedia`, Hosted media download. Up to 11 credits max.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/videos",
     "input_schema": {
@@ -5179,7 +5179,7 @@
   },
   {
     "name": "socialfetch_tiktok_videos_comments",
-    "description": "List comments on a TikTok video by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List comments on a TikTok video by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/videos/comments",
     "input_schema": {
@@ -5214,7 +5214,7 @@
   },
   {
     "name": "socialfetch_tiktok_videos_comments_replies",
-    "description": "List replies to a TikTok video comment. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List replies to a TikTok video comment. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/videos/comments/replies",
     "input_schema": {
@@ -5251,7 +5251,7 @@
   },
   {
     "name": "socialfetch_tiktok_videos_download",
-    "description": "Download TikTok video or photo post media Pricing: \"11 credits per successful request.\" (vendor spec extension).",
+    "description": "Download TikTok video or photo post media Pricing: \"11 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/videos/download",
     "input_schema": {
@@ -5280,7 +5280,7 @@
   },
   {
     "name": "socialfetch_tiktok_videos_transcript",
-    "description": "Get the spoken transcript for a TikTok video by URL. Pricing: \"1 credit base. With `useAiFallback`, AI transcript fallback. Up to 11 credits max.\" (vendor spec extension).",
+    "description": "Get the spoken transcript for a TikTok video by URL. Pricing: \"1 credit base. With `useAiFallback`, AI transcript fallback. Up to 11 credits max.\" [spec].",
     "method": "GET",
     "path": "/v1/tiktok/videos/transcript",
     "input_schema": {
@@ -5317,7 +5317,7 @@
   },
   {
     "name": "socialfetch_truthsocial_posts",
-    "description": "Get a Truth Social post by URL. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "Get a Truth Social post by URL. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/truthsocial/posts",
     "input_schema": {
@@ -5341,7 +5341,7 @@
   },
   {
     "name": "socialfetch_truthsocial_profiles_handle",
-    "description": "Get a Truth Social profile by handle or account id. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "Get a Truth Social profile by handle or account id. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/truthsocial/profiles/{handle}",
     "input_schema": {
@@ -5365,7 +5365,7 @@
   },
   {
     "name": "socialfetch_truthsocial_profiles_handle_posts",
-    "description": "List posts from a Truth Social profile by handle or account id. Pricing: \"2 credits base. With `includeReplies`, Include replies. Up to 4 credits max.\" (vendor spec extension).",
+    "description": "List posts from a Truth Social profile by handle or account id. Pricing: \"2 credits base. With `includeReplies`, Include replies. Up to 4 credits max.\" [spec].",
     "method": "GET",
     "path": "/v1/truthsocial/profiles/{handle}/posts",
     "input_schema": {
@@ -5408,7 +5408,7 @@
   },
   {
     "name": "socialfetch_twitch_clips",
-    "description": "Get metadata and playback URLs for a Twitch clip by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get metadata and playback URLs for a Twitch clip by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitch/clips",
     "input_schema": {
@@ -5432,7 +5432,7 @@
   },
   {
     "name": "socialfetch_twitch_profiles_handle",
-    "description": "Get a Twitch profile for a channel by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a Twitch profile for a channel by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitch/profiles/{handle}",
     "input_schema": {
@@ -5456,7 +5456,7 @@
   },
   {
     "name": "socialfetch_twitch_profiles_handle_schedule",
-    "description": "Get the stream schedule for a Twitch channel by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the stream schedule for a Twitch channel by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitch/profiles/{handle}/schedule",
     "input_schema": {
@@ -5480,7 +5480,7 @@
   },
   {
     "name": "socialfetch_twitch_profiles_handle_videos",
-    "description": "List videos from a Twitch channel by handle. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List videos from a Twitch channel by handle. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitch/profiles/{handle}/videos",
     "input_schema": {
@@ -5523,7 +5523,7 @@
   },
   {
     "name": "socialfetch_twitter_communities",
-    "description": "Get details for an X community by community id or URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get details for an X community by community id or URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/communities",
     "input_schema": {
@@ -5547,7 +5547,7 @@
   },
   {
     "name": "socialfetch_twitter_communities_members",
-    "description": "List members of an X community by community URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List members of an X community by community URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/communities/members",
     "input_schema": {
@@ -5577,7 +5577,7 @@
   },
   {
     "name": "socialfetch_twitter_communities_search",
-    "description": "Search X communities by keyword. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search X communities by keyword. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/communities/search",
     "input_schema": {
@@ -5607,7 +5607,7 @@
   },
   {
     "name": "socialfetch_twitter_communities_tweets",
-    "description": "List tweets from an X community by community id or URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List tweets from an X community by community id or URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/communities/tweets",
     "input_schema": {
@@ -5646,7 +5646,7 @@
   },
   {
     "name": "socialfetch_twitter_friendships",
-    "description": "Check whether one X account follows another, by handles or numeric user ids. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Check whether one X account follows another, by handles or numeric user ids. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/friendships",
     "input_schema": {
@@ -5683,7 +5683,7 @@
   },
   {
     "name": "socialfetch_twitter_hashtags",
-    "description": "Search X posts by hashtag (not free-text keyword — use twitter.search.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search X posts by hashtag (not free-text keyword — use twitter.search.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/hashtags",
     "input_schema": {
@@ -5733,7 +5733,7 @@
   },
   {
     "name": "socialfetch_twitter_lists",
-    "description": "Get an X list by URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get an X list by URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/lists",
     "input_schema": {
@@ -5757,7 +5757,7 @@
   },
   {
     "name": "socialfetch_twitter_lists_followers",
-    "description": "List accounts following (subscribed to) an X list, by list URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List accounts following (subscribed to) an X list, by list URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/lists/followers",
     "input_schema": {
@@ -5787,7 +5787,7 @@
   },
   {
     "name": "socialfetch_twitter_lists_members",
-    "description": "List member accounts of an X list, by list URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List member accounts of an X list, by list URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/lists/members",
     "input_schema": {
@@ -5817,7 +5817,7 @@
   },
   {
     "name": "socialfetch_twitter_lists_tweets",
-    "description": "List recent tweets from members of an X list, by list URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List recent tweets from members of an X list, by list URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/lists/tweets",
     "input_schema": {
@@ -5847,7 +5847,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles",
-    "description": "Get up to 50 X profiles in one request by handles and/or numeric user ids. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get up to 50 X profiles in one request by handles and/or numeric user ids. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles",
     "input_schema": {
@@ -5882,7 +5882,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle",
-    "description": "Get an X (Twitter) profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get an X (Twitter) profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}",
     "input_schema": {
@@ -5913,7 +5913,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_about",
-    "description": "Get X account transparency details (location, verification, username history) by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get X account transparency details (location, verification, username history) by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/about",
     "input_schema": {
@@ -5944,7 +5944,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_followers",
-    "description": "List accounts following an X profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List accounts following an X profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/followers",
     "input_schema": {
@@ -5981,7 +5981,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_followers_ids",
-    "description": "List numeric user ids of accounts following an X profile. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List numeric user ids of accounts following an X profile. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/followers/ids",
     "input_schema": {
@@ -6025,7 +6025,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_followers_verified",
-    "description": "List verified accounts following an X profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List verified accounts following an X profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/followers/verified",
     "input_schema": {
@@ -6062,7 +6062,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_following",
-    "description": "List accounts an X profile follows by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List accounts an X profile follows by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/following",
     "input_schema": {
@@ -6099,7 +6099,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_following_ids",
-    "description": "List numeric user ids of accounts an X profile follows. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List numeric user ids of accounts an X profile follows. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/following/ids",
     "input_schema": {
@@ -6143,7 +6143,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_subscriptions",
-    "description": "List creator accounts an X profile subscribes to, by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List creator accounts an X profile subscribes to, by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/subscriptions",
     "input_schema": {
@@ -6180,7 +6180,7 @@
   },
   {
     "name": "socialfetch_twitter_profiles_handle_tweets",
-    "description": "List tweets from an X profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List tweets from an X profile by handle or numeric user id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/profiles/{handle}/tweets",
     "input_schema": {
@@ -6234,7 +6234,7 @@
   },
   {
     "name": "socialfetch_twitter_search",
-    "description": "Search X posts or people by query. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search X posts or people by query. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/search",
     "input_schema": {
@@ -6284,7 +6284,7 @@
   },
   {
     "name": "socialfetch_twitter_spaces",
-    "description": "Get an X Space (audio room) by URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get an X Space (audio room) by URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/spaces",
     "input_schema": {
@@ -6308,7 +6308,7 @@
   },
   {
     "name": "socialfetch_twitter_spaces_stream",
-    "description": "Get the HLS audio stream URL for an X Space by URL or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the HLS audio stream URL for an X Space by URL or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/spaces/stream",
     "input_schema": {
@@ -6332,7 +6332,7 @@
   },
   {
     "name": "socialfetch_twitter_tweets",
-    "description": "Get a single tweet by permalink or numeric id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single tweet by permalink or numeric id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/tweets",
     "input_schema": {
@@ -6361,7 +6361,7 @@
   },
   {
     "name": "socialfetch_twitter_tweets_batch",
-    "description": "Get up to 200 tweets in one request by ids or permalinks. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get up to 200 tweets in one request by ids or permalinks. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/tweets/batch",
     "input_schema": {
@@ -6391,7 +6391,7 @@
   },
   {
     "name": "socialfetch_twitter_tweets_quotes",
-    "description": "List tweets that quote a tweet, by permalink or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List tweets that quote a tweet, by permalink or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/tweets/quotes",
     "input_schema": {
@@ -6421,7 +6421,7 @@
   },
   {
     "name": "socialfetch_twitter_tweets_replies",
-    "description": "List replies to a tweet by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List replies to a tweet by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/tweets/replies",
     "input_schema": {
@@ -6461,7 +6461,7 @@
   },
   {
     "name": "socialfetch_twitter_tweets_retweets",
-    "description": "List accounts that retweeted a tweet, by permalink or id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List accounts that retweeted a tweet, by permalink or id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/tweets/retweets",
     "input_schema": {
@@ -6491,7 +6491,7 @@
   },
   {
     "name": "socialfetch_twitter_tweets_transcript",
-    "description": "Get the transcript for a video tweet by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the transcript for a video tweet by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/twitter/tweets/transcript",
     "input_schema": {
@@ -6515,7 +6515,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_activities_activityid",
-    "description": "Get a LinkedIn activity by id. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get a LinkedIn activity by id. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/activities/{activityId}",
     "input_schema": {
@@ -6537,7 +6537,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_activities_activityid_comments",
-    "description": "List comments on a LinkedIn activity. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List comments on a LinkedIn activity. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/activities/{activityId}/comments",
     "input_schema": {
@@ -6588,7 +6588,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_activities_activityid_reactions",
-    "description": "List reactions on a LinkedIn activity. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List reactions on a LinkedIn activity. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/activities/{activityId}/reactions",
     "input_schema": {
@@ -6623,7 +6623,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_jobs_batch",
-    "description": "Get LinkedIn jobs by URL. Pricing: \"Up to 3 credits per URL; 50 URLs per request (150 credits maximum authorization). Final charge covers completed operations, including verified misses. Technical failures and unstarted work cost zero.\" (vendor spec extension).",
+    "description": "Get LinkedIn jobs by URL. Pricing: \"Up to 3 credits per URL; 50 URLs per request (150 credits maximum authorization). Final charge covers completed operations, including verified misses. Technical failures and unstarted work cost zero.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/jobs/batch",
     "input_schema": {
@@ -6652,7 +6652,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_jobs_jobid",
-    "description": "Get a LinkedIn job by id. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get a LinkedIn job by id. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/jobs/{jobId}",
     "input_schema": {
@@ -6674,7 +6674,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_jobs_jobid_hiring_team",
-    "description": "List the hiring team for a LinkedIn job. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List the hiring team for a LinkedIn job. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/jobs/{jobId}/hiring-team",
     "input_schema": {
@@ -6696,7 +6696,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_jobs_jobid_related_views",
-    "description": "List related jobs for a LinkedIn job. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List related jobs for a LinkedIn job. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/jobs/{jobId}/related-views",
     "input_schema": {
@@ -6718,7 +6718,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_jobs_jobid_similar",
-    "description": "List similar LinkedIn jobs. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List similar LinkedIn jobs. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/jobs/{jobId}/similar",
     "input_schema": {
@@ -6740,7 +6740,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_jobs_search",
-    "description": "Search LinkedIn jobs by keyword and filters. Pricing: \"6 credits per successful request.\" (vendor spec extension).",
+    "description": "Search LinkedIn jobs by keyword and filters. Pricing: \"6 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/jobs/search",
     "input_schema": {
@@ -6894,7 +6894,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations",
-    "description": "Get a LinkedIn organization by slug or id. Pricing: \"6 credits base. With `slug`, +3 credits. Up to 9 credits max. Only completed operations are charged; failed or skipped sections cost zero.\" (vendor spec extension).",
+    "description": "Get a LinkedIn organization by slug or id. Pricing: \"6 credits base. With `slug`, +3 credits. Up to 9 credits max. Only completed operations are charged; failed or skipped sections cost zero.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations",
     "input_schema": {
@@ -6919,7 +6919,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_batch",
-    "description": "Get LinkedIn organizations by URL. Pricing: \"Up to 9 credits per URL; 50 URLs per request (450 credits maximum authorization). Final charge covers completed operations, including verified misses. Technical failures and unstarted work cost zero.\" (vendor spec extension).",
+    "description": "Get LinkedIn organizations by URL. Pricing: \"Up to 9 credits per URL; 50 URLs per request (450 credits maximum authorization). Final charge covers completed operations, including verified misses. Technical failures and unstarted work cost zero.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/batch",
     "input_schema": {
@@ -6948,7 +6948,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_jobs",
-    "description": "List jobs for LinkedIn organizations. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List jobs for LinkedIn organizations. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/jobs",
     "input_schema": {
@@ -6984,7 +6984,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_organizationid_affiliated",
-    "description": "List affiliated organizations for a LinkedIn organization. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List affiliated organizations for a LinkedIn organization. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/{organizationId}/affiliated",
     "input_schema": {
@@ -7007,7 +7007,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_organizationid_headcount",
-    "description": "Get headcount for a LinkedIn organization. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get headcount for a LinkedIn organization. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/{organizationId}/headcount",
     "input_schema": {
@@ -7030,7 +7030,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_organizationid_posts",
-    "description": "List posts from a LinkedIn organization. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List posts from a LinkedIn organization. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/{organizationId}/posts",
     "input_schema": {
@@ -7066,7 +7066,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_organizationid_similar",
-    "description": "List similar LinkedIn organizations. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List similar LinkedIn organizations. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/{organizationId}/similar",
     "input_schema": {
@@ -7089,7 +7089,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_resolve",
-    "description": "Resolve a LinkedIn organization slug to an organization id. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Resolve a LinkedIn organization slug to an organization id. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/resolve",
     "input_schema": {
@@ -7113,7 +7113,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_organizations_search",
-    "description": "Search LinkedIn organizations by keyword. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Search LinkedIn organizations by keyword. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/organizations/search",
     "input_schema": {
@@ -7179,7 +7179,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_entityid_comments",
-    "description": "List comments authored by a LinkedIn person. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List comments authored by a LinkedIn person. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/{entityId}/comments",
     "input_schema": {
@@ -7215,7 +7215,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_entityid_employment_history",
-    "description": "Get grouped employment history for a LinkedIn person. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get grouped employment history for a LinkedIn person. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/{entityId}/employment-history",
     "input_schema": {
@@ -7239,7 +7239,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_entityid_interests",
-    "description": "Get interests for a LinkedIn person. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get interests for a LinkedIn person. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/{entityId}/interests",
     "input_schema": {
@@ -7263,7 +7263,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_entityid_posts",
-    "description": "List posts from a LinkedIn person. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List posts from a LinkedIn person. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/{entityId}/posts",
     "input_schema": {
@@ -7299,7 +7299,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_entityid_recommendations",
-    "description": "Get recommendations for a LinkedIn person. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get recommendations for a LinkedIn person. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/{entityId}/recommendations",
     "input_schema": {
@@ -7323,7 +7323,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_entityid_similar",
-    "description": "List similar LinkedIn people. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "List similar LinkedIn people. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/{entityId}/similar",
     "input_schema": {
@@ -7347,7 +7347,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_resolve",
-    "description": "Resolve a LinkedIn handle to a person entity id. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Resolve a LinkedIn handle to a person entity id. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/resolve",
     "input_schema": {
@@ -7369,7 +7369,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_people_search",
-    "description": "Search LinkedIn people by keyword and filters. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Search LinkedIn people by keyword and filters. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/people/search",
     "input_schema": {
@@ -7472,7 +7472,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_profiles",
-    "description": "Get a LinkedIn profile by handle or entity id. Pricing: \"3 credits per successful request.\" (vendor spec extension).",
+    "description": "Get a LinkedIn profile by handle or entity id. Pricing: \"3 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/profiles",
     "input_schema": {
@@ -7498,7 +7498,7 @@
   },
   {
     "name": "socialfetch_v2_linkedin_profiles_batch",
-    "description": "Get LinkedIn person profiles by URL. Pricing: \"Up to 3 credits per URL; 50 URLs per request (150 credits maximum authorization). Final charge covers completed operations, including verified misses. Technical failures and unstarted work cost zero.\" (vendor spec extension).",
+    "description": "Get LinkedIn person profiles by URL. Pricing: \"Up to 3 credits per URL; 50 URLs per request (150 credits maximum authorization). Final charge covers completed operations, including verified misses. Technical failures and unstarted work cost zero.\" [spec].",
     "method": "GET",
     "path": "/v2/linkedin/profiles/batch",
     "input_schema": {
@@ -7527,7 +7527,7 @@
   },
   {
     "name": "socialfetch_web_ask",
-    "description": "Ask a natural-language question about a specific web page and get an LLM-generated answer. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Ask a natural-language question about a specific web page and get an LLM-generated answer. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/web/ask",
     "input_schema": {
@@ -7559,7 +7559,7 @@
   },
   {
     "name": "socialfetch_web_crawl",
-    "description": "Crawl a small set of web pages synchronously. Pricing: \"1 credit per URL requested. Up to 5 URLs per request (5 credits max).\" (vendor spec extension).",
+    "description": "Crawl a small set of web pages synchronously. Pricing: \"1 credit per URL requested. Up to 5 URLs per request (5 credits max).\" [spec].",
     "method": "GET",
     "path": "/v1/web/crawl",
     "input_schema": {
@@ -7600,7 +7600,7 @@
   },
   {
     "name": "socialfetch_web_extract",
-    "description": "Extract structured fields from a web page using a CSS selector schema. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "Extract structured fields from a web page using a CSS selector schema. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "POST",
     "path": "/v1/web/extract",
     "input_schema": {
@@ -7698,7 +7698,7 @@
   },
   {
     "name": "socialfetch_web_html",
-    "description": "Fetch cleaned HTML for a web page URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Fetch cleaned HTML for a web page URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/web/html",
     "input_schema": {
@@ -7733,7 +7733,7 @@
   },
   {
     "name": "socialfetch_web_markdown",
-    "description": "Convert a web page URL into clean markdown. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Convert a web page URL into clean markdown. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/web/markdown",
     "input_schema": {
@@ -7796,7 +7796,7 @@
   },
   {
     "name": "socialfetch_web_screenshot",
-    "description": "Capture a screenshot of a public web page URL as a hosted image artifact. Pricing: \"1 credit (2 with region)\" (vendor spec extension).",
+    "description": "Capture a screenshot of a public web page URL as a hosted image artifact. Pricing: \"1 credit (2 with region)\" [spec].",
     "method": "GET",
     "path": "/v1/web/screenshot",
     "input_schema": {
@@ -7952,7 +7952,7 @@
   },
   {
     "name": "socialfetch_web_search",
-    "description": "Search the public web and return ranked organic results with snippets. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search the public web and return ranked organic results with snippets. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/web/search",
     "input_schema": {
@@ -8003,7 +8003,7 @@
   },
   {
     "name": "socialfetch_yelp_businesses_alias",
-    "description": "Get public details for a Yelp business. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "Get public details for a Yelp business. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/yelp/businesses/{alias}",
     "input_schema": {
@@ -8027,7 +8027,7 @@
   },
   {
     "name": "socialfetch_yelp_businesses_alias_photos",
-    "description": "List public photos for a Yelp business. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "List public photos for a Yelp business. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/yelp/businesses/{alias}/photos",
     "input_schema": {
@@ -8059,7 +8059,7 @@
   },
   {
     "name": "socialfetch_yelp_businesses_alias_reviews",
-    "description": "List public reviews for a Yelp business. Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "List public reviews for a Yelp business. Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/yelp/businesses/{alias}/reviews",
     "input_schema": {
@@ -8101,7 +8101,7 @@
   },
   {
     "name": "socialfetch_yelp_businesses_search",
-    "description": "Search Yelp businesses by name, category, or location. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search Yelp businesses by name, category, or location. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/yelp/businesses/search",
     "input_schema": {
@@ -8150,7 +8150,7 @@
   },
   {
     "name": "socialfetch_youtube_channel",
-    "description": "Get YouTube channel details by channel id, handle, or URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get YouTube channel details by channel id, handle, or URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/channel",
     "input_schema": {
@@ -8185,7 +8185,7 @@
   },
   {
     "name": "socialfetch_youtube_channels_shorts",
-    "description": "List Shorts from a YouTube channel (not long-form videos). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List Shorts from a YouTube channel (not long-form videos). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/channels/shorts",
     "input_schema": {
@@ -8226,7 +8226,7 @@
   },
   {
     "name": "socialfetch_youtube_channels_videos",
-    "description": "List long-form videos from a YouTube channel (not Shorts — use youtube.channel.shorts.list). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List long-form videos from a YouTube channel (not Shorts — use youtube.channel.shorts.list). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/channels/videos",
     "input_schema": {
@@ -8272,7 +8272,7 @@
   },
   {
     "name": "socialfetch_youtube_community_posts",
-    "description": "Get a YouTube community post by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a YouTube community post by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/community-posts",
     "input_schema": {
@@ -8296,7 +8296,7 @@
   },
   {
     "name": "socialfetch_youtube_playlists",
-    "description": "Get a YouTube playlist by playlist id. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a YouTube playlist by playlist id. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/playlists",
     "input_schema": {
@@ -8320,7 +8320,7 @@
   },
   {
     "name": "socialfetch_youtube_search",
-    "description": "Search YouTube videos, channels, and playlists by free-text keyword (not hashtag — use youtube.search.hashtag.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search YouTube videos, channels, and playlists by free-text keyword (not hashtag — use youtube.search.hashtag.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/search",
     "input_schema": {
@@ -8401,7 +8401,7 @@
   },
   {
     "name": "socialfetch_youtube_search_hashtags",
-    "description": "Search YouTube content by hashtag (not free-text keyword — use youtube.search.list for that). Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Search YouTube content by hashtag (not free-text keyword — use youtube.search.list for that). Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/search/hashtags",
     "input_schema": {
@@ -8440,7 +8440,7 @@
   },
   {
     "name": "socialfetch_youtube_shorts_trending",
-    "description": "List currently trending YouTube Shorts. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List currently trending YouTube Shorts. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/shorts/trending",
     "input_schema": {
@@ -8452,7 +8452,7 @@
   },
   {
     "name": "socialfetch_youtube_videos",
-    "description": "Get a single YouTube video by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get a single YouTube video by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/videos",
     "input_schema": {
@@ -8483,7 +8483,7 @@
   },
   {
     "name": "socialfetch_youtube_videos_comments",
-    "description": "List comments on a YouTube video by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List comments on a YouTube video by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/videos/comments",
     "input_schema": {
@@ -8522,7 +8522,7 @@
   },
   {
     "name": "socialfetch_youtube_videos_comments_analysis",
-    "description": "Analyze YouTube video comments Pricing: \"2 credits per successful request.\" (vendor spec extension).",
+    "description": "Analyze YouTube video comments Pricing: \"2 credits per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/videos/comments/analysis",
     "input_schema": {
@@ -8555,7 +8555,7 @@
   },
   {
     "name": "socialfetch_youtube_videos_comments_replies",
-    "description": "List replies to a YouTube comment. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "List replies to a YouTube comment. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/videos/comments/replies",
     "input_schema": {
@@ -8578,7 +8578,7 @@
   },
   {
     "name": "socialfetch_youtube_videos_transcript",
-    "description": "Get the transcript for a YouTube video by URL. Pricing: \"1 credit per successful request.\" (vendor spec extension).",
+    "description": "Get the transcript for a YouTube video by URL. Pricing: \"1 credit per successful request.\" [spec].",
     "method": "GET",
     "path": "/v1/youtube/videos/transcript",
     "input_schema": {

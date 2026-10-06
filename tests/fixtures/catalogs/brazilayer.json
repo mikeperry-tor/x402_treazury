@@ -13,7 +13,7 @@
   },
   {
     "name": "brazilayer_bcb_instituicao_cnpj",
-    "description": "Central Bank authorization check + verified domains ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Central Bank authorization check + verified domains ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/bcb/instituicao/{cnpj}",
     "input_schema": {
@@ -47,7 +47,7 @@
   },
   {
     "name": "brazilayer_cadeias_cafe_kc",
-    "description": "Causal chain — Arabica coffee: dry days in the Minas belt lead yield and KC price ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Causal chain — Arabica coffee: dry days in the Minas belt lead yield and KC price ($0.05 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cadeias/cafe_kc",
     "input_schema": {
@@ -59,7 +59,7 @@
   },
   {
     "name": "brazilayer_cadeias_capital_br",
-    "description": "Causal chain — Brazilian capital flight: the USDT premium over PTAX leads FX pressure ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Causal chain — Brazilian capital flight: the USDT premium over PTAX leads FX pressure ($0.05 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cadeias/capital_br",
     "input_schema": {
@@ -71,7 +71,7 @@
   },
   {
     "name": "brazilayer_cadeias_energia_br",
-    "description": "Causal chain — Brazilian power risk: rainfall leads reservoirs, thermal dispatch and tariff ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Causal chain — Brazilian power risk: rainfall leads reservoirs, thermal dispatch and tariff ($0.05 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cadeias/energia_br",
     "input_schema": {
@@ -83,7 +83,7 @@
   },
   {
     "name": "brazilayer_cadeias_soja_zs",
-    "description": "Causal chain — soybeans: consecutive dry days in the Mato Grosso belt lead yield and shipped volume ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Causal chain — soybeans: consecutive dry days in the Mato Grosso belt lead yield and shipped volume ($0.05 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cadeias/soja_zs",
     "input_schema": {
@@ -107,7 +107,7 @@
   },
   {
     "name": "brazilayer_cnpj_busca",
-    "description": "Search companies ($0.01 via x402). At least one filter required. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Search companies ($0.01 via x402). At least one filter required. Cost: unknown.",
     "method": "GET",
     "path": "/v1/cnpj/busca",
     "input_schema": {
@@ -177,7 +177,7 @@
   },
   {
     "name": "brazilayer_cnpj_empresa_cnpj",
-    "description": "Company registration data ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Company registration data ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cnpj/empresa/{cnpj}",
     "input_schema": {
@@ -199,7 +199,7 @@
   },
   {
     "name": "brazilayer_cnpj_empresa_cnpj_completo",
-    "description": "Bundle: registration + partners + branches ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Bundle: registration + partners + branches ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cnpj/empresa/{cnpj}/completo",
     "input_schema": {
@@ -221,7 +221,7 @@
   },
   {
     "name": "brazilayer_cnpj_empresa_cnpj_socios",
-    "description": "Partners/shareholders of a company ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Partners/shareholders of a company ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cnpj/empresa/{cnpj}/socios",
     "input_schema": {
@@ -243,7 +243,7 @@
   },
   {
     "name": "brazilayer_cnpj_situacao_cnpj",
-    "description": "Does the CNPJ exist and is it active ($0.001 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Does the CNPJ exist and is it active ($0.001 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cnpj/situacao/{cnpj}",
     "input_schema": {
@@ -265,7 +265,7 @@
   },
   {
     "name": "brazilayer_cnpj_socio_busca",
-    "description": "Reverse lookup: companies where a person/entity is partner ($0.02 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Reverse lookup: companies where a person/entity is partner ($0.02 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/cnpj/socio/busca",
     "input_schema": {
@@ -311,7 +311,7 @@
   },
   {
     "name": "brazilayer_commodities_briefing",
-    "description": "Daily AI-synthesized Brazil Commodity Briefing in English ($0.10 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Daily AI-synthesized Brazil Commodity Briefing in English ($0.10 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/commodities/briefing",
     "input_schema": {
@@ -323,7 +323,7 @@
   },
   {
     "name": "brazilayer_commodities_clima",
-    "description": "Crop-weather stress per Brazilian producing belt — rain, drought, frost risk ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Crop-weather stress per Brazilian producing belt — rain, drought, frost risk ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/commodities/clima",
     "input_schema": {
@@ -335,7 +335,7 @@
   },
   {
     "name": "brazilayer_commodities_exportacoes",
-    "description": "Monthly Brazilian commodity exports with YoY change ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Monthly Brazilian commodity exports with YoY change ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/commodities/exportacoes",
     "input_schema": {
@@ -347,7 +347,7 @@
   },
   {
     "name": "brazilayer_commodities_fogo",
-    "description": "Daily satellite fire hotspots by biome and state, with drought proxy ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Daily satellite fire hotspots by biome and state, with drought proxy ($0.002 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/commodities/fogo",
     "input_schema": {
@@ -359,7 +359,7 @@
   },
   {
     "name": "brazilayer_commodities_hidrologia",
-    "description": "Stored hydro energy (EAR) by grid subsystem, daily ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Stored hydro energy (EAR) by grid subsystem, daily ($0.002 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/commodities/hidrologia",
     "input_schema": {
@@ -371,7 +371,7 @@
   },
   {
     "name": "brazilayer_commodities_pacote",
-    "description": "All five commodity signals in one call, 47% cheaper than one by one ($0.06 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "All five commodity signals in one call, 47% cheaper than one by one ($0.06 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/commodities/pacote",
     "input_schema": {
@@ -395,7 +395,7 @@
   },
   {
     "name": "brazilayer_desmatamento_fornecedor_cnpj",
-    "description": "Supplier origin risk — CNPJ to its municipality's deforestation record ($0.02 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Supplier origin risk — CNPJ to its municipality's deforestation record ($0.02 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/desmatamento/fornecedor/{cnpj}",
     "input_schema": {
@@ -417,7 +417,7 @@
   },
   {
     "name": "brazilayer_desmatamento_municipio_ibge",
-    "description": "Deforestation profile of a Brazilian municipality since the EUDR cutoff ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Deforestation profile of a Brazilian municipality since the EUDR cutoff ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/desmatamento/municipio/{ibge}",
     "input_schema": {
@@ -439,7 +439,7 @@
   },
   {
     "name": "brazilayer_desmatamento_ranking",
-    "description": "Where Brazilian deforestation is concentrated ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Where Brazilian deforestation is concentrated ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/desmatamento/ranking",
     "input_schema": {
@@ -491,7 +491,7 @@
   },
   {
     "name": "brazilayer_empresa_enriquecer_cnpj",
-    "description": "Full KYB profile in one call — registration + partners + branches + sanctions + Central Bank + public contracts ($0.05 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Full KYB profile in one call — registration + partners + branches + sanctions + Central Bank + public contracts ($0.05 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/empresa/enriquecer/{cnpj}",
     "input_schema": {
@@ -581,7 +581,7 @@
   },
   {
     "name": "brazilayer_fundos_carteira_cnpj",
-    "description": "A fund's equity holdings from the CVM portfolio disclosure (CDA) ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "A fund's equity holdings from the CVM portfolio disclosure (CDA) ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/fundos/carteira/{cnpj}",
     "input_schema": {
@@ -603,7 +603,7 @@
   },
   {
     "name": "brazilayer_fundos_consulta_cnpj",
-    "description": "Verify a Brazilian investment fund at the CVM registry ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Verify a Brazilian investment fund at the CVM registry ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/fundos/consulta/{cnpj}",
     "input_schema": {
@@ -625,7 +625,7 @@
   },
   {
     "name": "brazilayer_fundos_fluxos",
-    "description": "Daily net flows of Brazilian institutional money by fund class ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Daily net flows of Brazilian institutional money by fund class ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/fundos/fluxos",
     "input_schema": {
@@ -645,7 +645,7 @@
   },
   {
     "name": "brazilayer_fundos_movimentacoes",
-    "description": "What Brazilian funds are buying and selling per stock — institutional net flow ($0.02 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "What Brazilian funds are buying and selling per stock — institutional net flow ($0.02 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/fundos/movimentacoes",
     "input_schema": {
@@ -669,7 +669,7 @@
   },
   {
     "name": "brazilayer_fundos_ranking",
-    "description": "Rank Brazilian funds by net assets, inflows or shareholders ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Rank Brazilian funds by net assets, inflows or shareholders ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/fundos/ranking",
     "input_schema": {
@@ -764,7 +764,7 @@
   },
   {
     "name": "brazilayer_licitacoes_abertas",
-    "description": "Open government tenders, live from PNCP ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Open government tenders, live from PNCP ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/licitacoes/abertas",
     "input_schema": {
@@ -812,7 +812,7 @@
   },
   {
     "name": "brazilayer_licitacoes_fornecedor_cnpj",
-    "description": "All public contracts won by a company, with summary stats ($0.01 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "All public contracts won by a company, with summary stats ($0.01 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/licitacoes/fornecedor/{cnpj}",
     "input_schema": {
@@ -846,7 +846,7 @@
   },
   {
     "name": "brazilayer_mercado_cambio",
-    "description": "Official PTAX + live BRL crypto premium, a capital-flow signal ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Official PTAX + live BRL crypto premium, a capital-flow signal ($0.002 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/mercado/cambio",
     "input_schema": {
@@ -858,7 +858,7 @@
   },
   {
     "name": "brazilayer_mercado_indicadores",
-    "description": "Brazil macro snapshot — Selic, IPCA, PTAX, Focus survey medians ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Brazil macro snapshot — Selic, IPCA, PTAX, Focus survey medians ($0.002 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/mercado/indicadores",
     "input_schema": {
@@ -870,7 +870,7 @@
   },
   {
     "name": "brazilayer_mercado_noticias",
-    "description": "Brazilian financial & crypto news with sentiment, 15-min refresh ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Brazilian financial & crypto news with sentiment, 15-min refresh ($0.002 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/mercado/noticias",
     "input_schema": {
@@ -915,7 +915,7 @@
   },
   {
     "name": "brazilayer_mercado_pacote",
-    "description": "FX, macro indicators and headlines in one call ($0.004 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "FX, macro indicators and headlines in one call ($0.004 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/mercado/pacote",
     "input_schema": {
@@ -939,7 +939,7 @@
   },
   {
     "name": "brazilayer_pacotes_brasil",
-    "description": "Every parameter-free endpoint of the catalog (13) in one call, 43% cheaper ($0.09 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Every parameter-free endpoint of the catalog (13) in one call, 43% cheaper ($0.09 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/pacotes/brasil",
     "input_schema": {
@@ -963,7 +963,7 @@
   },
   {
     "name": "brazilayer_tributos_busca",
-    "description": "Search tax-reform annexes by product/service description ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Search tax-reform annexes by product/service description ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/tributos/busca",
     "input_schema": {
@@ -990,7 +990,7 @@
   },
   {
     "name": "brazilayer_tributos_calendario",
-    "description": "Year-by-year Brazilian tax transition 2026-2033 ($0.002 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Year-by-year Brazilian tax transition 2026-2033 ($0.002 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/tributos/calendario",
     "input_schema": {
@@ -1002,7 +1002,7 @@
   },
   {
     "name": "brazilayer_tributos_ncm_codigo",
-    "description": "IBS/CBS regime for a product by NCM, with legal basis ($0.005 via x402) Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "IBS/CBS regime for a product by NCM, with legal basis ($0.005 via x402) Cost: unknown.",
     "method": "GET",
     "path": "/v1/tributos/ncm/{codigo}",
     "input_schema": {

@@ -1,7 +1,7 @@
 [
   {
     "name": "claw402_coinank_funding_rate_current",
-    "description": "Real-time funding rate rankings (type: current/day/week/month/year) Price: $0.01 per call (vendor spec).",
+    "description": "Real-time funding rate rankings (type: current/day/week/month/year) Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/v1/coinank/funding-rate/current",
     "input_schema": {
@@ -19,7 +19,7 @@
   },
   {
     "name": "claw402_coinank_indicator_altcoin_season",
-    "description": "Altcoin Season Index Price: $0.01 per call (vendor spec).",
+    "description": "Altcoin Season Index Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/v1/coinank/indicator/altcoin-season",
     "input_schema": {
@@ -31,7 +31,7 @@
   },
   {
     "name": "claw402_coinank_indicator_fear_greed",
-    "description": "Crypto fear & greed index Price: $0.01 per call (vendor spec).",
+    "description": "Crypto fear & greed index Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/v1/coinank/indicator/fear-greed",
     "input_schema": {
@@ -43,7 +43,7 @@
   },
   {
     "name": "claw402_coinank_oi_all",
-    "description": "Real-time open interest list by exchange Price: $0.01 per call (vendor spec).",
+    "description": "Real-time open interest list by exchange Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/v1/coinank/oi/all",
     "input_schema": {
@@ -61,7 +61,7 @@
   },
   {
     "name": "claw402_coinank_rank_price",
-    "description": "Price change rankings (sortBy: priceChangeH24/priceChangeH1) Price: $0.01 per call (vendor spec).",
+    "description": "Price change rankings (sortBy: priceChangeH24/priceChangeH1) Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/api/v1/coinank/rank/price",
     "input_schema": {
@@ -96,7 +96,7 @@
   },
   {
     "name": "claw402_nofx_netflow_low_ranking",
-    "description": "Top net capital outflow rankings Price: $0.002 per call (vendor spec).",
+    "description": "Top net capital outflow rankings Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/nofx/netflow/low-ranking",
     "input_schema": {
@@ -126,7 +126,7 @@
   },
   {
     "name": "claw402_nofx_netflow_top_ranking",
-    "description": "Top net capital inflow rankings Price: $0.002 per call (vendor spec).",
+    "description": "Top net capital inflow rankings Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/nofx/netflow/top-ranking",
     "input_schema": {
@@ -156,7 +156,7 @@
   },
   {
     "name": "claw402_nofx_price_ranking",
-    "description": "Price change rankings (gainers & losers) Price: $0.002 per call (vendor spec).",
+    "description": "Price change rankings (gainers & losers) Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/nofx/price/ranking",
     "input_schema": {
@@ -174,7 +174,7 @@
   },
   {
     "name": "claw402_vergex_direction_change_leaderboard",
-    "description": "Bull/bear radar leaderboard for the OI Top 30, with stable bias, direction score, five factor directions, price, and rank Price: $0.002 per call (vendor spec).",
+    "description": "Bull/bear radar leaderboard for the OI Top 30, with stable bias, direction score, five factor directions, price, and rank Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/vergex/direction-change/leaderboard",
     "input_schema": {
@@ -186,7 +186,7 @@
   },
   {
     "name": "claw402_vergex_flow_markets",
-    "description": "Order-flow leaderboard: ranks the full universe by net taker-buy notional over a rolling window, returning top inflow (most buying) and top outflow (most selling) markets with buy/sell notional, trade count and latest price. Optional window (5m/15m/1h/4h/24h) and limit Price: $0.002 per call (vendor spec).",
+    "description": "Order-flow leaderboard: ranks the full universe by net taker-buy notional over a rolling window, returning top inflow (most buying) and top outflow (most selling) markets with buy/sell notional, trade count and latest price. Optional window (5m/15m/1h/4h/24h) and limit Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/vergex/flow-markets",
     "input_schema": {
@@ -215,7 +215,7 @@
   },
   {
     "name": "claw402_vergex_signal_ranking",
-    "description": "Signal ranking: cross-market factor model that ranks the full universe by composite z (bias, capital-gains-overhang pct, liquidation-fuel pct, cascade vulnerability). Optional liqBand tunes the liquidation banding Price: $0.002 per call (vendor spec).",
+    "description": "Signal ranking: cross-market factor model that ranks the full universe by composite z (bias, capital-gains-overhang pct, liquidation-fuel pct, cascade vulnerability). Optional liqBand tunes the liquidation banding Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/vergex/signal-ranking",
     "input_schema": {
@@ -239,7 +239,7 @@
   },
   {
     "name": "claw402_vergex_whale_flashes",
-    "description": "Paginated whale-flash feed for large-address activity, optionally filtered by one or more symbols and localized in six languages Price: $0.002 per call (vendor spec).",
+    "description": "Paginated whale-flash feed for large-address activity, optionally filtered by one or more symbols and localized in six languages Cost: ~$0.002/call [spec].",
     "method": "GET",
     "path": "/api/v1/vergex/whale-flashes",
     "input_schema": {

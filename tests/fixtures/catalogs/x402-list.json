@@ -1,7 +1,7 @@
 [
   {
     "name": "x402_list_best",
-    "description": "Ranks the directory and returns the best x402 service(s) for a stated need, in one request (no paging). The ranking is the same two-stage relevance-then-quality scoring the MCP x402_find_best_service tool uses, run server-side. It is scored mostly on per-service reliability (live status, verification, uptime, response time), x402 compliance, and price (USD), filtered by category and network, with a SMALL (about 10%) weight on on-chain traction (settlement volume, transaction count, and unique buyers measured per service over its known payTo via recognized settlers, a conservative undercount). A deterministic danger flag removes a service from this surface entirely (its slug is listed in excluded_danger); a residual warning is penalized but kept. When a free-text q is given, each candidate is also scored on how well the query matches its AI-derived capability tags and summary plus its name/description/category (falling back to a plain substring match). The x402 compliance term is the share of deterministic conformance checks the service passes, capped at 0.6 (the floor of the C band) when at least one of its EVM routes is missing the EIP-712 domain parameters a standard x402 client needs in order to sign a payment. That cap is a statement about the payment envelope, not about the merit of the service, and it is what moved the scoring to generation 2. The generation served today is 3, which also gates the on-chain traction term on an absolute 30-day volume floor, discounts a payout concentrated on one buyer, and scores a service that publishes no payTo as zero instead of renormalizing around it. Scores produced under an earlier generation are not comparable with these; meta.ranking_version on every response says which one produced it. This endpoint is free and metered like every other GET on /api/v1/* (beyond the free daily quota it answers 402; see the metering note). Prices are decimal US dollars. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Ranks the directory and returns the best x402 service(s) for a stated need, in one request (no paging). The ranking is the same two-stage relevance-then-quality scoring the MCP x402_find_best_service tool uses, run server-side. It is scored mostly on per-service reliability (live status, verification, uptime, response time), x402 compliance, and price (USD), filtered by category and network, with a SMALL (about 10%) weight on on-chain traction (settlement volume, transaction count, and unique buyers measured per service over its known payTo via recognized settlers, a conservative undercount). A deterministic danger flag removes a service from this surface entirely (its slug is listed in excluded_danger); a residual warning is penalized but kept. When a free-text q is given, each candidate is also scored on how well the query matches its AI-derived capability tags and summary plus its name/description/category (falling back to a plain substring match). The x402 compliance term is the share of deterministic conformance checks the service passes, capped at 0.6 (the floor of the C band) when at least one of its EVM routes is missing the EIP-712 domain parameters a standard x402 client needs in order to sign a payment. That cap is a statement about the payment envelope, not about the merit of the service, and it is what moved the scoring to generation 2. The generation served today is 3, which also gates the on-chain traction term on an absolute 30-day volume floor, discounts a payout concentrated on one buyer, and scores a service that publishes no payTo as zero instead of renormalizing around it. Scores produced under an earlier generation are not comparable with these; meta.ranking_version on every response says which one produced it. This endpoint is free and metered like every other GET on /api/v1/* (beyond the free daily quota it answers 402; see the metering note). Prices are decimal US dollars. Cost: unknown.",
     "method": "GET",
     "path": "/best",
     "input_schema": {
@@ -78,7 +78,7 @@
   },
   {
     "name": "x402_list_categories",
-    "description": "Returns the distinct list of categories currently used by listed services. Useful for populating filter dropdowns or submission forms. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the distinct list of categories currently used by listed services. Useful for populating filter dropdowns or submission forms. Cost: unknown.",
     "method": "GET",
     "path": "/categories",
     "input_schema": {
@@ -103,7 +103,7 @@
   },
   {
     "name": "x402_list_networks",
-    "description": "Returns all blockchain networks that x402 services accept payments on. Each network includes a service count and average uptime. Uses CAIP-2 identifiers. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns all blockchain networks that x402 services accept payments on. Each network includes a service count and average uptime. Uses CAIP-2 identifiers. Cost: unknown.",
     "method": "GET",
     "path": "/networks",
     "input_schema": {
@@ -115,7 +115,7 @@
   },
   {
     "name": "x402_list_services",
-    "description": "Returns a paginated list of registered x402 services with computed fields like uptime, pricing, and endpoint count. Supports filtering by network, status, category, verification state, signability of the 402 envelope, and full-text search. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a paginated list of registered x402 services with computed fields like uptime, pricing, and endpoint count. Supports filtering by network, status, category, verification state, signability of the 402 envelope, and full-text search. Cost: unknown.",
     "method": "GET",
     "path": "/services",
     "input_schema": {
@@ -231,7 +231,7 @@
   },
   {
     "name": "x402_list_services_slug",
-    "description": "Returns full details for a single service including all active endpoints with their current pricing, uptime windows (24h/7d/30d/90d), average response time, and total check count. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns full details for a single service including all active endpoints with their current pricing, uptime windows (24h/7d/30d/90d), average response time, and total check count. Cost: unknown.",
     "method": "GET",
     "path": "/services/{slug}",
     "input_schema": {

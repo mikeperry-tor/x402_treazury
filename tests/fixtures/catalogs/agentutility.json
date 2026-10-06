@@ -1,7 +1,7 @@
 [
   {
     "name": "agentutility_answer_web",
-    "description": "Answers natural-language questions with live web research, returning a synthesized answer with inline [N] citations and the source URLs. Combines Decodo Google SERP + parallel cheerio scrape + Morpheus llama-3.3-70b. No login, pay-per-call. Use it as a live web answer engine, Perplexity-style cited answers, web Q&A, agent search, research-grade question-to-answer with sources, or SERP + scrape + LLM synthesis. Price: $0.04 per call (vendor spec).",
+    "description": "Answers natural-language questions with live web research, returning a synthesized answer with inline [N] citations and the source URLs. Combines Decodo Google SERP + parallel cheerio scrape + Morpheus llama-3.3-70b. No login, pay-per-call. Use it as a live web answer engine, Perplexity-style cited answers, web Q&A, agent search, research-grade question-to-answer with sources, or SERP + scrape + LLM synthesis. Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/answer-web",
     "input_schema": {
@@ -45,7 +45,7 @@
   },
   {
     "name": "agentutility_archive_snapshot",
-    "description": "Finds the closest archived snapshot of a public URL, like a Wayback Machine API. Given a URL and optional timestamp, returns the closest archived capture URL, archive timestamp, and optional cleaned archived page text for citation repair, reference rot fixes, due diligence, and provenance checks. Use it as a web archive lookup, historical webpage snapshot, or archived URL finder. Price: $0.02 per call (vendor spec).",
+    "description": "Finds the closest archived snapshot of a public URL, like a Wayback Machine API. Given a URL and optional timestamp, returns the closest archived capture URL, archive timestamp, and optional cleaned archived page text for citation repair, reference rot fixes, due diligence, and provenance checks. Use it as a web archive lookup, historical webpage snapshot, or archived URL finder. Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/archive-snapshot",
     "input_schema": {
@@ -77,7 +77,7 @@
   },
   {
     "name": "agentutility_arxiv_search",
-    "description": "Search arXiv's full paper catalog by query, author, category, or a specific id-list and get back structured results instead of scraping HTML. Runs against the public arXiv API, so coverage matches what researchers actually publish. Each result carries title, authors, abstract, primary category, submission and update dates, a PDF URL, and DOI when one exists; the response also reports total_results and how many were returned for the requested limit. Use it as an arXiv search API, academic paper lookup, or research literature search tool for tracking preprints, building citation lists, or monitoring a research topic. Price: $0.03 per call (vendor spec).",
+    "description": "Search arXiv's full paper catalog by query, author, category, or a specific id-list and get back structured results instead of scraping HTML. Runs against the public arXiv API, so coverage matches what researchers actually publish. Each result carries title, authors, abstract, primary category, submission and update dates, a PDF URL, and DOI when one exists; the response also reports total_results and how many were returned for the requested limit. Use it as an arXiv search API, academic paper lookup, or research literature search tool for tracking preprints, building citation lists, or monitoring a research topic. Cost: ~$0.03/call [spec].",
     "method": "POST",
     "path": "/arxiv-search",
     "input_schema": {
@@ -143,7 +143,7 @@
   },
   {
     "name": "agentutility_arxiv_summarize",
-    "description": "Turn an arXiv paper into a structured research summary without reading the PDF. Send an arxiv_id_or_url (like \"2402.12345\" or a full arxiv.org link) and get back a TLDR, 3-5 key findings, a methods description, disclosed limitations, and a plain-language so-what on why the paper matters outside its subfield, plus title, authors, categories, and links (arxiv_url, pdf_url). Works from the paper's abstract via the arXiv API, so it covers the claim and framing rather than deep results tables. Use it as an arXiv summarizer, research paper TLDR generator, or literature-review triage tool when you need to screen or digest papers faster than reading each one end to end. Price: $0.04 per call (vendor spec).",
+    "description": "Turn an arXiv paper into a structured research summary without reading the PDF. Send an arxiv_id_or_url (like \"2402.12345\" or a full arxiv.org link) and get back a TLDR, 3-5 key findings, a methods description, disclosed limitations, and a plain-language so-what on why the paper matters outside its subfield, plus title, authors, categories, and links (arxiv_url, pdf_url). Works from the paper's abstract via the arXiv API, so it covers the claim and framing rather than deep results tables. Use it as an arXiv summarizer, research paper TLDR generator, or literature-review triage tool when you need to screen or digest papers faster than reading each one end to end. Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/arxiv-summarize",
     "input_schema": {
@@ -170,7 +170,7 @@
   },
   {
     "name": "agentutility_github_readme",
-    "description": "Fetches the raw README markdown for any public GitHub repository via the official GitHub REST API, no auth required for public repos. Returns the unaltered markdown plus byte size and char count. Useful for agents documenting a stack, explaining a library, or snipping an example. Use it as a repo readme fetch, open-source-readme-as-markdown endpoint, or package documentation puller. Price: $0.005 per call (vendor spec).",
+    "description": "Fetches the raw README markdown for any public GitHub repository via the official GitHub REST API, no auth required for public repos. Returns the unaltered markdown plus byte size and char count. Useful for agents documenting a stack, explaining a library, or snipping an example. Use it as a repo readme fetch, open-source-readme-as-markdown endpoint, or package documentation puller. Cost: ~$0.005/call [spec].",
     "method": "POST",
     "path": "/github-readme",
     "input_schema": {
@@ -205,7 +205,7 @@
   },
   {
     "name": "agentutility_hn_search",
-    "description": "Searches 30M+ Hacker News stories and comments via the public Algolia HN index. Filter by type (story|comment|poll), author, minimum points, ISO8601 date range (since/until), and sort by relevance or recency. Returns total hit count plus per-hit objectID, title, author, points, comment count, created_at, URL, and story/comment text. Public Algolia API, no auth, commercial-OK. Use it as an HN search, yc-news or startup-news search, who-is-hiring scraper, or programmer-news firehose. Price: $0.001 per call (vendor spec).",
+    "description": "Searches 30M+ Hacker News stories and comments via the public Algolia HN index. Filter by type (story|comment|poll), author, minimum points, ISO8601 date range (since/until), and sort by relevance or recency. Returns total hit count plus per-hit objectID, title, author, points, comment count, created_at, URL, and story/comment text. Public Algolia API, no auth, commercial-OK. Use it as an HN search, yc-news or startup-news search, who-is-hiring scraper, or programmer-news firehose. Cost: ~$0.001/call [spec].",
     "method": "POST",
     "path": "/hn-search",
     "input_schema": {
@@ -271,7 +271,7 @@
   },
   {
     "name": "agentutility_link_extract",
-    "description": "Extracts every link from a webpage: fetches the HTML URL and returns each <a> link with its anchor text, rel attribute, and an is_external flag. Resolves relative URLs against the page's <base> or final URL. Lighter than full scrape / metadata endpoints; the exact tool for the agent task 'walk this page, pick which links to follow.' Default 500-link cap. SSRF-guarded (no loopback / RFC1918 targets). Use it as a link extractor, page outlink crawler, or to scrape outbound links and get hrefs from a page. Price: $0.005 per call (vendor spec).",
+    "description": "Extracts every link from a webpage: fetches the HTML URL and returns each <a> link with its anchor text, rel attribute, and an is_external flag. Resolves relative URLs against the page's <base> or final URL. Lighter than full scrape / metadata endpoints; the exact tool for the agent task 'walk this page, pick which links to follow.' Default 500-link cap. SSRF-guarded (no loopback / RFC1918 targets). Use it as a link extractor, page outlink crawler, or to scrape outbound links and get hrefs from a page. Cost: ~$0.005/call [spec].",
     "method": "POST",
     "path": "/link-extract",
     "input_schema": {
@@ -313,7 +313,7 @@
   },
   {
     "name": "agentutility_pdf_to_markdown",
-    "description": "Converts digital or scanned PDFs to clean Markdown with AI-powered, layout-aware extraction on the Datalab Marker engine. Preserves headings, tables, equations (LaTeX), bulleted lists, and multi-column flow; outputs Markdown (default), HTML, or structured JSON with per-page blocks. 30 pages max. Use it as a PDF parser, PDF to text converter, OCR PDF reader, extract-tables-from-PDF tool, equation-aware PDF parser, scanned-PDF OCR, or PDF data extractor. Price: $0.0025 per call (vendor spec).",
+    "description": "Converts digital or scanned PDFs to clean Markdown with AI-powered, layout-aware extraction on the Datalab Marker engine. Preserves headings, tables, equations (LaTeX), bulleted lists, and multi-column flow; outputs Markdown (default), HTML, or structured JSON with per-page blocks. 30 pages max. Use it as a PDF parser, PDF to text converter, OCR PDF reader, extract-tables-from-PDF tool, equation-aware PDF parser, scanned-PDF OCR, or PDF data extractor. Cost: ~$0.0025/call [spec].",
     "method": "POST",
     "path": "/pdf-to-markdown",
     "input_schema": {
@@ -345,7 +345,7 @@
   },
   {
     "name": "agentutility_pubmed_search",
-    "description": "Searches PubMed for biomedical literature by free-text query, with optional date range and sort (relevance / pub_date / first_author). Returns total hit count plus PMID, title, authors, journal, publication date, abstract, MeSH terms, and DOI per paper. Federal public-domain data via NCBI. Use it as a medical journal lookup, NIH paper search, clinical-research finder, MeSH-term query, or NCBI E-utilities wrapper. Price: $0.01 per call (vendor spec).",
+    "description": "Searches PubMed for biomedical literature by free-text query, with optional date range and sort (relevance / pub_date / first_author). Returns total hit count plus PMID, title, authors, journal, publication date, abstract, MeSH terms, and DOI per paper. Federal public-domain data via NCBI. Use it as a medical journal lookup, NIH paper search, clinical-research finder, MeSH-term query, or NCBI E-utilities wrapper. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/pubmed-search",
     "input_schema": {
@@ -397,7 +397,7 @@
   },
   {
     "name": "agentutility_research_brief",
-    "description": "Builds a structured research brief on a company, person, product, or topic as fixed-shape JSON: overview, key_facts, recent_news (with date hints), all with source-index citations. Combines Decodo Google SERP + parallel cheerio scrape (up to 8 sources) + Morpheus llama-3.3-70b with json_schema response_format. Use it for company briefs, entity profiles, topic briefs, sales-prep dossiers, due-diligence summaries, competitive intel, or agent-readable research. Price: $0.10 per call (vendor spec).",
+    "description": "Builds a structured research brief on a company, person, product, or topic as fixed-shape JSON: overview, key_facts, recent_news (with date hints), all with source-index citations. Combines Decodo Google SERP + parallel cheerio scrape (up to 8 sources) + Morpheus llama-3.3-70b with json_schema response_format. Use it for company briefs, entity profiles, topic briefs, sales-prep dossiers, due-diligence summaries, competitive intel, or agent-readable research. Cost: ~$0.10/call [spec].",
     "method": "POST",
     "path": "/research-brief",
     "input_schema": {
@@ -434,7 +434,7 @@
   },
   {
     "name": "agentutility_scrape",
-    "description": "Scrape any webpage. Pulls title, description, canonical URL, OpenGraph + Twitter card metadata, headings, and outbound links from a single URL. Server-side rendering. Body content rendered as text / raw HTML / clean markdown. Optional link extraction. Cheerio-based, no headless browser — fast and cheap, ideal for static pages and SSR sites. Alias of scrape-website. For JS-heavy SPAs that need a real browser, see website-screenshot. Price: $0.04 per call (vendor spec).",
+    "description": "Scrape any webpage. Pulls title, description, canonical URL, OpenGraph + Twitter card metadata, headings, and outbound links from a single URL. Server-side rendering. Body content rendered as text / raw HTML / clean markdown. Optional link extraction. Cheerio-based, no headless browser — fast and cheap, ideal for static pages and SSR sites. Alias of scrape-website. For JS-heavy SPAs that need a real browser, see website-screenshot. Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/scrape",
     "input_schema": {
@@ -476,7 +476,7 @@
   },
   {
     "name": "agentutility_scrape_to_json",
-    "description": "Turn any webpage into structured JSON that matches your schema. Fetches the page server-side (cheerio, no headless browser), converts it to clean markdown, then extracts data conforming to a caller-supplied JSON schema via Morpheus mistral-31-24b. The web scraper to reach for when you need website-to-JSON, page-to-structured-data, or scrape-and-extract with schema enforcement. Pair with watch-page or research-brief for richer agent pipelines. Price: $0.02 per call (vendor spec).",
+    "description": "Turn any webpage into structured JSON that matches your schema. Fetches the page server-side (cheerio, no headless browser), converts it to clean markdown, then extracts data conforming to a caller-supplied JSON schema via Morpheus mistral-31-24b. The web scraper to reach for when you need website-to-JSON, page-to-structured-data, or scrape-and-extract with schema enforcement. Pair with watch-page or research-brief for richer agent pipelines. Cost: ~$0.02/call [spec].",
     "method": "POST",
     "path": "/scrape-to-json",
     "input_schema": {
@@ -523,7 +523,7 @@
   },
   {
     "name": "agentutility_web_search",
-    "description": "Live web search and web answer engine retrieval API for agents that need ranked sources before writing an answer. Send a query and optional recency filter; receive ranked web results with title, URL, snippet, and domain, not an LLM-written response. Successful results are cached, and provider rate limits trigger a short circuit breaker plus a clearly marked recent public-news fallback. Use it as a web answer engine source API, live web search API, web search MCP tool, RAG source-discovery feed, or source search tool. For fetched page text or cited synthesis, use answer-web or scrape-to-json. Price: $0.006 per call (vendor spec).",
+    "description": "Live web search and web answer engine retrieval API for agents that need ranked sources before writing an answer. Send a query and optional recency filter; receive ranked web results with title, URL, snippet, and domain, not an LLM-written response. Successful results are cached, and provider rate limits trigger a short circuit breaker plus a clearly marked recent public-news fallback. Use it as a web answer engine source API, live web search API, web search MCP tool, RAG source-discovery feed, or source search tool. For fetched page text or cited synthesis, use answer-web or scrape-to-json. Cost: ~$0.006/call [spec].",
     "method": "POST",
     "path": "/web-search",
     "input_schema": {
@@ -572,7 +572,7 @@
   },
   {
     "name": "agentutility_wikipedia_search",
-    "description": "Wikipedia search for full-text lookups across any Wikipedia language edition, built for agents that need a quick encyclopedia fact-check or background pass before answering. Send a query and get back ranked article hits with plain-text snippets (HTML stripped), page ids, and canonical wiki URLs. Wikipedia search, encyclopedia search, wiki full text search, knowledge search. Distinct from a single-page fetch: this ranks matches across the whole encyclopedia. Use it as a Wikipedia search API, an encyclopedia lookup tool, or a knowledge-base search for research and fact-checking agents. Price: $0.008 per call (vendor spec).",
+    "description": "Wikipedia search for full-text lookups across any Wikipedia language edition, built for agents that need a quick encyclopedia fact-check or background pass before answering. Send a query and get back ranked article hits with plain-text snippets (HTML stripped), page ids, and canonical wiki URLs. Wikipedia search, encyclopedia search, wiki full text search, knowledge search. Distinct from a single-page fetch: this ranks matches across the whole encyclopedia. Use it as a Wikipedia search API, an encyclopedia lookup tool, or a knowledge-base search for research and fact-checking agents. Cost: ~$0.008/call [spec].",
     "method": "POST",
     "path": "/wikipedia-search",
     "input_schema": {
@@ -604,7 +604,7 @@
   },
   {
     "name": "agentutility_youtube_transcript",
-    "description": "Fetch the transcript of any YouTube video. Pulls auto-generated or manual captions and returns full text plus per-segment {start, duration, text}, with an optional language pick. Backed by Supadata's transcript pipeline server-side — no caller key required; returns a clear 404 when a video has no transcript. Use it as a YouTube closed-caption fetcher or video subtitles puller. Price: $0.01 per call (vendor spec).",
+    "description": "Fetch the transcript of any YouTube video. Pulls auto-generated or manual captions and returns full text plus per-segment {start, duration, text}, with an optional language pick. Backed by Supadata's transcript pipeline server-side — no caller key required; returns a clear 404 when a video has no transcript. Use it as a YouTube closed-caption fetcher or video subtitles puller. Cost: ~$0.01/call [spec].",
     "method": "POST",
     "path": "/youtube-transcript",
     "input_schema": {

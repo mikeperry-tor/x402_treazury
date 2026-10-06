@@ -32,8 +32,7 @@ impl std::fmt::Display for LoadStage {
 }
 impl std::error::Error for LoadStage {}
 
-const DEFAULT_PRICE: &str =
-    "Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).";
+const DEFAULT_PRICE: &str = "Cost: unknown.";
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'!')
@@ -535,9 +534,13 @@ fn price(op: &Value) -> (String, bool) {
         return (DEFAULT_PRICE.into(), false);
     }
     if p["authMode"] == "free" && p.get("price").is_none() {
-        return ("Free — no payment required (vendor spec).".into(), true);
+        return ("Cost: free [spec].".into(), true);
     }
     let block = p.get("price").filter(|v| v.is_object()).unwrap_or(p);
+    let unit = block["unit"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("call");
     let show = |amount: String| match block["currency"].as_str() {
         Some(c) if c.eq_ignore_ascii_case("USD") || c.eq_ignore_ascii_case("USDC") => {
             format!("${amount}")
@@ -550,18 +553,14 @@ fn price(op: &Value) -> (String, bool) {
             .as_str()
             .is_some_and(|s| s.eq_ignore_ascii_case("dynamic"));
         format!(
-            "Price: {} per call (vendor spec{}).",
+            "Cost: ~{}/{unit} [spec{}].",
             show(amount),
             if dynamic { ", dynamic" } else { "" }
         )
     } else if let (Some(lo), Some(hi)) = (money(&block["min"]), money(&block["max"])) {
-        format!(
-            "Price: {}–{} per call, scaling with usage (vendor spec).",
-            show(lo),
-            show(hi)
-        )
+        format!("Cost: ~{}–{}/{unit} [spec].", show(lo), show(hi))
     } else {
-        format!("Pricing: {p} (vendor spec extension).")
+        format!("Pricing: {p} [spec].")
     };
     (line, true)
 }
@@ -577,10 +576,9 @@ pub fn build_tools_with_prices(
     prices: &BTreeMap<(String, String), String>,
 ) -> Result<Vec<ToolSpec>> {
     let selected = selected_operations(cfg, root, prefix)?;
-    let price_tokens = Regex::new(r"\$\d[\d,]*(?:\.\d+)?").expect("constant regex");
     let mut tools = selected
         .into_iter()
-        .map(|(op, name)| operation_tool(cfg, &op, name, prices, &price_tokens))
+        .map(|(op, name)| operation_tool(cfg, &op, name, prices))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
         tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
@@ -792,7 +790,6 @@ fn operation_description(
     cfg: &Config,
     op: &Value,
     prices: &BTreeMap<(String, String), String>,
-    re: &Regex,
 ) -> String {
     let method = op["method"].as_str().unwrap();
     let text = op["description"]
@@ -810,9 +807,9 @@ fn operation_description(
     {
         price = line.clone();
     }
-    let tokens: Vec<_> = re.find_iter(&price).map(|m| m.as_str()).collect();
-    let mut description = if vendor && !tokens.is_empty() && tokens.iter().all(|s| text.contains(s))
-    {
+    // Dollar amounts elsewhere in vendor prose do not establish price provenance.
+    // Only omit a suffix that is already present verbatim.
+    let mut description = if text.ends_with(&price) {
         text
     } else {
         format!("{text} {price}")
@@ -837,11 +834,10 @@ fn operation_tool(
     op: &Value,
     name: String,
     prices: &BTreeMap<(String, String), String>,
-    re: &Regex,
 ) -> Result<ToolSpec> {
     let input = operation_input(op)?;
     let method = op["method"].as_str().unwrap();
-    let description = operation_description(cfg, op, prices, re);
+    let description = operation_description(cfg, op, prices);
     Ok(ToolSpec {
         response_mapping: cfg
             .response_mappings

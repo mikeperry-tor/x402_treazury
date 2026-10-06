@@ -1,7 +1,7 @@
 [
   {
     "name": "concordance_company_brief",
-    "description": "The cross-source correlation endpoint: joins market quotes (3\nproviders), SEC filings, and general mentions (news/academic/legal/\ndev-community) for one company in a single call -- something no\nsingle-source competitor in this space can offer, since it requires\nowning all the underlying sources already. Partial results are\nnormal and expected here (e.g. market data present but no recent\nfilings) -- this endpoint aggregates across inherently-optional\nsources, unlike /tools/series which is about exactly one source and\nwhere \"not synced yet\" is a meaningful 503 signal. Price: $0.05 per call (vendor spec).",
+    "description": "The cross-source correlation endpoint: joins market quotes (3\nproviders), SEC filings, and general mentions (news/academic/legal/\ndev-community) for one company in a single call -- something no\nsingle-source competitor in this space can offer, since it requires\nowning all the underlying sources already. Partial results are\nnormal and expected here (e.g. market data present but no recent\nfilings) -- this endpoint aggregates across inherently-optional\nsources, unlike /tools/series which is about exactly one source and\nwhere \"not synced yet\" is a meaningful 503 signal. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/tools/company-brief",
     "input_schema": {
@@ -33,7 +33,7 @@
   },
   {
     "name": "concordance_corroboration",
-    "description": "Is this claim independently corroborated across multiple unrelated\nsources, or does it trace back to a single origin? Groups matches by\nSOURCE (not category, unlike /tools/digest) so a caller can see exactly\nhow many independent outlets/agencies/publications back a claim, not\njust how many raw documents mention it -- the literal meaning of\n\"concordance\": where a claim is attested across a body of independently\nsourced texts. Price: $0.04 per call (vendor spec).",
+    "description": "Is this claim independently corroborated across multiple unrelated\nsources, or does it trace back to a single origin? Groups matches by\nSOURCE (not category, unlike /tools/digest) so a caller can see exactly\nhow many independent outlets/agencies/publications back a claim, not\njust how many raw documents mention it -- the literal meaning of\n\"concordance\": where a claim is attested across a body of independently\nsourced texts. Cost: ~$0.04/call [spec].",
     "method": "POST",
     "path": "/tools/corroboration",
     "input_schema": {
@@ -76,7 +76,7 @@
   },
   {
     "name": "concordance_digest",
-    "description": "The cross-category synthesis endpoint: one call replaces manually\ncalling /tools/search once per category and merging results\nyourself. Deliberately NOT an LLM-generated summary -- pure\nstructured aggregation of real search hits, keeping the same zero-\nmarginal-cost model as the rest of this service (an LLM call here\nwould need its own paid API key and per-call cost, undermining the\nwhole \"free sources, free to run\" design). Price: $0.03 per call (vendor spec).",
+    "description": "The cross-category synthesis endpoint: one call replaces manually\ncalling /tools/search once per category and merging results\nyourself. Deliberately NOT an LLM-generated summary -- pure\nstructured aggregation of real search hits, keeping the same zero-\nmarginal-cost model as the rest of this service (an LLM call here\nwould need its own paid API key and per-call cost, undermining the\nwhole \"free sources, free to run\" design). Cost: ~$0.03/call [spec].",
     "method": "POST",
     "path": "/tools/digest",
     "input_schema": {
@@ -255,7 +255,7 @@
   },
   {
     "name": "concordance_timeline",
-    "description": "How has coverage of this topic developed over time, across every\naggregated source? Chronologically ordered (oldest first), unlike\n/tools/search (relevance-ranked) or /tools/digest (grouped by\ncategory) -- for tracking a story's evolution or an emerging trend\nacross independently-sourced outlets. Price: $0.03 per call (vendor spec).",
+    "description": "How has coverage of this topic developed over time, across every\naggregated source? Chronologically ordered (oldest first), unlike\n/tools/search (relevance-ranked) or /tools/digest (grouped by\ncategory) -- for tracking a story's evolution or an emerging trend\nacross independently-sourced outlets. Cost: ~$0.03/call [spec].",
     "method": "POST",
     "path": "/tools/timeline",
     "input_schema": {

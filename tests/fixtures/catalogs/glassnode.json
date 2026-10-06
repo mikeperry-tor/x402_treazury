@@ -14,7 +14,7 @@
   },
   {
     "name": "glassnode_metadata_assets",
-    "description": "List all assets and their metadata ($0.01 USDC on Base per call): Glassnode id, symbol, name, asset_type (BLOCKCHAIN/TOKEN), blockchains with contract addresses and decimals, external ids (CoinMarketCap, Coingecko, CCData) and semantic tags. The optional CEL filter narrows the list, e.g. filter=asset.id=='USDT', filter=asset.blockchains.exists(b,b.blockchain=='ETH') or filter=asset.semantic_tags.exists(tag,tag=='stablecoin').",
+    "description": "List all assets and their metadata ($0.01 USDC on Base per call): Glassnode id, symbol, name, asset_type (BLOCKCHAIN/TOKEN), blockchains with contract addresses and decimals, external ids (CoinMarketCap, Coingecko, CCData) and semantic tags. The optional CEL filter narrows the list, e.g. filter=asset.id=='USDT', filter=asset.blockchains.exists(b,b.blockchain=='ETH') or filter=asset.semantic_tags.exists(tag,tag=='stablecoin'). Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/v1/metadata/assets",
     "input_schema": {
@@ -33,7 +33,7 @@
   },
   {
     "name": "glassnode_metadata_metric",
-    "description": "Metadata for a single Glassnode metric ($0.01 USDC on Base per call): the metric's allowed parameters and their values, defaults applied when parameters are omitted, the available timerange, descriptors (name, group, description, tags) and docs/studio links. path is required (e.g. /distribution/balance_exchanges); passing additional parameters (a, e, i, ...) narrows the returned parameter values to that drill-down.",
+    "description": "Metadata for a single Glassnode metric ($0.01 USDC on Base per call): the metric's allowed parameters and their values, defaults applied when parameters are omitted, the available timerange, descriptors (name, group, description, tags) and docs/studio links. path is required (e.g. /distribution/balance_exchanges); passing additional parameters (a, e, i, ...) narrows the returned parameter values to that drill-down. Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/v1/metadata/metric",
     "input_schema": {
@@ -85,7 +85,7 @@
   },
   {
     "name": "glassnode_metadata_metrics",
-    "description": "List all available Glassnode metric paths ($0.01 USDC on Base per call), returned without the /v1/metrics prefix (e.g. /addresses/count). Feed a path to glassnode_metadata_metric for its allowed parameters and to glassnode_metrics_category_metric for the data. Optional filters narrow the list: a (asset, repeatable: a=BTC&a=ETH), c currency, e exchange, f format, i interval, from_exchange, to_exchange, miner, maturity, network, period, quote_symbol.",
+    "description": "List all available Glassnode metric paths ($0.01 USDC on Base per call), returned without the /v1/metrics prefix (e.g. /addresses/count). Feed a path to glassnode_metadata_metric for its allowed parameters and to glassnode_metrics_category_metric for the data. Optional filters narrow the list: a (asset, repeatable: a=BTC&a=ETH), c currency, e exchange, f format, i interval, from_exchange, to_exchange, miner, maturity, network, period, quote_symbol. Cost: ~$0.01/call [spec].",
     "method": "GET",
     "path": "/v1/metadata/metrics",
     "input_schema": {
@@ -159,7 +159,7 @@
   },
   {
     "name": "glassnode_metrics_category_metric",
-    "description": "Fetch any Glassnode metric time series ($0.05 USDC on Base per call). The x402 gateway mirrors api.glassnode.com metric paths one-to-one. Discover metric paths with glassnode_metadata_metrics (returned without the /v1/metrics prefix, e.g. /distribution/balance_exchanges), then pass category = the first path segment and metric = the second segment (two-segment paths; deeper sub-path variants are not addressable here). a (asset, e.g. BTC) is required. Check a metric's exact allowed parameters, intervals and defaults with glassnode_metadata_metric before paying.",
+    "description": "Fetch any Glassnode metric time series ($0.05 USDC on Base per call). The x402 gateway mirrors api.glassnode.com metric paths one-to-one. Discover metric paths with glassnode_metadata_metrics (returned without the /v1/metrics prefix, e.g. /distribution/balance_exchanges), then pass category = the first path segment and metric = the second segment (two-segment paths; deeper sub-path variants are not addressable here). a (asset, e.g. BTC) is required. Check a metric's exact allowed parameters, intervals and defaults with glassnode_metadata_metric before paying. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/v1/metrics/{category}/{metric}",
     "input_schema": {

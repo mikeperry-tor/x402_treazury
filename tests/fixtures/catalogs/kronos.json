@@ -1,7 +1,7 @@
 [
   {
     "name": "kronos_alerts_asset",
-    "description": "Returns the current actionable market-state for any of the 16 supported assets: recent regime events detected by the Kronos regime engine within the last ~2 hours (squeeze, breakout, funding_extreme, oi_surge) plus live derived state from the latest market_signals row (funding rate, heuristic annualised funding, open interest, plain-language read). Supports BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT. Regime events run on a ~15-minute cron; live state may lag by up to 5 minutes. Note: /api/v1/alerts/btc is a dedicated static route; this dynamic route handles all 17 assets. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the current actionable market-state for any of the 16 supported assets: recent regime events detected by the Kronos regime engine within the last ~2 hours (squeeze, breakout, funding_extreme, oi_surge) plus live derived state from the latest market_signals row (funding rate, heuristic annualised funding, open interest, plain-language read). Supports BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT. Regime events run on a ~15-minute cron; live state may lag by up to 5 minutes. Note: /api/v1/alerts/btc is a dedicated static route; this dynamic route handles all 17 assets. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/alerts/{asset}",
     "input_schema": {
@@ -41,7 +41,7 @@
   },
   {
     "name": "kronos_alerts_btc",
-    "description": "Returns the CURRENT actionable market-state for BTC that an agent can poll: recent regime events detected by the Kronos regime engine within the last ~2 hours (squeeze, breakout, funding_extreme, oi_surge) plus live derived state from the latest market_signals row (funding rate, heuristic annualised funding, open interest, and a short plain-language read). Regime events are detected on a ~15-minute cron; live state may lag by up to 5 minutes. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the CURRENT actionable market-state for BTC that an agent can poll: recent regime events detected by the Kronos regime engine within the last ~2 hours (squeeze, breakout, funding_extreme, oi_surge) plus live derived state from the latest market_signals row (funding rate, heuristic annualised funding, open interest, and a short plain-language read). Regime events are detected on a ~15-minute cron; live state may lag by up to 5 minutes. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/alerts/btc",
     "input_schema": {
@@ -53,7 +53,7 @@
   },
   {
     "name": "kronos_briefing",
-    "description": "Assembles BTC/ETH/SOL ML forecasts (1h horizon), Crypto Fear & Greed Index, TradFi macro context (VIX/DXY/US 10Y yield/S&P 500/gold), and top funding-rate extremes (|z|≥2 across 17 perpetual markets) into one response. Each section carries an `available` flag — partial responses are valid and valuable. markUnserved is only triggered when ALL four sections simultaneously fail. Forecasts reuse the Kronos-base cached model (~20 min TTL). Macro fetches fresh from stooq.com + Yahoo Finance. Funding extremes query Kronos market_signals (OKX perpetual swaps, 30d window). Requires an x402 EIP-3009 micropayment of $0.10 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Assembles BTC/ETH/SOL ML forecasts (1h horizon), Crypto Fear & Greed Index, TradFi macro context (VIX/DXY/US 10Y yield/S&P 500/gold), and top funding-rate extremes (|z|≥2 across 17 perpetual markets) into one response. Each section carries an `available` flag — partial responses are valid and valuable. markUnserved is only triggered when ALL four sections simultaneously fail. Forecasts reuse the Kronos-base cached model (~20 min TTL). Macro fetches fresh from stooq.com + Yahoo Finance. Funding extremes query Kronos market_signals (OKX perpetual swaps, 30d window). Requires an x402 EIP-3009 micropayment of $0.10 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/briefing",
     "input_schema": {
@@ -65,7 +65,7 @@
   },
   {
     "name": "kronos_cex_premium_asset",
-    "description": "Computes the Coinbase price premium vs the composite median of OKX, Kraken, and Binance spot prices. premium_pct = (coinbase_price / composite_median − 1) × 100. Positive = US/institutional demand bias; negative = global selling pressure. Covers assets listed on Coinbase (BTC/ETH/SOL/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/BCH/ATOM/NEAR). Assets not listed on Coinbase return available:false. Includes 30d z-score and 24h percentile from Kronos cex_premium_history (hourly cron); baseline_status:'accumulating' until ≥24 samples. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Computes the Coinbase price premium vs the composite median of OKX, Kraken, and Binance spot prices. premium_pct = (coinbase_price / composite_median − 1) × 100. Positive = US/institutional demand bias; negative = global selling pressure. Covers assets listed on Coinbase (BTC/ETH/SOL/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/BCH/ATOM/NEAR). Assets not listed on Coinbase return available:false. Includes 30d z-score and 24h percentile from Kronos cex_premium_history (hourly cron); baseline_status:'accumulating' until ≥24 samples. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/cex-premium/{asset}",
     "input_schema": {
@@ -102,7 +102,7 @@
   },
   {
     "name": "kronos_digest_asset",
-    "description": "Returns a deterministic structured market digest for any of the 16 supported assets. Composes funding rate, basis, market regime, 30d realized volatility, Fear & Greed index, VIX macro context, and ML forecast probability (BTC/ETH/SOL only) into a single JSON bundle. Includes a templated thesis string and per-driver interpretations. No LLM involved — all logic is deterministic from live market data. The 'start here' endpoint for autonomous agents needing a full market snapshot. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a deterministic structured market digest for any of the 16 supported assets. Composes funding rate, basis, market regime, 30d realized volatility, Fear & Greed index, VIX macro context, and ML forecast probability (BTC/ETH/SOL only) into a single JSON bundle. Includes a templated thesis string and per-driver interpretations. No LLM involved — all logic is deterministic from live market data. The 'start here' endpoint for autonomous agents needing a full market snapshot. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/digest/{asset}",
     "input_schema": {
@@ -142,7 +142,7 @@
   },
   {
     "name": "kronos_fear_greed",
-    "description": "Returns the current Crypto Fear & Greed Index: score (0-100) and classification (Extreme Fear/Fear/Neutral/Greed/Extreme Greed) from alternative.me. Essential for contrarian signals and market sentiment analysis. $0.03 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the current Crypto Fear & Greed Index: score (0-100) and classification (Extreme Fear/Fear/Neutral/Greed/Extreme Greed) from alternative.me. Essential for contrarian signals and market sentiment analysis. $0.03 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/fear-greed",
     "input_schema": {
@@ -154,7 +154,7 @@
   },
   {
     "name": "kronos_forecast_ada",
-    "description": "Returns a directional price forecast for ADA-USD (Cardano). Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists); new endpoint 2026-07-20, no prior serving history. model_type in the response says which model served. Served accuracy is published live at /api/v1/forecast-ledger and /api/stats. Priced at $0.05 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for ADA-USD (Cardano). Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists); new endpoint 2026-07-20, no prior serving history. model_type in the response says which model served. Served accuracy is published live at /api/v1/forecast-ledger and /api/stats. Priced at $0.05 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/ada",
     "input_schema": {
@@ -179,7 +179,7 @@
   },
   {
     "name": "kronos_forecast_bnb",
-    "description": "Returns a directional price forecast for BNB-USD. Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists) — graduated from the composite heuristic 2026-07-10. model_type in the response says which model served. Per-asset served accuracy is published live at /api/stats (beta_accuracy.per_asset). Response includes model_type and accuracy_note. Priced at $0.05 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for BNB-USD. Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists) — graduated from the composite heuristic 2026-07-10. model_type in the response says which model served. Per-asset served accuracy is published live at /api/stats (beta_accuracy.per_asset). Response includes model_type and accuracy_note. Priced at $0.05 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/bnb",
     "input_schema": {
@@ -204,7 +204,7 @@
   },
   {
     "name": "kronos_forecast_btc",
-    "description": "Returns a directional price forecast for the requested asset computed from live Binance OHLCV data. The primary model is Kronos-small (ML); if unavailable the fallback is a composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) vote-based heuristic. Requires an x402 EIP-3009 micropayment of $0.05 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for the requested asset computed from live Binance OHLCV data. The primary model is Kronos-small (ML); if unavailable the fallback is a composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) vote-based heuristic. Requires an x402 EIP-3009 micropayment of $0.05 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/btc",
     "input_schema": {
@@ -240,7 +240,7 @@
   },
   {
     "name": "kronos_forecast_doge",
-    "description": "Returns a directional price forecast for DOGE-USD. Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists) — graduated from the composite heuristic 2026-07-10. model_type in the response says which model served. Per-asset served accuracy is published live at /api/stats (beta_accuracy.per_asset). Response includes model_type and accuracy_note. Priced at $0.05 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for DOGE-USD. Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists) — graduated from the composite heuristic 2026-07-10. model_type in the response says which model served. Per-asset served accuracy is published live at /api/stats (beta_accuracy.per_asset). Response includes model_type and accuracy_note. Priced at $0.05 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/doge",
     "input_schema": {
@@ -265,7 +265,7 @@
   },
   {
     "name": "kronos_forecast_eth",
-    "description": "Returns a directional price forecast for ETH-USD computed from live Binance OHLCV data. The primary model is Kronos-small (ML); if unavailable the fallback is a composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) vote-based heuristic. Requires an x402 EIP-3009 micropayment of $0.05 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for ETH-USD computed from live Binance OHLCV data. The primary model is Kronos-small (ML); if unavailable the fallback is a composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) vote-based heuristic. Requires an x402 EIP-3009 micropayment of $0.05 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/eth",
     "input_schema": {
@@ -290,7 +290,7 @@
   },
   {
     "name": "kronos_forecast_ledger",
-    "description": "Returns a paginated list of resolved forecasts (outcomes joined with forecasts). Each row shows the original prediction and actual outcome. Summary includes total, hit_rate (cache-source rows, matching /api/stats methodology), and a sample note. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a paginated list of resolved forecasts (outcomes joined with forecasts). Each row shows the original prediction and actual outcome. Summary includes total, hit_rate (cache-source rows, matching /api/stats methodology), and a sample note. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast-ledger",
     "input_schema": {
@@ -353,7 +353,7 @@
   },
   {
     "name": "kronos_forecast_near",
-    "description": "Returns a directional price forecast for NEAR-USD. Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists); new endpoint 2026-07-15, no prior serving history. model_type in the response says which model served. Per-asset served accuracy is published live at /api/stats (beta_accuracy.per_asset). Priced at $0.05 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for NEAR-USD. Kronos-base ML model (60-path Monte-Carlo, run hourly; composite heuristic when no recent run exists); new endpoint 2026-07-15, no prior serving history. model_type in the response says which model served. Per-asset served accuracy is published live at /api/stats (beta_accuracy.per_asset). Priced at $0.05 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/near",
     "input_schema": {
@@ -378,7 +378,7 @@
   },
   {
     "name": "kronos_forecast_path_asset",
-    "description": "Returns the real Monte-Carlo quantile fan (p10/p25/p50/p75/p90), expected close, and forward volatility at the three discrete horizons Kronos forecasts (1h/4h/24h), read directly from the cached forecasts-table rows (60-path Kronos-base Monte-Carlo, refreshed every 20 min). No interpolation between horizons, no fabricated per-step path data. Requires an x402 EIP-3009 micropayment of $0.08 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the real Monte-Carlo quantile fan (p10/p25/p50/p75/p90), expected close, and forward volatility at the three discrete horizons Kronos forecasts (1h/4h/24h), read directly from the cached forecasts-table rows (60-path Kronos-base Monte-Carlo, refreshed every 20 min). No interpolation between horizons, no fabricated per-step path data. Requires an x402 EIP-3009 micropayment of $0.08 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast-path/{asset}",
     "input_schema": {
@@ -405,7 +405,7 @@
   },
   {
     "name": "kronos_forecast_sol",
-    "description": "Returns a directional price forecast for SOL-USD computed from live Binance OHLCV data. The primary model is Kronos-small (ML); if unavailable the fallback is a composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) vote-based heuristic. Requires an x402 EIP-3009 micropayment of $0.05 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a directional price forecast for SOL-USD computed from live Binance OHLCV data. The primary model is Kronos-small (ML); if unavailable the fallback is a composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) vote-based heuristic. Requires an x402 EIP-3009 micropayment of $0.05 USDC. On the first call (no X-PAYMENT header) the server returns HTTP 402 with payment instructions; re-send with the X-PAYMENT header populated by an x402 client library. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/sol",
     "input_schema": {
@@ -430,7 +430,7 @@
   },
   {
     "name": "kronos_forecast_xrp",
-    "description": "Returns a composite directional price forecast for XRP-USD from live Binance OHLCV data. Model: composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) heuristic — the Kronos ML model is not yet deployed for XRP. It has shown no directional edge; check the live per-asset figure at /api/stats (beta_accuracy.per_asset, free) before buying. Response includes model_type:'composite' and accuracy_note. Priced at $0.05 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a composite directional price forecast for XRP-USD from live Binance OHLCV data. Model: composite EMA(20/50)/RSI(14)/MACD(12,26,9)/ATR(14) heuristic — the Kronos ML model is not yet deployed for XRP. It has shown no directional edge; check the live per-asset figure at /api/stats (beta_accuracy.per_asset, free) before buying. Response includes model_type:'composite' and accuracy_note. Priced at $0.05 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forecast/xrp",
     "input_schema": {
@@ -455,7 +455,7 @@
   },
   {
     "name": "kronos_forward_vol_asset",
-    "description": "Returns model-predicted forward volatility at 1h, 4h, and 24h horizons, read directly from the cached Kronos-base 60-path Monte-Carlo dispersion (refreshed every 20 min), alongside a realized-volatility comparison (Binance daily OHLC: close-to-close, Parkinson, Garman-Klass). Requires an x402 EIP-3009 micropayment of $0.03 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns model-predicted forward volatility at 1h, 4h, and 24h horizons, read directly from the cached Kronos-base 60-path Monte-Carlo dispersion (refreshed every 20 min), alongside a realized-volatility comparison (Binance daily OHLC: close-to-close, Parkinson, Garman-Klass). Requires an x402 EIP-3009 micropayment of $0.03 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/forward-vol/{asset}",
     "input_schema": {
@@ -482,7 +482,7 @@
   },
   {
     "name": "kronos_funding_arb_asset",
-    "description": "Queries up to 6 perpetual swap exchanges for real-time 8h-equivalent funding rates (Binance USDT-M, OKX, Bybit, KuCoin Futures, Bitget, Hyperliquid) and computes the gross and net-of-fees spread between the best short venue (highest rate8h) and the best long venue (lowest rate8h). gross_spread_bps = (best_short_rate8h − best_long_rate8h) × 10000. net_spread_bps = gross_spread_bps − 20 (ROUND_TRIP_FEE_BPS: 5 bps/side taker × 4 fills). annualized_pct = (net per-8h fraction) × 3 × 365 × 100. Actionability: not_actionable (net≤0), marginal (0<net≤5 bps), actionable (net>5 bps). Returns honest nulls when a venue fails — never fabricated. All 17 assets. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Queries up to 6 perpetual swap exchanges for real-time 8h-equivalent funding rates (Binance USDT-M, OKX, Bybit, KuCoin Futures, Bitget, Hyperliquid) and computes the gross and net-of-fees spread between the best short venue (highest rate8h) and the best long venue (lowest rate8h). gross_spread_bps = (best_short_rate8h − best_long_rate8h) × 10000. net_spread_bps = gross_spread_bps − 20 (ROUND_TRIP_FEE_BPS: 5 bps/side taker × 4 fills). annualized_pct = (net per-8h fraction) × 3 × 365 × 100. Actionability: not_actionable (net≤0), marginal (0<net≤5 bps), actionable (net>5 bps). Returns honest nulls when a venue fails — never fabricated. All 17 assets. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/funding-arb/{asset}",
     "input_schema": {
@@ -522,7 +522,7 @@
   },
   {
     "name": "kronos_funding_extremes",
-    "description": "Scans all 17 perpetual futures markets and returns assets ranked by absolute funding rate. Identifies crowded positions and squeeze risk across the market. Real-time from Kronos market_signals (OKX data). $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Scans all 17 perpetual futures markets and returns assets ranked by absolute funding rate. Identifies crowded positions and squeeze risk across the market. Real-time from Kronos market_signals (OKX data). $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/funding-extremes",
     "input_schema": {
@@ -534,7 +534,7 @@
   },
   {
     "name": "kronos_gex_asset",
-    "description": "Gamma Exposure (GEX) and max-pain options tool for BTC and ETH from the Deribit public API. Returns an aggregate GEX strike ladder (dealer-convention net gamma per strike), gamma flip level (zero-cumulative-GEX strike), spot regime above or below flip, max-pain strikes for upcoming weekly and monthly expiries, an expected-move cone (ATM-IV-derived 1-sigma, front expiry), and a heuristic pin-risk score. 15-minute in-memory cache. $0.04 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Gamma Exposure (GEX) and max-pain options tool for BTC and ETH from the Deribit public API. Returns an aggregate GEX strike ladder (dealer-convention net gamma per strike), gamma flip level (zero-cumulative-GEX strike), spot regime above or below flip, max-pain strikes for upcoming weekly and monthly expiries, an expected-move cone (ATM-IV-derived 1-sigma, front expiry), and a heuristic pin-risk score. 15-minute in-memory cache. $0.04 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/gex/{asset}",
     "input_schema": {
@@ -573,7 +573,7 @@
   },
   {
     "name": "kronos_implied_prob_asset",
-    "description": "Returns the options market's probability that BTC or ETH is above each of up to 25 prices at a target time, backed out of the Deribit option book: a skew-inclusive call-spread digital on the mark-IV smile, with total variance interpolated in time between listed expiries. It is the fair value of a prediction-market crypto threshold contract (Kalshi, Polymarket) — compare probability_above with the contract's YES price. Risk-neutral, not a forecast. Malformed input is refused with a free 400 before any payment. $0.02 USDC via x402. BTC and ETH only. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the options market's probability that BTC or ETH is above each of up to 25 prices at a target time, backed out of the Deribit option book: a skew-inclusive call-spread digital on the mark-IV smile, with total variance interpolated in time between listed expiries. It is the fair value of a prediction-market crypto threshold contract (Kalshi, Polymarket) — compare probability_above with the contract's YES price. Risk-neutral, not a forecast. Malformed input is refused with a free 400 before any payment. $0.02 USDC via x402. BTC and ETH only. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/implied-prob/{asset}",
     "input_schema": {
@@ -609,7 +609,7 @@
   },
   {
     "name": "kronos_liquidations_asset",
-    "description": "Returns two things for any of the 16 supported assets: (1) A forward liquidation cluster map — estimated liq price levels for 5x/10x/25x/50x leverage bands, modeled from open interest and mark price (no new upstream source; reuses OKX data already collected by the 5-min collect cron). Includes nearest long/short liq clusters (price + distance %) and squeeze_bias (long_squeeze_risk / short_squeeze_risk / balanced). (2) Recent liquidation prints from the OKX public API (no auth required), if reachable. If OKX is unreachable, recent_prints.available=false — never fabricated. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns two things for any of the 16 supported assets: (1) A forward liquidation cluster map — estimated liq price levels for 5x/10x/25x/50x leverage bands, modeled from open interest and mark price (no new upstream source; reuses OKX data already collected by the 5-min collect cron). Includes nearest long/short liq clusters (price + distance %) and squeeze_bias (long_squeeze_risk / short_squeeze_risk / balanced). (2) Recent liquidation prints from the OKX public API (no auth required), if reachable. If OKX is unreachable, recent_prints.available=false — never fabricated. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/liquidations/{asset}",
     "input_schema": {
@@ -649,7 +649,7 @@
   },
   {
     "name": "kronos_macro",
-    "description": "Returns TradFi macro context for crypto risk assessment: VIX fear gauge, DXY (US Dollar Index), US 10-Year Treasury yield, S&P 500 (SPX), and gold spot price. Sourced from stooq.com and Yahoo Finance in parallel with 15-minute caching. All fields null if sources are unreachable — never fabricated. BTC-SPX and BTC-DXY 30-day Pearson correlations are computed from daily returns (Binance + stooq historical) and returned when source data is available; null with btc_spx_correlation_available:false on upstream failure — never fabricated. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns TradFi macro context for crypto risk assessment: VIX fear gauge, DXY (US Dollar Index), US 10-Year Treasury yield, S&P 500 (SPX), and gold spot price. Sourced from stooq.com and Yahoo Finance in parallel with 15-minute caching. All fields null if sources are unreachable — never fabricated. BTC-SPX and BTC-DXY 30-day Pearson correlations are computed from daily returns (Binance + stooq historical) and returned when source data is available; null with btc_spx_correlation_available:false on upstream failure — never fabricated. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/macro",
     "input_schema": {
@@ -661,7 +661,7 @@
   },
   {
     "name": "kronos_market_pulse",
-    "description": "Material-change feed. Pass the cursor from your last call and receive ONLY what changed since: funding sign or band, funding trend, open-interest regime, alert set, and source stale/recovered, for up to 5 assets. Returns an explicit no-change packet, per-asset freshness, and a next-poll time derived from the real 5-minute collection cadence. An outage is reported as an outage, never as a market move. Send 0.02 USDC on Base mainnet (eip155:8453) via x402. Market data, not financial advice. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Material-change feed. Pass the cursor from your last call and receive ONLY what changed since: funding sign or band, funding trend, open-interest regime, alert set, and source stale/recovered, for up to 5 assets. Returns an explicit no-change packet, per-asset freshness, and a next-poll time derived from the real 5-minute collection cadence. An outage is reported as an outage, never as a market move. Send 0.02 USDC on Base mainnet (eip155:8453) via x402. Market data, not financial advice. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/market-pulse",
     "input_schema": {
@@ -685,7 +685,7 @@
   },
   {
     "name": "kronos_ohlc_asset",
-    "description": "Returns OHLC candlestick data for any of the 16 supported assets from Binance. Supports ?interval=1h|4h|1d and ?limit=1-100 (default 24 candles). For technical analysis, backtesting, and AI agent decision-making. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns OHLC candlestick data for any of the 16 supported assets from Binance. Supports ?interval=1h|4h|1d and ?limit=1-100 (default 24 candles). For technical analysis, backtesting, and AI agent decision-making. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/ohlc/{asset}",
     "input_schema": {
@@ -744,7 +744,7 @@
   },
   {
     "name": "kronos_options_iv_asset",
-    "description": "Returns the implied volatility surface for BTC or ETH from Deribit public options data (no auth required). Fields: ATM IV (annualized %), IV rank and IV percentile (from Kronos iv_history table, daily cron, null + iv_history_status:'accumulating' until ≥20 days), term structure (weekly/1m/3m ATM IV) with contango/backwardation/flat shape label, 25-delta risk reversal (put IV − call IV at BS-approximated 25-delta strikes), 10-delta wing IVs (wing_10d_call_iv / wing_10d_put_iv), max-pain strike across top-5 nearest expiries, and a vol-regime label (compression/normal/event-risk/expansion). Falls back to OKX options if Deribit is unreachable. Returns available:false (never fabricated) if both fail. 1-hour in-memory cache. $0.03 USDC via x402. BTC and ETH only. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the implied volatility surface for BTC or ETH from Deribit public options data (no auth required). Fields: ATM IV (annualized %), IV rank and IV percentile (from Kronos iv_history table, daily cron, null + iv_history_status:'accumulating' until ≥20 days), term structure (weekly/1m/3m ATM IV) with contango/backwardation/flat shape label, 25-delta risk reversal (put IV − call IV at BS-approximated 25-delta strikes), 10-delta wing IVs (wing_10d_call_iv / wing_10d_put_iv), max-pain strike across top-5 nearest expiries, and a vol-regime label (compression/normal/event-risk/expansion). Falls back to OKX options if Deribit is unreachable. Returns available:false (never fabricated) if both fail. 1-hour in-memory cache. $0.03 USDC via x402. BTC and ETH only. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/options-iv/{asset}",
     "input_schema": {
@@ -770,7 +770,7 @@
   },
   {
     "name": "kronos_overview",
-    "description": "Returns funding rate, open interest, mark price, and 24h volume for all 17 perpetual futures markets in one call. One call replaces 16 separate signals calls. Real-time from Kronos market_signals. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns funding rate, open interest, mark price, and 24h volume for all 17 perpetual futures markets in one call. One call replaces 16 separate signals calls. Real-time from Kronos market_signals. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/overview",
     "input_schema": {
@@ -782,7 +782,7 @@
   },
   {
     "name": "kronos_price_asset",
-    "description": "Returns the current spot price for any of the 16 supported assets from the Binance public API. Multi-source reference price — $0.02 USDC per call. Supports BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT. Optional ?coins=BTC,ETH,SOL batches up to 10 additional symbols (case-insensitive, de-duped) in the same paid call; adds quotes[] and unresolved[] to the response. Single-asset response is unchanged when coins= is absent. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the current spot price for any of the 16 supported assets from the Binance public API. Multi-source reference price — $0.02 USDC per call. Supports BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT. Optional ?coins=BTC,ETH,SOL batches up to 10 additional symbols (case-insensitive, de-duped) in the same paid call; adds quotes[] and unresolved[] to the response. Single-asset response is unchanged when coins= is absent. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/price/{asset}",
     "input_schema": {
@@ -827,7 +827,7 @@
   },
   {
     "name": "kronos_scan",
-    "description": "Returns a market-wide scan across all 17 crypto assets in one call. Per-asset: funding rate, annualized rate, OI 1h change (abs + pct), basis, funding trend, funding_extreme flag (|rate| > 0.001), mark price, and regime event count in the last 2h. Optional ?assets=btc,eth,sol to scan a subset. Assets without data are flagged with available:false — never fabricated. Requires an x402 EIP-3009 micropayment of $0.04 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns a market-wide scan across all 17 crypto assets in one call. Per-asset: funding rate, annualized rate, OI 1h change (abs + pct), basis, funding trend, funding_extreme flag (|rate| > 0.001), mark price, and regime event count in the last 2h. Optional ?assets=btc,eth,sol to scan a subset. Assets without data are flagged with available:false — never fabricated. Requires an x402 EIP-3009 micropayment of $0.04 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/scan",
     "input_schema": {
@@ -846,7 +846,7 @@
   },
   {
     "name": "kronos_signals_asset",
-    "description": "Returns perpetual swap market intelligence for any of the 16 supported assets (BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT) sourced from OKX. Raw fields: funding rate (raw 8-hour + heuristic annualised), mark price, index price, basis (perp premium/discount), open interest, 24h volume, next funding time. Derived signals: OI change over ~1 hour window (abs + pct), funding trend (rising/falling/flat vs prior half-window), and a human-readable heuristic read. Data is collected every 5 minutes by a background cron into the market_signals table; responses may lag by up to 5 minutes. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns perpetual swap market intelligence for any of the 16 supported assets (BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT) sourced from OKX. Raw fields: funding rate (raw 8-hour + heuristic annualised), mark price, index price, basis (perp premium/discount), open interest, 24h volume, next funding time. Derived signals: OI change over ~1 hour window (abs + pct), funding trend (rising/falling/flat vs prior half-window), and a human-readable heuristic read. Data is collected every 5 minutes by a background cron into the market_signals table; responses may lag by up to 5 minutes. Requires an x402 EIP-3009 micropayment of $0.02 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/signals/{asset}",
     "input_schema": {
@@ -886,7 +886,7 @@
   },
   {
     "name": "kronos_snapshot_asset",
-    "description": "Returns everything for the asset in one call: spot price, derivatives (funding rate, OI, basis, trend), market regime alerts (BTC only), the Kronos ML forecast for the 1h horizon (BTC/ETH/SOL only), options IV summary from Deribit (BTC/ETH only; available:false otherwise), liquidation squeeze_bias derived from funding rate + OI split, and Coinbase CEX premium (Coinbase-listed assets only; available:false otherwise). Supports all 16 assets (BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT). Cheaper than buying each tool separately. Requires an x402 EIP-3009 micropayment of $0.08 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns everything for the asset in one call: spot price, derivatives (funding rate, OI, basis, trend), market regime alerts (BTC only), the Kronos ML forecast for the 1h horizon (BTC/ETH/SOL only), options IV summary from Deribit (BTC/ETH only; available:false otherwise), liquidation squeeze_bias derived from funding rate + OI split, and Coinbase CEX premium (Coinbase-listed assets only; available:false otherwise). Supports all 16 assets (BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT). Cheaper than buying each tool separately. Requires an x402 EIP-3009 micropayment of $0.08 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/snapshot/{asset}",
     "input_schema": {
@@ -926,7 +926,7 @@
   },
   {
     "name": "kronos_stablecoins",
-    "description": "Returns total stablecoin market cap, top-10 breakdown by dominance %, and 7-day and 30-day supply flows (mint/burn) sourced from DeFiLlama. 15-minute cache. Never fabricated — returns available:false when sources are unreachable. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns total stablecoin market cap, top-10 breakdown by dominance %, and 7-day and 30-day supply flows (mint/burn) sourced from DeFiLlama. 15-minute cache. Never fabricated — returns available:false when sources are unreachable. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/stablecoins",
     "input_schema": {
@@ -938,7 +938,7 @@
   },
   {
     "name": "kronos_target_prob_asset",
-    "description": "Returns the empirical probability that the close will be above/below a caller-supplied target price at 1h, 4h, or 24h, computed directly from the 60 terminal prices of the cached Kronos-base Monte-Carlo run (refreshed every 20 min). Resolution is ~1/60 ≈ 1.7 percentage points — an empirical sample frequency, not a market-implied probability. Requires an x402 EIP-3009 micropayment of $0.05 USDC. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Returns the empirical probability that the close will be above/below a caller-supplied target price at 1h, 4h, or 24h, computed directly from the 60 terminal prices of the cached Kronos-base Monte-Carlo run (refreshed every 20 min). Resolution is ~1/60 ≈ 1.7 percentage points — an empirical sample frequency, not a market-implied probability. Requires an x402 EIP-3009 micropayment of $0.05 USDC. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/target-prob/{asset}",
     "input_schema": {
@@ -994,7 +994,7 @@
   },
   {
     "name": "kronos_trade_preflight",
-    "description": "Pre-trade context pack for one asset in a single call: derivatives state, recent liquidation prints, implied-volatility surface for BTC/ETH, and active regime alerts. Replaces four separate paid calls. Each component is independently marked available, unavailable or stale and is never flattened into a neutral value. Send 0.05 USDC on Base mainnet (eip155:8453) via x402. Facts only, no recommendation. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Pre-trade context pack for one asset in a single call: derivatives state, recent liquidation prints, implied-volatility surface for BTC/ETH, and active regime alerts. Replaces four separate paid calls. Each component is independently marked available, unavailable or stale and is never flattened into a neutral value. Send 0.05 USDC on Base mainnet (eip155:8453) via x402. Facts only, no recommendation. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/trade-preflight",
     "input_schema": {
@@ -1033,7 +1033,7 @@
   },
   {
     "name": "kronos_volatility_asset",
-    "description": "Computes 7-day and 30-day annualized realized volatility from Binance daily OHLC. Based on log returns of daily close prices, annualized by sqrt(365). Supports all 16 assets. Essential for risk management and position sizing. $0.02 USDC via x402. Paid per call via x402 (price set by the API; per-payment cap via X402_MAX_PRICE_USD).",
+    "description": "Computes 7-day and 30-day annualized realized volatility from Binance daily OHLC. Based on log returns of daily close prices, annualized by sqrt(365). Supports all 16 assets. Essential for risk management and position sizing. $0.02 USDC via x402. Cost: unknown.",
     "method": "GET",
     "path": "/api/v1/volatility/{asset}",
     "input_schema": {

@@ -1,7 +1,7 @@
 [
   {
     "name": "genuinegood_brief_get",
-    "description": "Produce a sourced agent-ready brief of up to ten current U.S. federal grant matches, eligibility signals, deadline urgency, award ranges, and next actions. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.50 per call (vendor spec).",
+    "description": "Produce a sourced agent-ready brief of up to ten current U.S. federal grant matches, eligibility signals, deadline urgency, award ranges, and next actions. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Cost: ~$0.50/call [spec].",
     "method": "GET",
     "path": "/v1/grants/brief",
     "input_schema": {
@@ -47,7 +47,7 @@
   },
   {
     "name": "genuinegood_brief_post",
-    "description": "Produce a sourced agent-ready brief of up to ten current U.S. federal grant matches, eligibility signals, deadline urgency, award ranges, and next actions. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.50 per call (vendor spec).",
+    "description": "Produce a sourced agent-ready brief of up to ten current U.S. federal grant matches, eligibility signals, deadline urgency, award ranges, and next actions. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Cost: ~$0.50/call [spec].",
     "method": "POST",
     "path": "/v1/grants/brief",
     "input_schema": {
@@ -93,7 +93,7 @@
   },
   {
     "name": "genuinegood_detail_get",
-    "description": "Retrieve an official Grants.gov opportunity with normalized applicant types, eligibility text, award range, deadline, categories, and provenance. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.08 per call (vendor spec).",
+    "description": "Retrieve an official Grants.gov opportunity with normalized applicant types, eligibility text, award range, deadline, categories, and provenance. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Cost: ~$0.08/call [spec].",
     "method": "GET",
     "path": "/v1/grants/detail",
     "input_schema": {
@@ -116,7 +116,7 @@
   },
   {
     "name": "genuinegood_detail_post",
-    "description": "Retrieve an official Grants.gov opportunity with normalized applicant types, eligibility text, award range, deadline, categories, and provenance. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.08 per call (vendor spec).",
+    "description": "Retrieve an official Grants.gov opportunity with normalized applicant types, eligibility text, award range, deadline, categories, and provenance. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Cost: ~$0.08/call [spec].",
     "method": "POST",
     "path": "/v1/grants/detail",
     "input_schema": {
@@ -139,7 +139,7 @@
   },
   {
     "name": "genuinegood_fit_get",
-    "description": "Rank current U.S. federal opportunities against a mission profile using transparent keyword, deadline, and applicant-type signals; returns reasons and official records. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.20 per call (vendor spec).",
+    "description": "Rank current U.S. federal opportunities against a mission profile using transparent keyword, deadline, and applicant-type signals; returns reasons and official records. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Cost: ~$0.20/call [spec].",
     "method": "GET",
     "path": "/v1/grants/fit",
     "input_schema": {
@@ -191,7 +191,7 @@
   },
   {
     "name": "genuinegood_fit_post",
-    "description": "Rank current U.S. federal opportunities against a mission profile using transparent keyword, deadline, and applicant-type signals; returns reasons and official records. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.20 per call (vendor spec).",
+    "description": "Rank current U.S. federal opportunities against a mission profile using transparent keyword, deadline, and applicant-type signals; returns reasons and official records. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Cost: ~$0.20/call [spec].",
     "method": "POST",
     "path": "/v1/grants/fit",
     "input_schema": {
@@ -257,7 +257,7 @@
   },
   {
     "name": "genuinegood_preflight_get",
-    "description": "Run deterministic rule-based checks over up to five retrieved Grants.gov notices: deadline horizon, listed applicant-type code intersection, source-field completeness, and official-notice verification flags. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $5.00 per call (vendor spec).",
+    "description": "Run deterministic rule-based checks over up to five retrieved Grants.gov notices: deadline horizon, listed applicant-type code intersection, source-field completeness, and official-notice verification flags. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Cost: ~$5.00/call [spec].",
     "method": "GET",
     "path": "/v1/grants/preflight",
     "input_schema": {
@@ -302,7 +302,7 @@
   },
   {
     "name": "genuinegood_preflight_post",
-    "description": "Run deterministic rule-based checks over up to five retrieved Grants.gov notices: deadline horizon, listed applicant-type code intersection, source-field completeness, and official-notice verification flags. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $5.00 per call (vendor spec).",
+    "description": "Run deterministic rule-based checks over up to five retrieved Grants.gov notices: deadline horizon, listed applicant-type code intersection, source-field completeness, and official-notice verification flags. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Cost: ~$5.00/call [spec].",
     "method": "POST",
     "path": "/v1/grants/preflight",
     "input_schema": {
@@ -347,7 +347,7 @@
   },
   {
     "name": "genuinegood_search_get",
-    "description": "Search current Grants.gov opportunities with normalized deadlines, days remaining, agency, status, assistance listing numbers, and official source links. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Price: $0.05 per call (vendor spec).",
+    "description": "Search current Grants.gov opportunities with normalized deadlines, days remaining, agency, status, assistance listing numbers, and official source links. GET compatibility accepts the same input as query parameters. Array values may be comma-separated. Cost: ~$0.05/call [spec].",
     "method": "GET",
     "path": "/v1/grants/search",
     "input_schema": {
@@ -425,7 +425,7 @@
   },
   {
     "name": "genuinegood_search_post",
-    "description": "Search current Grants.gov opportunities with normalized deadlines, days remaining, agency, status, assistance listing numbers, and official source links. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Price: $0.05 per call (vendor spec).",
+    "description": "Search current Grants.gov opportunities with normalized deadlines, days remaining, agency, status, assistance listing numbers, and official source links. Payment flow: send the request without PAYMENT-SIGNATURE, read PAYMENT-REQUIRED from the 402 response, sign one accepted option, then retry the identical request with PAYMENT-SIGNATURE. Cost: ~$0.05/call [spec].",
     "method": "POST",
     "path": "/v1/grants/search",
     "input_schema": {
