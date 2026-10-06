@@ -2,12 +2,14 @@
 
 **Privacy-enhanced x402 payments for AI agents.**
 
-Reusing a payment wallet links API calls. Connecting directly also exposes your
-network address to providers.
+X402 micropayments have a privacy problem. When you reuse your payment wallet
+across multiple agents, your wallet source address lists all their API calls on
+the public Base blockchain. Connecting directly to API services also exposes your
+network address to these API providers and Coinbase infrastructure.
 
 **treazury** reduces that linkability with **Zcash-funded rotating wallets** and **Tor isolation tied to each payment identity**. You choose which providers share a wallet and which stay separate.
 
-Treazury loads x402 provider API catalogs, converts them into MCP tools, handles x402 payments, and replenishes Base USDC wallets without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
+The `treazury` cli tool loads x402 provider API catalogs, converts them into MCP tools, handles x402 payments, and replenishes Base USDC wallets, without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
 
 You can also optionally grant your agent a set of tools to discover and add x402 providers themselves.
 
@@ -23,44 +25,61 @@ flowchart LR
     B -. promoted when active cannot fund a payment .-> A
 ```
 
-Each managed pool has an active wallet and a funded standby. When the active wallet
-cannot cover an admitted payment, treazury can promote the standby and fund a new
-replacement address. Calls continue on the promoted wallet while its replacement
-is being filled. Funding, confirmation and payment uncertainty are persisted across
-restarts; a signed payment is never automatically replayed to force a rotation.
+Each managed provider pool has an active Base USDC wallet, and a funded standby USDC
+wallet. When the active wallet cannot cover an admitted payment, treazury can
+promote the standby and fund a new replacement address. Calls continue on the
+promoted wallet while its replacement is being filled. Funding, confirmation and
+payment uncertainty are persisted across restarts.
 
-The default allocation target is **$2 USDC per address**, raised when NEAR's current
-bridge minimum requires more, within your configured spending limits. A pool needs
-two allocations to bootstrap, costing roughly $4 USDC plus swap and network fees. Separate wallet groups each need their own active and standby funding.
+The default allocation target is **$2 USDC per address**, raised when NEAR's
+current bridge minimum requires more, within your configured spending limits.
+Each provider pool needs two allocations, to bootstrap the active
+and standby wallets, costing roughly $4 USDC plus swap and network fees.
+Separate wallet groups each need their own active and standby funding.
 
-Payment requests, wallet-specific balance checks and swap jobs use the actual EVM
-address's Tor isolation identity. A rotation gets a new identity and connection pool.
-Catalogs, help and pricing use separate discovery identities grouped by origin;
-treasury synchronization has its own identity. Tor mode uses remote DNS and has
-no direct-network fallback.
+Payment requests, wallet-specific balance checks and swap jobs use the current
+source wallet address as the Tor circuit isolation identity. An active to
+standby USDC wallet rotation gets a new Tor circuit identity. API catalog
+retrieval, llm help text, and pricing queries use separate Tor identities
+grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
+uses remote DNS and has no direct-network fallback.
 
-This reduces wallet and network linkability; it does not make payments invisible.
-The currently qualified funding path uses **public NEAR swaps and public Base
-transactions**. Circuit isolation does not guarantee different exit IPs, and shared
-API credentials or identifying request contents can still link activity.
-Authenticated confidential swaps remain unqualified.
+> **NOTE** Treazury reduces wallet and network linkability; it does not make payments
+> invisible. The funding path uses **public NEAR swaps and public Base
+> transactions**. These are visible, but unlinkable to your Zcash shielded
+> address. Because of the $2 minimum swap size, each wallet will make multiple API
+> calls before rotation. Identifying request contents across these rotations can
+> also link activity.
 
 ## Quickstart: Zcash and Tor
 
-Run these commands from the repository root. This example groups Botsmith, Exa,
-PDL, Google Trends and Genuine Good Grants behind one managed wallet pool.
+The [privacy example conf file](examples/deployments/privacy.toml)
+provides three MCP endpoints, each with its own rotating wallet pool:
+
+| Research context | Selected APIs | MCP endpoint |
+| --- | --- | --- |
+| Web | Exa, SocialFetch web/community tools, Google Trends | `http://127.0.0.1:6337/mcp` |
+| Social | SocialFetch social platforms, PDL people tools | `http://127.0.0.1:6338/mcp` |
+| Company | Exa, PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants | `http://127.0.0.1:6339/mcp` |
+
+SocialFetch's overlapping Reddit tools use different wallets on the web and social
+endpoints; Exa likewise uses separate wallets on web and company. Company tools
+are explicitly selected by name to keep the agent's context focused.
 
 ### 1. Build and start Tor
+
+Run these commands from the repository checkout directory:
 
 ```sh
 scripts/zcash.sh build
 cp examples/deployments/privacy.toml examples/deployments/privacy.local.toml
 ```
 
-The wrapper uses the pinned Rust/Cargo toolchain and supplies protoc. Zcash support
-is included by default; reference checkouts and Python are not needed. Initial
-builds may download dependencies and proving parameters outside runtime Tor routing.
+The wrapper uses the pinned Rust/Cargo toolchain and supplies protoc.
 See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
+
+The cargo download dependencies and Zcash proving parameters are downloaded
+outside of Tor routing by default.
 
 Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
 the application. The example connects to Tor Browser's `127.0.0.1:9150` SOCKS port.
@@ -81,15 +100,14 @@ target/debug/treazury wallet init --config examples/deployments/privacy.local.to
 target/debug/treazury wallet addresses --config examples/deployments/privacy.local.toml
 ```
 
-Initialization creates the wallet directory, generates a seed and discovers its
-birthday through Tor. The treasury ID is read automatically from wallet state;
-there is no ID to copy into TOML. Initialization refuses an existing wallet. Imports
-require an explicit birthday; see the [wallet reference](docs/wallet-cli.md).
+Initialization creates the wallet directory specified by the config file. It
+then generates a seed and discovers its birthday through Tor.
 
-The default encryption key is `wallet.key` inside the owner-only wallet directory.
+The default encryption key is `wallet.key` inside the wallet directory.
 Anyone obtaining that entire directory obtains both state and decryption material.
-Set `treasury.key_file` to keep the key elsewhere if your storage or backup policy
-needs separation. No password or OS-keychain protection is implied.
+
+No password or OS-keychain protection is provided at this time, but the keyfile
+design is amenable to this protection in the future.
 
 Before funding, back up the wallet and encryption key. Create a private backup
 parent directory; the backup destination itself must not already exist.
@@ -101,8 +119,9 @@ target/debug/treazury wallet backup \
   --config examples/deployments/privacy.local.toml --destination secrets/privacy-backup
 ```
 
-Keep the backup secure: it contains spending material. Never operate the original
-and a restored copy concurrently.
+Keep the backup secure: it contains spending material.
+
+> **NOTE**: Do not run multiple instances of treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchonized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
 
 ### 3. Review, fund and launch
 
@@ -116,9 +135,24 @@ target/debug/treazury \
   --config examples/deployments/privacy.local.toml --check
 ```
 
-Send ZEC to the treasury's **shielded receive address**. Budget for both wallet
-allocations and fees; the bridge minimum and ZEC exchange rate can change.
-The example limits individual API payments to **$0.05**, each source operation to
+Send ZEC to the treasury's **shielded receive address**. The privacy example conf defines
+**three wallet pools**, each requiring an active and standby address:
+**3 x 2 x $2 = $12 USDC** for initial allocations. The treasury therefore needs
+**at least $12 worth of ZEC before fees; about $15 is a practical starting preload**.
+
+Allow more if the bridge minimum exceeds $2 or exchange rates and fees change.
+This preload funds initial wallets, not unlimited calls or replacements.
+
+To reduce that expense, **remove unused `[wallets.NAME]` definitions**, then remove
+or rebind any servers/sources referencing them.
+
+> **NOTE** Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
+> not eliminate that pool's funding setup. Keeping one pool requires two $2 allocations
+> (about $4 before fees); sharing it across multiple MCP servers preserves
+> separate toolsets but shares their payment identity and Tor circuit usage.
+
+The example limits individual API payments to **$0.05 for web/social** and
+**$0.10 for company**, each source operation to
 **0.006 ZEC**, daily source exposure to **0.012 ZEC**, quoted overhead to **500 bps**,
 and each refund-shielding fee to **0.0003 ZEC**. These are ceilings, not estimates;
 they may need deliberate adjustment for the current route. Daily limits reset and
@@ -131,8 +165,8 @@ target/debug/treazury wallet status --config examples/deployments/privacy.local.
 ```
 
 Once the confirmed spendable balance is sufficient and you have reviewed those
-limits, launch the server. **Managed serving automatically funds the initial pair
-and later replacements**, using real ZEC within the configured limits. Set
+limits, launch the servers. **Managed serving automatically funds each pool's initial
+pair and later replacements**, using real ZEC within the configured limits. Set
 `funding.auto_fund = false` to pause automatic funding. Initialization, inspection,
 backup and `wallet sync` never start funding workers. Ensure `TREAZURY_MCP_TOKEN`
 is set, then:
@@ -141,14 +175,15 @@ is set, then:
 target/debug/treazury --config examples/deployments/privacy.local.toml
 ```
 
-Connect your MCP client to **`http://127.0.0.1:8000/mcp`**, authenticating with
+Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`. Authentication is on by default;
 to disable it for a listener, set `auth = false` and omit `bearer_token_env` in its
 server table. Standalone HTTP supports `--no-auth`. Startup warns when auth is off.
-Wait for an active wallet and a
-ready standby before paid use. List tools in your MCP client, read the provider
-help, and select a request within the configured payment cap. Help is fetched on
-demand and cached for the process.
+Wait for an active wallet and ready standby in each selected pool before paid use.
+List tools in your MCP client and select a request within that pool's payment cap.
+Where exposed, help is fetched on demand and cached for the process. PDL person
+matches are vendor-listed at $0.28 and exceed the social pool's default cap;
+raise that cap deliberately if you need paid matches.
 
 `wallet status` reports persisted progress. Stop with Ctrl-C and allow the announced
 transaction-safety drain to finish. Wallet administration commands that need

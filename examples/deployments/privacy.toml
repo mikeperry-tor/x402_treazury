@@ -1,6 +1,11 @@
-# README quickstart: copy to privacy.local.toml and initialize its treasury.
+# Three private research contexts share one Zcash treasury, but use separate
+# rotating EVM wallet pools and Tor payer identities. Copy this file to privacy.local.toml before editing.
+# Run each agent against the MCP listener for its research context.
+# Separate wallets/circuits do not hide identifying terms in API request content.
 version = 1
 
+# Tor Browser SOCKS endpoint; keep Tor Browser running while serving.
+# Catalog/help/pricing identities are discovery-scoped; paid calls follow wallets.
 [network]
 mode = "tor"
 socks_endpoint = "127.0.0.1:9150"
@@ -9,6 +14,7 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 request_timeout_seconds = 240
 
+# Treasury commands use this same state directory and its default wallet.key.
 [treasury]
 state_dir = "../../state/privacy"
 daily_input_zec = "0.012"
@@ -20,30 +26,139 @@ confidentiality = "public"
 # Leave BASE_RPC_URL unset to use the built-in Base RPC failover list.
 base_rpc_url_env = "BASE_RPC_URL"
 
-[wallets.research]
+# Each pool maintains an active wallet and a funded standby. Three $2 pairs
+# require at least $12 worth of ZEC before fees; start with about $15 for headroom.
+# Actual deposits may rise with swap minimums. All declared pools initialize, even
+# unused ones: remove unused wallet definitions and update bindings to save funding.
+# max_price_usd caps one payment, not the total research budget.
+[wallets.web]
 mode = "zcash_rotation"
 deposit_size = "2.00"
 max_price_usd = "0.05"
 max_input_zec = "0.006"
 max_fee_bps = 500
 
-[sources.botsmith]
-extends = "../../providers/botsmith.toml"
+[wallets.social]
+mode = "zcash_rotation"
+deposit_size = "2.00"
+max_price_usd = "0.05"
+max_input_zec = "0.006"
+max_fee_bps = 500
 
+# Company research has its own active/standby pair and Tor payer identities.
+# $0.10 permits single-company enrichment; larger PDL batches may exceed the cap.
+[wallets.company]
+mode = "zcash_rotation"
+deposit_size = "2.00"
+max_price_usd = "0.10"
+max_input_zec = "0.006"
+max_fee_bps = 500
+
+# SocialFetch appears in two contexts with overlapping Reddit coverage,
+# demonstrating that even the same provider/tool can use different payers.
+# Using different wallets keeps the social queries to SocialFetch unlinked and
+# isolated from the webinfo queries.
+[sources.social]
+extends = "../../providers/socialfetch.toml"
+tags = ["Bluesky", "Facebook", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter"]
+exclude_tools = ["socialfetch_help"]
+
+[sources.webinfo]
+extends = "../../providers/socialfetch.toml"
+tags = ["Web", "Reddit", "Hacker News", "Github", "Yelp"]
+exclude_tools = ["socialfetch_help"]
+
+# Exa is reused unchanged across web and company listeners. Its complete
+# curated toolset includes help; subset providers below omit broad vendor guides.
 [sources.exa]
 extends = "../../providers/exa.toml"
 
-[sources.pdl]
+# Person lookups stay in the social context. Vendor-listed matches cost $0.28,
+# above its $0.05 cap; paid matches require a deliberate cap increase.
+[sources.pdl_people]
 extends = "../../providers/pdl.toml"
+include_tools = ["pdl_person_*"]
+
+# Structured company discovery complements Deepline enrichment.
+# The PDL catalog lists $0.10 per company result, so larger batches exceed the
+# wallet cap.
+[sources.pdl_company]
+extends = "../../providers/pdl.toml"
+include_tools = ["pdl_company_search"]
+
+# Tool-name allowlists keep the company toolset small as upstream catalogs grow.
+# Broad vendor help tools are omitted to avoid suggesting unselected operations.
+# Cheap, focused public-company financial statements and news.
+[sources.company_otto]
+extends = "../../providers/otto.toml"
+include_tools = ["otto_financial_statements", "otto_equity_news"]
+instructions_text = "Company research: SEC financial statements and company-specific equity news. Prices are estimates; use source dates and filing provenance when comparing results."
+
+# Startup/crypto/investor research: RootData profiles crypto projects and venture
+# organizations, including teams, backers and funding rounds. Search resolves IDs
+# for project/org lookups; this is company intelligence, not trading execution.
+[sources.company_claw402]
+extends = "../../providers/claw402.toml"
+# Clear the inherited operation allowlist so RootData tools become selectable.
+include_operations = []
+include_tools = [
+  "claw402_crypto_rootdata_search",
+  "claw402_crypto_rootdata_project",
+  "claw402_crypto_rootdata_org",
+  "claw402_crypto_rootdata_funding",
+]
+instructions_text = "Crypto-company research through RootData: search projects and investors, inspect project/organization profiles, and list funding rounds. Resolve IDs with search before requesting profiles. Only these four operations are exposed. Treazury handles x402 payment; do not manually retry signed requests."
+
+# Business profiles and competitor advertising; no personal contact harvesting.
+[sources.company_deepline]
+extends = "../../providers/deepline.toml"
+tags = ["Company", "Ads"]
+include_tools = ["deepline_company_enrich", "deepline_ads_search"]
+instructions_text = "Company research: company enrichment and advertising intelligence. Personal contact, email and phone lookup tools are excluded."
+
+# Public-company discovery, overview, SEC disclosures and filing summaries.
+# Retain inherited exclusions; omit trading signals, expensive research memos
+# and vendor-wide help. Saved prices for these four calls are $0.01-$0.05.
+[sources.company_x402stock]
+extends = "../../providers/x402stock.toml"
+include_tools = [
+  "x402stock_tickers",
+  "x402stock_overview_ticker",
+  "x402stock_dossier_ticker",
+  "x402stock_filing_summary_ticker",
+]
+instructions_text = "US public-company research: resolve symbols with tickers, then request overview, SEC disclosure dossier or filing summary. Pass ticker symbols in the tool's ticker argument. Check timestamps and unavailable sections; quotes may be delayed, and filing summaries are synthesized. Treazury handles x402 payment."
 
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
 
+# GenuineGood is a grant discovery service. Only search and detail tools
+# fit within the $0.10 price cap.
 [sources.genuinegood]
 extends = "../../providers/genuinegood.toml"
+include_tools = ["genuinegood_search_post", "genuinegood_detail_post"]
+instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed; Treazury handles x402 payment."
 
-[servers.research]
-listen = "127.0.0.1:8000"
+# Independent MCP endpoints let an agent choose the appropriate privacy context.
+# Sources inherit each listener wallet unless a source explicitly overrides it.
+[servers.web]
+listen = "127.0.0.1:6337"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
-wallet = "research"
-sources = ["botsmith", "exa", "pdl", "googletrends", "genuinegood"]
+wallet = "web"
+sources = ["exa", "webinfo", "googletrends"]
+
+[servers.social]
+listen = "127.0.0.1:6338"
+bearer_token_env = "TREAZURY_MCP_TOKEN"
+wallet = "social"
+sources = ["social", "pdl_people"]
+
+# Note: Exa is the same source used by web, but this listener pays from the
+# "company" wallet, and connections to Exa travel down a separate Tor circuit,
+# isolated by the wallet address.
+# Do not set sources.exa.wallet: that would override the listener's wallet choice.
+[servers.company]
+listen = "127.0.0.1:6339"
+bearer_token_env = "TREAZURY_MCP_TOKEN"
+wallet = "company"
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock"]
