@@ -387,7 +387,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
         None,
         "",
     );
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["--config", path.to_str().unwrap(), "--list-tools"])
         .output()
         .await
@@ -448,7 +448,7 @@ async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
         None,
         "",
     );
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["--config", path.to_str().unwrap(), "--list-tools"])
         .output()
         .await
@@ -476,7 +476,7 @@ async fn failed_inspection_retains_structured_stages_but_never_a_partial_invento
         None,
         "",
     );
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args([
             "--config",
             path.to_str().unwrap(),

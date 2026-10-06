@@ -43,7 +43,7 @@ bearer_token_env="TOKEN"
     .unwrap();
     let m = serde_json::from_value(json!({
         "version":1,"run_id":"prepared","treasury_id":id,"deployment":dir.join("deployment.toml"),
-        "binary":env!("CARGO_BIN_EXE_treazury"),"evidence_dir":dir.join("evidence"),"registry_authorization":"reviewed",
+        "binary":env!("CARGO_BIN_EXE_x402_treazury"),"evidence_dir":dir.join("evidence"),"registry_authorization":"reviewed",
         "start":{"mode":"funded_pools","pools":[]},
         "network":{"tor_mode":"direct","confinement":"none","require_isolation_evidence":false},
         "limits":{"api_reservation_usdc":"0","new_funding_jobs":0,"source_exposure_zec":"0","max_in_flight":1,"run_seconds":60,"phase_seconds":30,"call_seconds":10,"cleanup_seconds":10,"result_bytes":10000},
@@ -217,7 +217,7 @@ async fn filtered_tool_and_invalid_arguments_never_prepare() {
 }
 #[tokio::test]
 async fn build_info_is_credential_free_and_matches_compiled_library() {
-    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .arg("build-info")
         .output()
@@ -815,7 +815,7 @@ bearer_token_env="TOKEN"
         m.treasury_id
     );
     std::fs::write(&m.deployment, deployment).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .arg("--config")
         .arg(&m.deployment)
@@ -974,7 +974,7 @@ spec="missing.json"
     .unwrap();
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
             .kill_on_drop(true)
             .env_clear()
             .env("INDEXER", &endpoint)

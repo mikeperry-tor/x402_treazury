@@ -921,7 +921,7 @@ pub async fn inspect_cli() -> Result<()> {
     let Args {
         command: Command::Inspect { meta_config },
     } = Args::parse_from(
-        std::iter::once("treazury sources".to_owned()).chain(std::env::args().skip(2)),
+        std::iter::once("x402_treazury sources".to_owned()).chain(std::env::args().skip(2)),
     );
     let cfg: crate::deployment::MetaConfig =
         toml::from_str(&std::fs::read_to_string(&meta_config)?)?;

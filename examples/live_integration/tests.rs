@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 pub(super) fn manifest() -> Manifest {
     serde_json::from_value(json!({
         "version":1,"run_id":"test_run","treasury_id":"11111111-1111-4111-8111-111111111111",
-        "deployment":"deploy.toml","binary":"treazury","evidence_dir":"evidence","registry_authorization":"review_1",
+        "deployment":"deploy.toml","binary":"x402_treazury","evidence_dir":"evidence","registry_authorization":"review_1",
         "start":{"mode":"funded_pools","pools":["pool"]},
         "network":{"tor_mode":"direct","confinement":"none","require_isolation_evidence":false},
         "limits":{"api_reservation_usdc":"0.04","new_funding_jobs":0,"source_exposure_zec":"0","max_in_flight":2,"run_seconds":900,"phase_seconds":600,"call_seconds":300,"cleanup_seconds":900,"result_bytes":1000},

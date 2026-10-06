@@ -5,7 +5,7 @@ use std::{
     process::{Command, Output},
 };
 fn wallet(config: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_treazury"))
+    Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .arg("wallet")
         .args(args)
         .arg("--config")

@@ -60,7 +60,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         ),
     )
     .unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))

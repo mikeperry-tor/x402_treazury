@@ -27,11 +27,11 @@ From the repository root:
 
 ```sh
 scripts/zcash.sh build --offline
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/public-swap-demo.toml --show-config
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/public-swap-demo.toml --check
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/public-swap-demo.toml --list-tools
 ```
 
@@ -66,9 +66,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    ```sh
    cp examples/deployments/public-swap-demo.toml \
      examples/deployments/public-swap-demo.local.toml
-   target/debug/treazury wallet init \
+   target/debug/x402_treazury wallet init \
      --config examples/deployments/public-swap-demo.local.toml
-   target/debug/treazury wallet addresses \
+   target/debug/x402_treazury wallet addresses \
      --config examples/deployments/public-swap-demo.local.toml
    ```
 
@@ -92,7 +92,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    ```sh
    mkdir -p secrets
    chmod 700 secrets
-   target/debug/treazury wallet backup \
+   target/debug/x402_treazury wallet backup \
      --config examples/deployments/public-swap-demo.local.toml \
      --destination secrets/public-demo-backup
    ```
@@ -108,9 +108,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 5. After the operator transfers ZEC, sync and inspect the treasury:
 
    ```sh
-   target/debug/treazury wallet sync \
+   target/debug/x402_treazury wallet sync \
      --config examples/deployments/public-swap-demo.local.toml
-   target/debug/treazury wallet status \
+   target/debug/x402_treazury wallet status \
      --config examples/deployments/public-swap-demo.local.toml
    ```
 
@@ -121,7 +121,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    `funding.auto_fund = true` in the local copy and serve:
 
    ```sh
-   target/debug/treazury \
+   target/debug/x402_treazury \
      --config examples/deployments/public-swap-demo.local.toml
    ```
 

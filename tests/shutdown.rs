@@ -79,7 +79,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool) {
         source
     };
     std::fs::write(tmp.path().join("config.toml"), config).unwrap();
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
     command
         .env_clear()
         .current_dir(tmp.path())

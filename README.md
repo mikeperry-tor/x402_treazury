@@ -7,9 +7,9 @@ across multiple agents, your wallet source address lists all their API calls on
 the public Base blockchain. Connecting directly to API services also exposes your
 network address to these API providers and Coinbase infrastructure.
 
-**treazury** reduces that linkability with **Zcash-funded rotating wallets** and **Tor isolation tied to each payment identity**. You choose which providers share a wallet and which stay separate.
+**x402_treazury** reduces that linkability with **Zcash-funded rotating wallets** and **Tor isolation tied to each payment identity**. You choose which providers share a wallet and which stay separate.
 
-The `treazury` cli tool loads x402 provider API catalogs, converts them into MCP tools, handles x402 payments, and replenishes Base USDC wallets, without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
+The `x402_treazury` cli tool loads x402 provider API catalogs, converts them into MCP tools, handles x402 payments, and replenishes Base USDC wallets, without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
 
 You can also optionally grant your agent a set of tools to discover and add x402 providers themselves.
 
@@ -26,7 +26,7 @@ flowchart TB
 ```
 
 Each managed provider pool has an active Base USDC wallet, and a funded standby USDC
-wallet. When the active wallet cannot cover an admitted payment, treazury can
+wallet. When the active wallet cannot cover an admitted payment, x402_treazury can
 promote the standby and fund a new replacement address. Calls continue on the
 promoted wallet while its replacement is being filled. Funding, confirmation and
 payment uncertainty are persisted across restarts.
@@ -44,7 +44,9 @@ retrieval, llm help text, and pricing queries use separate Tor identities
 grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
 uses remote DNS and has no direct-network fallback.
 
-> **NOTE** Treazury reduces wallet and network linkability; it does not make payments
+> **NOTE:**
+>
+> Treazury reduces wallet and network linkability; it does not make payments
 > invisible. The funding path uses **public NEAR swaps and public Base
 > transactions**. These are visible, but unlinkable to your Zcash shielded
 > address. Because of the $2 minimum swap size, each wallet will make multiple API
@@ -96,8 +98,8 @@ private bearer token for your MCP client (for example, generate one with
 `openssl rand -hex 32` and store it in your secret manager).
 
 ```sh
-target/debug/treazury wallet init --config examples/deployments/privacy.local.toml
-target/debug/treazury wallet addresses --config examples/deployments/privacy.local.toml
+target/debug/x402_treazury wallet init --config examples/deployments/privacy.local.toml
+target/debug/x402_treazury wallet addresses --config examples/deployments/privacy.local.toml
 ```
 
 Initialization creates the wallet directory specified by the config file. It
@@ -115,23 +117,25 @@ parent directory; the backup destination itself must not already exist.
 ```sh
 mkdir -p secrets
 chmod 700 secrets
-target/debug/treazury wallet backup \
+target/debug/x402_treazury wallet backup \
   --config examples/deployments/privacy.local.toml --destination secrets/privacy-backup
 ```
 
 Keep the backup secure: it contains spending material.
 
-> **NOTE**: Do not run multiple instances of treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchonized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
+> **NOTE:**
+>
+> Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchonized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
 
 ### 3. Review, fund and launch
 
 ```sh
 # Offline: inspect wallet bindings, funding targets and network policy.
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/privacy.local.toml --show-config
 
 # Fetch the catalog through Tor and validate selected tools; no payments.
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/privacy.local.toml --check
 ```
 
@@ -146,7 +150,9 @@ This preload funds initial wallets, not unlimited calls or replacements.
 To reduce that expense, **remove unused `[wallets.NAME]` definitions**, then remove
 or rebind any servers/sources referencing them.
 
-> **NOTE** Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
+> **NOTE:**
+>
+> Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
 > not eliminate that pool's funding setup. Keeping one pool requires two $2 allocations
 > (about $4 before fees); sharing it across multiple MCP servers preserves
 > separate toolsets but shares their payment identity and Tor circuit usage.
@@ -159,9 +165,9 @@ they may need deliberate adjustment for the current route. Daily limits reset an
 per-payment caps are not lifetime budgets.
 
 ```sh
-target/debug/treazury wallet sync \
+target/debug/x402_treazury wallet sync \
   --config examples/deployments/privacy.local.toml
-target/debug/treazury wallet status --config examples/deployments/privacy.local.toml
+target/debug/x402_treazury wallet status --config examples/deployments/privacy.local.toml
 ```
 
 Once the confirmed spendable balance is sufficient and you have reviewed those
@@ -172,7 +178,7 @@ backup and `wallet sync` never start funding workers. Ensure `TREAZURY_MCP_TOKEN
 is set, then:
 
 ```sh
-target/debug/treazury --config examples/deployments/privacy.local.toml
+target/debug/x402_treazury --config examples/deployments/privacy.local.toml
 ```
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
@@ -285,7 +291,7 @@ For a simpler static-key stdio setup, provide `EVM_PRIVATE_KEY` through the envi
 or a private `.env` file:
 
 ```sh
-target/debug/treazury --provider providers/socialfetch.toml \
+target/debug/x402_treazury --provider providers/socialfetch.toml \
   --network-config examples/network/tor.toml --env-file .env
 ```
 

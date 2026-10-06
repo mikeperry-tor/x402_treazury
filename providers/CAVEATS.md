@@ -79,7 +79,7 @@ enums, waterfall-provider detail in summaries. Tool schemas are closed via
 `--timeout 120`.
 
 ```bash
-treazury --provider providers/deepline.toml --timeout 120
+x402_treazury --provider providers/deepline.toml --timeout 120
 ```
 
 ## pdl.toml — People Data Labs (stablepeopledata.dev)
@@ -166,7 +166,7 @@ default "paid per call" line). The `/v1/intent/{id}/match` tool long-polls up
 to 300s — run with `--timeout 320`.
 
 ```bash
-treazury --provider providers/regimeshift.toml --timeout 320
+x402_treazury --provider providers/regimeshift.toml --timeout 320
 ```
 
 ## kronos.toml — Kronos Crypto Data (kronossignals.com)
@@ -333,7 +333,7 @@ cannot expose — is rewritten into that flat form). Design notes:
 - Slow: place-report can take tens of seconds, environmental-context 60–90s.
 
 ```bash
-treazury --provider providers/locus/provider.toml --timeout 120
+x402_treazury --provider providers/locus/provider.toml --timeout 120
 ```
 
 ## straits.toml — Straits.live Hormuz monitor (straits.live)
@@ -588,10 +588,10 @@ also lists those tags and counts routes removed by the allowlist. Selecting only
 an excluded group fails with no matching operations rather than exposing it.
 
 ```sh
-target/debug/treazury --provider providers/agent402.toml --list-tags
-target/debug/treazury --provider providers/agent402.toml --tags network --list-tools
-target/debug/treazury --provider providers/agent402.toml --tags data,crypto --list-tools
-target/debug/treazury --provider providers/agent402.toml --tags llm --list-tools
+target/debug/x402_treazury --provider providers/agent402.toml --list-tags
+target/debug/x402_treazury --provider providers/agent402.toml --tags network --list-tools
+target/debug/x402_treazury --provider providers/agent402.toml --tags data,crypto --list-tools
+target/debug/x402_treazury --provider providers/agent402.toml --tags llm --list-tools
 ```
 
 In a deployment, override tags on the source to widen beyond the web default;
@@ -724,9 +724,9 @@ The registry does not mark every semantically similar endpoint as an alias, so
 some overlap remains even after excluding all declared aliases.
 
 ```sh
-target/debug/treazury --provider providers/agentutility/provider.toml --list-tools
-target/debug/treazury --provider providers/agentutility/provider.toml --tags wordmint --list-tools
-target/debug/treazury --provider providers/agentutility/provider.toml --tags synthforge --list-tools
+target/debug/x402_treazury --provider providers/agentutility/provider.toml --list-tools
+target/debug/x402_treazury --provider providers/agentutility/provider.toml --tags wordmint --list-tools
+target/debug/x402_treazury --provider providers/agentutility/provider.toml --tags synthforge --list-tools
 ```
 
 A deployment source can set `extends = "../providers/agentutility/provider.toml"`

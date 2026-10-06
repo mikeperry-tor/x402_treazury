@@ -55,11 +55,11 @@ Pricing discovery rolls across sources and endpoints with a shared 16-request ca
 separate research and company MCP listeners sharing one static wallet profile:
 
 ```sh
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/servers.toml --check
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/servers.toml --list-tools
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/servers.toml --env-file .env
 ```
 
@@ -404,7 +404,7 @@ Directory results are leads, not automatically imported schemas.
 See [agent source management](agent-sources.md) for the complete configuration,
 agent workflow, limits, wallet/privacy behavior and recovery procedures.
 `--show-config` inspects grants and wallet bindings offline;
-`treazury sources inspect --config FILE` inspects saved registrations.
+`x402_treazury sources inspect --config FILE` inspects saved registrations.
 
 ## Provider reliability observations
 
@@ -452,9 +452,9 @@ and disables pricing probes because credit prices are embedded in the spec.
 The server instructions explain the credit unit and metering caveats.
 
 ```sh
-target/debug/treazury --provider providers/socialfetch.toml --list-tags
-target/debug/treazury --provider providers/socialfetch.toml --tags Twitter,YouTube --list-tools
-target/debug/treazury --config examples/deployments/socialfetch.toml --env-file .env
+target/debug/x402_treazury --provider providers/socialfetch.toml --list-tags
+target/debug/x402_treazury --provider providers/socialfetch.toml --tags Twitter,YouTube --list-tools
+target/debug/x402_treazury --config examples/deployments/socialfetch.toml --env-file .env
 ```
 
 [examples/deployments/socialfetch.toml](../examples/deployments/socialfetch.toml) configures a selected
@@ -504,9 +504,9 @@ payment authorization expiry, NEAR quote expiry or experiment deadlines.
 For standalone serving or wallet commands, use the same table in a separate file:
 
 ```sh
-treazury --provider providers/socialfetch.toml \
+x402_treazury --provider providers/socialfetch.toml \
   --network-config examples/network/tor.toml --list-tools
-treazury wallet init --state-dir state/public-demo \
+x402_treazury wallet init --state-dir state/public-demo \
   --network-config examples/network/tor.toml
 ```
 
@@ -626,8 +626,8 @@ To inspect descriptions with unsigned discovery enabled, without wallet keys,
 listener tokens, wallet state access or starting a server:
 
 ```sh
-treazury --provider providers/botsmith.toml --list-tools --discover-pricing
-treazury --config examples/deployments/privacy.local.toml --list-tools --discover-pricing
+x402_treazury --provider providers/botsmith.toml --list-tools --discover-pricing
+x402_treazury --config examples/deployments/privacy.local.toml --list-tools --discover-pricing
 ```
 
 The flag requires `--list-tools` and respects `probe_pricing = false`, route

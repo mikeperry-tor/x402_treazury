@@ -114,7 +114,7 @@ bearer_token_env="TOKEN"
     std::fs::write(dir.join("config.toml"), text).unwrap();
 }
 fn spawn(dir: &Path, piped: bool) -> tokio::process::Child {
-    let mut c = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
+    let mut c = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
     c.env_clear()
         .current_dir(dir)
         .env("TOKEN", TOKEN)

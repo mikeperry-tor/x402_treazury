@@ -301,7 +301,7 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
         .unwrap();
     }
     let path = write_config(dir.path(), &configuration());
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["--config", path.to_str().unwrap(), "--list-tools"])
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
@@ -530,7 +530,7 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
     let deployment = Deployment::load(&path).await.unwrap();
     let _ = deployment.inventory();
     assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--config", path.to_str().unwrap(), "--list-tools"])

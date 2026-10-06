@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Guidance for code agents working on **x402_treazury**, a Rust application with
-executable **treazury** and library crate **x402_treazury**.
+executable **x402_treazury** and library crate **x402_treazury**.
 
 ## Purpose and layout
 
@@ -157,8 +157,8 @@ macOS profile; see `docs/reproducible-builds.md`. It builds committed HEAD only,
 requires prefetched dependencies/parameters and blocks build-time network access.
 Do not weaken the sandbox or silently update toolchain/profile pins to make a run pass.
 
-`target/debug/treazury --help` lists serving
-options; `treazury wallet --help` lists treasury commands. Default builds include
+`target/debug/x402_treazury --help` lists serving
+options; `x402_treazury wallet --help` lists treasury commands. Default builds include
 the embedded Zcash wallet; `--no-default-features` disables it. Plain Cargo builds
 require protoc; the Zcash wrapper supplies Cargo-managed protoc and respects
 `--no-default-features`. `scripts/coverage.sh` measures default-build application

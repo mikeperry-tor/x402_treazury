@@ -1,7 +1,7 @@
 use std::process::{Command, Output};
 
 fn run(path: &std::path::Path, meta: bool, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_treazury"))
+    Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .arg(if meta { "--config" } else { "--provider" })
         .arg(path)
         .args(extra)

@@ -19,13 +19,13 @@ and synchronize through normal startup; automatic funding still requires `auto_f
 ```sh
 cargo build --locked
 # Offline composition and permissions; no keys, spec requests or registry access:
-target/debug/treazury --config examples/deployments/agent-sources.toml --show-config
+target/debug/x402_treazury --config examples/deployments/agent-sources.toml --show-config
 # Checks the example's committed directory spec, without credentials or probes:
-target/debug/treazury --config examples/deployments/agent-sources.toml --check
+target/debug/x402_treazury --config examples/deployments/agent-sources.toml --check
 # Serving needs EVM_PRIVATE_KEY and the two configured MCP bearer tokens:
-target/debug/treazury --config examples/deployments/agent-sources.toml --env-file .env
+target/debug/x402_treazury --config examples/deployments/agent-sources.toml --env-file .env
 # Offline saved-record inspection; does not create a missing registry:
-target/debug/treazury sources inspect --config examples/deployments/agent-sources.toml
+target/debug/x402_treazury sources inspect --config examples/deployments/agent-sources.toml
 ```
 
 Use `scripts/zcash.sh build` for the managed example and initialize its treasury
@@ -221,7 +221,7 @@ deployment or treasury paths. Config-only inspection never opens the store.
 Back up the SQLite registry while the process is stopped, separately from treasury/key
 backups. Do not delete or replace its ownership sidecar while serving. Document URLs and
 contents can reveal operator interests even though the registry contains no wallet keys.
-`treazury sources inspect` reports saved records without fetching or changing them;
+`x402_treazury sources inspect` reports saved records without fetching or changing them;
 `treazury_sources_list` reports the running state, including policy-disabled records.
 
 Persistent changes commit before publication; accepted commit jobs finish even if the

@@ -22,7 +22,7 @@ any working directory unless a command explicitly supplies relative data paths.
 Do not run the no-default-feature checks during ordinary development unless explicitly
 requested. The standard build includes Zcash; static-wallet deployments need no treasury
 configuration. If both variants are requested, run them sequentially: CLI tests share
-`target/debug/treazury`.
+`target/debug/x402_treazury`.
 `check.sh` leaves the Zcash-enabled executable available at that path.
 All default checks use local fixtures and public test keys; none reads `.env` or
 performs funded transactions. Local socket tests require permission to bind localhost.

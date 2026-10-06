@@ -18,12 +18,12 @@ Build the application and runner together; preparation pins their build identity
 Default builds include Zcash. Build traffic is separate from runtime Tor policy.
 
 ```sh
-scripts/zcash.sh build --bin treazury --example live_integration
+scripts/zcash.sh build --bin x402_treazury --example live_integration
 ```
 
 Before preparation, copy both executables into an owner-only directory for this
 experiment (ordinary copies, not hard links). Set the manifest's `binary` to that
-private `treazury` copy and invoke the private `live_integration` copy for all
+private `x402_treazury` copy and invoke the private `live_integration` copy for all
 commands below. Keep them unchanged through reporting. Cargo may replace files
 in `target/debug` during unrelated tests; rebuilding that path during a pinned
 live run breaks artifact continuity even if the running process never restarts.
@@ -53,7 +53,7 @@ not startup sources. New IDs never reset cumulative charges or old liabilities.
 
 ## 2. Establish a usable wallet and budget
 
-Use production `treazury wallet init`, `addresses`, `sync` and `backup` commands;
+Use production `x402_treazury wallet init`, `addresses`, `sync` and `backup` commands;
 see [wallet setup](INTEGRATION_REFERENCE.md#wallet-setup-and-readiness). Standalone
 Tor wallet commands require an already-running configured SOCKS listener. A failed
 sync is an error, not a zero balance. Keep seeds, keys and backups private.

@@ -476,17 +476,17 @@ Use the production CLI for wallet administration. Default builds include Zcash;
 these operations need no runner, registry or matching source checkout.
 
 ```sh
-target/debug/treazury wallet init \
+target/debug/x402_treazury wallet init \
   --state-dir state/new-integration-wallet \
   --key-file secrets/new-integration-wallet.key \
   --network-config examples/network/tor.toml
-target/debug/treazury wallet addresses \
+target/debug/x402_treazury wallet addresses \
   --state-dir state/new-integration-wallet \
   --key-file secrets/new-integration-wallet.key
 # Set treasury references and network policy in deployment.toml, then synchronize:
-target/debug/treazury wallet sync --config deployment.toml
+target/debug/x402_treazury wallet sync --config deployment.toml
 # With serving stopped, save an owner-only backup including its key:
-target/debug/treazury wallet backup \
+target/debug/x402_treazury wallet backup \
   --state-dir state/new-integration-wallet \
   --key-file secrets/new-integration-wallet.key \
   --treasury-id TREASURY_UUID --destination /private/new-backup-directory
@@ -552,7 +552,7 @@ supports unsigned static or exclusively managed public-swap deployments; source
 management is refused. Listeners use fixed literal loopback addresses/ports.
 Build the executable and runner together, with matching features.
 
-`treazury build-info` embeds application/runner/vendor/manifest/lockfile/toolchain
+`x402_treazury build-info` embeds application/runner/vendor/manifest/lockfile/toolchain
 hashes, compiler, target and feature set. Preparation checks these against current
 inputs and pins the executable bytes. This detects stale trusted local builds;
 it is not attestation of an arbitrary binary. Full frozen catalogs must reproduce
@@ -707,7 +707,7 @@ declared managed wallets and automatic funding disabled. Selecting only unsigned
 cases inside a managed deployment does not remove its treasury/funding workers.
 The runner refuses that combination before execution and again before stopping
 Tor. Outage qualification is an independent keyless test; do not stop Tor under
-a funded child. Use `treazury wallet backup` for ordinary financial backups.
+a funded child. Use `x402_treazury wallet backup` for ordinary financial backups.
 
 ## Offline Tor re-audit
 
@@ -821,7 +821,7 @@ fund**, with zero API/source/job authority. The fixture writer is explicitly
 ignored in normal test runs and itself performs no network requests:
 
 ```sh
-scripts/zcash.sh build --bin treazury --example live_integration
+scripts/zcash.sh build --bin x402_treazury --example live_integration
 TREAZURY_M4_FIXTURE_DIR=/private/tmp/treazury-m4-new \
   scripts/zcash.sh test --test integration_preparation \
   prepare_real_tor_qualification_fixture -- --ignored --exact --nocapture
@@ -870,10 +870,10 @@ fixtures verify physical reuse, never-indexed HPACK, faults and stream priority.
 Generate a private real-Tor fixture with no network traffic:
 
 ```sh
-scripts/zcash.sh build --bin treazury --example live_integration
+scripts/zcash.sh build --bin x402_treazury --example live_integration
 target/debug/examples/live_integration cover-fixture \
   --directory /private/tmp/treazury-cover-qualification \
-  --binary "$PWD/target/debug/treazury" \
+  --binary "$PWD/target/debug/x402_treazury" \
   --tor-binary '/Applications/Tor Browser.app/Contents/MacOS/Tor/tor' \
   --profile ranges --distribution log-normal --concurrency 2 --samples 3
 ```

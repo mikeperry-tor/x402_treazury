@@ -139,11 +139,11 @@ def qualify(run, no_zcash):
             # Build the locked protoc helper independently in each clean target.
             run_logged(["cargo", "build", "--frozen", "--manifest-path", "compat/protoc/Cargo.toml"], source, env, log)
             env["PROTOC"] = output(SANDBOX + [str(work / "target/debug/x402-protoc-path")], cwd=source, env=env)
-            command = ["cargo", "build", "--frozen", "--release", "--bin", "treazury", "--target", profile["host"]]
+            command = ["cargo", "build", "--frozen", "--release", "--bin", "x402_treazury", "--target", profile["host"]]
             if no_zcash:
                 command.append("--no-default-features")
             run_logged(command, source, env, log)
-            binary = work / "target" / profile["host"] / "release/treazury"
+            binary = work / "target" / profile["host"] / "release/x402_treazury"
             run_logged([str(binary), "--help"], source, env, log)
             report["artifacts"].append({"path": str(binary), "sha256": digest(binary), "bytes": binary.stat().st_size})
         report["matching_sha256"] = compare(*(Path(a["path"]) for a in report["artifacts"]))

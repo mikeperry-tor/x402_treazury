@@ -137,7 +137,7 @@ async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
     let tools = build_tools(
         &Config::default(),
         &json!({"paths":{"/cover_status":{"get":{}}}}),
-        "treazury",
+        "x402_treazury",
     )
     .unwrap();
     assert_eq!(tools[0].name, "treazury_cover_status");

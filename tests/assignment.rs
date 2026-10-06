@@ -86,7 +86,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     // --show-config runs without credentials or even a spec file; --check loads
     // the catalog but still creates no pool. Inventory carries template provenance.
     let path = dir.path().join("servers.toml");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--config", path.to_str().unwrap(), "--show-config"])
@@ -105,7 +105,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let deployment = Deployment::load(&path).await.unwrap();
     let inv = serde_json::to_value(deployment.inventory()).unwrap();
     assert_eq!(inv[0]["wallet_bindings"]["a"]["scope"], "binding");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["--config", path.to_str().unwrap(), "--check"])

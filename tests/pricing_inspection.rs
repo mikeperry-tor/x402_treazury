@@ -14,7 +14,7 @@ use std::{
 async fn cli(dir: &Path, args: &[&str]) -> std::process::Output {
     tokio::time::timeout(
         Duration::from_secs(30),
-        tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
             .current_dir(dir)
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))

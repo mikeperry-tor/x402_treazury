@@ -3,7 +3,7 @@
 Dependency resolution uses committed lockfiles and `--locked`. Release
 qualification additionally builds committed HEAD twice with independent source,
 HOME, temporary and target directories, blocks network access at the OS level,
-and compares SHA-256 hashes of the resulting `treazury` binaries. A successful
+and compares SHA-256 hashes of the resulting `x402_treazury` binaries. A successful
 run proves matching bytes for that revision, feature selection and recorded
 host environment. It does not establish reproducibility across operating
 systems, independent machines or different toolchain distributions.
@@ -63,7 +63,7 @@ python3 scripts/reproducible.py --no-default-features
 Commit tracked changes first. The script archives HEAD; untracked files,
 including user scripts and secrets, are excluded. A clean checkout and its
 Git archive produce the same snapshot. Each build uses `cargo build --frozen
---release --bin treazury --target aarch64-apple-darwin`, with default Zcash unless
+--release --bin x402_treazury --target aarch64-apple-darwin`, with default Zcash unless
 explicitly disabled. The locked protoc helper is also rebuilt independently.
 
 The environment is constructed from an allowlist: no inherited Rust flags,

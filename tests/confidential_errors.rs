@@ -133,7 +133,7 @@ async fn executable_startup_and_inspection_do_not_print_environment_secrets() {
     )
     .unwrap();
     for inspect in [true, false] {
-        let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
+        let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
         cmd.current_dir(tmp.path())
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))

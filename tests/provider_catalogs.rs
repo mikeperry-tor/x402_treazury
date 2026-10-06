@@ -76,7 +76,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     assert_eq!(cases.len(), 22);
     let mut total = 0;
     for case in cases {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_treazury"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
         command
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))

@@ -345,7 +345,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
         "spec = 'http://unreachable.invalid/openapi.json'\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["--show-config", "--provider"])
         .arg(&source)
         .output()
@@ -360,7 +360,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
         "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n",
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["--show-config", "--provider"])
         .arg(&source)
         .arg("--network-config")
@@ -377,7 +377,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert_eq!(value["network"]["cover_traffic_enabled"], true);
     assert_eq!(value["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(value["network"]["socks_auth"], "tor_extended");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["--config", "missing.toml", "--network-config"])
         .arg(policy)
         .output()

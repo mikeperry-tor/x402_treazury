@@ -244,7 +244,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("provider.toml"),format!("spec = '{vendor}/spec'\nbase_url = '{vendor}'\nprefix = 'test'\nmax_spec_bytes = 8\nprobe_pricing = false\n")).unwrap();
     for override_limit in [false, true] {
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
         command
             .env_clear()
             .current_dir(tmp.path())
@@ -272,7 +272,7 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
     }
     let spec_url = format!("{vendor}/spec");
     std::fs::write(tmp.path().join("servers.toml"),format!("version = 1\n[sources.test]\nspec = '{spec_url}'\nbase_url = '{vendor}'\nmax_spec_bytes = 8\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'MUST_NOT_LOAD'\n[servers.test]\nlisten = '127.0.0.1:0'\nwallet = 'shared'\nsources = ['test']\nbearer_token_env = 'MUST_NOT_LOAD'\n")).unwrap();
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .current_dir(tmp.path())
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))

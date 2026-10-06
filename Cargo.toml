@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 publish = false
-default-run = "treazury"
+default-run = "x402_treazury"
 
 [[bin]]
-name = "treazury"
+name = "x402_treazury"
 path = "src/main.rs"
 
 [features]

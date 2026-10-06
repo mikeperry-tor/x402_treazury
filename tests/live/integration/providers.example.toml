@@ -6,7 +6,7 @@ version = 1
 run_id = "replace_with_unique_run_id"
 treasury_id = "replace_with_treasury_uuid"
 deployment = "../../../examples/live-tor-providers.toml"
-binary = "../../../target/debug/treazury"
+binary = "../../../target/debug/x402_treazury"
 evidence_dir = "../../../target/live-integration/replace_with_unique_run_id"
 registry_authorization = "replace_with_authorization_id"
 [start]

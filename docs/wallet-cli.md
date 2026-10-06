@@ -3,7 +3,7 @@
 Start with the [README quickstart](../README.md#quickstart-zcash-and-tor).
 This reference covers treasury commands, funding controls and operator recovery.
 For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
-Commands run from the repository root; `treazury` means the built executable on PATH.
+Commands run from the repository root; `x402_treazury` means the built executable on PATH.
 
 ## One configuration for wallet commands
 
@@ -13,11 +13,11 @@ only treasury/network settings: they do not fetch provider catalogs, need listen
 tokens, allocate pools automatically or start funding workers.
 
 ```sh
-treazury wallet init --config examples/deployments/privacy.local.toml
-treazury wallet addresses --config examples/deployments/privacy.local.toml
-treazury wallet status --config examples/deployments/privacy.local.toml
-treazury wallet backup --config examples/deployments/privacy.local.toml --destination secrets/backup
-treazury wallet sync --config examples/deployments/privacy.local.toml
+x402_treazury wallet init --config examples/deployments/privacy.local.toml
+x402_treazury wallet addresses --config examples/deployments/privacy.local.toml
+x402_treazury wallet status --config examples/deployments/privacy.local.toml
+x402_treazury wallet backup --config examples/deployments/privacy.local.toml --destination secrets/backup
+x402_treazury wallet sync --config examples/deployments/privacy.local.toml
 ```
 
 Only `treasury.state_dir`, `daily_input_zec` and `shield_max_fee_zec` are required
@@ -64,35 +64,35 @@ The binary supports these treasury commands:
 ```sh
 # STATE_DIR must not exist; KEY_FILE must be new, with an existing parent directory.
 # Generate a new seed; query the mainnet tip automatically.
-treazury wallet init --state-dir /private/state/new-treasury \
+x402_treazury wallet init --state-dir /private/state/new-treasury \
   --key-file /private/keys/new-treasury.key
 
 # Supply the correct birthday for your mnemonic when importing.
-treazury wallet init --state-dir /private/state/treasury \
+x402_treazury wallet init --state-dir /private/state/treasury \
   --key-file /private/keys/treasury.key --birthday 2000000 \
   --mnemonic-file /private/import/mnemonic.txt
 
 # Without --mnemonic-file, init generates a new seed inside zingolib.
 # Status reads persisted metadata and needs neither key nor network access.
-treazury wallet status --state-dir /private/state/treasury
+x402_treazury wallet status --state-dir /private/state/treasury
 
 # This allocates two keys and queued jobs;
 # it does not contact NEAR, transfer ZEC, or fund either EVM address.
-treazury wallet pool --state-dir /private/state/treasury \
+x402_treazury wallet pool --state-dir /private/state/treasury \
   --key-file /private/keys/treasury.key \
   --name research --deposit-size 5.00
 
 # Display existing receive addresses without derivation or network access.
 # The treasury UUID is read from state; --treasury-id UUID is an optional check.
-treazury wallet addresses --state-dir /private/state/treasury \
+x402_treazury wallet addresses --state-dir /private/state/treasury \
   --key-file /private/keys/treasury.key
 
 # Derive another shielded receive address and save its snapshot before returning it.
-treazury wallet address --state-dir /private/state/treasury \
+x402_treazury wallet address --state-dir /private/state/treasury \
   --key-file /private/keys/treasury.key
 ```
 
-Use `target/debug/treazury` or put the built binary on
+Use `target/debug/x402_treazury` or put the built binary on
 PATH. Mnemonic files must be owner-only and are never passed as seed arguments.
 `wallet addresses` reads the encrypted snapshot without changing address indices,
 snapshot revision, or sync readiness. `wallet address` creates a new address.
@@ -152,7 +152,7 @@ remain part of live qualification.
 To sync an existing treasury using the selected endpoint policy, run:
 
 ```sh
-treazury wallet sync --config examples/deployments/servers-managed.toml
+x402_treazury wallet sync --config examples/deployments/servers-managed.toml
 ```
 
 This command reads `[treasury]`, resolves state/key paths relative to the TOML,
@@ -184,7 +184,7 @@ is required after restart. SIGINT/SIGTERM cancel the CLI sync and save its state
 Stop serving before running an offline backup:
 
 ```sh
-target/debug/treazury wallet backup \
+target/debug/x402_treazury wallet backup \
   --state-dir /path/to/state --key-file /path/to/key \
   --treasury-id <UUID> --destination /path/to/new-backup
 ```
@@ -204,7 +204,7 @@ random EVM keys, pending payment authorizations or the rotation journal.
 To retry a job that never produced signed bytes, stop serving and run:
 
 ```sh
-target/debug/treazury wallet recover-unprepared \
+target/debug/x402_treazury wallet recover-unprepared \
   --state-dir /path/to/state --key-file /path/to/key \
   --treasury-id <UUID> --job-id <UUID-from-status>
 ```
@@ -261,7 +261,7 @@ status alone never credits funds.
 With serving stopped, prepare shielding for exactly one refund address:
 
 ```sh
-target/debug/treazury wallet shield-refunds \
+target/debug/x402_treazury wallet shield-refunds \
   --config servers.toml --job-id JOB_UUID
 ```
 
@@ -341,9 +341,9 @@ Recovery requires exclusive ownership. Without `--rebroadcast`, this command onl
 syncs and looks up the saved transaction and needs no submission credential:
 
 ```sh
-treazury wallet reconcile --config servers.toml --operation-id UUID
+x402_treazury wallet reconcile --config servers.toml --operation-id UUID
 # Explicitly allow resubmission of the SAME saved bytes, within deadline/expiry:
-treazury wallet reconcile --config servers.toml --operation-id UUID --rebroadcast
+x402_treazury wallet reconcile --config servers.toml --operation-id UUID --rebroadcast
 ```
 
 Confirmation releases the send gate only when fresh wallet sync and exact-byte
@@ -416,7 +416,7 @@ trusted Base RPC. [servers-managed.toml](../examples/deployments/servers-managed
 a complete deployment example. Inspect it without credentials or state access:
 
 ```sh
-target/debug/treazury \
+target/debug/x402_treazury \
   --config examples/deployments/servers-managed.toml --show-config
 ```
 

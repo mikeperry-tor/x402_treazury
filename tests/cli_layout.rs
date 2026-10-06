@@ -4,7 +4,7 @@ use std::{path::Path, process::Command};
 #[test]
 fn executable_name_version_and_example_inspection_are_portable() {
     let dir = tempfile::tempdir().unwrap();
-    let binary = env!("CARGO_BIN_EXE_treazury");
+    let binary = env!("CARGO_BIN_EXE_x402_treazury");
     let run = |args: &[&str]| {
         Command::new(binary)
             .env_clear()
@@ -18,14 +18,14 @@ fn executable_name_version_and_example_inspection_are_portable() {
     assert!(version.status.success());
     assert_eq!(
         String::from_utf8(version.stdout).unwrap().trim(),
-        concat!("treazury ", env!("CARGO_PKG_VERSION"))
+        concat!("x402_treazury ", env!("CARGO_PKG_VERSION"))
     );
     let help = run(&["--help"]);
     assert!(help.status.success());
     assert!(
         String::from_utf8(help.stdout)
             .unwrap()
-            .contains("Usage: treazury")
+            .contains("Usage: x402_treazury")
     );
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for example in [

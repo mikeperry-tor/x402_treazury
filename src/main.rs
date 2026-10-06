@@ -10,7 +10,7 @@ use x402_treazury::{
 
 #[derive(Parser)]
 #[command(
-    name = "treazury",
+    name = "x402_treazury",
     version,
     about = "x402_treazury: paid API tools with managed wallets and optional Tor isolation",
     after_help = "Treasury commands: wallet --help (init/addresses/address/pool require the zcash feature)"

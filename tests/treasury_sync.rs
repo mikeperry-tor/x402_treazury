@@ -407,7 +407,7 @@ spec="nonexistent.json"
     )
     .unwrap();
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env("INDEXER", endpoint)
@@ -582,7 +582,7 @@ async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
     let state = dir.path().join("state");
     let key = dir.path().join("key");
     let run = |extra: Vec<&str>| {
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"));
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
         command
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
@@ -647,7 +647,7 @@ spec="nonexistent.json"
         ),
     )
     .unwrap();
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
         .args(["wallet", "init", "--config"])
@@ -680,7 +680,7 @@ async fn birthday_discovery_rejects_wrong_network_without_creating_state() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("TEST_INDEXER", endpoint)
@@ -850,7 +850,7 @@ spec="nonexistent.json"
         ),
     )
     .unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_treazury"))
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("INDEXER", &endpoint)
