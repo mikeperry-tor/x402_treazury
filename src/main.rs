@@ -86,6 +86,9 @@ struct Args {
     port: u16,
     #[arg(long)]
     bearer_token: Option<String>,
+    /// Serve standalone HTTP without bearer authentication (explicit opt-out).
+    #[arg(long, conflicts_with = "bearer_token")]
+    no_auth: bool,
     #[arg(long)]
     list_tools: bool,
     #[arg(long, conflicts_with_all = ["list_tools", "check", "route_tool"])]
@@ -127,6 +130,10 @@ async fn run() -> Result<()> {
     let matches = Args::command().get_matches();
     let args = Args::from_arg_matches(&matches)?;
     validate_meta_arguments(&args, &matches)?;
+    ensure!(
+        !args.no_auth || args.transport == "http",
+        "--no-auth requires --transport http"
+    );
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter("warn,x402_treazury::startup=info,x402_treazury::network=info")
@@ -252,11 +259,15 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             engine.shutdown().await;
         }
     } else {
-        let token = args
+        let token = if args.no_auth {
+            None
+        } else {
+            Some(args
             .bearer_token
             .or_else(|| env.get("X402_MCP_BEARER_TOKEN").cloned())
             .filter(|s| !s.is_empty())
-            .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token")?;
+            .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
+        };
         let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
         tracing::warn!(address = %listener.local_addr()?, "MCP listening at /mcp");
         serve_http(listener, server, token, shutdown_signal()).await?;

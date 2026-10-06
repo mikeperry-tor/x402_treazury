@@ -36,6 +36,10 @@ pub async fn plan(m: &Manifest) -> Result<Plan> {
 }
 pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
     m.validate()?;
+    if let Some(servers) = config.get("servers").and_then(Value::as_object) {
+        ensure!(servers.values().all(|server| server.get("auth") != Some(&Value::Bool(false))),
+            "live qualification requires authenticated listeners");
+    }
     crate::pricing_stages::validate(m, config)?;
     let wallets = config["resolved_wallets"]
         .as_object()

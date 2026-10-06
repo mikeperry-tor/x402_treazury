@@ -374,6 +374,57 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
 }
 
 #[tokio::test]
+async fn optional_auth_is_explicit_and_independent_per_listener() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["alpha", "beta"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            spec("http://127.0.0.1:1").to_string(),
+        )
+        .unwrap();
+    }
+    let original = configuration();
+    let missing = original.replace("bearer_token_env = \"RESEARCH_TOKEN\"", "");
+    let path = write_config(dir.path(), &missing);
+    assert!(Deployment::show_config(&path).await.is_err());
+    let conflicting = original.replace(
+        "bearer_token_env = \"RESEARCH_TOKEN\"",
+        "auth = false\nbearer_token_env = \"RESEARCH_TOKEN\"",
+    );
+    write_config(dir.path(), &conflicting);
+    assert!(Deployment::show_config(&path).await.is_err());
+    let text = original
+        .replace("bearer_token_env = \"RESEARCH_TOKEN\"", "auth = false")
+        .replace("spec = ", "probe_pricing = false\nspec = ");
+    write_config(dir.path(), &text);
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(shown["servers"]["research"]["auth"], false);
+    assert_eq!(shown["servers"]["beta_only"]["auth"], true);
+    let mut environment = env();
+    environment.remove("RESEARCH_TOKEN");
+    let running = Deployment::load(&path)
+        .await
+        .unwrap()
+        .bind(&environment)
+        .await
+        .unwrap();
+    let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    for (listener, expected) in [("research", 200), ("beta_only", 401)] {
+        let response = http.post(format!("http://{}/mcp", addresses[listener]))
+            .header("accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                "protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}))
+            .send().await.unwrap();
+        assert_eq!(response.status().as_u16(), expected);
+    }
+    stop.cancel();
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn binding_is_atomic_and_missing_auth_opens_no_port() {
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta"] {

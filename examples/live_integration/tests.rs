@@ -17,6 +17,12 @@ fn config() -> Value {
     json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_price_usd":"0.02"},"unused":{"mode":"zcash_rotation","max_price_usd":"0.02"}},"wallet_bindings":{"main":{"api":{"wallet":"pool"}}},"treasury":{"id":"11111111-1111-4111-8111-111111111111"},"funding":{"confidentiality":"public"},"network":{"mode":"direct"}})
 }
 #[test]
+fn qualification_rejects_explicitly_unauthenticated_listeners() {
+    let mut config = config();
+    config["servers"] = json!({"main":{"auth":false}});
+    assert!(planner::build(&manifest(), &config).err().unwrap().to_string().contains("authenticated listeners"));
+}
+#[test]
 fn zero_amounts_and_exact_decimal_boundaries() {
     for zero in ["0", "0.0", "00.00000000"] {
         assert_eq!(zec(zero).unwrap(), 0);

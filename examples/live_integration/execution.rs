@@ -148,6 +148,7 @@ async fn run_inner(
     let mut clients = BTreeMap::new();
     let local = NetworkContext::new(NetworkPolicy::default())?;
     for (name, listener) in &config.servers {
+        ensure!(listener.auth, "live qualification requires authenticated listeners");
         ensure!(
             listener.listen.ip().is_loopback() && listener.listen.port() != 0,
             "driver refuses non-loopback/ephemeral listener"

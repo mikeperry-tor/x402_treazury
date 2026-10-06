@@ -4,6 +4,7 @@ use anyhow::Result;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
 use serde_json::Map;
 use std::{collections::BTreeMap, sync::Arc};
+mod auth;
 
 #[derive(Clone)]
 pub struct Server {
@@ -309,6 +310,10 @@ impl ServerHandler for Server {
 }
 
 pub fn http_app(server: Server, token: String) -> axum::Router {
+    http_app_with_auth(server, Some(token))
+}
+
+pub fn http_app_with_auth(server: Server, token: Option<String>) -> axum::Router {
     use axum::{
         extract::{Request, State},
         http::{StatusCode, header},
@@ -318,18 +323,19 @@ pub fn http_app(server: Server, token: String) -> axum::Router {
     use rmcp::transport::streamable_http_server::{
         StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     };
-    use subtle::ConstantTimeEq;
-    async fn gate(State(token): State<String>, request: Request, next: Next) -> Response {
-        let expected = format!("Bearer {token}");
-        let actual = request
-            .headers()
-            .get(header::AUTHORIZATION)
-            .map(|v| v.as_bytes())
-            .unwrap_or_default();
-        if !bool::from(expected.as_bytes().ct_eq(actual)) {
+    async fn gate(
+        State(auth): State<Option<Arc<auth::Gate>>>,
+        request: Request,
+        next: Next,
+    ) -> Response {
+        if let Some(auth) = auth
+            && let Err(failure) = auth.check(request.headers())
+        {
+            auth.warn(failure);
             return (
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Bearer")],
+                failure.message(),
             )
                 .into_response();
         }
@@ -342,6 +348,11 @@ pub fn http_app(server: Server, token: String) -> axum::Router {
         }
         response
     }
+    if token.is_none() {
+        tracing::warn!(listener = %server.catalog_server, category = "http_auth_disabled",
+            "HTTP authentication is disabled for this listener; clients can call its tools without a bearer token");
+    }
+    let auth = token.map(|token| Arc::new(auth::Gate::new(token, server.catalog_server.clone())));
     let config = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
         .with_json_response(true)
@@ -353,7 +364,7 @@ pub fn http_app(server: Server, token: String) -> axum::Router {
     );
     axum::Router::new()
         .route_service("/mcp", service)
-        .layer(middleware::from_fn_with_state(token, gate))
+        .layer(middleware::from_fn_with_state(auth, gate))
 }
 
 // Shared contract for standalone and deployment HTTP listeners.
@@ -372,7 +383,7 @@ pub(crate) fn log_http_shutdown() {
 pub async fn serve_http(
     listener: tokio::net::TcpListener,
     server: Server,
-    token: String,
+    token: Option<String>,
     shutdown: impl std::future::Future<Output = std::io::Result<()>>,
 ) -> Result<()> {
     use anyhow::Context;
@@ -380,7 +391,7 @@ pub async fn serve_http(
     server.validate_cover()?;
     let stop = tokio_util::sync::CancellationToken::new();
     let _cancel_on_drop = stop.clone().drop_guard();
-    let serving = axum::serve(listener, http_app(server, token))
+    let serving = axum::serve(listener, http_app_with_auth(server, token))
         .with_graceful_shutdown(stop.clone().cancelled_owned())
         .into_future();
     tokio::pin!(serving);

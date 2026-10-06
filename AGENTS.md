@@ -128,6 +128,13 @@ restrictions remain authoritative, and bounded live demos retain explicit opt-ou
 
 ## Commands and test discipline
 
+HTTP listeners require bearer authentication by default. Explicit `servers.NAME.auth=false`
+omits `bearer_token_env`; standalone HTTP uses `--no-auth`. Warn at startup when
+disabled. Never log authentication headers or token values. Auth failure warnings
+are bounded per listener/category, with explicit suppression notice/counts; HTTP
+401 bodies distinguish missing, malformed and incorrect-token failures. Live
+qualification must reject unauthenticated listeners.
+
 `scripts/check.sh` validates only the default Zcash build, including all-feature
 Clippy and dependency compatibility. See `scripts/README.md` for optional vector
 regeneration. Individual commands:

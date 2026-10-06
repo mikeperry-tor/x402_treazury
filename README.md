@@ -142,7 +142,10 @@ target/debug/treazury --config examples/deployments/privacy.local.toml
 ```
 
 Connect your MCP client to **`http://127.0.0.1:8000/mcp`**, authenticating with
-`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`. Wait for an active wallet and a
+`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`. Authentication is on by default;
+to disable it for a listener, set `auth = false` and omit `bearer_token_env` in its
+server table. Standalone HTTP supports `--no-auth`. Startup warns when auth is off.
+Wait for an active wallet and a
 ready standby before paid use. List tools in your MCP client, read the provider
 help, and select a request within the configured payment cap. Help is fetched on
 demand and cached for the process.
@@ -227,8 +230,9 @@ addition. Discovery does not grant spending or source-registration authority.
 
 ## MCP and startup behavior
 
-- **Streamable HTTP and stdio.** Managed multi-server deployments use authenticated
-  loopback HTTP listeners. Standalone provider serving also supports stdio.
+- **Streamable HTTP and stdio.** Managed multi-server deployments use loopback
+  HTTP listeners with authentication enabled by default. Standalone provider
+  serving also supports stdio.
 - **Multiple servers in one process.** Each listener selects sources, tools and
   wallet bindings; provider definitions are reusable across deployments.
 - **Tor-oriented startup scheduling.** Catalogs use a rolling two-load default;

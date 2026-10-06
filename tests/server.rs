@@ -95,10 +95,22 @@ async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result
             .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
             "params":{"name":"test_read","arguments":{}}}))
     };
-    assert_eq!(
-        request().send().await.unwrap().status(),
-        StatusCode::UNAUTHORIZED
-    );
+    for (authorization, message) in [
+        (None, "missing Authorization header"),
+        (Some("Basic never-log-this"), "invalid Authorization header"),
+        (Some("Bearer wrong-secret"), "incorrect bearer token value"),
+    ] {
+        let mut request = request();
+        if let Some(value) = authorization {
+            request = request.header("Authorization", value);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()["www-authenticate"], "Bearer");
+        let body = response.text().await.unwrap();
+        assert!(body.contains(message), "{body}");
+        assert!(!body.contains("never-log-this") && !body.contains("wrong-secret"));
+    }
     assert_eq!(unsigned.load(Ordering::SeqCst), 0);
     assert_eq!(signed.load(Ordering::SeqCst), 0);
     let result: Value = request()

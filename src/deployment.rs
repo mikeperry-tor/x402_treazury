@@ -2,7 +2,7 @@
 use crate::{
     catalog::{self, Config, ToolSpec},
     payment::{PaidClient, Payer, SpendPolicy},
-    server::{Server, http_app},
+    server::{Server, http_app_with_auth},
 };
 use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
@@ -54,10 +54,16 @@ pub use crate::rotation::assignment::WalletBinding;
 use crate::rotation::assignment::{self, Assignment, Resolution, WalletSummary};
 pub use crate::rotation::config::WalletConfig;
 use crate::rotation::config::{FundingConfig, TreasuryConfig};
+fn auth_enabled() -> bool {
+    true
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerConfig {
     pub listen: SocketAddr,
+    #[serde(default = "auth_enabled")]
+    pub auth: bool,
+    #[serde(default)]
     pub bearer_token_env: String,
     pub wallet: Option<String>,
     pub source_management: Option<crate::discovery::policy::Grant>,
@@ -166,8 +172,12 @@ impl MetaConfig {
                 server.listen
             );
             ensure!(
-                !server.bearer_token_env.trim().is_empty(),
-                "server {name}: bearer_token_env is required"
+                !server.auth || !server.bearer_token_env.trim().is_empty(),
+                "server {name}: bearer_token_env is required unless auth = false"
+            );
+            ensure!(
+                server.auth || server.bearer_token_env.is_empty(),
+                "server {name}: omit bearer_token_env when auth = false"
             );
             if let Some(wallet) = &server.wallet {
                 ensure!(
@@ -700,7 +710,14 @@ impl Deployment {
         // Validate every credential before opening any port.
         let mut tokens = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
-            tokens.insert(name.clone(), secret(&cfg.bearer_token_env)?);
+            tokens.insert(
+                name.clone(),
+                if cfg.auth {
+                    Some(secret(&cfg.bearer_token_env)?)
+                } else {
+                    None
+                },
+            );
         }
         let initialized = if unsigned {
             ensure!(
@@ -794,7 +811,7 @@ impl Deployment {
             listeners.push((
                 name.clone(),
                 listener,
-                http_app(server, tokens.remove(name).unwrap()),
+                http_app_with_auth(server, tokens.remove(name).unwrap()),
             ));
         }
         Ok(RunningDeployment {

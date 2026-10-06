@@ -82,10 +82,26 @@ optional wallet templates and an automatic assignment policy:
   (decimal string, default `"1.00"`), or a managed `zcash_rotation` profile
   described below. Bindings referencing the same profile share payer state.
   The cap applies per payment; it is not an aggregate budget.
-- `servers`: `listen`, `bearer_token_env`, and `sources`, with an optional default
+- `servers`: `listen`, `sources`, and `bearer_token_env` when `auth = true` (the default), with an optional default
   `wallet` and optional
   `include_tools`, `exclude_tools`, `tags`, `exclude_tags`, and `max_response_chars`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
+
+To disable HTTP authentication for one listener, set `auth = false` and omit
+`bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own
+authentication policy. Standalone HTTP uses `--transport http --no-auth`; this
+explicit flag ignores `X402_MCP_BEARER_TOKEN` and conflicts with `--bearer-token`.
+Startup warns when a listener allows clients to call tools without authentication.
+Stdio needs no authentication. Live integration qualification still requires
+authenticated listeners and fresh runner-generated tokens.
+
+Authenticated HTTP clients send `Authorization: Bearer <token>`; `bearer_token_env` names the
+environment variable containing only the token. HTTP 401 responses distinguish
+missing headers, malformed or duplicate authorization headers, and incorrect token
+values. Warnings identify the listener and failure category without including
+credentials. Each category logs at most once per listener per 30 seconds; warnings
+state this limit and the next warning reports the suppressed count. Every rejected
+request receives the error response even when its warning is suppressed.
 
 Payment identity sharing is controlled by named wallet references. For every
 server/source binding, precedence is **source `wallet` → server default `wallet`
@@ -612,4 +628,3 @@ retain atomic units, while recognized USDC uses six decimal places. Authored
 description overrides apply last, and description limits remain explicit.
 Cached prices are informational: each paid invocation still obtains a fresh
 challenge and enforces its spend cap before signing.
-
