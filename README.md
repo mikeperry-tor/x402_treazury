@@ -28,7 +28,7 @@ flowchart TB
 > **NOTE:**
 >
 > `x402_treazury` reduces wallet and network linkability; it does not make payments
-> invisible. The Zcash->USDC funding path uses **public NEAR swaps and public Base
+> invisible. The Zcash to USDC funding path uses **public NEAR swaps and public Base
 > transactions**. These are visible, but unlinkable to your Zcash shielded
 > address. Because of the $2 minimum swap size, each wallet will make multiple API
 > calls before rotation. Identifying request contents across these rotations can
