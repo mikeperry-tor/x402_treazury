@@ -263,7 +263,7 @@ sources. Explicit profiles can add randomized request-header padding and tune
 concurrency and sampling distributions. This is a
 research vehicle for traffic-shape experiments, **not a demonstrated defense against
 traffic analysis**. It shares the real request's isolation scope and prioritizes paid
-traffic. PING overlays and more advanced shaping remain deferred.
+traffic.
 
 Set `network.cover_traffic_enabled = false` to disable it globally, or
 `cover_traffic_enabled = false` in a provider/source definition to disable it for that

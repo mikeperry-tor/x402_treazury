@@ -32,12 +32,24 @@ max_price_usd = "0.05"
 max_input_zec = "0.006"
 max_fee_bps = 500
 
-[sources.socialfetch]
-extends = "../providers/socialfetch.toml"
+[sources.botsmith]
+extends = "../providers/botsmith.toml"
+
+[sources.exa]
+extends = "../providers/exa.toml"
+
+[sources.pdl]
+extends = "../providers/pdl.toml"
+
+[sources.googletrends]
+extends = "../providers/google-trends.toml"
+
+[sources.genuinegood]
+extends = "../providers/genuinegood.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "research"
-sources = ["socialfetch"]
+sources = ["botsmith", "exa", "pdl", "googletrends", "genuinegood"]
 include_tools = ["socialfetch_twitter_profiles_handle", "socialfetch_help"]
