@@ -83,13 +83,13 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
         assert!(!dir.path().join("state").exists());
         assert!(!dir.path().join("key").exists());
     }
-    // --show-config runs without credentials or even a spec file; --check loads
+    // config show runs without credentials or even a spec file; config check loads
     // the catalog but still creates no pool. Inventory carries template provenance.
     let path = dir.path().join("servers.toml");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-        .args(["--config", path.to_str().unwrap(), "--show-config"])
+        .args(["config", "show", "--config", path.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(
@@ -108,7 +108,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-        .args(["--config", path.to_str().unwrap(), "--check"])
+        .args(["config", "check", "--config", path.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(

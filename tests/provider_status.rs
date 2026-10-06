@@ -1,10 +1,10 @@
 use std::process::{Command, Output};
 
-fn run(path: &std::path::Path, meta: bool, extra: &[&str]) -> Output {
+fn run(path: &std::path::Path, meta: bool, command: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .args(command)
         .arg(if meta { "--config" } else { "--provider" })
         .arg(path)
-        .args(extra)
         .env_clear()
         .output()
         .unwrap()
@@ -31,7 +31,7 @@ reliability_note = "Dated evidence: paid response lost"
 "#,
     )
     .unwrap();
-    let result = run(&path, false, &[]);
+    let result = run(&path, false, &["serve"]);
     assert!(!result.status.success());
     assert!(result.stdout.is_empty());
     let err = String::from_utf8(result.stderr).unwrap();
@@ -43,7 +43,7 @@ reliability_note = "Dated evidence: paid response lost"
     assert!(err.contains("may still be charged"), "{err}");
     assert!(err.contains("Dated evidence: paid response lost"), "{err}");
 
-    let result = run(&path, false, &["--show-config"]);
+    let result = run(&path, false, &["config", "show"]);
     assert!(result.status.success(), "{:?}", result);
     assert!(!String::from_utf8_lossy(&result.stderr).contains("Provider reliability"));
     assert!(String::from_utf8_lossy(&result.stdout).contains("intermittent_response_body"));
@@ -54,7 +54,7 @@ fn slow_pricing_warning_is_visible_before_catalog_io_and_inspection_is_quiet() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("slow-pricing.toml");
     std::fs::write(&path, "spec = 'missing.json'\nreliability_tags = ['slow_pricing', 'slow_pricing']\nreliability_note = 'Pricing discovery was slow'\n").unwrap();
-    let result = run(&path, false, &[]);
+    let result = run(&path, false, &["serve"]);
     assert!(!result.status.success());
     assert!(result.stdout.is_empty());
     let log = String::from_utf8(result.stderr).unwrap();
@@ -64,7 +64,7 @@ fn slow_pricing_warning_is_visible_before_catalog_io_and_inspection_is_quiet() {
         "{log}"
     );
     assert!(log.contains("Pricing discovery was slow"), "{log}");
-    let shown = run(&path, false, &["--show-config"]);
+    let shown = run(&path, false, &["config", "show"]);
     assert!(shown.status.success());
     assert!(String::from_utf8_lossy(&shown.stdout).contains("slow_pricing"));
     assert!(!String::from_utf8_lossy(&shown.stderr).contains("Provider reliability"));
@@ -102,12 +102,17 @@ sources = ["observed"]
 "#,
     )
     .unwrap();
-    for flag in ["--check", "--list-tools", "--list-tags", "--show-config"] {
-        let result = run(&path, true, &[flag]);
-        assert!(result.status.success(), "{flag}: {:?}", result);
+    for command in [
+        ["config", "check"],
+        ["catalog", "tools"],
+        ["catalog", "tags"],
+        ["config", "show"],
+    ] {
+        let result = run(&path, true, &command);
+        assert!(result.status.success(), "{command:?}: {:?}", result);
         assert!(!String::from_utf8_lossy(&result.stderr).contains("Provider reliability"));
     }
-    let result = run(&path, true, &[]);
+    let result = run(&path, true, &["serve"]);
     assert!(!result.status.success()); // No credentials: never binds a listener.
     let err = String::from_utf8(result.stderr).unwrap();
     assert_eq!(
@@ -120,14 +125,14 @@ sources = ["observed"]
 
     let standalone = dir.path().join("standalone.toml");
     std::fs::write(&standalone, "spec = 'spec.json'\ntags = ['data']\n").unwrap();
-    let baseline = run(&standalone, false, &["--list-tools"]);
+    let baseline = run(&standalone, false, &["catalog", "tools"]);
     assert!(baseline.status.success());
     std::fs::write(
         &standalone,
         "spec = 'spec.json'\ntags = ['data']\nreliability_tags = ['upstream_rate_limited']\n",
     )
     .unwrap();
-    let annotated = run(&standalone, false, &["--list-tools"]);
+    let annotated = run(&standalone, false, &["catalog", "tools"]);
     assert!(annotated.status.success());
     assert_eq!(baseline.stdout, annotated.stdout);
     assert!(!String::from_utf8_lossy(&annotated.stderr).contains("Provider reliability"));

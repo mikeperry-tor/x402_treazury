@@ -199,7 +199,7 @@ The report bounds pricing rows at 10000 source/session pairs and explicitly refu
 a larger projection instead of omitting rows. A source's private pricing event is
 limited to 16 MiB; exceeding it logs a warning and fails publication explicitly. Unselected sources can have no
 pricing stage; request an assertion only for a source that will be priced. Catalog
-inspection (`--check`/preparation) still does not probe. The real-executable suite
+inspection (`config check`/preparation) still does not probe. The real-executable suite
 in `tests/integration_preparation.rs` shares the runner entry code in
 `examples/live_integration/driver.rs`, preventing module/CLI drift.
 

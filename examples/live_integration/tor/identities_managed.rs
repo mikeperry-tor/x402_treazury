@@ -109,7 +109,7 @@ fn managed_map_inner(
         status.treasury_id == m.treasury_id,
         "identity export treasury mismatch"
     );
-    // This is the actual execution config, not `--show-config` inspection JSON.
+    // This is the actual execution config, not `config show` inspection JSON.
     // Resolve named/generated wallets through production assignment and check
     // the stored inventory against that resolution before granting any identity.
     let config: MetaConfig = serde_json::from_value(snapshot["deployment"].clone())?;

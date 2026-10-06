@@ -2,15 +2,30 @@
 
 For a Zcash-and-Tor walkthrough, start with the [README](../README.md).
 This reference covers TOML composition, tool selection, transport and pricing.
-Commands run from the repository root.
+Commands run from the repository root. The executable requires an explicit
+subcommand; running it without arguments displays help and never starts serving.
+
+| Command | Purpose |
+| --- | --- |
+| `serve --config FILE` | Start a multi-listener deployment and its configured funding workers |
+| `serve --provider FILE` | Serve one provider, using stdio by default |
+| `catalog tools --config FILE` or `--provider FILE` | Print selected tool inventories as JSON; optional `--discover-pricing` runs unsigned probes |
+| `catalog tags --config FILE` or `--provider FILE` | Print available OpenAPI tags |
+| `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
+| `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
+| `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices or funding |
+| `wallet ...` | Administer the treasury |
+| `sources inspect --config FILE` | Read persisted agent-added source records |
+| `build-info` | Print build identity and provenance |
+
+Use `x402_treazury COMMAND --help` for the options available to each operation.
 
 ## Configuration file roles
 
 `--config FILE` selects a deployment: sources, listeners, wallets and network
 policy. Wallet commands accept the same file without loading API sources.
 `--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
-provider for standalone serving; the former provider meaning of `--config` is
-replaced by this explicit flag. `--network-config FILE` is an optional network-only
+provider for standalone serving and catalog inspection. `--network-config FILE` is an optional network-only
 file for standalone operations, not an override for deployments.
 
 Ordinary deployment examples live in `examples/deployments/`, standalone network policies in
@@ -40,8 +55,8 @@ limit; see [startup qualification](../tests/STARTUP.md). Pricing concurrency is 
 A free slot starts the next source immediately. Serving still waits for every
 declared catalog and startup pricing discovery; a catalog failure aborts startup
 and cancels unfinished loads. Tool ordering and wallet bindings do not depend on
-completion order. `--check`, `--list-tools` and `--list-tags` use the same loader;
-`--show-config` remains offline and reports the effective limit. Progress, source
+completion order. `config check`, `catalog tools` and `catalog tags` use the same loader;
+`config show` remains offline and reports the effective limit. Progress, source
 fetch/parse and generation timings, and pricing timings go to stderr; a ten-second
 waiting message identifies remaining work. No response content or source URL is
 included in these progress messages. Remote spec aliases share a download and parsed document within one deployment
@@ -55,11 +70,11 @@ Pricing discovery rolls across sources and endpoints with a shared 16-request ca
 separate research and company MCP listeners sharing one static wallet profile:
 
 ```sh
-target/debug/x402_treazury \
-  --config examples/deployments/servers.toml --check
-target/debug/x402_treazury \
-  --config examples/deployments/servers.toml --list-tools
-target/debug/x402_treazury \
+target/debug/x402_treazury config check \
+  --config examples/deployments/servers.toml
+target/debug/x402_treazury catalog tools \
+  --config examples/deployments/servers.toml
+target/debug/x402_treazury serve \
   --config examples/deployments/servers.toml --env-file .env
 ```
 
@@ -167,12 +182,12 @@ complete unlinkability. Every additional managed pool requires its own active
 and standby funding. Referencing one profile from more bindings does not create
 additional pools or funding jobs.
 
-`--show-config` includes `wallet_bindings.<server>.<source>` with the effective
+`config show` includes `wallet_bindings.<server>.<source>` with the effective
 `wallet` and its `origin`, such as `sources.socialfetch.wallet` or
 `servers.research.wallet`. Resolved sources display their optional `wallet`
-separately from provider `settings`. Inventory (`--list-tools`) includes each
+separately from provider `settings`. Inventory (`catalog tools`) includes each
 server's `default_wallet` and the same `wallet_bindings` map; each tool's `source`
-identifies its binding. `--check` prints these mappings as well. Mappings cover
+identifies its binding. `config check` prints these mappings as well. Mappings cover
 all declared server/source bindings, including sources whose tools are filtered
 out; only effective static wallets used by selected tools load private keys.
 Inspection never reads wallet secrets or opens treasury state.
@@ -232,11 +247,11 @@ new pools. Managed startup disables pools absent from the resolved set and keeps
 their keys and history; restoring the previous scope/name resumes them. Static-only
 serving does not unlock or modify treasury state.
 
-For automatic bindings, `--show-config` and inventory additionally report
+For automatic bindings, `config show` and inventory additionally report
 `template` and `scope`. Configuration inspection includes `resolved_wallets`
 (explicit plus generated profile settings), `generated_wallets` (generation
 metadata), and `wallet_summary` (distinct managed/generated pool counts and their
-combined active-plus-standby target in atomic units and decimal USDC). `--check`
+combined active-plus-standby target in atomic units and decimal USDC). `config check`
 also prints that summary. The total counts each managed pool once, including
 explicit unreferenced profiles; it excludes unused templates and static wallets.
 It is a configuration target, not a live balance or a quote for additional funds:
@@ -275,19 +290,22 @@ the same selection as listing. Sources referenced by multiple listeners are
 loaded once and retain one catalog; selected instructions are combined without
 hidden truncation.
 
-`--show-config` prints the composed file settings and per-source field origins,
-including defaults, without reading secrets or loading specs. It accepts only
-`--provider` or `--config`; CLI/environment runtime overrides are outside
+`config show` prints the composed file settings and per-source field origins,
+including defaults, without reading secrets or loading specs. It accepts
+`--provider` or `--config`, plus optional `--network-config` for a standalone
+provider; CLI/environment runtime overrides are outside
 this file inspection command. Wallet/token fields show environment variable
 names, never their values.
 
-`--check` validates and reports inventories; `--list-tools` prints per-server
-JSON including source attribution. `--list-tags` reports unfiltered source tag
+`config check` validates and reports inventories; `catalog tools` prints per-server
+JSON including source attribution. `catalog tags` reports unfiltered source tag
 counts. These commands do not create signers, bind ports, or fetch help documents.
-Pricing probes require the explicit `--list-tools --discover-pricing` combination.
-Remote specs still require network access. Only `--env-file`,
-`--check`, `--list-tools`, `--discover-pricing`, `--list-tags`, and `--show-config` may accompany
-`--config`; deployment settings do not inherit single-source CLI overrides.
+Pricing probes require the explicit `catalog tools --discover-pricing` combination.
+Remote specs still require network access. Deployment operations accept `--env-file`
+except offline `config show`; `--discover-pricing` belongs only to `catalog tools`.
+Standalone CLI overrides cannot accompany a deployment `--config`; configure
+those values in its TOML instead. Serving/authentication flags belong only to
+`serve`.
 
 Startup validates credentials and binds every listener before serving any.
 A bind failure releases listeners already acquired. Both standalone HTTP and
@@ -311,7 +329,7 @@ Sources and reusable provider TOML files accept these positive byte limits:
 
 Standalone CLI flags `--max-response-bytes`, `--max-help-bytes` and
 `--max-spec-bytes` override provider settings. Meta-config sets them per source;
-`--show-config` reports resolved values and origins. For agent-added sources,
+`config show` reports resolved values and origins. For agent-added sources,
 `[source_management]` sets the response/help caps and its existing spec import cap.
 Agents cannot raise these operator-controlled limits.
 
@@ -362,7 +380,7 @@ Filters accept comma-separated values. Supported
 `PRICING_KEY`, `INCLUDE`, `EXCLUDE`, `TAGS`, `EXCLUDE_TAGS`, `INSTRUCTIONS_TEXT`,
 `HELP_URL`, and `MAX_DESCRIPTION_CHARS`. Precedence is CLI > environment > config
 > default; explicit env-file values override inherited environment values.
-Use `--help` for the complete CLI. `--route-tool NAME --args '{...}'` prints
+Use `--help` for the complete CLI. `catalog route NAME --args '{...}'` prints
 method, URL, query and JSON body without making a request or loading a signer.
 
 ## Optional agent API discovery
@@ -403,7 +421,7 @@ Directory results are leads, not automatically imported schemas.
 
 See [agent source management](agent-sources.md) for the complete configuration,
 agent workflow, limits, wallet/privacy behavior and recovery procedures.
-`--show-config` inspects grants and wallet bindings offline;
+`config show` inspects grants and wallet bindings offline;
 `x402_treazury sources inspect --config FILE` inspects saved registrations.
 
 ## Provider reliability observations
@@ -429,8 +447,8 @@ source name and evidence note, before fetching that source's catalog. A deployme
 warns once per listener-bound source/tag, even when several listeners share it.
 Declared unbound sources do not warn; bound sources warn even if later tool filters
 remove all their tools. Standalone serving also warns. Inspection commands
-(`--show-config`, `--check`, `--list-tools`, `--list-tags`, `--route-tool`)
-remain quiet; `--show-config` exposes the annotations and their origins.
+(`config show`, `config check`, `catalog tools`, `catalog tags`, `catalog route`)
+remain quiet; `config show` exposes the annotations and their origins.
 
 Annotations follow normal TOML composition: omission inherits, a supplied list
 replaces the entire list, and `reliability_tags = []` suppresses its warnings.
@@ -452,9 +470,9 @@ and disables pricing probes because credit prices are embedded in the spec.
 The server instructions explain the credit unit and metering caveats.
 
 ```sh
-target/debug/x402_treazury --provider providers/socialfetch.toml --list-tags
-target/debug/x402_treazury --provider providers/socialfetch.toml --tags Twitter,YouTube --list-tools
-target/debug/x402_treazury --config examples/deployments/socialfetch.toml --env-file .env
+target/debug/x402_treazury catalog tags --provider providers/socialfetch.toml
+target/debug/x402_treazury catalog tools --provider providers/socialfetch.toml --tags Twitter,YouTube
+target/debug/x402_treazury serve --config examples/deployments/socialfetch.toml --env-file .env
 ```
 
 [examples/deployments/socialfetch.toml](../examples/deployments/socialfetch.toml) configures a selected
@@ -464,7 +482,7 @@ clears it. Matching is exact and case-sensitive. Include tags match any listed
 tag; exclude tags win. Tag selection combines with source path filters, then
 listener tool-name selection. Untagged operations cannot match an include tag.
 
-`--list-tags` prints JSON counts from the unfiltered source (grouped by source
+`catalog tags` prints JSON counts from the unfiltered source (grouped by source
 in meta-config mode). It loads no credentials, fetches no help, and performs no
 pricing probes. A remote spec is still fetched once. Use `--spec tests/fixtures/socialfetch_openapi.json` on the single-source command for an
 offline inventory. It is mutually exclusive with other inventory commands.
@@ -501,11 +519,11 @@ must be at least the connection timeout. Direct-mode budgets are unchanged.
 These settings govern our client, not the external Tor daemon. They do not extend
 payment authorization expiry, NEAR quote expiry or experiment deadlines.
 
-For standalone serving or wallet commands, use the same table in a separate file:
+For standalone operations or wallet commands, use the same table in a separate file:
 
 ```sh
-x402_treazury --provider providers/socialfetch.toml \
-  --network-config examples/network/tor.toml --list-tools
+x402_treazury catalog tools --provider providers/socialfetch.toml \
+  --network-config examples/network/tor.toml
 x402_treazury wallet init --state-dir state/public-demo \
   --network-config examples/network/tor.toml
 ```
@@ -513,7 +531,7 @@ x402_treazury wallet init --state-dir state/public-demo \
 Paths above assume the repository root as the current directory. Meta-config wallet
 commands take network policy from their deployment file; an external network policy
 cannot override it. Provider files and MCP tool arguments cannot choose transport.
-`--show-config` reports effective settings without reading keys or contacting Tor.
+`config show` reports effective settings without reading keys or contacting Tor.
 Offline wallet inspection, backup and explicit-birthday init remain offline.
 
 The SOCKS endpoint must be a literal loopback IP and nonzero port. Tor Browser or a
@@ -587,7 +605,7 @@ allow_http1 = true  # permit HTTP/1.1 fallback; still offer HTTP/2
 allow_tls12 = true  # permit TLS 1.2; still prefer TLS 1.3
 ```
 
-Both default to `false`, inherit through `extends`, and appear in `--show-config`.
+Both default to `false`, inherit through `extends`, and appear in `config show`.
 They are independent: an HTTP/1.1-only server with TLS 1.3 needs only
 `allow_http1`. There is no automatic downgrade retry on a strict connection
 failure. These flags do not relax certificate or hostname checks. Existing
@@ -621,16 +639,16 @@ scoped status and experimental limitations. Periodic/randomized PINGs are not im
 Serving can discover missing prices once at startup through unsigned GETs.
 Provider settings enable this by default (`probe_pricing = false` disables it).
 Inline sources use the same defaults; a deployment source can override the
-provider setting. Validation, ordinary inventory and `--route-tool` never probe.
+provider setting. Validation, ordinary inventory and `catalog route` never probe.
 To inspect descriptions with unsigned discovery enabled, without wallet keys,
 listener tokens, wallet state access or starting a server:
 
 ```sh
-x402_treazury --provider providers/botsmith.toml --list-tools --discover-pricing
-x402_treazury --config examples/deployments/privacy.local.toml --list-tools --discover-pricing
+x402_treazury catalog tools --provider providers/botsmith.toml --discover-pricing
+x402_treazury catalog tools --config examples/deployments/privacy.local.toml --discover-pricing
 ```
 
-The flag requires `--list-tools` and respects `probe_pricing = false`, route
+The flag requires `catalog tools` and respects `probe_pricing = false`, route
 eligibility, caps, timeouts and the configured direct/Tor policy. Each invocation
 is a new process, so repeated CLI invocations can repeat probes. Failed or skipped
 discovery leaves prices explicitly unavailable; unpaid success does not establish

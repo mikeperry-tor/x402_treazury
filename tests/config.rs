@@ -204,7 +204,7 @@ fn show_config_is_offline_reports_origins_and_never_resolves_secret_values() {
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("PRIVATE_ENV_REFERENCE", "do-not-expose-this")
-        .args(["--config", path.to_str().unwrap(), "--show-config"])
+        .args(["config", "show", "--config", path.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(

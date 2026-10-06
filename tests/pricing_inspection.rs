@@ -61,7 +61,24 @@ async fn inspection_discovery_is_opt_in_unsigned_and_respects_source_policy() {
         "spec='spec.json'\nprefix='api'\n",
     )
     .unwrap();
-    let ordinary = output(cli(dir.path(), &["--provider", "provider.toml", "--list-tools"]).await);
+    let ordinary = output(
+        cli(
+            dir.path(),
+            &["catalog", "tools", "--provider", "provider.toml"],
+        )
+        .await,
+    );
+    let checked = cli(
+        dir.path(),
+        &["config", "check", "--provider", "provider.toml"],
+    )
+    .await;
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("tools validated"));
     assert_eq!(counts.load(Ordering::SeqCst), 0);
     assert!(
         ordinary[0]["description"]
@@ -73,9 +90,10 @@ async fn inspection_discovery_is_opt_in_unsigned_and_respects_source_policy() {
         cli(
             dir.path(),
             &[
+                "catalog",
+                "tools",
                 "--provider",
                 "provider.toml",
-                "--list-tools",
                 "--discover-pricing",
             ],
         )
@@ -115,9 +133,10 @@ async fn inspection_discovery_is_opt_in_unsigned_and_respects_source_policy() {
         cli(
             dir.path(),
             &[
+                "catalog",
+                "tools",
                 "--provider",
                 "provider.toml",
-                "--list-tools",
                 "--discover-pricing",
             ],
         )
@@ -127,7 +146,7 @@ async fn inspection_discovery_is_opt_in_unsigned_and_respects_source_policy() {
     assert!(
         !cli(
             dir.path(),
-            &["--provider", "provider.toml", "--discover-pricing"]
+            &["serve", "--provider", "provider.toml", "--discover-pricing"]
         )
         .await
         .status
@@ -168,9 +187,10 @@ include_tools=['api_read']
         cli(
             dir.path(),
             &[
+                "catalog",
+                "tools",
                 "--config",
                 "deployment.toml",
-                "--list-tools",
                 "--discover-pricing",
             ],
         )

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, ensure};
-use clap::{CommandFactory, FromArgMatches, Parser};
+use clap::{CommandFactory, FromArgMatches};
 use rmcp::ServiceExt;
 use std::{collections::BTreeMap, time::Duration};
 use x402_treazury::{
@@ -8,97 +8,44 @@ use x402_treazury::{
     server::{Server, serve_http},
 };
 
-#[derive(Parser)]
-#[command(
-    name = "x402_treazury",
-    version,
-    about = "x402_treazury: paid API tools with managed wallets and optional Tor isolation",
-    after_help = "Treasury commands: wallet --help (init/addresses/address/pool require the zcash feature)"
-)]
+mod cli;
+
+#[derive(Default)]
 struct Args {
-    /// Deployment configuration for serving and inspection.
-    #[arg(long = "config", alias = "meta-config")]
     meta_config: Option<std::path::PathBuf>,
-    /// Internal qualification restriction; never enables calls or funding.
-    #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
     qualification_no_new_funding: bool,
-    /// Internal keyless serving mode for supervised unsigned qualification.
-    #[arg(
-        long,
-        hide = true,
-        requires = "qualification_parent_stdin",
-        conflicts_with = "env_file"
-    )]
     qualification_unsigned: bool,
-    /// Internal managed serving mode; registry-bound and parent supervised.
-    #[arg(long, hide=true, requires="qualification_binding", requires="qualification_parent_stdin", conflicts_with_all=["qualification_unsigned","env_file"])]
     qualification_managed: bool,
-    /// Internal lifetime channel: EOF on piped stdin initiates deliberate shutdown.
-    #[arg(long, hide = true, requires = "meta_config", conflicts_with_all = ["check", "show_config", "list_tools", "list_tags", "route_tool"])]
     qualification_parent_stdin: bool,
-    #[arg(long, conflicts_with = "meta_config")]
     network_config: Option<std::path::PathBuf>,
-    #[arg(long, requires = "meta_config")]
     check: bool,
-    #[arg(long, hide=true, requires="meta_config", conflicts_with_all=["check","show_config","list_tools","list_tags","route_tool","qualification_unsigned","qualification_managed","qualification_parent_stdin","qualification_no_new_funding"])]
     qualification_snapshot: bool,
-    /// Internal private binding for registry-reviewed supervised cases.
-    #[arg(long, hide = true, requires = "qualification_parent_stdin")]
     qualification_binding: Option<std::path::PathBuf>,
-    #[arg(long, conflicts_with_all = ["check", "list_tools", "list_tags", "route_tool"])]
     show_config: bool,
-    /// Reusable provider configuration for standalone serving.
-    #[arg(long = "provider")]
     config: Option<String>,
-    #[arg(long)]
     spec: Option<String>,
-    #[arg(long)]
     base_url: Option<String>,
-    #[arg(long)]
     prefix: Option<String>,
-    #[arg(long, value_delimiter = ',')]
     include: Option<Vec<String>>,
-    #[arg(long, value_delimiter = ',')]
     exclude: Option<Vec<String>>,
-    #[arg(long, value_delimiter = ',')]
     tags: Option<Vec<String>>,
-    #[arg(long, value_delimiter = ',')]
     exclude_tags: Option<Vec<String>>,
-    #[arg(long)]
     env_file: Option<String>,
-    #[arg(long)]
     max_price_usd: Option<String>,
-    #[arg(long)]
     max_response_chars: Option<usize>,
-    #[arg(long)]
     max_response_bytes: Option<usize>,
-    #[arg(long)]
     max_help_bytes: Option<usize>,
-    #[arg(long)]
     max_spec_bytes: Option<usize>,
-    #[arg(long)]
     timeout: Option<f64>,
-    #[arg(long, default_value="stdio", value_parser=["stdio", "http"])]
     transport: String,
-    #[arg(long, default_value = "127.0.0.1")]
     host: String,
-    #[arg(long, default_value = "8000")]
     port: u16,
-    #[arg(long)]
     bearer_token: Option<String>,
-    /// Serve standalone HTTP without bearer authentication (explicit opt-out).
-    #[arg(long, conflicts_with = "bearer_token")]
     no_auth: bool,
-    #[arg(long)]
     list_tools: bool,
-    /// Add unsigned startup pricing discovery to --list-tools; respects provider probe policy.
-    #[arg(long, requires = "list_tools", conflicts_with_all = ["check", "route_tool"])]
     discover_pricing: bool,
-    #[arg(long, conflicts_with_all = ["list_tools", "check", "route_tool"])]
     list_tags: bool,
-    #[arg(long)]
     route_tool: Option<String>,
-    #[arg(long, default_value = "{}")]
     args: String,
 }
 #[tokio::main]
@@ -113,26 +60,34 @@ async fn main() -> std::process::ExitCode {
     }
 }
 async fn run() -> Result<()> {
-    if std::env::args().nth(1).as_deref() == Some("build-info") {
-        ensure!(
-            std::env::args_os().count() == 2,
-            "build-info accepts no arguments"
-        );
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&x402_treazury::build_identity::current())?
-        );
-        return Ok(());
+    let matches = cli::Cli::command().get_matches();
+    let command = cli::Cli::from_arg_matches(&matches)?.command;
+    let args: Args = match command {
+        cli::Command::Wallet(args) => return x402_treazury::wallet_cli::run(args).await,
+        cli::Command::Sources(cli::Sources::Inspect { config }) => {
+            return x402_treazury::discovery::inspect_cli(&config).await;
+        }
+        cli::Command::BuildInfo => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&x402_treazury::build_identity::current())?
+            );
+            return Ok(());
+        }
+        cli::Command::Serve(args) => args.into(),
+        cli::Command::Catalog(args) => args.into(),
+        cli::Command::Config(args) => args.into(),
+    };
+    let definition = cli::Cli::command();
+    let mut leaf_definition = &definition;
+    let mut matches = &matches;
+    while let Some((name, nested)) = matches.subcommand() {
+        leaf_definition = leaf_definition
+            .find_subcommand(name)
+            .expect("parsed command exists");
+        matches = nested;
     }
-    if std::env::args().nth(1).as_deref() == Some("wallet") {
-        return x402_treazury::wallet_cli::run().await;
-    }
-    if std::env::args().nth(1).as_deref() == Some("sources") {
-        return x402_treazury::discovery::inspect_cli().await;
-    }
-    let matches = Args::command().get_matches();
-    let args = Args::from_arg_matches(&matches)?;
-    validate_meta_arguments(&args, &matches)?;
+    validate_meta_arguments(&args, matches, leaf_definition)?;
     ensure!(
         !args.no_auth || args.transport == "http",
         "--no-auth requires --transport http"
@@ -142,7 +97,7 @@ async fn run() -> Result<()> {
         .with_env_filter("warn,x402_treazury::startup=info,x402_treazury::network=info")
         .init();
     if args.show_config {
-        return show_config(&args, &matches).await;
+        return show_config(&args).await;
     }
     if let Some(path) = &args.network_config {
         x402_treazury::network::install(x402_treazury::network::NetworkPolicy::load(path)?)?;
@@ -222,6 +177,10 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         );
         return Ok(());
     }
+    if args.check {
+        println!("{} tools validated", tools.len());
+        return Ok(());
+    }
     let policy = SpendPolicy::dollars(
         args.max_price_usd
             .as_deref()
@@ -284,19 +243,19 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     Ok(())
 }
 
-fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()> {
+fn validate_meta_arguments(
+    args: &Args,
+    matches: &clap::ArgMatches,
+    command: &clap::Command,
+) -> Result<()> {
     if args.meta_config.is_some() {
-        for argument in Args::command().get_arguments() {
+        for argument in command.get_arguments() {
             let id = argument.get_id();
             if matches.value_source(id.as_str()) == Some(clap::parser::ValueSource::CommandLine) {
                 ensure!(
                     [
                         "meta_config",
-                        "check",
-                        "show_config",
-                        "list_tools",
                         "discover_pricing",
-                        "list_tags",
                         "env_file",
                         "qualification_no_new_funding",
                         "qualification_unsigned",
@@ -307,7 +266,11 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
                     ]
                     .contains(&id.as_str()),
                     "--config cannot be combined with --{}; configure it in the TOML file",
-                    argument.get_long().unwrap_or(id.as_str())
+                    if id.as_str() == "config" {
+                        "provider".to_owned()
+                    } else {
+                        id.as_str().replace('_', "-")
+                    }
                 );
             }
         }
@@ -315,24 +278,14 @@ fn validate_meta_arguments(args: &Args, matches: &clap::ArgMatches) -> Result<()
     Ok(())
 }
 
-async fn show_config(args: &Args, matches: &clap::ArgMatches) -> Result<()> {
-    for argument in Args::command().get_arguments() {
-        let id = argument.get_id();
-        if matches.value_source(id.as_str()) == Some(clap::parser::ValueSource::CommandLine) {
-            ensure!(
-                ["show_config", "config", "meta_config", "network_config"].contains(&id.as_str()),
-                "--show-config resolves configuration files only; omit --{}",
-                argument.get_long().unwrap_or(id.as_str())
-            );
-        }
-    }
+async fn show_config(args: &Args) -> Result<()> {
     let mut value = if let Some(path) = &args.meta_config {
         x402_treazury::deployment::Deployment::show_config(path).await?
     } else {
         let path = args
             .config
             .as_ref()
-            .context("--show-config requires --provider or --config")?;
+            .context("config show requires --provider or --config")?;
         serde_json::to_value(x402_treazury::config::load(std::path::Path::new(path)).await?)?
     };
     if args.meta_config.is_none() {

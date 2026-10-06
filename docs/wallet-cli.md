@@ -416,8 +416,8 @@ trusted Base RPC. [servers-managed.toml](../examples/deployments/servers-managed
 a complete deployment example. Inspect it without credentials or state access:
 
 ```sh
-target/debug/x402_treazury \
-  --config examples/deployments/servers-managed.toml --show-config
+target/debug/x402_treazury config show \
+  --config examples/deployments/servers-managed.toml
 ```
 
 Serve with the Zcash-enabled binary using the same `--config` and an
@@ -465,7 +465,7 @@ When `funding.base_rpc_fallback_url_envs` is omitted, dRPC and Base are fallback
 (a default equal to the primary is skipped). Set it to `[]` to disable fallbacks,
 or name up to two environment variables to replace the default fallback list.
 Missing custom variables fail startup rather than reverting to public services.
-`--show-config` includes a secret-free `base_rpc_policy` describing these defaults
+`config show` includes a secret-free `base_rpc_policy` describing these defaults
 and environment references, and startup logs whether default fallbacks are active.
 All selected services may receive wallet-address queries; shared provider accounts
 or API keys can additionally link wallets. Custom-list example:
@@ -555,7 +555,7 @@ existing configurations are unchanged.
 `deposit_size` defaults to `"2.00"`, `max_price_usd` to `"1.00"`, `wait_seconds`
 to 30 (range 1–3600), and `max_attempts` to 3. Money fields are decimal strings;
 USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
-settings and all risk limits are validated by `--check`/`--show-config` without
+settings and all risk limits are validated by `config check`/`config show` without
 unlocking state. Endpoint credentials remain environment references. Serving
 requires those references; endpoints require HTTPS, with HTTP allowed only for
 loopback fixtures. Zcash/NEAR endpoint settings are reserved for the funding

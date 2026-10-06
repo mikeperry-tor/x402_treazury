@@ -19,11 +19,11 @@ and synchronize through normal startup; automatic funding still requires `auto_f
 ```sh
 cargo build --locked
 # Offline composition and permissions; no keys, spec requests or registry access:
-target/debug/x402_treazury --config examples/deployments/agent-sources.toml --show-config
+target/debug/x402_treazury config show --config examples/deployments/agent-sources.toml
 # Checks the example's committed directory spec, without credentials or probes:
-target/debug/x402_treazury --config examples/deployments/agent-sources.toml --check
+target/debug/x402_treazury config check --config examples/deployments/agent-sources.toml
 # Serving needs EVM_PRIVATE_KEY and the two configured MCP bearer tokens:
-target/debug/x402_treazury --config examples/deployments/agent-sources.toml --env-file .env
+target/debug/x402_treazury serve --config examples/deployments/agent-sources.toml --env-file .env
 # Offline saved-record inspection; does not create a missing registry:
 target/debug/x402_treazury sources inspect --config examples/deployments/agent-sources.toml
 ```

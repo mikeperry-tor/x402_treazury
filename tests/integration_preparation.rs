@@ -766,7 +766,7 @@ async fn managed_tor_map_preserves_wallet_scope_and_requires_paid_provider_desti
             .record_credit(&wallet.id, "1000000", "offline", 1)
             .unwrap();
     }
-    // Exercise the real snapshot shape. `--show-config` has extra resolved fields
+    // Exercise the real snapshot shape. `config show` has extra resolved fields
     // which are intentionally absent from the configuration used for execution.
     let deployment = format!(
         r#"version=1
@@ -817,6 +817,7 @@ bearer_token_env="TOKEN"
     std::fs::write(&m.deployment, deployment).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
+        .args(["config", "check"])
         .arg("--config")
         .arg(&m.deployment)
         .arg("--qualification-snapshot")

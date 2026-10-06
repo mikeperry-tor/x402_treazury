@@ -137,6 +137,7 @@ impl<'a> Application<'a> {
 impl Launcher<'_> {
     fn arguments(&self, binding_file: &Path) -> Vec<String> {
         let mut args = vec![
+            "serve".into(),
             "--config".into(),
             self.frozen.to_string_lossy().into_owned(),
             if self.managed {
@@ -296,7 +297,7 @@ mod tests {
                         .position(|a| a == "--qualification-binding")
                         .unwrap();
                     assert_eq!(args[index + 1], name);
-                    assert_eq!(args[1], "frozen.toml");
+                    assert_eq!(&args[..3], &["serve", "--config", "frozen.toml"]);
                 }
             }
         }

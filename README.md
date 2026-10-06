@@ -25,6 +25,15 @@ flowchart TB
     T --> P[API provider group]
 ```
 
+> **NOTE:**
+>
+> Treazury reduces wallet and network linkability; it does not make payments
+> invisible. The Zcash->USDC funding path uses **public NEAR swaps and public Base
+> transactions**. These are visible, but unlinkable to your Zcash shielded
+> address. Because of the $2 minimum swap size, each wallet will make multiple API
+> calls before rotation. Identifying request contents across these rotations can
+> also link activity.
+
 Each managed provider pool has an active Base USDC wallet, and a funded standby USDC
 wallet. When the active wallet cannot cover an admitted payment, x402_treazury can
 promote the standby and fund a new replacement address. Calls continue on the
@@ -44,14 +53,12 @@ retrieval, llm help text, and pricing queries use separate Tor identities
 grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
 uses remote DNS and has no direct-network fallback.
 
-> **NOTE:**
->
-> Treazury reduces wallet and network linkability; it does not make payments
-> invisible. The funding path uses **public NEAR swaps and public Base
-> transactions**. These are visible, but unlinkable to your Zcash shielded
-> address. Because of the $2 minimum swap size, each wallet will make multiple API
-> calls before rotation. Identifying request contents across these rotations can
-> also link activity.
+
+The CLI uses explicit commands: `serve` starts MCP serving, `catalog tools` and
+`catalog tags` inspect API inventories, and `config show` / `config check` inspect
+and validate configuration. `wallet` manages the treasury; `sources inspect`
+reads persisted agent-added sources. Running `x402_treazury` without a command
+shows help. See the [command reference](docs/configuration.md).
 
 ## Quickstart: Zcash and Tor
 
@@ -131,12 +138,12 @@ Keep the backup secure: it contains spending material.
 
 ```sh
 # Offline: inspect wallet bindings, funding targets and network policy.
-target/debug/x402_treazury \
-  --config examples/deployments/privacy.local.toml --show-config
+target/debug/x402_treazury config show \
+  --config examples/deployments/privacy.local.toml
 
 # Fetch the catalog through Tor and validate selected tools; no payments.
-target/debug/x402_treazury \
-  --config examples/deployments/privacy.local.toml --check
+target/debug/x402_treazury config check \
+  --config examples/deployments/privacy.local.toml
 ```
 
 Send ZEC to the treasury's **shielded receive address**. The privacy example conf defines
@@ -178,7 +185,7 @@ backup and `wallet sync` never start funding workers. Ensure `TREAZURY_MCP_TOKEN
 is set, then:
 
 ```sh
-target/debug/x402_treazury --config examples/deployments/privacy.local.toml
+target/debug/x402_treazury serve --config examples/deployments/privacy.local.toml
 ```
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
@@ -233,7 +240,7 @@ template = "small"
 
 This is an alternative to explicit wallet assignments in the quickstart. Remove
 those assignments where you want the automatic policy to apply; explicit references
-retain priority. `--show-config` displays the resolved bindings and combined
+retain priority. `config show` displays the resolved bindings and combined
 active-plus-standby target before allocating anything. That target excludes fees
 and bridge-minimum increases.
 
@@ -259,7 +266,7 @@ spec = "https://api.example.com/openapi.json"
 Add `my_api` to a server's `sources`. Some providers also need a `base_url`, tool
 filters, schema overrides or payment compatibility settings. Reuse bundled settings
 with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage guide.
-Use `--list-tags` and `--list-tools` to choose a useful subset instead of exposing an
+Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
 entire large catalog to the agent.
 
 Optional [agent source management](docs/agent-sources.md) lets authorized agents
@@ -291,7 +298,7 @@ For a simpler static-key stdio setup, provide `EVM_PRIVATE_KEY` through the envi
 or a private `.env` file:
 
 ```sh
-target/debug/x402_treazury --provider providers/socialfetch.toml \
+target/debug/x402_treazury serve --provider providers/socialfetch.toml \
   --network-config examples/network/tor.toml --env-file .env
 ```
 

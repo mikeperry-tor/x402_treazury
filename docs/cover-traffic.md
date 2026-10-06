@@ -14,7 +14,7 @@ for a global opt-out, or true to enable cover in direct mode. In a provider TOML
 file, set the top-level `cover_traffic_enabled = false` to disable both ranges and
 padding for that provider. A deployment source can set the same field beside
 `extends` to override an inherited provider policy. Provider true cannot override
-global false. `--show-config` shows the effective network switch and authored
+global false. `config show` shows the effective network switch and authored
 source overrides without opening secrets.
 
 For authored static sources without a `[cover_traffic]` table, the default uses the

@@ -27,6 +27,62 @@ fn executable_name_version_and_example_inspection_are_portable() {
             .unwrap()
             .contains("Usage: x402_treazury")
     );
+    // No implicit serving, even when inherited environment could configure a provider.
+    let no_command = run(&[]);
+    let help_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&no_command.stdout),
+        String::from_utf8_lossy(&no_command.stderr)
+    );
+    assert!(help_text.contains("Usage: x402_treazury <COMMAND>"));
+    assert!(!help_text.contains("EVM_PRIVATE_KEY required"));
+    for command in [
+        "serve",
+        "catalog",
+        "config",
+        "wallet",
+        "sources",
+        "build-info",
+    ] {
+        assert!(help_text.contains(command));
+    }
+    for args in [
+        vec!["serve", "--help"],
+        vec!["catalog", "tools", "--help"],
+        vec!["catalog", "route", "--help"],
+        vec!["config", "show", "--help"],
+        vec!["wallet", "init", "--help"],
+        vec!["sources", "inspect", "--help"],
+    ] {
+        let result = run(&args);
+        assert!(result.status.success(), "{args:?}");
+        assert!(String::from_utf8_lossy(&result.stdout).contains(&format!(
+            "Usage: x402_treazury {}",
+            args[..args.len() - 1].join(" ")
+        )));
+    }
+    for args in [
+        vec!["--provider", "missing.toml"],
+        vec!["serve", "--list-tools"],
+        vec!["catalog", "tools", "--no-auth"],
+        vec!["catalog", "tags", "--discover-pricing"],
+        vec![
+            "config",
+            "show",
+            "--config",
+            "missing.toml",
+            "--env-file",
+            "missing.env",
+        ],
+        vec!["catalog", "route", "api_read", "--config", "missing.toml"],
+        vec!["build-info", "unexpected"],
+    ] {
+        let result = run(&args);
+        assert!(!result.status.success(), "{args:?}");
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(!error.contains("panicked"), "{error}");
+        assert!(error.contains("error:"), "{error}");
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for example in [
         "privacy.toml",
@@ -38,8 +94,8 @@ fn executable_name_version_and_example_inspection_are_portable() {
         "public-payment-demo.toml",
     ] {
         let path = root.join("examples/deployments").join(example);
-        let shown = run(&["--config", path.to_str().unwrap(), "--show-config"]);
-        let legacy = run(&["--meta-config", path.to_str().unwrap(), "--show-config"]);
+        let shown = run(&["config", "show", "--config", path.to_str().unwrap()]);
+        let legacy = run(&["config", "show", "--meta-config", path.to_str().unwrap()]);
         assert!(legacy.status.success());
         assert_eq!(shown.stdout, legacy.stdout);
         assert!(

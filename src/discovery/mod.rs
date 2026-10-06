@@ -904,31 +904,13 @@ fn page(values: Vec<Value>, query: &Query, generation: u64, scope: &str) -> Resu
         json!({"items":values[offset..end],"catalog_generation":generation,"next_cursor":(end<values.len()).then(||format!("{prefix}{end}"))}),
     )
 }
-pub async fn inspect_cli() -> Result<()> {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Args {
-        #[command(subcommand)]
-        command: Command,
-    }
-    #[derive(clap::Subcommand)]
-    enum Command {
-        Inspect {
-            #[arg(long = "config", alias = "meta-config")]
-            meta_config: PathBuf,
-        },
-    }
-    let Args {
-        command: Command::Inspect { meta_config },
-    } = Args::parse_from(
-        std::iter::once("x402_treazury sources".to_owned()).chain(std::env::args().skip(2)),
-    );
+pub async fn inspect_cli(meta_config: &std::path::Path) -> Result<()> {
     let cfg: crate::deployment::MetaConfig =
-        toml::from_str(&std::fs::read_to_string(&meta_config)?)?;
+        toml::from_str(&std::fs::read_to_string(meta_config)?)?;
     let mut policy = cfg
         .source_management
         .context("source management not configured")?;
-    policy.resolve(&meta_config);
+    policy.resolve(meta_config);
     let path = policy
         .registry_file
         .context("persistent registry not configured")?;

@@ -180,7 +180,14 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         ("X402_MCP_GENERIC_BASE_URL", "https://env.example.com"),
     ];
     assert_eq!(
-        good(run(dir, &["--provider", "provider.toml", "--list-tools"], &env).await)[0]["name"],
+        good(
+            run(
+                dir,
+                &["catalog", "tools", "--provider", "provider.toml"],
+                &env
+            )
+            .await
+        )[0]["name"],
         "environment_root"
     );
     std::fs::write(
@@ -193,11 +200,12 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
             run(
                 dir,
                 &[
+                    "catalog",
+                    "tools",
                     "--provider",
                     "provider.toml",
                     "--env-file",
-                    "env",
-                    "--list-tools"
+                    "env"
                 ],
                 &env
             )
@@ -209,6 +217,8 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         run(
             dir,
             &[
+                "catalog",
+                "route",
                 "--provider",
                 "provider.toml",
                 "--env-file",
@@ -217,7 +227,6 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
                 "cli",
                 "--base-url",
                 "https://cli.example.com",
-                "--route-tool",
                 "cli_root",
             ],
             &env,
@@ -229,11 +238,12 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         run(
             dir,
             &[
+                "catalog",
+                "tools",
                 "--provider",
                 "provider.toml",
                 "--include",
                 "",
-                "--list-tools",
             ],
             &[],
         )
@@ -244,11 +254,12 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         bad(run(
             dir,
             &[
+                "catalog",
+                "tools",
                 "--provider",
                 "provider.toml",
                 "--timeout",
                 invalid,
-                "--list-tools",
             ],
             &[],
         )
@@ -337,7 +348,7 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
     assert!(
         bad(run(
             dir,
-            &["--config", "servers.toml", "--transport", "stdio"],
+            &["serve", "--config", "servers.toml", "--transport", "stdio"],
             &[]
         )
         .await)
@@ -346,7 +357,7 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
     let key = format!("{:064x}", 1);
     let error = bad(run(
         dir,
-        &["--config", "servers.toml"],
+        &["serve", "--config", "servers.toml"],
         &[("KEY", &key), ("TOKEN", "test-token")],
     )
     .await);
@@ -359,15 +370,20 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
 async fn qualification_restriction_requires_serving_meta_config() {
     let tmp = tempfile::tempdir().unwrap();
     let flag = "--qualification-no-new-funding";
-    assert!(bad(run(tmp.path(), &[flag], &[]).await).contains("--config"));
-    for inspection in ["--check", "--show-config", "--list-tools", "--list-tags"] {
+    assert!(bad(run(tmp.path(), &["serve", flag], &[]).await).contains("--config"));
+    for command in [
+        ["config", "check"],
+        ["config", "show"],
+        ["catalog", "tools"],
+        ["catalog", "tags"],
+    ] {
         let error = bad(run(
             tmp.path(),
-            &[flag, "--config", "missing.toml", inspection],
+            &[command[0], command[1], "--config", "missing.toml", flag],
             &[],
         )
         .await);
-        assert!(error.contains("cannot be used with"), "{error}");
+        assert!(error.contains("unexpected argument"), "{error}");
     }
 }
 
@@ -375,25 +391,27 @@ async fn qualification_restriction_requires_serving_meta_config() {
 async fn unsigned_qualification_cannot_use_stdio_or_dotenv_or_inspection_modes() {
     let tmp = tempfile::tempdir().unwrap();
     let unsigned = "--qualification-unsigned";
-    assert!(bad(run(tmp.path(), &[unsigned], &[]).await).contains("--qualification-parent-stdin"));
-    for additional in ["--list-tools", "--show-config", "--check"] {
+    assert!(
+        bad(run(tmp.path(), &["serve", unsigned], &[]).await)
+            .contains("--qualification-parent-stdin")
+    );
+    for command in [
+        ["catalog", "tools"],
+        ["config", "show"],
+        ["config", "check"],
+    ] {
         let error = bad(run(
             tmp.path(),
-            &[
-                "--config",
-                "missing.toml",
-                unsigned,
-                "--qualification-parent-stdin",
-                additional,
-            ],
+            &[command[0], command[1], "--config", "missing.toml", unsigned],
             &[],
         )
         .await);
-        assert!(error.contains("cannot be used with"), "{error}");
+        assert!(error.contains("unexpected argument"), "{error}");
     }
     let error = bad(run(
         tmp.path(),
         &[
+            "serve",
             "--config",
             "missing.toml",
             unsigned,

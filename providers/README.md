@@ -31,7 +31,7 @@ can be overridden at the source, including `spec`, `base_url`, `prefix`,
 Use listener tag/tool filters for multiple views of one shared source catalog.
 
 `--provider providers/pdl.toml` runs a single provider. `--config` loads
-sources, wallets and listeners. Add `--show-config` to either to inspect file
+sources, wallets and listeners. Add `config show` to either to inspect file
 composition and per-field origins without fetching specs or reading secret
 values. See the [configuration reference](../docs/configuration.md) for complete usage.
 
@@ -93,7 +93,7 @@ context. See Exa in [the caveats](CAVEATS.md) for this pattern.
 
 Agent402 has a much larger catalog than most providers. Its default `tags = ["web"]`
 produces 48 API tools plus help in the fixture; `--tags data,crypto` replaces that
-selection. Run `--provider providers/agent402.toml --list-tags` to inspect the vendor's
+selection. Run `--provider providers/agent402.toml catalog tags` to inspect the vendor's
 24 tags. Counts there describe the source before exclusions, not necessarily the
 selected inventory. See [Agent402 caveats](CAVEATS.md#agent402toml--agent402tools)
 for supported subsets, excluded workflows and examples.
@@ -146,7 +146,7 @@ the existing visible marker; encoded image data is never truncated. Inline data 
 not persisted and there is no artifact retrieval URI.
 
 Mapping and limit tables replace inherited tables in full, like other source
-fields. Provider response mappings also appear in `--show-config` and resolved tool
+fields. Provider response mappings also appear in `config show` and resolved tool
 inventories. Limits and unused mappings validate at config load. Agent-added sources
 use the default image limits; agents cannot supply provider response-mapping TOML
 through source registration. Raw images use the same typed path for static tools,

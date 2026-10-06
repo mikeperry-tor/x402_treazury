@@ -302,7 +302,7 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
     }
     let path = write_config(dir.path(), &configuration());
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
-        .args(["--config", path.to_str().unwrap(), "--list-tools"])
+        .args(["catalog", "tools", "--config", path.to_str().unwrap()])
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .output()
@@ -533,7 +533,7 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-        .args(["--config", path.to_str().unwrap(), "--list-tools"])
+        .args(["catalog", "tools", "--config", path.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(output.status.success());

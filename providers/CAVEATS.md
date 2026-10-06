@@ -79,7 +79,7 @@ enums, waterfall-provider detail in summaries. Tool schemas are closed via
 `--timeout 120`.
 
 ```bash
-x402_treazury --provider providers/deepline.toml --timeout 120
+x402_treazury serve --provider providers/deepline.toml --timeout 120
 ```
 
 ## pdl.toml — People Data Labs (stablepeopledata.dev)
@@ -166,7 +166,7 @@ default "paid per call" line). The `/v1/intent/{id}/match` tool long-polls up
 to 300s — run with `--timeout 320`.
 
 ```bash
-x402_treazury --provider providers/regimeshift.toml --timeout 320
+x402_treazury serve --provider providers/regimeshift.toml --timeout 320
 ```
 
 ## kronos.toml — Kronos Crypto Data (kronossignals.com)
@@ -247,7 +247,7 @@ does not implement; the help description makes those boundaries explicit. Caveat
   `/deposit`, `/withdraw` — plus the `/full-auto` spending router by path.
   Either would let an agent move or commit the server wallet's funds;
   re-add them only deliberately. Category subsets can be mounted per server
-  with `--tags` (eight tags, `--list-tags` inventories them).
+  with `--tags` (eight tags, `catalog tags` inventories them).
 - `/video-gen` is dynamically priced **$0.46–$4.60/call**; the default
   `X402_MAX_PRICE_USD=1.00` cap rejects the expensive end pre-sign.
 - 68 of 88 services also quote Solana; the live 402 `accepts[]` is
@@ -333,7 +333,7 @@ cannot expose — is rewritten into that flat form). Design notes:
 - Slow: place-report can take tens of seconds, environmental-context 60–90s.
 
 ```bash
-x402_treazury --provider providers/locus/provider.toml --timeout 120
+x402_treazury serve --provider providers/locus/provider.toml --timeout 120
 ```
 
 ## straits.toml — Straits.live Hormuz monitor (straits.live)
@@ -341,7 +341,7 @@ x402_treazury --provider providers/locus/provider.toml --timeout 120
 Strait of Hormuz crisis data in two tiers, exposed as **33 tools tagged
 `Free` / `Premium` in a curated OpenAPI catalog** (`providers/straits/openapi.json`)
 so the server's tag selection mounts tiers per server (`--tags Premium`,
-`--tags Free`; `--list-tags` inventories them). The vendor spec
+`--tags Free`; `catalog tags` inventories them). The vendor spec
 (`straits.live/openapi.json`, snapshot in `tests/fixtures/`) covers only the
 premium side — 13 ops, all tagged `Premium`, correct-shape `x-payment-info`
 ($0.01–$0.50) — from which the local catalog derives the 10 GET data routes; it
@@ -583,15 +583,15 @@ Other vendor groups include `network`, `encoding`, `identifiers`, `conversion`,
 `chain`, `ai`, `api`, and `x402`. Tags such as `data` are broad: they include some
 local utilities and OCR as well as live public data. `time` and `date-time` are
 distinct. `memory`, `agent`, `skill-pack` and `workflows` have no eligible operations
-in this definition. `--list-tags` reports the unfiltered vendor catalog, so it
+in this definition. `catalog tags` reports the unfiltered vendor catalog, so it
 also lists those tags and counts routes removed by the allowlist. Selecting only
 an excluded group fails with no matching operations rather than exposing it.
 
 ```sh
-target/debug/x402_treazury --provider providers/agent402.toml --list-tags
-target/debug/x402_treazury --provider providers/agent402.toml --tags network --list-tools
-target/debug/x402_treazury --provider providers/agent402.toml --tags data,crypto --list-tools
-target/debug/x402_treazury --provider providers/agent402.toml --tags llm --list-tools
+target/debug/x402_treazury catalog tags --provider providers/agent402.toml
+target/debug/x402_treazury catalog tools --provider providers/agent402.toml --tags network
+target/debug/x402_treazury catalog tools --provider providers/agent402.toml --tags data,crypto
+target/debug/x402_treazury catalog tools --provider providers/agent402.toml --tags llm
 ```
 
 In a deployment, override tags on the source to widen beyond the web default;
@@ -718,15 +718,15 @@ Use cluster tags for practical subsets rather than browsing all 2,076 detailed t
 | `compose` | 132 |
 
 `tags = []` selects 525 API operations plus help. Clusters and finer tags can
-overlap; the table counts each service's registry cluster. The full `--list-tags`
+overlap; the table counts each service's registry cluster. The full `catalog tags`
 report includes aliases/exclusions because it describes the input document.
 The registry does not mark every semantically similar endpoint as an alias, so
 some overlap remains even after excluding all declared aliases.
 
 ```sh
-target/debug/x402_treazury --provider providers/agentutility/provider.toml --list-tools
-target/debug/x402_treazury --provider providers/agentutility/provider.toml --tags wordmint --list-tools
-target/debug/x402_treazury --provider providers/agentutility/provider.toml --tags synthforge --list-tools
+target/debug/x402_treazury catalog tools --provider providers/agentutility/provider.toml
+target/debug/x402_treazury catalog tools --provider providers/agentutility/provider.toml --tags wordmint
+target/debug/x402_treazury catalog tools --provider providers/agentutility/provider.toml --tags synthforge
 ```
 
 A deployment source can set `extends = "../providers/agentutility/provider.toml"`

@@ -308,10 +308,7 @@ enum Command {
         deposit_size: String,
     },
 }
-pub async fn run() -> Result<()> {
-    let args = WalletArgs::parse_from(
-        std::iter::once("wallet".to_owned()).chain(std::env::args().skip(2)),
-    );
+pub async fn run(args: WalletArgs) -> Result<()> {
     run_args(args, crate::rotation::store::TreasuryNetwork::Mainnet).await
 }
 async fn run_args(

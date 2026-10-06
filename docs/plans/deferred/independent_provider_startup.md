@@ -62,9 +62,9 @@ provider_loading = "background" # default; "strict" retains eager fail-fast serv
 catalog_concurrency = 2         # implemented; validate 1..64
 ```
 
-`--check`, `--list-tools`, and `--list-tags` remain exhaustive, credential-free
+`config check`, `catalog tools`, and `catalog tags` remain exhaustive, credential-free
 inspection: await catalogs with bounded concurrency and fail visibly if any cannot
-be validated. `--show-config` remains entirely offline. Standalone single-source
+be validated. `config show` remains entirely offline. Standalone single-source
 serving retains eager loading initially. Direct and Tor deployments use the same
 startup machinery.
 
@@ -178,7 +178,7 @@ Each milestone should be a separately tested commit.
 
 1. **State and policy:** extend startup configuration with loading policy, source-state types and
    pure validation. Test unknown fields, bounds, binding resolution without catalogs,
-   eager inspection behavior, and no secrets/state access in `--show-config`.
+   eager inspection behavior, and no secrets/state access in `config show`.
 2. **Atomic publication:** share an explicit publication coordinator with dynamic
    catalog updates. Test forced overlaps among static completion, pricing completion,
    registration and removal, including same-name conflicts and revision checks.

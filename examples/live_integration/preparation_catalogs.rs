@@ -297,6 +297,8 @@ pub async fn collect_catalogs_confined(
         &directory,
         "catalog",
         vec![
+            "config".into(),
+            "check".into(),
             "--config".into(),
             m.deployment.to_string_lossy().into_owned(),
             "--qualification-snapshot".into(),
@@ -366,6 +368,8 @@ pub async fn collect_catalogs_confined(
         &directory,
         "frozen-catalog",
         vec![
+            "config".into(),
+            "check".into(),
             "--config".into(),
             directory
                 .join("deployment.toml")

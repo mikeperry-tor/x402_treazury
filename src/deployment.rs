@@ -474,7 +474,7 @@ impl Deployment {
                 tracing::warn!(
                     provider_count = urls.len(),
                     default_fallbacks = f.base_rpc_fallback_url_envs.is_none(),
-                    "Base RPC policy active; verification may disclose wallet addresses to fallback providers; see --show-config base_rpc_policy"
+                    "Base RPC policy active; verification may disclose wallet addresses to fallback providers; see config show base_rpc_policy"
                 );
                 let base = BaseRpc::with_fallbacks(
                     &urls,

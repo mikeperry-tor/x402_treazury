@@ -11,7 +11,7 @@ TOML providers compose into sources and multiple authenticated HTTP listeners.
 A single Zcash treasury can fund rotating Base USDC wallet pools through NEAR
 Intents. Optional Tor uses the same network/state machinery as direct mode.
 
-- `src/main.rs`, `wallet_cli.rs`: executable and treasury commands.
+- `src/main.rs`, `src/cli.rs`, `src/wallet_cli.rs`: executable command tree and treasury commands.
 - `src/output.rs`: bounded typed image/text results and explicit JSON image mappings.
 - `src/catalog.rs`, `config.rs`, `pricing.rs`: OpenAPI tools, TOML composition,
   startup-only pricing discovery.
@@ -105,8 +105,13 @@ The treasury is exclusively spent here; accepted lag must appear in logs/CLI out
 
 ## Configuration and wallet workflow
 
-`--config FILE` selects a deployment; `--meta-config` is its compatibility alias.
-`--provider FILE` selects standalone reusable provider settings. Wallet commands
+`serve --config FILE` starts a deployment; `--meta-config` is its compatibility alias.
+`serve --provider FILE` starts standalone serving. `catalog tools`, `catalog tags`,
+and `catalog route` inspect tools; routing previews accept standalone providers only.
+`config show` is offline file inspection; `config check` fetches and validates
+catalogs for deployments or standalone providers. No command means help, never
+serving. Keep these modes in the shared Clap tree; only `serve` accepts listener,
+authentication and supervised funding options. Wallet commands
 accept the same deployment file, consuming treasury/network settings without
 loading catalogs, requiring listener tokens or starting funding workers. Do not
 combine deployment configuration with standalone location/network overrides.
@@ -114,7 +119,7 @@ User-facing deployment examples live in `examples/deployments/`; network-only ex
 `examples/network/`. Preserve user-owned local copies when changing layouts.
 
 An omitted treasury ID resolves from existing state at runtime; a supplied ID is
-an assertion, never permission to adopt another wallet. Offline `--show-config`
+an assertion, never permission to adopt another wallet. Offline `config show`
 reports that resolution policy without opening state. An omitted key path resolves
 to `wallet.key` inside the owner-only state directory; the whole directory contains
 sufficient decryption material. External key paths remain supported. Never replace
@@ -157,7 +162,7 @@ macOS profile; see `docs/reproducible-builds.md`. It builds committed HEAD only,
 requires prefetched dependencies/parameters and blocks build-time network access.
 Do not weaken the sandbox or silently update toolchain/profile pins to make a run pass.
 
-`target/debug/x402_treazury --help` lists serving
+`target/debug/x402_treazury serve --help` lists serving
 options; `x402_treazury wallet --help` lists treasury commands. Default builds include
 the embedded Zcash wallet; `--no-default-features` disables it. Plain Cargo builds
 require protoc; the Zcash wrapper supplies Cargo-managed protoc and respects
@@ -214,7 +219,7 @@ and [the runtime architecture](docs/architecture.md).
   restart. Revalidate grants/quotas/format, disable invalid records, retain tombstones.
   Registry, ownership sidecar and SQLite sidecars must not alias config/treasury paths.
 - Source removal never retires wallets or deletes payment/funding/refund journals.
-  `--show-config` never opens the registry; `sources inspect` is read-only and cannot
+  `config show` never opens the registry; `sources inspect` is read-only and cannot
   create a missing registry. Persistent metadata/specs can still reveal user interests.
 - Tests in `src/discovery/tests.rs` inject public-URL documents/local fixtures only
   under `cfg(test)`; no production loopback bypass is permitted. Tests use unfunded
@@ -242,7 +247,7 @@ and [the runtime architecture](docs/architecture.md).
   body argument and restore its original body key on the wire. Header parameters
   are not agent-settable. Normalize OpenAPI boolean exclusive bounds to numeric ones.
 - Startup pricing is unsigned GET-only, bounded and cached including failures;
-  expiration never triggers refresh. `--list-tools --discover-pricing` explicitly
+  expiration never triggers refresh. `catalog tools --discover-pricing` explicitly
   reuses that path without signers, wallet access or listeners; ordinary inspection
   never probes. Respect source probe opt-outs. Distinguish advertised estimates,
   observed probe prices, metered maximums and unknown prices in descriptions.
@@ -349,7 +354,7 @@ username/password negotiation, normal TLS validation, no direct fallback, no amb
 proxy/NO_PROXY influence, and no automatic transport-wide HTTP retries or redirects. The Base adapter alone
 allows one bounded retry of unsigned read RPC transport failures on the same
 client/identity/payload; signed API requests are never retried. Local MCP
-listeners remain inbound-only. `--show-config` exposes policy, never derived tokens.
+listeners remain inbound-only. `config show` exposes policy, never derived tokens.
 
 `PaidClient` owns payer state and source timeout, not arbitrary HTTP clients. Managed
 calls select a candidate before the unsigned request and require that same wallet/

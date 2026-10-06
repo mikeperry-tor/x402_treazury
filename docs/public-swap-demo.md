@@ -27,12 +27,12 @@ From the repository root:
 
 ```sh
 scripts/zcash.sh build --offline
-target/debug/x402_treazury \
-  --config examples/deployments/public-swap-demo.toml --show-config
-target/debug/x402_treazury \
-  --config examples/deployments/public-swap-demo.toml --check
-target/debug/x402_treazury \
-  --config examples/deployments/public-swap-demo.toml --list-tools
+target/debug/x402_treazury config show \
+  --config examples/deployments/public-swap-demo.toml
+target/debug/x402_treazury config check \
+  --config examples/deployments/public-swap-demo.toml
+target/debug/x402_treazury catalog tools \
+  --config examples/deployments/public-swap-demo.toml
 ```
 
 The example uses a committed request schema, disables pricing probes and exposes
@@ -121,7 +121,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    `funding.auto_fund = true` in the local copy and serve:
 
    ```sh
-   target/debug/x402_treazury \
+   target/debug/x402_treazury serve \
      --config examples/deployments/public-swap-demo.local.toml
    ```
 
@@ -150,8 +150,8 @@ trigger a demonstration.
 
 Use `examples/deployments/public-payment-demo.toml` with `PUBLIC_DEMO_EVM_PRIVATE_KEY` and
 `PUBLIC_DEMO_MCP_TOKEN` in the environment. The key must hold USDC on Base; this
-exact EIP-3009 test does not require Permit2 approval. Inspect with `--show-config`
-and `--list-tools`, then start serving and perform only the single approved call
+exact EIP-3009 test does not require Permit2 approval. Inspect with `config show`
+and `catalog tools`, then start serving and perform only the single approved call
 as described above. The $0.05 cap applies per payment. Stop immediately afterward.
 This qualification cannot substitute for the treasury-funded test.
 

@@ -18,7 +18,7 @@ then expands optional managed-wallet templates for unassigned bindings. Automati
 scopes are deployment, server, source or binding. Generated names are stable
 within treasury state; changing a template's settings does not change existing
 pool identity. Changing names or sharing scope can allocate different pools.
-`--show-config` exposes these effective bindings without opening wallet state.
+`config show` exposes these effective bindings without opening wallet state.
 
 `deployment.rs` initializes the selected static payers and all declared managed
 pools. Removing a profile disables its pool while retaining keys, balances and

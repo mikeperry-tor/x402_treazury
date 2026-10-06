@@ -81,9 +81,9 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .current_dir(repo)
+            .args(["catalog", "tools"])
             .arg("--provider")
-            .arg(&case.provider)
-            .arg("--list-tools");
+            .arg(&case.provider);
         if let Some(spec) = case.spec {
             command.arg("--spec").arg(spec);
         }
