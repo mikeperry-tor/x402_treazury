@@ -27,18 +27,18 @@ flowchart TB
 
 > **NOTE:**
 >
-> Treazury reduces wallet and network linkability; it does not make payments
+> `x402_treazury` reduces wallet and network linkability; it does not make payments
 > invisible. The Zcash->USDC funding path uses **public NEAR swaps and public Base
 > transactions**. These are visible, but unlinkable to your Zcash shielded
 > address. Because of the $2 minimum swap size, each wallet will make multiple API
 > calls before rotation. Identifying request contents across these rotations can
 > also link activity.
 
-Each managed provider pool has an active Base USDC wallet, and a funded standby USDC
-wallet. When the active wallet cannot cover an admitted payment, x402_treazury can
-promote the standby and fund a new replacement address. Calls continue on the
-promoted wallet while its replacement is being filled. Funding, confirmation and
-payment uncertainty are persisted across restarts.
+Each managed provider pool has an active Base USDC wallet, and a funded
+standby USDC wallet. When the active wallet cannot cover an admitted payment,
+`x402_treazury` can promote the standby and fund a new replacement address.
+Calls continue on the promoted wallet while its replacement is being filled.
+Funding, confirmation and payment uncertainty are persisted across restarts.
 
 The default allocation target is **$2 USDC per address**, raised when NEAR's
 current bridge minimum requires more, within your configured spending limits.
@@ -91,18 +91,17 @@ The cargo download dependencies and Zcash proving parameters are downloaded
 outside of Tor routing by default.
 
 Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
-the application. The example connects to Tor Browser's `127.0.0.1:9150` SOCKS port.
-For a dedicated daemon, use a listener such as
-`SocksPort 127.0.0.1:9050 IsolateSOCKSAuth` and change `network.socks_endpoint` in
-your local deployment file. That same file controls initialization, synchronization
-and serving. Keep Tor running throughout.
+the application. The [example privacy conf file](examples/deployments/privacy.toml)
+connects to Tor Browser's `127.0.0.1:9150` SOCKS port. `x402_treazury` uses
+SOCKS username+password isolation, so it will not use the same Tor circuits
+as your web browsing traffic.
+
+For a dedicated daemon, use a listener such as `SocksPort 127.0.0.1:9050
+IsolateSOCKSAuth` and change `network.socks_endpoint` in your local deployment
+file. That same file controls initialization, synchronization and serving.
+Keep Tor running throughout.
 
 ### 2. Create the treasury
-
-The default Zcash indexer and submission endpoint is `https://zec.rocks:443`;
-no endpoint environment variables are required. Set `TREAZURY_MCP_TOKEN` to a
-private bearer token for your MCP client (for example, generate one with
-`openssl rand -hex 32` and store it in your secret manager).
 
 ```sh
 target/debug/x402_treazury wallet init --config examples/deployments/privacy.local.toml
@@ -178,11 +177,12 @@ target/debug/x402_treazury wallet status --config examples/deployments/privacy.l
 ```
 
 Once the confirmed spendable balance is sufficient and you have reviewed those
-limits, launch the servers. **Managed serving automatically funds each pool's initial
-pair and later replacements**, using real ZEC within the configured limits. Set
-`funding.auto_fund = false` to pause automatic funding. Initialization, inspection,
-backup and `wallet sync` never start funding workers. Ensure `TREAZURY_MCP_TOKEN`
-is set, then:
+limits, launch the servers. **Managed serving automatically funds each wallet pool's
+initial USDC pair and later replacements**, using real ZEC within the configured
+limits, once you start the MCP server. Initialization, inspection, backup and
+`wallet sync` do not perform USDC funding.
+
+Once you are ready to begin USDC funding, ensure `TREAZURY_MCP_TOKEN` is set, then:
 
 ```sh
 target/debug/x402_treazury serve --config examples/deployments/privacy.local.toml
@@ -192,20 +192,23 @@ Connect your MCP client to the endpoint(s) in the table above, authenticating wi
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`. Authentication is on by default;
 to disable it for a listener, set `auth = false` and omit `bearer_token_env` in its
 server table. Standalone HTTP supports `--no-auth`. Startup warns when auth is off.
-Wait for an active wallet and ready standby in each selected pool before paid use.
-List tools in your MCP client and select a request within that pool's payment cap.
-Where exposed, help is fetched on demand and cached for the process. PDL person
-matches are vendor-listed at $0.28 and exceed the social pool's default cap;
-raise that cap deliberately if you need paid matches.
+
+Wait for an active wallet and ready standby in each selected pool before paid
+use.  Where exposed, help text for help tools is fetched on upon first tool
+call and cached for the process. PDL person matches are vendor-listed at $0.28
+and exceed the social pool's default cap in the example privacy conf; raise
+that cap deliberately if you need paid matches.
 
 `wallet status` reports persisted progress. Stop with Ctrl-C and allow the announced
 transaction-safety drain to finish. Wallet administration commands that need
 exclusive ownership must run while serving is stopped. Local example copies,
 `state/` and `secrets/` are gitignored.
 
-For funding failures, refunds, backup restoration and RPC configuration, use the
-[wallet reference](docs/wallet-cli.md) and [rotation guide](docs/wallet-rotation.md).
-For bounded paid test runs, use the [live integration runbook](tests/live/INTEGRATION.md).
+> **NOTE:**
+>
+> For funding failures, refunds, backup restoration and RPC configuration, use the
+> [wallet reference](docs/wallet-cli.md) and [rotation guide](docs/wallet-rotation.md).
+> For bounded paid test runs, use the [live integration runbook](tests/live/INTEGRATION.md).
 
 ## Choose what shares a wallet
 
@@ -248,7 +251,7 @@ See [automatic wallets](examples/deployments/servers-auto-wallets.toml),
 [multiple managed listeners](examples/deployments/servers-managed.toml), and the
 [composition reference](docs/configuration.md#multiple-mcp-ports-from-one-configuration).
 
-## Bring your APIs
+## Adding API Providers
 
 The [provider catalog](providers/README.md) contains reusable TOML definitions,
 including curated catalogs for APIs that need adaptation. Providers carry specific
