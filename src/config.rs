@@ -51,6 +51,9 @@ pub fn validate(settings: &Config) -> Result<()> {
         settings.max_description_chars != Some(0),
         "max_description_chars must be positive"
     );
+    for selector in settings.include_tools.iter().chain(&settings.exclude_tools) {
+        crate::deployment::pattern(selector)?;
+    }
     for operation in &settings.include_operations {
         let (method, path) = operation
             .split_once(' ')

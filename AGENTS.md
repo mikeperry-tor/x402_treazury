@@ -234,6 +234,10 @@ and [the runtime architecture](docs/architecture.md).
   release managed exposure; use confirmed chain evidence.
 - Preserve vendor descriptions whole by default. Any text limit must be explicit
   (`max_description_chars`, `--max-response-chars`). Authored overrides apply last.
+- Provider/source `include_tools` and `exclude_tools` use the same case-sensitive
+  `*`/`?` patterns as listeners, after path/operation/tag selection and collision
+  naming. They also select help tools; unknown exact names fail, unmatched patterns
+  warn, and empty inventories fail. Listener filters can only narrow source tools.
 - Path filters respect segment boundaries; query/body collisions rename the exposed
   body argument and restore its original body key on the wire. Header parameters
   are not agent-settable. Normalize OpenAPI boolean exclusive bounds to numeric ones.

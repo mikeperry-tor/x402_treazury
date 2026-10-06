@@ -75,7 +75,8 @@ optional wallet templates and an automatic assignment policy:
 - `sources`: provider settings written inline or imported with
   `extends = "../providers/pdl.toml"`. Every generic catalog setting is
   available here, including `spec`, `base_url`, `prefix`, `timeout` (default 30),
-  path/tag filters, pricing options, overrides and guidance. A deployment source
+  path/tag filters, `include_tools`, `exclude_tools`, pricing options, overrides
+  and guidance. A deployment source
   can also set `wallet` to override the server default; this field is forbidden
   in reusable provider files.
 - `wallets`: `mode = "static"`, `private_key_env`, and `max_price_usd`
@@ -86,6 +87,28 @@ optional wallet templates and an automatic assignment policy:
   `wallet` and optional
   `include_tools`, `exclude_tools`, `tags`, `exclude_tags`, and `max_response_chars`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
+
+Provider and source `include_tools` / `exclude_tools` select generated tool names,
+using the same case-sensitive `*` (any characters) and `?` (one character) patterns
+as server filters. For example:
+
+```toml
+[sources.company]
+extends = "../../providers/otto.toml"
+include_tools = ["otto_equity_intel", "otto_financial_statements", "otto_help"]
+```
+
+Names are assigned after path, operation and tag selection, before tool-name
+filtering, so removing a tool by name does not rename its remaining siblings.
+Tool-name filters intersect the earlier filters; exclusions win. Help tools also
+participate: include their name or a matching pattern to keep them in an allowlist.
+Unknown exact names fail catalog loading; unmatched wildcard patterns emit a
+warning, and an empty final toolset fails. Server filters further narrow each
+listener's inventory and cannot restore excluded source tools.
+
+Composition follows the ordinary replacement rule: omitted lists inherit,
+present lists replace, and `[]` clears. To select tools outside an inherited
+`include_operations` allowlist, explicitly clear or replace that allowlist too.
 
 To disable HTTP authentication for one listener, set `auth = false` and omit
 `bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own

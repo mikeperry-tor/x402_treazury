@@ -93,6 +93,10 @@ pub struct Config {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include_tools: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exclude_tools: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include_operations: Vec<String>,
     pub tags: Vec<String>,
     pub exclude_tags: Vec<String>,
@@ -140,6 +144,8 @@ impl Default for Config {
             prefix: None,
             include: vec![],
             exclude: vec![],
+            include_tools: vec![],
+            exclude_tools: vec![],
             include_operations: vec![],
             tags: vec![],
             exclude_tags: vec![],
@@ -594,7 +600,35 @@ pub fn build_tools_with_prices(
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
+    filter_tool_names(cfg, &mut tools)?;
     Ok(tools)
+}
+
+fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
+    let compile = |selectors: &[String]| -> Result<Vec<regex::Regex>> {
+        selectors.iter().map(|selector| {
+            let pattern = crate::deployment::pattern(selector)?;
+            if !tools.iter().any(|tool| pattern.is_match(&tool.name)) {
+                if selector.contains(['*', '?']) {
+                    tracing::warn!(selector, "Provider tool pattern matches nothing");
+                } else {
+                    bail!("unknown provider tool selector {selector}; check path, operation and tag filters");
+                }
+            }
+            Ok(pattern)
+        }).collect()
+    };
+    let include = compile(&cfg.include_tools)?;
+    let exclude = compile(&cfg.exclude_tools)?;
+    tools.retain(|tool| {
+        (include.is_empty() || include.iter().any(|p| p.is_match(&tool.name)))
+            && !exclude.iter().any(|p| p.is_match(&tool.name))
+    });
+    ensure!(
+        !tools.is_empty(),
+        "no tools matched provider tool-name filters"
+    );
+    Ok(())
 }
 
 // Selection and collision naming depend on the entire sorted inventory.
