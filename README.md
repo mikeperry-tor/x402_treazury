@@ -16,13 +16,13 @@ You can also optionally grant your agent a set of tools to discover and add x402
 ## How it works
 
 ```mermaid
-flowchart LR
-    Z[Shielded Zcash treasury] --> N[NEAR Intents swap]
-    N --> A[Active Base USDC wallet]
-    N --> B[Funded standby wallet]
-    A --> T[Tor isolation for active address]
-    T --> P[API providers in this wallet group]
-    B -. promoted when active cannot fund a payment .-> A
+flowchart TB
+    Z[Shielded Zcash treasury] --> N[NEAR Intents swaps]
+    N --> A[Active USDC wallet]
+    N --> B[Funded standby]
+    B -. Insufficient funds: promote .-> A
+    A --> T[Wallet-isolated Tor]
+    T --> P[API provider group]
 ```
 
 Each managed provider pool has an active Base USDC wallet, and a funded standby USDC
