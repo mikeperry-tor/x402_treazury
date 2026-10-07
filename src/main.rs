@@ -42,6 +42,8 @@ struct Args {
     port: u16,
     bearer_token: Option<String>,
     no_auth: bool,
+    allowed_hosts: Option<Vec<String>>,
+    disable_host_check: bool,
     list_tools: bool,
     discover_pricing: bool,
     list_tags: bool,
@@ -92,6 +94,14 @@ async fn run() -> Result<()> {
         !args.no_auth || args.transport == "http",
         "--no-auth requires --transport http"
     );
+    ensure!(
+        (args.allowed_hosts.is_none() && !args.disable_host_check) || args.transport == "http",
+        "--allowed-hosts and --disable-host-check require --transport http"
+    );
+    x402_treazury::server::host::HostPolicy::new(
+        args.allowed_hosts.clone(),
+        args.disable_host_check,
+    )?;
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter("warn,x402_treazury::startup=info,x402_treazury::network=info")
@@ -216,6 +226,8 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if let Some(name) = cfg.name {
         server.name = name;
     }
+    server.host_policy =
+        x402_treazury::server::host::HostPolicy::new(args.allowed_hosts, args.disable_host_check)?;
     server.validate_cover()?;
     if args.transport == "stdio" {
         server

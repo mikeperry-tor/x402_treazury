@@ -133,7 +133,11 @@ restrictions remain authoritative, and bounded live demos retain explicit opt-ou
 
 ## Commands and test discipline
 
-HTTP listeners require bearer authentication by default. Explicit `servers.NAME.auth=false`
+HTTP listeners require bearer authentication by default. Host validation is independent: `allowed_hosts` replaces loopback defaults;
+`disable_host_check=true` or an empty list disables the allowlist with a startup
+warning. Reject an explicit list combined with the disable flag. Standalone HTTP
+uses `--allowed-hosts` or `--disable-host-check`; both may accompany `--no-auth`.
+Explicit `servers.NAME.auth=false`
 omits `bearer_token_env`; standalone HTTP uses `--no-auth`. Warn at startup when
 disabled. Never log authentication headers or token values. Auth failure warnings
 are bounded per listener/category, with explicit suppression notice/counts; HTTP

@@ -5,6 +5,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::
 use serde_json::Map;
 use std::{collections::BTreeMap, sync::Arc};
 mod auth;
+pub mod host;
 
 const PRICING_GUIDANCE: &str = "Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.";
 
@@ -22,6 +23,7 @@ pub struct Server {
     pub discovery: Option<Arc<crate::discovery::Manager>>,
     pub catalog_server: String,
     pub name: String,
+    pub host_policy: host::HostPolicy,
     pub instructions: Option<String>,
     pub max_response_chars: Option<usize>,
 }
@@ -48,6 +50,7 @@ impl Server {
         max_response_chars: Option<usize>,
     ) -> Self {
         Self {
+            host_policy: Default::default(),
             discovery: None,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
                 generation: 0,
@@ -367,6 +370,7 @@ pub fn http_app_with_auth(server: Server, token: Option<String>) -> axum::Router
         .with_legacy_session_mode(false)
         .with_json_response(true)
         .with_max_request_body_bytes(crate::limits::MCP_REQUEST_BYTES);
+    let config = server.host_policy.apply(config, &server.catalog_server);
     let service = StreamableHttpService::new(
         move || Ok(server.clone()),
         Arc::new(LocalSessionManager::default()),

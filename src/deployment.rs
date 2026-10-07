@@ -63,6 +63,9 @@ pub struct ListenerConfig {
     pub listen: SocketAddr,
     #[serde(default = "auth_enabled")]
     pub auth: bool,
+    pub allowed_hosts: Option<Vec<String>>,
+    #[serde(default)]
+    pub disable_host_check: bool,
     #[serde(default)]
     pub bearer_token_env: String,
     pub wallet: Option<String>,
@@ -162,6 +165,11 @@ impl MetaConfig {
         }
         let mut addresses = BTreeSet::new();
         for (name, server) in &self.servers {
+            crate::server::host::HostPolicy::new(
+                server.allowed_hosts.clone(),
+                server.disable_host_check,
+            )
+            .with_context(|| format!("server {name}: invalid Host policy"))?;
             ensure!(
                 server.listen.ip().is_loopback(),
                 "server {name}: this release requires a loopback listen address"
@@ -804,6 +812,10 @@ impl Deployment {
             let mut server = servers.remove(name).unwrap();
             server.catalog = catalog.clone();
             server.catalog_server = name.clone();
+            server.host_policy = crate::server::host::HostPolicy::new(
+                cfg.allowed_hosts.clone(),
+                cfg.disable_host_check,
+            )?;
             server.discovery = manager.clone();
             let listener = TcpListener::bind(cfg.listen)
                 .await

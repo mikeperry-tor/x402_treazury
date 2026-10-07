@@ -116,6 +116,12 @@ pub struct Serve {
     /// Explicitly disable authentication for standalone HTTP serving.
     #[arg(long, conflicts_with = "bearer_token")]
     no_auth: bool,
+    /// Replace the MCP Host allowlist (comma-separated hosts or host:port entries).
+    #[arg(long, value_delimiter = ',', conflicts_with = "disable_host_check")]
+    allowed_hosts: Option<Vec<String>>,
+    /// Disable the MCP Host allowlist; authentication is unchanged.
+    #[arg(long)]
+    disable_host_check: bool,
     #[arg(long, hide = true, requires = "meta_config")]
     qualification_no_new_funding: bool,
     #[arg(
@@ -230,6 +236,8 @@ impl From<Serve> for Args {
             port,
             bearer_token,
             no_auth,
+            allowed_hosts,
+            disable_host_check,
             qualification_no_new_funding,
             qualification_unsigned,
             qualification_managed,
@@ -244,6 +252,8 @@ impl From<Serve> for Args {
             port,
             bearer_token,
             no_auth,
+            allowed_hosts,
+            disable_host_check,
             qualification_no_new_funding,
             qualification_unsigned,
             qualification_managed,

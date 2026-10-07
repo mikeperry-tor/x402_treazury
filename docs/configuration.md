@@ -125,6 +125,31 @@ Composition follows the ordinary replacement rule: omitted lists inherit,
 present lists replace, and `[]` clears. To select tools outside an inherited
 `include_operations` allowlist, explicitly clear or replace that allowlist too.
 
+Host validation defaults to `localhost`, `127.0.0.1` and `::1`, independently of
+the listener's bind address. Replace that allowlist per listener when using a
+custom hostname or reverse proxy:
+
+```toml
+[servers.research]
+allowed_hosts = ["mcp.example.com", "localhost"]
+# Alternatively, omit allowed_hosts and disable the allowlist:
+# disable_host_check = true
+```
+
+Entries are exact hostnames or IP addresses, optionally with a port. A hostname
+without a port permits any port; `"mcp.example.com:8443"` permits only that port.
+URLs and wildcards are not supported. The list replaces rather than extends the
+defaults. `allowed_hosts = []` also disables the allowlist. Do not combine
+`allowed_hosts` with `disable_host_check = true`.
+
+Standalone HTTP serving accepts `--allowed-hosts mcp.example.com,localhost` or
+`--disable-host-check`, both requiring `--transport http`. Deployments configure
+these settings in TOML. Disabling the allowlist emits a startup warning and removes
+this DNS-rebinding defense; it does not change authentication. Disabling both
+authentication and Host checking is permitted. Malformed/missing Host headers
+and HTTP/2 authority validation still follow the MCP library's protocol rules.
+`config show` exposes each server's settings without starting listeners.
+
 To disable HTTP authentication for one listener, set `auth = false` and omit
 `bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own
 authentication policy. Standalone HTTP uses `--transport http --no-auth`; this

@@ -904,3 +904,69 @@ sources=['alpha']
     }
     vendor.abort();
 }
+
+#[tokio::test]
+async fn host_policy_is_listener_local_and_visible_in_config() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["alpha", "beta"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            spec("http://127.0.0.1:1").to_string(),
+        )
+        .unwrap();
+    }
+    let text = configuration()
+        .replace(
+            "[servers.research]",
+            "[servers.research]\nallowed_hosts = ['research.example']",
+        )
+        .replace(
+            "[servers.beta_only]",
+            "[servers.beta_only]\ndisable_host_check = true",
+        )
+        .replace("spec = ", "probe_pricing = false\nspec = ");
+    let path = write_config(dir.path(), &text);
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(
+        shown["servers"]["research"]["allowed_hosts"],
+        json!(["research.example"])
+    );
+    assert_eq!(shown["servers"]["beta_only"]["disable_host_check"], true);
+    let running = Deployment::load(&path)
+        .await
+        .unwrap()
+        .bind(&env())
+        .await
+        .unwrap();
+    let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    for (name, host, expected) in [
+        ("research", "research.example", 200),
+        ("research", "other.example", 403),
+        ("beta_only", "other.example", 200),
+    ] {
+        let token_env = if name == "research" {
+            "RESEARCH_TOKEN"
+        } else {
+            "BETA_TOKEN"
+        };
+        let response = http.post(format!("http://{}/mcp", addresses[name]))
+            .bearer_auth(&env()[token_env]).header("host", host)
+            .header("accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}))
+            .send().await.unwrap();
+        assert_eq!(response.status().as_u16(), expected);
+    }
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    write_config(
+        dir.path(),
+        &text.replace(
+            "allowed_hosts = ['research.example']",
+            "allowed_hosts = ['research.example']\ndisable_host_check = true",
+        ),
+    );
+    assert!(Deployment::show_config(&path).await.is_err());
+}
