@@ -161,6 +161,10 @@ direct IP address. Paid calls and treasury traffic still use the configured Tor
 policy. Only responses with suitable caching headers can be reused while fresh;
 the command reports what was cached. Repeat the warm command when entries expire
 if their origins remain blocked over Tor—there is no automatic direct fallback.
+To keep discovery connections over Tor, deployments can instead configure a
+[paid Curl discovery relay](docs/configuration.md#paid-discovery-relay) and name
+its paying wallet. Enable it separately for serving and warming; the wallet must
+already be funded. A relay error disables further relay calls for that run.
 
 ```sh
 # Validate selected tools, using fresh caches or fetching through Tor; no payments.
@@ -319,6 +323,8 @@ addition. Discovery does not grant spending or source-registration authority.
   discovery data directly for a Tor deployment. Omitting `--source` selects all
   declared sources; add `--source ID` to narrow the selection. Selected sources
   with `http_cache_enabled = false` reject the warm run rather than being skipped.
+  An optional [paid discovery relay](docs/configuration.md#paid-discovery-relay)
+  uses an explicitly named wallet when origin discovery fails.
   See [cache behavior and opt-out](docs/configuration.md#automatic-discovery-disk-cache).
 - **Plain agent results.** The server handles x402 challenge/sign/retry. Bounded text
   and supported inline images become MCP results, with explicit errors for limits.

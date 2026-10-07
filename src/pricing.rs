@@ -41,6 +41,7 @@ type ProbeKey = (
     Option<Vec<u8>>,
     bool,
     bool,
+    Option<String>,
 );
 #[derive(Default)]
 pub struct PricingCache {
@@ -90,6 +91,7 @@ impl PricingCache {
                     .map(|p| serde_json::to_vec(p).expect("serializable network policy")),
                 cfg.http_cache_enabled,
                 crate::qualification::active(),
+                cfg.discovery_relay.as_ref().map(|r| r.key.clone()),
             ))
             .or_default()
             .clone();
@@ -100,7 +102,7 @@ impl PricingCache {
                 initialized.store(true, std::sync::atomic::Ordering::Relaxed);
                 let _permit = LIMIT.acquire().await.expect("probe semaphore open");
                 let slot = crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024);
-                let entry = probe_request(&http, &url, slot, ttl).await;
+                let entry = probe_request(&http, &url, slot, ttl, cfg).await;
                 tracing::debug!(
                     discovered = entry.line.is_some(),
                     "pricing attempt cached; no automatic retry"
@@ -248,11 +250,18 @@ async fn probe_request(
     url: &str,
     slot: Option<crate::http_cache::Slot>,
     ttl: f64,
+    cfg: &Config,
 ) -> CachedProbe {
-    if let Some(slot) = &slot {
+    let relay_slot = crate::discovery_relay::slot(cfg, url, "pricing", 64 * 1024);
+    for slot in [&slot, &relay_slot].into_iter().flatten() {
         if let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) {
             if let Ok(line) = String::from_utf8(entry.data) {
                 tracing::info!("Pricing estimate loaded from fresh HTTP disk cache");
+                if cfg.discovery_relay.is_some() {
+                    tracing::warn!(
+                        "Discovery relay enabled: pricing cache may contain relay-supplied estimates"
+                    );
+                }
                 let lifetime = Duration::from_secs(
                     entry
                         .metadata
@@ -277,7 +286,31 @@ async fn probe_request(
         // payment challenge: persist only its derived display estimate with explicit freshness.
         slot.write(None).await;
     }
-    let (line, outcome, status, metadata) = probe_network(http, url, slot.is_some()).await;
+    let mut result = probe_network(http, url, slot.is_some()).await;
+    let mut write_slot = slot;
+    if (matches!(result.1, Outcome::HttpConnect | Outcome::HttpTimeout) || result.2 == Some(403))
+        && let Some(relay) = &cfg.discovery_relay
+    {
+        match relay.fetch(url, 402, 64 * 1024, "max_response_bytes").await {
+            Ok(response) => {
+                let metadata = crate::http_cache::Metadata::from_headers(
+                    &response.headers,
+                    response.cache_delay(),
+                    None,
+                );
+                result = price_headers(&response.headers, Some(402), metadata);
+                if result.0.is_none() {
+                    relay.stop().await;
+                }
+                write_slot = relay_slot;
+            }
+            Err(_) => {
+                tracing::warn!("Pricing relay unavailable; estimate remains unknown, no retry")
+            }
+        }
+    }
+    let (line, outcome, status, metadata) = result;
+    let slot = write_slot;
     if let (Some(slot), Some(mut metadata), Some(line)) = (&slot, metadata, &line) {
         metadata.expires = metadata
             .expires
@@ -338,9 +371,21 @@ async fn probe_network(
     } else {
         None
     };
+    price_headers(response.headers(), status, metadata)
+}
+pub(crate) fn price_headers(
+    headers: &reqwest::header::HeaderMap,
+    status: Option<u16>,
+    metadata: Option<crate::http_cache::Metadata>,
+) -> (
+    Option<String>,
+    Outcome,
+    Option<u16>,
+    Option<crate::http_cache::Metadata>,
+) {
     let mut outcome = Outcome::MissingHeader;
     for name in ["payment-required", "x-payment-required"] {
-        let Some(raw) = response.headers().get(name) else {
+        let Some(raw) = headers.get(name) else {
             continue;
         };
         outcome = Outcome::MalformedChallenge;
@@ -401,4 +446,85 @@ fn challenge_line(c: &Value) -> Option<String> {
         "upto" => format!("Max: {amount}/call [x402 probe{denomination}]."),
         _ => format!("Amount: {amount} [x402 probe; scheme {scheme}{denomination}]."),
     })
+}
+
+#[cfg(test)]
+mod relay_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[tokio::test]
+    async fn relay_pricing_persists_only_estimates_and_shares_process_attempts() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let app = axum::Router::new().route(
+            "/price",
+            axum::routing::get(move || {
+                let count = count.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    axum::http::StatusCode::FORBIDDEN
+                }
+            }),
+        );
+        let (address, origin) = crate::test_tls::serve(app).await;
+        let socks = crate::test_socks::Socks::start(
+            BTreeMap::from([("api.example.com".into(), address)]),
+            crate::test_socks::Fault::None,
+        )
+        .await;
+        let url = "https://api.example.com/price".to_owned();
+        let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some(socks.address),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA);
+        let http = context
+            .http(
+                &crate::network::IsolationId::discovery(&url).unwrap(),
+                &url,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+        let challenge = STANDARD.encode(r#"{"accepts":[{"amount":"1000","asset":"USDC"}]}"#);
+        let body = serde_json::json!({"url":url,"method":"GET","statusCode":402,"body":"","redirectChain":[],"error":null,"headers":{"cache-control":"max-age=600","payment-required":challenge}});
+        let (relay, fixture, task) =
+            crate::discovery_relay::tests::fixture(body, false, false).await;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            discovery_relay: Some(relay),
+            http_cache_directory: Some(dir.path().join("http-cache")),
+            ..Default::default()
+        };
+        let cache = PricingCache::default();
+        let first = cache.get(url.clone(), http.clone(), 600.0, &cfg).await;
+        assert_eq!(first.outcome, Outcome::Discovered);
+        assert!(first.line.unwrap().contains("$0.001"));
+        let second = cache.get(url.clone(), http.clone(), 600.0, &cfg).await;
+        assert_eq!(second.cache, CachePath::Hit);
+        let fresh = PricingCache::default()
+            .get(url.clone(), http.clone(), 600.0, &cfg)
+            .await;
+        assert_eq!(fresh.cache, CachePath::Disk);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+        let saved = crate::discovery_relay::slot(&cfg, &url, "pricing", 64 * 1024)
+            .unwrap()
+            .read()
+            .await
+            .unwrap();
+        let text = String::from_utf8(saved.data).unwrap();
+        assert!(!text.contains(&challenge));
+        assert!(text.starts_with("Cost:"));
+        assert!(
+            crate::http_cache::Slot::new(&cfg, &url, "pricing", 64 * 1024)
+                .unwrap()
+                .read()
+                .await
+                .is_none()
+        );
+        task.abort();
+        origin.abort();
+    }
 }

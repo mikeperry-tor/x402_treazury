@@ -186,6 +186,13 @@ pub fn inspection(config: &MetaConfig) -> serde_json::Value {
 }
 pub fn protected_paths(config: &MetaConfig, path: &Path) -> Vec<PathBuf> {
     let mut paths = vec![path.to_owned()];
+    if let Some(relay) = &config.discovery_relay {
+        paths.push(
+            path.parent()
+                .unwrap_or(Path::new("."))
+                .join(&relay.provider),
+        );
+    }
     for source in config.sources.values() {
         if let Some(file) = source.provider.get("extends").and_then(toml::Value::as_str) {
             paths.push(path.parent().unwrap_or(Path::new(".")).join(file));

@@ -21,7 +21,7 @@ Intents. Optional Tor uses the same network/state machinery as direct mode.
 - `src/cover/`: optional bounded unsigned ranges, request padding, sampling and scoped evidence.
 - `src/rotation/`: pool assignment, durable SQLite state, Base/NEAR adapters and funding.
 - `src/treasury/`: embedded Zingolib, serialized commands, sync, proving and recovery.
-- `providers/`: 26 TOML definitions; curated OpenAPI catalogs in provider subdirectories.
+- `providers/`: 27 TOML definitions; curated OpenAPI catalogs in provider subdirectories.
 - `examples/`: deployment, public-demo and Tor configurations; Rust development utilities.
 - `tests/`: offline Rust suites, local protocol fixtures and pinned provider contracts.
 - `vendor/`: reviewed Alloy/Zingo patches and provenance verification.
@@ -270,7 +270,17 @@ and [the runtime architecture](docs/architecture.md).
   process: direct-warm entries retain separate provenance and the target configured
   network policy. Normal loading accepts them only while fresh, warns on reuse,
   never sends their validators over Tor and never refreshes them directly. Warming
-  cannot open wallets, construct serving deployments or run during qualification.
+  opens no wallet with `--direct` and cannot run during qualification.
+- Optional deployment `[discovery_relay]` names a local Curl bootstrap provider and
+  an explicit wallet, enabled separately for serve/warm. Target discovery stays
+  unsigned GET-only; only relay payment uses PaidClient. Reuse existing wallet caps
+  and byte/time limits. Serialize calls, coalesce successful targets, and disable
+  the relay for the run on failure or cancellation before any retry can spend.
+  Relay cache entries retain separate provenance and explicit origin freshness;
+  never revalidate through Curl, use outer relay headers or persist challenges.
+  Serving initializes wallets before relay catalog I/O; warming denies funding and
+  opens only the selected wallet. Neither starts funding workers before discovery.
+  Ordinary inspection remains unsigned; qualification cannot invoke paid relays.
 - HTTP MCP is stateless and JSON-response based, with bearer auth enabled by default.
   Disabling the gate requires the explicit configured or standalone opt-out.
 - Typed results flow through `PaidClient::execute_response`, `BoundTool::invoke_output`

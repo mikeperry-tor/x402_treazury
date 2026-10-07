@@ -108,5 +108,10 @@
     "name": "claw402",
     "provider": "providers/claw402.toml",
     "spec": "tests/fixtures/claw402_openapi.json"
+  },
+  {
+    "name": "curl",
+    "provider": "providers/curl/provider.toml",
+    "spec": null
   }
 ]

@@ -19,7 +19,7 @@ pub struct Cli {
 pub enum Command {
     /// Start MCP servers and configured automatic wallet funding.
     Serve(Serve),
-    /// Inspect tools, tags and request routing without making paid calls.
+    /// Inspect catalogs or warm discovery caches.
     #[command(subcommand)]
     Catalog(Catalog),
     /// Inspect configuration or validate selected catalogs without funding wallets.
@@ -36,7 +36,7 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum Catalog {
-    /// Warm discovery caches without wallets or listeners; --direct explicitly bypasses Tor.
+    /// Warm discovery caches; configured relay may pay. --direct bypasses Tor without relay.
     Warm(Warm),
     /// List selected tools; optionally discover unsigned x402 prices.
     Tools(Tools),

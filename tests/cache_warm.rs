@@ -44,6 +44,13 @@ version=1
 mode='tor'
 socks_endpoint='{socks}'
 isolation_namespace='direct-warm-fixture'
+# Direct warming and ordinary inspection must ignore even an enabled relay:
+# its bootstrap is deliberately missing and its wallet key is unavailable.
+[discovery_relay]
+provider='missing-bootstrap.toml'
+wallet='w'
+serve=true
+warm=true
 [treasury]
 state_dir='state'
 daily_input_zec='0.01'

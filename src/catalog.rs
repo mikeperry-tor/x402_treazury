@@ -67,6 +67,8 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    pub discovery_relay: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
     pub http_cache_enabled: bool,
     #[serde(skip)]
     #[doc(hidden)]
@@ -134,6 +136,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            discovery_relay: None,
             http_cache_enabled: true,
             http_cache_directory: None,
             http_cache_direct_warm_target: None,
@@ -304,6 +307,65 @@ pub async fn load_json_with_limit(
 ) -> Result<Value> {
     load_json_cached(source, http, limit, None).await
 }
+pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) -> Result<Value> {
+    let relay_slot = crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
+    if let Some(slot) = &relay_slot
+        && let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh())
+    {
+        if let Ok(document) = parse_document(&entry.data) {
+            tracing::warn!(
+                "Catalog loaded from fresh relay cache; content supplied by configured relay"
+            );
+            return Ok(document);
+        }
+        slot.write(None).await;
+    }
+    let result = load_json_cached(
+        &cfg.spec,
+        http,
+        cfg.max_spec_bytes,
+        crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes),
+    )
+    .await;
+    let error = match result {
+        Ok(doc) => return Ok(doc),
+        Err(e) => e,
+    };
+    let Some(relay) = &cfg.discovery_relay else {
+        return Err(error);
+    };
+    if !crate::discovery_relay::eligible(&error) {
+        return Err(error);
+    }
+    let response = relay
+        .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
+        .await?;
+    let document = match parse_document(&response.body) {
+        Ok(doc) => doc,
+        Err(error) => {
+            relay.stop().await;
+            return Err(error);
+        }
+    };
+    if let Some(slot) = relay_slot {
+        let metadata = crate::http_cache::Metadata::from_headers(
+            &response.headers,
+            response.cache_delay(),
+            None,
+        );
+        slot.write(
+            metadata
+                .filter(|m| m.fresh())
+                .map(|metadata| crate::http_cache::Entry {
+                    metadata,
+                    data: response.body.clone(),
+                }),
+        )
+        .await;
+    }
+    Ok(document)
+}
+
 pub(crate) async fn load_json_cached(
     source: &str,
     http: &reqwest::Client,
@@ -650,6 +712,10 @@ fn price(op: &Value) -> (String, bool) {
         return ("Cost: free [spec].".into(), true);
     }
     let block = p.get("price").filter(|v| v.is_object()).unwrap_or(p);
+    let block = block
+        .get("fixed")
+        .filter(|v| v.is_object())
+        .unwrap_or(block);
     let unit = block["unit"]
         .as_str()
         .filter(|s| !s.is_empty())

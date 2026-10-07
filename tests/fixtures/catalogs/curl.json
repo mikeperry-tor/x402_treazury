@@ -1,0 +1,33 @@
+[
+  {
+    "name": "curl_curl",
+    "description": "Send an HTTP request to the given web address from our servers and return the full response including status, headers, and body. Cost: ~$0.01/call [spec].",
+    "method": "POST",
+    "path": "/curl",
+    "input_schema": {
+      "properties": {
+        "method": {
+          "default": "GET",
+          "description": "The type of request to make. Choose from GET, POST, PUT, PATCH, DELETE, or HEAD. Defaults to GET if not provided.",
+          "title": "Method",
+          "type": "string"
+        },
+        "url": {
+          "description": "The full web address you want to send a request to. Must start with http:// or https://.",
+          "maxLength": 8192,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "method": "body",
+      "url": "body"
+    },
+    "has_body": true
+  }
+]

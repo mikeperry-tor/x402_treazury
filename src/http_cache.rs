@@ -252,6 +252,14 @@ impl Slot {
             limit,
         })
     }
+    pub(crate) fn relay(mut self, identity: &str) -> Self {
+        self.key = format!(
+            "{:x}",
+            Sha256::digest(format!("discovery-relay-v1:{identity}:{}", self.key))
+        );
+        self.direct_key = None;
+        self
+    }
     pub async fn read(&self) -> Option<Entry> {
         let ordinary = self.read_primary().await;
         if ordinary

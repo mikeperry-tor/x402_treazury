@@ -22,6 +22,7 @@ type DownloadKey = (
     crate::network::HttpPolicy,
     Option<std::path::PathBuf>,
     bool,
+    Option<String>,
 );
 type Document = Arc<serde_json::Value>;
 
@@ -44,6 +45,7 @@ type DownloadResult = std::result::Result<Document, SharedFailure>;
 /// documents only for this load; aliases still generate/filter/bind independently.
 #[derive(Default)]
 struct Downloads {
+    relay: Option<Arc<crate::discovery_relay::Relay>>,
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
     direct_warm_target: Option<crate::network::NetworkPolicy>,
@@ -70,6 +72,7 @@ impl Downloads {
             cfg.transport(),
             cfg.http_cache_directory.clone(),
             cfg.http_cache_enabled,
+            cfg.discovery_relay.as_ref().map(|r| r.key.clone()),
         );
         let cell = {
             let mut entries = self.entries.lock().expect("catalog download map poisoned");
@@ -81,15 +84,10 @@ impl Downloads {
         };
         // No detached tasks: cancellation drops the initializer and its HTTP request.
         cell.get_or_init(|| async {
-            catalog::load_json_cached(
-                &cfg.spec,
-                http,
-                cfg.max_spec_bytes,
-                crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes),
-            )
-            .await
-            .map(Arc::new)
-            .map_err(|error| SharedFailure(Arc::new(error)))
+            catalog::load_json_discovery(cfg, http)
+                .await
+                .map(Arc::new)
+                .map_err(|error| SharedFailure(Arc::new(error)))
         })
         .await
         .clone()
@@ -141,6 +139,7 @@ pub(super) async fn load(
     config: &MetaConfig,
     path: &Path,
     warn: bool,
+    relay: Option<Arc<crate::discovery_relay::Relay>>,
 ) -> Result<BTreeMap<String, Source>> {
     let started = Instant::now();
     let total = config.sources.len();
@@ -148,6 +147,7 @@ pub(super) async fn load(
     let limit = config.startup.catalog_concurrency;
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, "Loading catalogs; startup waits for all sources");
     let downloads = Downloads {
+        relay,
         direct_warm_target: None,
         entries: Mutex::default(),
         cache_directory: config
@@ -264,6 +264,7 @@ impl Source {
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        cfg.discovery_relay = downloads.relay.clone().filter(|r| r.allows(id));
         cfg.http_cache_directory = downloads.cache_directory.clone();
         cfg.http_cache_direct_warm_target = downloads.direct_warm_target.clone();
         if warn {
@@ -376,8 +377,10 @@ pub(super) async fn warm(
     selected: &std::collections::BTreeSet<String>,
     direct: bool,
     discover_pricing: bool,
+    relay: Option<Arc<crate::discovery_relay::Relay>>,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
+        relay,
         entries: Mutex::default(),
         cache_directory: config
             .treasury
@@ -389,7 +392,9 @@ pub(super) async fn warm(
     let mut pending = stream::iter(selected.iter().map(|id| async {
         let (_, source) = load_one(id, &config.sources[id], path, false, &downloads).await?;
         let cfg = &source.config;
-        let catalog_cache = if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
+        let mut catalog_cache = if cfg.spec.starts_with("https://")
+            || cfg.spec.starts_with("http://")
+        {
             let slot = crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
             match if let Some(slot) = slot {
                 slot.read().await
@@ -403,6 +408,12 @@ pub(super) async fn warm(
         } else {
             "local_file"
         };
+        if let Some(slot) =
+            crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
+            && slot.read().await.is_some_and(|e| e.metadata.fresh())
+        {
+            catalog_cache = "fresh_via_relay";
+        }
         let mut fresh_pricing_entries = 0;
         let evidence = if discover_pricing {
             let tools = super::cache_warm::selected_tools(config, id, &source)?;
@@ -419,14 +430,21 @@ pub(super) async fn warm(
                     if !inspected.insert(url.clone()) {
                         continue;
                     }
-                    if let Some(slot) =
-                        crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024)
-                        && slot
+                    for slot in [
+                        crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024),
+                        crate::discovery_relay::slot(cfg, &url, "pricing", 64 * 1024),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        if slot
                             .read()
                             .await
                             .is_some_and(|entry| entry.metadata.fresh())
-                    {
-                        fresh_pricing_entries += 1;
+                        {
+                            fresh_pricing_entries += 1;
+                            break;
+                        }
                     }
                 }
             }

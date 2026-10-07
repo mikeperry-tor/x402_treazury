@@ -1,5 +1,5 @@
-//! Explicit unsigned discovery in a dedicated CLI process. No Deployment or payer
-//! is returned, so the direct-warming exception cannot become a serving policy.
+//! Explicit discovery in a dedicated CLI process. Direct warming is unsigned;
+//! configured relay warming owns only its named wallet and starts no workers.
 use super::*;
 
 #[derive(Serialize)]
@@ -80,7 +80,47 @@ pub async fn warm_cache(
             "Explicit direct cache warming: selected unsigned catalogs/pricing bypass the configured network; fresh entries may be reused by that policy"
         );
     }
-    let sources = startup::warm(&config, path, &selected, direct, discover_pricing).await?;
+    // Direct warming retains its unsigned behavior. Relay warming uses only the
+    // named wallet and never starts treasury sync, funding workers or listeners.
+    let policy = config.discovery_relay.clone().filter(|p| {
+        p.warm
+            && !direct
+            && (p.sources.is_empty() || selected.iter().any(|id| p.sources.contains(id)))
+    });
+    let mut owner = None;
+    let relay = if let Some(policy) = policy {
+        if let Some(funding) = &mut config.funding {
+            funding.auto_fund = false;
+        }
+        let deployment = Deployment {
+            wallet_resolution: config.validate()?,
+            config,
+            initialized: None,
+            sources: BTreeMap::new(),
+            selected: BTreeMap::new(),
+            config_path: path.to_owned(),
+        };
+        let initialized = deployment
+            .initialize_wallets(
+                &std::env::vars().collect(),
+                crate::rotation::restriction::FundingRestriction::DenyNewFunding,
+                Some(&policy.wallet),
+            )
+            .await?;
+        let relay = crate::discovery_relay::Relay::new(
+            &policy,
+            path,
+            initialized.wallets[&policy.wallet].clone(),
+        )
+        .await?;
+        config = deployment.config;
+        owner = Some(initialized);
+        Some(relay)
+    } else {
+        None
+    };
+    let sources = startup::warm(&config, path, &selected, direct, discover_pricing, relay).await?;
+    drop(owner);
     Ok(CacheWarmSummary { direct, sources })
 }
 

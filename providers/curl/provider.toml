@@ -1,0 +1,9 @@
+# Pinned vendor schema: https://curl-http-request.underscoredone.com/openapi.json
+spec = "openapi.json"
+name = "Curl HTTP Request"
+base_url = "https://curl-http-request.underscoredone.com"
+prefix = "curl"
+include_operations = ["POST /curl"]
+pricing_key = "x-payment-info"
+probe_pricing = false
+cover_traffic_enabled = false

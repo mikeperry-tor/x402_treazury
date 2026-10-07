@@ -30,6 +30,16 @@ Schema version 10 adds that binding table; it does not rewrite wallet keys or si
 bytes. Pending shielding operations created without a recoverable recipient binding
 fail closed and require operator investigation; do not guess from current pool roles.
 
+## Paid discovery relay
+
+An optional deployment `[discovery_relay]` uses a named paying wallet for Curl
+HTTP Request fallback. Its paid connection follows the immutable deployment
+network policy and payer identity; it never falls back to direct egress. Curl
+fetches the target using its own network and supplies the response envelope.
+Origin TLS and response integrity are consequently trusted to the relay. Failures
+or cancellation disable further relay calls for the run. See
+[configuration and cache provenance](configuration.md#paid-discovery-relay).
+
 ## Explicit direct discovery warming
 
 `catalog warm --config FILE --source ID --direct` is a separate, unsigned-only

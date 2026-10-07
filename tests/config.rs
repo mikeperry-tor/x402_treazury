@@ -131,7 +131,7 @@ async fn bundled_provider_settings_match_reviewed_snapshots() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let expected: std::collections::BTreeMap<String, Value> =
         serde_json::from_str(include_str!("fixtures/catalogs/settings.json")).unwrap();
-    assert_eq!(expected.len(), 26);
+    assert_eq!(expected.len(), 27);
     for (provider, expected) in expected {
         let resolved = config::load(&repo.join(&provider)).await.unwrap();
         let mut actual = serde_json::to_value(&resolved.settings).unwrap();
@@ -229,4 +229,107 @@ fn show_config_is_offline_reports_origins_and_never_resolves_secret_values() {
             .unwrap()
             .ends_with("deployment.toml")
     );
+}
+
+#[tokio::test]
+async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployment.toml");
+    let text = deployment_text();
+    let relay = "\n[discovery_relay]\nprovider='missing-local-provider.toml'\nwallet='default'\nserve=true\nwarm=true\nsources=['shared']\n";
+    std::fs::write(&path, format!("{text}{relay}")).unwrap();
+    let shown = x402_treazury::deployment::Deployment::show_config(&path)
+        .await
+        .unwrap();
+    assert_eq!(shown["discovery_relay"]["wallet"], "default");
+    assert_eq!(shown["discovery_relay"]["serve"], true);
+    std::fs::write(&path,format!("{text}{relay}\n[source_management]\nwallet='default'\nregistry_file='missing-local-provider.toml'\n")).unwrap();
+    let error = x402_treazury::deployment::Deployment::show_config(&path)
+        .await
+        .err()
+        .unwrap();
+    assert!(format!("{error:#}").contains("aliases a protected"));
+    for invalid in [
+        relay.replace("wallet='default'", "wallet='missing'"),
+        relay.replace("sources=['shared']", "sources=['missing']"),
+        format!("{relay}max_spend='1'\n"),
+    ] {
+        std::fs::write(&path, format!("{text}{invalid}")).unwrap();
+        assert!(
+            x402_treazury::deployment::Deployment::show_config(&path)
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn relay_serving_loads_only_its_static_key_before_catalog_selection() {
+    use std::collections::BTreeMap;
+    use x402_treazury::deployment::Deployment;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("api.json"),
+        r#"{"operations":[{"method":"GET","path":"/read"}]}"#,
+    )
+    .unwrap();
+    let provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(
+        &path,
+        format!(
+            r#"
+version=1
+[discovery_relay]
+provider='{}'
+wallet='relay'
+serve=true
+[wallets.relay]
+mode='static'
+private_key_env='RELAY_FIXTURE_KEY'
+[wallets.used]
+mode='static'
+private_key_env='USED_FIXTURE_KEY'
+[wallets.unused]
+mode='static'
+private_key_env='NEVER_LOAD_THIS_KEY'
+[sources.api]
+spec='api.json'
+base_url='https://example.com'
+wallet='used'
+probe_pricing=false
+[servers.test]
+listen='127.0.0.1:0'
+bearer_token_env='AUTH_FIXTURE_TOKEN'
+wallet='unused'
+sources=['api']
+"#,
+            provider.display()
+        ),
+    )
+    .unwrap();
+    // Inspection ignores the paid relay, without any credentials.
+    Deployment::load(&path).await.unwrap();
+    let env = BTreeMap::from([
+        (
+            "RELAY_FIXTURE_KEY".into(),
+            "0000000000000000000000000000000000000000000000000000000000000001".into(),
+        ),
+        ("AUTH_FIXTURE_TOKEN".into(), "fixture-token".into()),
+    ]);
+    let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+        .await
+        .unwrap();
+    let error = deployment.bind(&env).await.err().unwrap();
+    assert!(format!("{error:#}").contains("USED_FIXTURE_KEY"));
+    let mut env = env;
+    env.insert(
+        "USED_FIXTURE_KEY".into(),
+        "0000000000000000000000000000000000000000000000000000000000000002".into(),
+    );
+    let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+        .await
+        .unwrap();
+    let running = deployment.bind(&env).await.unwrap();
+    assert_eq!(running.addresses().len(), 1);
 }

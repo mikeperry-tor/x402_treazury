@@ -383,7 +383,16 @@ async fn run_deployment(
         if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
             x402_treazury::deployment::Deployment::load(path).await
         } else {
-            x402_treazury::deployment::Deployment::load_for_serving(path).await
+            x402_treazury::deployment::Deployment::load_for_serving_with_relay(
+                path,
+                env,
+                if args.qualification_no_new_funding {
+                    x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
+                } else {
+                    Default::default()
+                },
+            )
+            .await
         }
     };
     let mut deployment = tokio::select! {

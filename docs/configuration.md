@@ -10,6 +10,7 @@ subcommand; running it without arguments displays help and never starts serving.
 | `serve --config FILE` | Start a multi-listener deployment and its configured funding workers |
 | `serve --provider FILE` | Serve one provider, using stdio by default |
 | `catalog tools --config FILE` or `--provider FILE` | Print selected tool inventories as JSON; optional `--discover-pricing` runs unsigned probes |
+| `catalog warm --config FILE` | Warm catalogs and optional pricing; configured relay may pay, `--direct` stays unsigned |
 | `catalog tags --config FILE` or `--provider FILE` | Print available OpenAPI tags |
 | `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
 | `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
@@ -284,7 +285,7 @@ existing addresses retain their original targets, and fees and retired balances
 are not included. None of these inspection commands allocates keys or funds.
 
 Rust configuration is TOML-only. [providers/](../providers/README.md) contains
-all 26 reusable provider definitions. AgentUtility, Glassnode, Concordance,
+all 27 reusable provider definitions. AgentUtility, Glassnode, Concordance,
 Straits and Locus have a `provider.toml` and a locally curated `openapi.json` in their own directory.
 JSON remains the format for API documents, fixture data and inventory output.
 Small PNG/JPEG/WebP results are returned as MCP image attachments; provider TOML
@@ -757,9 +758,11 @@ x402_treazury catalog warm --config deployment.toml --source provider_id --direc
 repeat it or use a comma-separated list. Omitting it selects every declared source.
 Only selected catalogs are fetched. `--discover-pricing` also warms eligible unsigned
 GET estimates, respecting source opt-outs, endpoint caps and the union of listener
-filters. The command requires an existing treasury state directory, never opens a
-wallet or starts listeners/funding, and rejects `http_cache_enabled = false` on a
-selected source. Without `--direct`, it uses the deployment's network policy.
+filters. The command requires an existing treasury state directory and rejects
+`http_cache_enabled = false` on a selected source. Without `--direct`, it uses the
+deployment's network policy. It starts no listeners or funding workers. It opens
+only the configured discovery wallet when paid relay warming is enabled below;
+otherwise it remains unsigned and opens no wallet.
 
 `--direct` is an explicit exception for this dedicated warming process. Its
 unsigned discovery requests use direct egress through the normal network factory,
@@ -778,12 +781,77 @@ imports and treasury traffic always retain their configured policy. Qualificatio
 continues to bypass all disk caches and cannot invoke this warm path.
 
 The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
-`requires_revalidation`, `not_stored` and `local_file`; `fresh_pricing_entries`
+`fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`; `fresh_pricing_entries`
 counts persistent, fresh estimates. Fetching successfully does not imply caching
 is supported: validator-only catalogs still require revalidation, and entries
 without explicit freshness cannot bypass a Tor-blocked origin. Normal HTTP storage
 restrictions and limits still apply; `--direct` does not force persistence or
 extend lifetimes. A failed multi-source warm can leave completed disposable entries.
+
+#### Paid discovery relay
+
+A deployment can opt into Curl HTTP Request as a fallback for catalog and pricing
+GETs that fail with a connection error, timeout, or HTTP 403. Other HTTP statuses,
+invalid catalogs and local-file failures do not trigger a paid fallback. This does
+not diagnose Tor blocking; the same policy applies on a direct deployment.
+
+```toml
+[discovery_relay]
+provider = "../../providers/curl/provider.toml" # relative to this deployment file
+wallet = "web" # an existing named [wallets.web], static or zcash_rotation
+serve = true   # allow paid fallback during serving startup; defaults false
+warm = true    # allow paid fallback during catalog warm; defaults false
+# sources = ["social"] # optional authored source IDs; omitted/empty selects all
+```
+
+The relay provider must have a local bootstrap catalog exposing `POST /curl` and
+an HTTPS `base_url`. The bundled provider pins the vendor schema and advertises
+$0.01 per fetch; the live challenge and the wallet's existing `max_price_usd` are
+authoritative. Its existing timeout, transport and `max_response_bytes` settings
+bound the relay call; the target's existing `max_spec_bytes` bounds decoded catalogs.
+No additional spending caps or download settings are introduced.
+
+Both modes use the named wallet through the ordinary paid client and the configured
+network factory. Under Tor, the connection to Curl remains over Tor; Curl sees the
+target URLs and its own egress reaches the targets. The target GET is unsigned.
+The relay supplies origin content, headers and status: our TLS connection verifies
+Curl, not the target's TLS policy. Never use it for authenticated discovery URLs.
+The provider can also be exposed as ordinary MCP tools by adding it as a source;
+the relay setting alone does not expose a tool to listeners.
+
+Serving initializes wallets before catalogs when `serve=true`. The relay wallet
+must already be funded: automatic funding workers do not start until catalog and
+pricing discovery finish. Warming opens only its selected wallet (including treasury
+ownership for a managed wallet), denies new funding and starts no workers. Export
+static signing-key environment variables before warming. `--direct` always bypasses
+the relay and remains unsigned. Ordinary `config check`, catalog inspection and
+`catalog tools --discover-pricing` remain unsigned and never invoke the relay.
+Qualification rejects paid relay startup.
+
+Paid relay calls are serialized. Successful results are shared for each target URL;
+any payment, transport, envelope, origin-status or parse failure disables further
+relay calls for that run. Cancellation also disables further calls, including after
+a signed submission. Queued targets cannot spin on the wallet; there is no automatic
+retry, alternate relay, or replay of an uncertain payment. A new explicit command or
+process restart starts a new run and can spend again. Catalog failure still aborts
+startup; pricing failures remain unknown estimates. Existing successful results and
+fresh cache entries remain usable.
+
+Relay responses must match the target URL and GET method and contain complete JSON
+catalog text, or a usable 402 payment header for pricing. Redirects and explicitly
+truncated results are rejected. Curl's documentation does not specify its body limit
+or guarantee a truncation flag; paid delivery, completeness on large documents and
+Tor reachability remain unqualified. Valid JSON alone cannot prove the relay has
+preserved every origin field.
+
+Only explicitly fresh origin metadata permits disk storage, under the existing
+treasury cache directory. Relay identity and target policy partition these entries;
+relay-disabled inspection cannot reuse them. The relay's outer caching headers are
+ignored. Curl does not expose conditional request headers, so expired relay entries
+are fetched anew through the normal origin-first fallback path, never revalidated
+with relay validators or served stale. Pricing persists only display estimates,
+never payment challenges. `catalog warm` reports `fresh_via_relay` for cached catalogs;
+a successful fetch without suitable origin headers reports `not_stored`.
 
 Pricing suffixes use compact provenance labels:
 

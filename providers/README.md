@@ -45,6 +45,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Claw402 | `claw402.toml` | Twelve market overview reads and lazy help; exact curated allowlist |
 | botsmith | `botsmith.toml` | Vendor OpenAPI |
 | Brazilayer | `brazilayer.toml` | Vendor OpenAPI |
+| Curl HTTP Request | `curl/provider.toml` | Local schema; POST `/curl` returns status, headers and body text; advertised $0.01 |
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |
 | Deepline | `deepline.toml` | Vendor OpenAPI |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
@@ -64,7 +65,10 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | x402-list | `x402-list.toml` | Curated API-directory reads |
 | x402stock | `x402stock.toml` | Vendor OpenAPI |
 
-The five local catalogs are authored OpenAPI 3.1 request definitions, explicitly
+Curl additionally pins the vendor-published OpenAPI response envelope for discovery
+relay use; see [relay configuration](../docs/configuration.md#paid-discovery-relay).
+
+The five authored local catalogs are OpenAPI 3.1 request definitions, explicitly
 labeled as local rather than vendor-published. They preserve the curated routes,
 tags, descriptions, parameters, request bodies and embedded prices from the
 Python reference digests. Prices use the `x-payment-info` extension. Responses
@@ -72,8 +76,8 @@ have a generic description because their schemas are not modeled. Preserve the
 Locus gateway body rewrite and job exclusions, Straits free/premium split,
 Concordance POST pricing, and Glassnode's discovery workflow when editing them.
 
-`tests/provider_catalogs.rs` pins 860 tool definitions across the 22 providers
-with committed fixtures. `tests/config.rs` pins settings for all 26 providers.
+`tests/provider_catalogs.rs` pins 861 tool definitions across the 23 providers
+with committed fixtures. `tests/config.rs` pins settings for all 27 providers.
 Tests need no Python or live vendor access. See [provider caveats](CAVEATS.md)
 for route exclusions, pricing semantics and vendor-specific workflows.
 

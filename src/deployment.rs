@@ -1,4 +1,4 @@
-//! Resolve catalogs without secrets, then bind every authenticated listener before serving.
+//! Resolve catalogs (optionally through a paid relay), then bind authenticated listeners.
 use crate::{
     catalog::{self, Config, ToolSpec},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -37,6 +37,7 @@ pub struct MetaConfig {
     pub treasury: Option<TreasuryConfig>,
     pub funding: Option<FundingConfig>,
     pub source_management: Option<crate::discovery::policy::Policy>,
+    pub discovery_relay: Option<crate::discovery_relay::Policy>,
     #[serde(default)]
     pub sources: BTreeMap<String, SourceConfig>,
     #[serde(default)]
@@ -108,6 +109,7 @@ pub struct InventoryTool {
     pub tool: ToolSpec,
 }
 pub struct Deployment {
+    initialized: Option<InitializedWallets>,
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
@@ -133,6 +135,9 @@ impl MetaConfig {
         self.startup.validate()?;
         self.network.validate()?;
         crate::discovery::policy::validate(self)?;
+        if let Some(relay) = &self.discovery_relay {
+            relay.validate(self)?;
+        }
         ensure!(
             self.version == 1,
             "unsupported meta-config version {}",
@@ -268,17 +273,32 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"discovery_relay":config.discovery_relay,"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, false).await
+        Self::load_with_warnings(path, false, None).await
     }
     /// Warn for listener-bound sources before catalog I/O, including failed fetches.
     pub async fn load_for_serving(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, true).await
+        Self::load_for_serving_with_relay(path, &std::env::vars().collect(), Default::default())
+            .await
     }
-    async fn load_with_warnings(path: &Path, warn: bool) -> Result<Self> {
+    pub async fn load_for_serving_with_relay(
+        path: &Path,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+    ) -> Result<Self> {
+        Self::load_with_warnings(path, true, Some((env, restriction))).await
+    }
+    async fn load_with_warnings(
+        path: &Path,
+        warn: bool,
+        relay_env: Option<(
+            &BTreeMap<String, String>,
+            crate::rotation::restriction::FundingRestriction,
+        )>,
+    ) -> Result<Self> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
         if let Some(p) = &mut config.source_management {
@@ -290,7 +310,46 @@ impl Deployment {
             t.resolve(path);
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
-        let sources = startup::load(&config, path, warn).await?;
+        let mut deployment = Self {
+            initialized: None,
+            config,
+            wallet_resolution,
+            sources: BTreeMap::new(),
+            selected: BTreeMap::new(),
+            config_path: path.to_owned(),
+        };
+        let relay = if let Some(policy) = deployment
+            .config
+            .discovery_relay
+            .clone()
+            .filter(|p| p.serve)
+            && let Some((env, restriction)) = relay_env
+        {
+            ensure!(
+                !crate::qualification::active() && !catalog_evidence::collecting(),
+                "paid discovery relay is unavailable during qualification"
+            );
+            // Validate listener credentials before discovery can spend.
+            for server in deployment.config.servers.values().filter(|s| s.auth) {
+                required_secret(env, &server.bearer_token_env)?;
+            }
+            let initialized = deployment
+                .initialize_wallets(env, restriction, None)
+                .await?;
+            let relay = crate::discovery_relay::Relay::new(
+                &policy,
+                path,
+                initialized.wallets[&policy.wallet].clone(),
+            )
+            .await?;
+            deployment.initialized = Some(initialized);
+            Some(relay)
+        } else {
+            None
+        };
+        let config = &deployment.config;
+        let wallet_resolution = &deployment.wallet_resolution;
+        let sources = startup::load(config, path, warn, relay).await?;
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
             selected.insert(name.clone(), select_listener_tools(name, server, &sources)?);
@@ -327,13 +386,9 @@ impl Deployment {
                 }
             }
         }
-        Ok(Self {
-            config,
-            sources,
-            selected,
-            wallet_resolution,
-            config_path: path.to_owned(),
-        })
+        deployment.sources = sources;
+        deployment.selected = selected;
+        Ok(deployment)
     }
     /// Credential-free qualification snapshot, returned only by an explicit CLI inspection.
     pub async fn inspect_catalogs(
@@ -390,18 +445,16 @@ impl Deployment {
         &self,
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
+        only_wallet: Option<&str>,
     ) -> Result<InitializedWallets> {
         #[cfg(not(feature = "zcash"))]
         let _ = restriction;
         let secret = |key: &str| required_secret(env, key);
         // Static-only serving does not unlock state, but must not reuse a known
         // managed profile name as a different wallet identity.
-        if !self
-            .wallet_resolution
-            .wallets
-            .values()
-            .any(WalletConfig::managed)
-            && let Some(t) = &self.config.treasury
+        if !self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
+            only_wallet.is_none_or(|selected| selected == name) && wallet.managed()
+        }) && let Some(t) = &self.config.treasury
             && t.state_dir.exists()
         {
             let dir = t.state_dir.clone();
@@ -434,6 +487,12 @@ impl Deployment {
             })
             .collect();
         used_wallets.extend(crate::discovery::policy::wallets(&self.config));
+        if let Some(policy) = &self.config.discovery_relay
+            && (only_wallet.is_some() || (policy.serve && self.sources.is_empty()))
+        {
+            used_wallets.insert(policy.wallet.clone());
+        }
+        used_wallets.retain(|name| only_wallet.is_none_or(|selected| selected == name));
         for name in used_wallets {
             if let WalletConfig::Static {
                 private_key_env,
@@ -454,12 +513,9 @@ impl Deployment {
         let mut funding_runtime = None;
         #[cfg(feature = "zcash")]
         let mut managed_pools = Vec::new();
-        if self
-            .wallet_resolution
-            .wallets
-            .values()
-            .any(WalletConfig::managed)
-        {
+        if self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
+            only_wallet.is_none_or(|selected| selected == name) && wallet.managed()
+        }) {
             #[cfg(not(feature = "zcash"))]
             bail!("managed serving requires a build with --features zcash");
             #[cfg(feature = "zcash")]
@@ -530,6 +586,9 @@ impl Deployment {
                     .call(move |s| s.configure_profiles(&managed, &statics))
                     .await?;
                 for (name, w) in &self.wallet_resolution.wallets {
+                    if only_wallet.is_some_and(|selected| selected != name) {
+                        continue;
+                    }
                     if let WalletConfig::ZcashRotation {
                         deposit_size,
                         max_price_usd,
@@ -601,7 +660,8 @@ impl Deployment {
         })
     }
 
-    /// Prepare unsigned startup prices without binding listeners or opening wallets.
+    /// Prepare startup prices without binding listeners or opening additional wallets.
+    /// Inspection is unsigned; a serving load may have explicitly prepared a paid relay.
     /// Uses the process cache; repeated calls never refresh completed attempts.
     pub async fn discover_prices(&mut self) -> Result<()> {
         let started = std::time::Instant::now();
@@ -768,8 +828,50 @@ impl Deployment {
                 #[cfg(feature = "zcash")]
                 managed_pools: Vec::new(),
             }
+        } else if let Some(mut initialized) = self.initialized.take() {
+            #[cfg(feature = "zcash")]
+            if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding
+                && let Some(treasury) = &initialized.treasury
+            {
+                treasury
+                    .store_handle()
+                    .call(|store| {
+                        store.deny_new_funding();
+                        Ok(())
+                    })
+                    .await?;
+            }
+            // Catalog selection is now known: unused/overridden static profiles
+            // must still not require credentials merely because relay is enabled.
+            let needed: BTreeSet<_> = self
+                .selected
+                .iter()
+                .flat_map(|(server, tools)| {
+                    tools.iter().map(|(source, _)| {
+                        self.wallet_resolution.bindings[server][source]
+                            .wallet
+                            .clone()
+                    })
+                })
+                .collect();
+            for name in needed {
+                if !initialized.wallets.contains_key(&name)
+                    && let WalletConfig::Static {
+                        private_key_env,
+                        max_price_usd,
+                    } = &self.wallet_resolution.wallets[&name]
+                {
+                    let payer = Payer::new(
+                        &secret(private_key_env)?,
+                        SpendPolicy::dollars(max_price_usd)?,
+                    )
+                    .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
+                    initialized.wallets.insert(name, PaidClient::new(payer));
+                }
+            }
+            initialized
         } else {
-            self.initialize_wallets(env, restriction).await?
+            self.initialize_wallets(env, restriction, None).await?
         };
         let wallets = initialized.wallets;
         #[cfg(feature = "zcash")]

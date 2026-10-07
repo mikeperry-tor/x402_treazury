@@ -891,3 +891,15 @@ components. These annotations never determine spending limits or signing; atomic
 Unknown fields and unsupported mechanisms still fail closed. Local signing regressions do not prove live settlement.
 OpenAPI `x-*` annotations (pricing, discovery, lifecycle, etc.) are yet another
 category; they are not themselves x402 challenge extensions.
+
+## Curl HTTP Request
+
+`curl/provider.toml` pins the vendor's public OpenAPI schema for `POST /curl`.
+It advertises $0.01 per call on Base USDC and returns origin status, headers and
+body text. Redirects are automatically followed by the vendor; discovery relay
+use rejects nonempty redirect chains. The documented request cannot forward
+conditional headers, and binary bodies, body-size limits and completeness are not
+qualified. No paid delivery or Tor qualification has been performed. The discovery
+adapter accepts only unsigned target GETs; enabling the provider as an MCP source
+also exposes the vendor's other target-method choices. See
+[relay configuration](../docs/configuration.md#paid-discovery-relay).

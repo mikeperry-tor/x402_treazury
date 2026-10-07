@@ -37,3 +37,5 @@ pub mod build_identity;
 pub mod cover;
 
 mod http_cache;
+
+pub mod discovery_relay;

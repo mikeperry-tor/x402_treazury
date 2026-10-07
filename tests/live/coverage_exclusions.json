@@ -8,5 +8,10 @@
     "provider": "claw402",
     "config": "providers/claw402.toml",
     "reason": "Outside the reviewed provider preset; no paid request or budget authorized."
+  },
+  {
+    "provider": "curl",
+    "config": "providers/curl/provider.toml",
+    "reason": "Discovery relay contract pinned from vendor documentation; paid delivery and Tor behavior are not qualified. No paid request or budget authorized by this inventory."
   }
 ]

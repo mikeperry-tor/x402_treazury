@@ -73,7 +73,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 22);
+    assert_eq!(cases.len(), 23);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
@@ -107,7 +107,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 860);
+    assert_eq!(total, 861);
 }
 
 #[tokio::test]
