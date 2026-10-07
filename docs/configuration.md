@@ -761,7 +761,7 @@ GET estimates, respecting source opt-outs, endpoint caps and the union of listen
 filters. The command requires an existing treasury state directory and rejects
 `http_cache_enabled = false` on a selected source. Without `--direct`, it uses the
 deployment's network policy. It starts no listeners or funding workers. It opens
-only the configured discovery wallet when paid relay warming is enabled below;
+only the resolved discovery wallets when paid relay warming is enabled below;
 otherwise it remains unsigned and opens no wallet.
 
 `--direct` is an explicit exception for this dedicated warming process. Its
@@ -798,7 +798,7 @@ not diagnose Tor blocking; the same policy applies on a direct deployment.
 ```toml
 [discovery_relay]
 provider = "../../providers/curl/provider.toml" # relative to this deployment file
-wallet = "web" # an existing named [wallets.web], static or zcash_rotation
+# wallet = "web" # optional override; otherwise choose from each source's bindings
 serve = true   # allow paid fallback during serving startup; defaults false
 warm = true    # allow paid fallback during catalog warm; defaults false
 # sources = ["social"] # optional authored source IDs; omitted/empty selects all
@@ -811,7 +811,27 @@ authoritative. Its existing timeout, transport and `max_response_bytes` settings
 bound the relay call; the target's existing `max_spec_bytes` bounds decoded catalogs.
 No additional spending caps or download settings are introduced.
 
-Both modes use the named wallet through the ordinary paid client and the configured
+Without `wallet`, each source uses one of its effective assigned wallet profiles.
+An explicit source wallet takes precedence through normal binding resolution. A
+source shared across listeners chooses one candidate by the highest SHA-256 score
+of the JSON tuple `["discovery-wallet-v1", source_id, wallet_name]` (wallet name
+breaks ties). This is stable across restarts and listener ordering; duplicate
+bindings to the same wallet do not add weight. Renaming a source or changing its
+candidate wallets can change the selection. No keys, balances, timing or current
+rotating addresses influence the choice. A failed wallet is never replaced by
+another candidate to retry relay spending. An unbound source needs either its own
+`wallet` or an explicit `discovery_relay.wallet` override.
+
+`config show` reports the resulting `discovery_wallets` source-to-profile map.
+The privacy example enables relay fallback without an override: `social` uses
+`social`, `webinfo` uses `web`, and shared `exa` selects `company` from its `web` /
+`company` candidates. Exa's discovered catalog/pricing remains shared by its
+listeners; their paid API calls still use their original wallet bindings. Distinct
+source aliases using different wallets keep separate relay requests and caches,
+even if they fetch the same URL. Sharing a wallet intentionally retains that link;
+this removes a mandatory common discovery payer, not all correlation channels.
+
+Both modes use the resolved wallets through the ordinary paid client and the configured
 network factory. Under Tor, the connection to Curl remains over Tor; Curl sees the
 target URLs and its own egress reaches the targets. The target GET is unsigned.
 The relay supplies origin content, headers and status: our TLS connection verifies
@@ -819,18 +839,20 @@ Curl, not the target's TLS policy. Never use it for authenticated discovery URLs
 The provider can also be exposed as ordinary MCP tools by adding it as a source;
 the relay setting alone does not expose a tool to listeners.
 
-Serving initializes wallets before catalogs when `serve=true`. The relay wallet
+Serving initializes wallets before catalogs when `serve=true`. Resolved relay wallets
 must already be funded: automatic funding workers do not start until catalog and
-pricing discovery finish. Warming opens only its selected wallet (including treasury
-ownership for a managed wallet), denies new funding and starts no workers. Export
+pricing discovery finish. Warming opens only the wallets resolved for its selected
+sources (including treasury ownership for managed wallets), denies new funding
+and starts no workers. Export
 static signing-key environment variables before warming. `--direct` always bypasses
 the relay and remains unsigned. Ordinary `config check`, catalog inspection and
 `catalog tools --discover-pricing` remain unsigned and never invoke the relay.
 Qualification rejects paid relay startup.
 
-Paid relay calls are serialized. Successful results are shared for each target URL;
+Paid relay calls are serialized across wallets. Successful results are shared within
+the same wallet/relay scope for each target URL;
 any payment, transport, envelope, origin-status or parse failure disables further
-relay calls for that run. Cancellation also disables further calls, including after
+relay calls across all wallets for that run. Cancellation also disables further calls, including after
 a signed submission. Queued targets cannot spin on the wallet; there is no automatic
 retry, alternate relay, or replay of an uncertain payment. A new explicit command or
 process restart starts a new run and can spend again. Catalog failure still aborts
@@ -845,7 +867,7 @@ Tor reachability remain unqualified. Valid JSON alone cannot prove the relay has
 preserved every origin field.
 
 Only explicitly fresh origin metadata permits disk storage, under the existing
-treasury cache directory. Relay identity and target policy partition these entries;
+treasury cache directory. Resolved wallet, relay identity and target policy partition these entries;
 relay-disabled inspection cannot reuse them. The relay's outer caching headers are
 ignored. Curl does not expose conditional request headers, so expired relay entries
 are fetched anew through the normal origin-first fallback path, never revalidated

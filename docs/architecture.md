@@ -47,8 +47,9 @@ never challenges. It partitions network/transport identities, bounds storage and
 bypasses qualification. See [discovery disk caching](configuration.md#automatic-discovery-disk-cache).
 
 `src/discovery_relay.rs` implements an explicitly configured paid Curl fallback.
-It uses the named wallet and ordinary paid client, serializes requests and disables
-further relay spending after error or cancellation. Local bootstrap metadata avoids
+It resolves one assigned wallet per source (or an explicit override), uses the
+ordinary paid client, serializes requests across wallets and disables
+further relay spending across all wallets after error or cancellation. Local bootstrap metadata avoids
 a catalog dependency cycle. Serving prepares wallets before catalog loading when
 enabled; warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See

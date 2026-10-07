@@ -14,15 +14,17 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 request_timeout_seconds = 240
 
-# Optional paid fallback for blocked catalog/pricing GETs. The named wallet must
-# already have funds: discovery finishes before automatic funding workers start.
-# Curl receives target URLs; the connection to Curl retains this Tor policy.
-# A failure/cancellation disables further relay calls for the run; no paid retries.
-# [discovery_relay]
-# provider = "../../providers/curl/provider.toml"
-# wallet = "web"
-# serve = true
-# warm = true
+# Paid fallback for blocked catalog/pricing GETs, using each source's assigned
+# wallet. Shared sources choose one assigned profile deterministically; config
+# show reports discovery_wallets. Paid API calls retain their listener bindings.
+# Selected wallets must already have funds: funding workers start after discovery.
+# Curl receives target URLs; connections retain wallet-bound Tor isolation.
+# A failure/cancellation disables further relay calls across all wallets this run.
+[discovery_relay]
+provider = "../../providers/curl/provider.toml"
+serve = true
+warm = true
+# wallet = "web" # optional override: share this wallet for all discovery
 # sources = ["social"] # omit to allow all authored sources
 
 # Treasury commands use this same state directory and its default wallet.key.

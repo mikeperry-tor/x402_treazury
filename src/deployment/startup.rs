@@ -45,7 +45,7 @@ type DownloadResult = std::result::Result<Document, SharedFailure>;
 /// documents only for this load; aliases still generate/filter/bind independently.
 #[derive(Default)]
 struct Downloads {
-    relay: Option<Arc<crate::discovery_relay::Relay>>,
+    relay: crate::discovery_relay::Relays,
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
     direct_warm_target: Option<crate::network::NetworkPolicy>,
@@ -139,7 +139,7 @@ pub(super) async fn load(
     config: &MetaConfig,
     path: &Path,
     warn: bool,
-    relay: Option<Arc<crate::discovery_relay::Relay>>,
+    relay: crate::discovery_relay::Relays,
 ) -> Result<BTreeMap<String, Source>> {
     let started = Instant::now();
     let total = config.sources.len();
@@ -264,7 +264,7 @@ impl Source {
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
-        cfg.discovery_relay = downloads.relay.clone().filter(|r| r.allows(id));
+        cfg.discovery_relay = downloads.relay.get(id).cloned();
         cfg.http_cache_directory = downloads.cache_directory.clone();
         cfg.http_cache_direct_warm_target = downloads.direct_warm_target.clone();
         if warn {
@@ -377,7 +377,7 @@ pub(super) async fn warm(
     selected: &std::collections::BTreeSet<String>,
     direct: bool,
     discover_pricing: bool,
-    relay: Option<Arc<crate::discovery_relay::Relay>>,
+    relay: crate::discovery_relay::Relays,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
         relay,

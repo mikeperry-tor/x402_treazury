@@ -332,4 +332,36 @@ sources=['api']
         .unwrap();
     let running = deployment.bind(&env).await.unwrap();
     assert_eq!(running.addresses().len(), 1);
+    // With no override, only the source-assigned key is required for discovery.
+    let automatic = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("wallet='relay'\nserve=true", "serve=true");
+    std::fs::write(&path, automatic).unwrap();
+    env.remove("RELAY_FIXTURE_KEY");
+    let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+        .await
+        .unwrap();
+    let running = deployment.bind(&env).await.unwrap();
+    assert_eq!(running.addresses().len(), 1);
+}
+
+#[tokio::test]
+async fn privacy_example_enables_source_wallet_discovery_offline() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let shown = x402_treazury::deployment::Deployment::show_config(
+        &root.join("examples/deployments/privacy.toml"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(shown["discovery_relay"]["serve"], true);
+    assert_eq!(shown["discovery_relay"]["warm"], true);
+    assert!(shown["discovery_relay"]["wallet"].is_null());
+    assert_eq!(shown["discovery_wallets"]["exa"], "company");
+    assert_eq!(shown["discovery_wallets"]["social"], "social");
+    assert_eq!(shown["discovery_wallets"]["webinfo"], "web");
+    assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
+    assert_eq!(
+        shown["wallet_bindings"]["company"]["exa"]["wallet"],
+        "company"
+    );
 }

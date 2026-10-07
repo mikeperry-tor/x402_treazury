@@ -1,5 +1,5 @@
 //! Explicit discovery in a dedicated CLI process. Direct warming is unsigned;
-//! configured relay warming owns only its named wallet and starts no workers.
+//! configured relay warming owns only its resolved wallets and starts no workers.
 use super::*;
 
 #[derive(Serialize)]
@@ -81,7 +81,7 @@ pub async fn warm_cache(
         );
     }
     // Direct warming retains its unsigned behavior. Relay warming uses only the
-    // named wallet and never starts treasury sync, funding workers or listeners.
+    // resolved wallets and never starts treasury sync, funding workers or listeners.
     let policy = config.discovery_relay.clone().filter(|p| {
         p.warm
             && !direct
@@ -100,24 +100,28 @@ pub async fn warm_cache(
             selected: BTreeMap::new(),
             config_path: path.to_owned(),
         };
+        let bindings = crate::discovery_relay::resolve_wallets(
+            &policy,
+            &deployment.config,
+            &deployment.wallet_resolution,
+            selected.iter().cloned(),
+        )?;
+        let needed = bindings.values().cloned().collect();
         let initialized = deployment
             .initialize_wallets(
                 &std::env::vars().collect(),
                 crate::rotation::restriction::FundingRestriction::DenyNewFunding,
-                Some(&policy.wallet),
+                Some(&needed),
+                &needed,
             )
             .await?;
-        let relay = crate::discovery_relay::Relay::new(
-            &policy,
-            path,
-            initialized.wallets[&policy.wallet].clone(),
-        )
-        .await?;
+        let relay =
+            crate::discovery_relay::build(&policy, path, &bindings, &initialized.wallets).await?;
         config = deployment.config;
         owner = Some(initialized);
-        Some(relay)
+        relay
     } else {
-        None
+        Default::default()
     };
     let sources = startup::warm(&config, path, &selected, direct, discover_pricing, relay).await?;
     drop(owner);

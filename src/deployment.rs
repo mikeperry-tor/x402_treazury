@@ -259,6 +259,20 @@ impl Deployment {
             t.resolve(path);
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
+        let discovery_wallets = config
+            .discovery_relay
+            .as_ref()
+            .map(|policy| {
+                crate::discovery_relay::resolve_wallets(
+                    policy,
+                    &config,
+                    &wallet_resolution,
+                    config.sources.keys().cloned(),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+
         let mut resolved = BTreeMap::new();
         for (id, source) in &config.sources {
             let mut provider = crate::config::resolve(source.provider.clone(), path).await?;
@@ -273,7 +287,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"discovery_relay":config.discovery_relay,"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"discovery_wallets":discovery_wallets,"discovery_relay":config.discovery_relay,"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -333,19 +347,23 @@ impl Deployment {
             for server in deployment.config.servers.values().filter(|s| s.auth) {
                 required_secret(env, &server.bearer_token_env)?;
             }
-            let initialized = deployment
-                .initialize_wallets(env, restriction, None)
-                .await?;
-            let relay = crate::discovery_relay::Relay::new(
+            let bindings = crate::discovery_relay::resolve_wallets(
                 &policy,
-                path,
-                initialized.wallets[&policy.wallet].clone(),
-            )
-            .await?;
+                &deployment.config,
+                &deployment.wallet_resolution,
+                deployment.config.sources.keys().cloned(),
+            )?;
+            let needed = bindings.values().cloned().collect();
+            let initialized = deployment
+                .initialize_wallets(env, restriction, None, &needed)
+                .await?;
+            let relay =
+                crate::discovery_relay::build(&policy, path, &bindings, &initialized.wallets)
+                    .await?;
             deployment.initialized = Some(initialized);
-            Some(relay)
+            relay
         } else {
-            None
+            Default::default()
         };
         let config = &deployment.config;
         let wallet_resolution = &deployment.wallet_resolution;
@@ -445,7 +463,8 @@ impl Deployment {
         &self,
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
-        only_wallet: Option<&str>,
+        only_wallets: Option<&BTreeSet<String>>,
+        relay_wallets: &BTreeSet<String>,
     ) -> Result<InitializedWallets> {
         #[cfg(not(feature = "zcash"))]
         let _ = restriction;
@@ -453,7 +472,7 @@ impl Deployment {
         // Static-only serving does not unlock state, but must not reuse a known
         // managed profile name as a different wallet identity.
         if !self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
-            only_wallet.is_none_or(|selected| selected == name) && wallet.managed()
+            only_wallets.is_none_or(|selected| selected.contains(name)) && wallet.managed()
         }) && let Some(t) = &self.config.treasury
             && t.state_dir.exists()
         {
@@ -487,12 +506,8 @@ impl Deployment {
             })
             .collect();
         used_wallets.extend(crate::discovery::policy::wallets(&self.config));
-        if let Some(policy) = &self.config.discovery_relay
-            && (only_wallet.is_some() || (policy.serve && self.sources.is_empty()))
-        {
-            used_wallets.insert(policy.wallet.clone());
-        }
-        used_wallets.retain(|name| only_wallet.is_none_or(|selected| selected == name));
+        used_wallets.extend(relay_wallets.iter().cloned());
+        used_wallets.retain(|name| only_wallets.is_none_or(|selected| selected.contains(name)));
         for name in used_wallets {
             if let WalletConfig::Static {
                 private_key_env,
@@ -514,7 +529,7 @@ impl Deployment {
         #[cfg(feature = "zcash")]
         let mut managed_pools = Vec::new();
         if self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
-            only_wallet.is_none_or(|selected| selected == name) && wallet.managed()
+            only_wallets.is_none_or(|selected| selected.contains(name)) && wallet.managed()
         }) {
             #[cfg(not(feature = "zcash"))]
             bail!("managed serving requires a build with --features zcash");
@@ -586,7 +601,7 @@ impl Deployment {
                     .call(move |s| s.configure_profiles(&managed, &statics))
                     .await?;
                 for (name, w) in &self.wallet_resolution.wallets {
-                    if only_wallet.is_some_and(|selected| selected != name) {
+                    if only_wallets.is_some_and(|selected| !selected.contains(name)) {
                         continue;
                     }
                     if let WalletConfig::ZcashRotation {
@@ -871,7 +886,8 @@ impl Deployment {
             }
             initialized
         } else {
-            self.initialize_wallets(env, restriction, None).await?
+            self.initialize_wallets(env, restriction, None, &BTreeSet::new())
+                .await?
         };
         let wallets = initialized.wallets;
         #[cfg(feature = "zcash")]

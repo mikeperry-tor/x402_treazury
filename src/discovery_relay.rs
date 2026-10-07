@@ -16,7 +16,8 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     pub provider: PathBuf,
-    pub wallet: String,
+    #[serde(default)]
+    pub wallet: Option<String>,
     #[serde(default)]
     pub serve: bool,
     #[serde(default)]
@@ -27,10 +28,12 @@ pub struct Policy {
 }
 impl Policy {
     pub fn validate(&self, config: &crate::deployment::MetaConfig) -> Result<()> {
-        ensure!(
-            config.wallets.contains_key(&self.wallet),
-            "discovery_relay.wallet must name a declared wallet"
-        );
+        if let Some(wallet) = &self.wallet {
+            ensure!(
+                config.wallets.contains_key(wallet),
+                "discovery_relay.wallet must name a declared wallet"
+            );
+        }
         for source in &self.sources {
             ensure!(
                 config.sources.contains_key(source),
@@ -40,10 +43,68 @@ impl Policy {
         Ok(())
     }
 }
+/// The stable logical profile, never a current rotating address or listener order.
+pub(crate) fn resolve_wallets(
+    policy: &Policy,
+    config: &crate::deployment::MetaConfig,
+    resolution: &crate::rotation::assignment::Resolution,
+    selected: impl IntoIterator<Item = String>,
+) -> Result<BTreeMap<String, String>> {
+    use sha2::{Digest, Sha256};
+    let mut result = BTreeMap::new();
+    for source in selected {
+        if !policy.sources.is_empty() && !policy.sources.contains(&source) {
+            continue;
+        }
+        let wallet = if let Some(wallet) = &policy.wallet {
+            wallet.clone()
+        } else {
+            let mut candidates = std::collections::BTreeSet::new();
+            if let Some(wallet) = &config.sources[&source].wallet {
+                candidates.insert(wallet.clone());
+            }
+            for bindings in resolution.bindings.values() {
+                if let Some(binding) = bindings.get(&source) {
+                    candidates.insert(binding.wallet.clone());
+                }
+            }
+            candidates.into_iter().max_by_key(|wallet| {
+                // Length-delimited JSON prevents ambiguous source/profile concatenation.
+                (Sha256::digest(serde_json::to_vec(&("discovery-wallet-v1", &source, wallet)).expect("serializable identifiers")).to_vec(), wallet.clone())
+            }).with_context(|| format!("source {source}: discovery relay needs an assigned wallet; set sources.{source}.wallet or discovery_relay.wallet"))?
+        };
+        result.insert(source, wallet);
+    }
+    Ok(result)
+}
+pub(crate) type Relays = BTreeMap<String, Arc<Relay>>;
+pub(crate) async fn build(
+    policy: &Policy,
+    path: &Path,
+    bindings: &BTreeMap<String, String>,
+    clients: &BTreeMap<String, PaidClient>,
+) -> Result<Relays> {
+    let state = Arc::default();
+    let mut wallets = BTreeMap::new();
+    let mut relays = BTreeMap::new();
+    for (source, wallet) in bindings {
+        if let std::collections::btree_map::Entry::Vacant(entry) = wallets.entry(wallet.clone()) {
+            let mut scoped = policy.clone();
+            scoped.wallet = Some(wallet.clone());
+            let relay =
+                Relay::new_scoped(&scoped, path, clients[wallet].clone(), Arc::clone(&state))
+                    .await?;
+            entry.insert(relay);
+        }
+        relays.insert(source.clone(), wallets[wallet].clone());
+    }
+    Ok(relays)
+}
+
 #[derive(Default)]
 struct State {
     stopped: bool,
-    responses: BTreeMap<String, Arc<Response>>,
+    responses: BTreeMap<(String, String), Arc<Response>>,
 }
 pub struct Relay {
     client: PaidClient,
@@ -51,7 +112,7 @@ pub struct Relay {
     response_limit: usize,
     pub key: String,
     sources: Vec<String>,
-    state: tokio::sync::Mutex<State>,
+    state: Arc<tokio::sync::Mutex<State>>,
 }
 impl std::fmt::Debug for Relay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -72,6 +133,14 @@ impl Response {
 }
 impl Relay {
     pub async fn new(policy: &Policy, path: &Path, client: PaidClient) -> Result<Arc<Self>> {
+        Self::new_scoped(policy, path, client, Arc::default()).await
+    }
+    async fn new_scoped(
+        policy: &Policy,
+        path: &Path,
+        client: PaidClient,
+        state: Arc<tokio::sync::Mutex<State>>,
+    ) -> Result<Arc<Self>> {
         let provider = if policy.provider.is_absolute() {
             policy.provider.clone()
         } else {
@@ -124,7 +193,7 @@ impl Relay {
             response_limit: cfg.max_response_bytes,
             key,
             sources: policy.sources.clone(),
-            state: Default::default(),
+            state,
         }))
     }
     pub fn allows(&self, source: &str) -> bool {
@@ -149,7 +218,8 @@ impl Relay {
             "discovery relay targets must be HTTPS without credentials"
         );
         let mut state = self.state.lock().await;
-        if let Some(response) = state.responses.get(url).cloned() {
+        let key = (self.key.clone(), url.to_owned());
+        if let Some(response) = state.responses.get(&key).cloned() {
             if response.status != expected {
                 state.stopped = true;
                 anyhow::bail!("discovery relay origin status mismatch; disabled for this run");
@@ -198,7 +268,7 @@ impl Relay {
         match result {
             Ok(response) => {
                 let response = Arc::new(response);
-                state.responses.insert(url.to_owned(), response.clone());
+                state.responses.insert(key, response.clone());
                 state.stopped = false;
                 Ok(response)
             }
@@ -318,6 +388,7 @@ pub(crate) mod tests {
     pub(crate) struct Fixture {
         calls: Arc<AtomicUsize>,
         pub(crate) signed: Arc<AtomicUsize>,
+        payers: Arc<std::sync::Mutex<Vec<String>>>,
         body: Value,
         reject: bool,
         arrived: Arc<tokio::sync::Notify>,
@@ -328,7 +399,15 @@ pub(crate) mod tests {
         headers: HeaderMap,
     ) -> axum::response::Response {
         f.calls.fetch_add(1, Ordering::SeqCst);
-        if headers.contains_key("payment-signature") {
+        if let Some(signature) = headers.get("payment-signature") {
+            let payload: Value =
+                serde_json::from_slice(&STANDARD.decode(signature.as_bytes()).unwrap()).unwrap();
+            f.payers.lock().unwrap().push(
+                payload["payload"]["authorization"]["from"]
+                    .as_str()
+                    .unwrap()
+                    .to_ascii_lowercase(),
+            );
             f.signed.fetch_add(1, Ordering::SeqCst);
             f.arrived.notify_one();
             if f.stall {
@@ -358,6 +437,7 @@ pub(crate) mod tests {
         let f = Fixture {
             calls: Default::default(),
             signed: Default::default(),
+            payers: Default::default(),
             body,
             reject,
             arrived: Default::default(),
@@ -389,6 +469,155 @@ pub(crate) mod tests {
             f,
             task,
         )
+    }
+    fn second_wallet(first: &Relay) -> Relay {
+        let payer = crate::payment::Payer::new(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+            crate::payment::SpendPolicy::dollars("0.01").unwrap(),
+        )
+        .unwrap();
+        Relay {
+            client: PaidClient::new(payer),
+            endpoint: first.endpoint.clone(),
+            response_limit: first.response_limit,
+            key: "second-wallet".into(),
+            sources: vec![],
+            state: first.state.clone(),
+        }
+    }
+    #[tokio::test]
+    async fn wallet_scopes_do_not_share_paid_results_but_share_failure_breaker() {
+        let (first, f, task) = fixture(envelope(TARGET), false, false).await;
+        let second = second_wallet(&first);
+        first
+            .fetch(TARGET, 200, 4096, "max_spec_bytes")
+            .await
+            .unwrap();
+        second
+            .fetch(TARGET, 200, 4096, "max_spec_bytes")
+            .await
+            .unwrap();
+        first
+            .fetch(TARGET, 200, 4096, "max_spec_bytes")
+            .await
+            .unwrap();
+        assert_eq!(f.signed.load(Ordering::SeqCst), 2);
+        let payers = f.payers.lock().unwrap().clone();
+        assert_eq!(payers.len(), 2);
+        assert_ne!(payers[0], payers[1]);
+        task.abort();
+        let (first, f, task) = fixture(envelope(TARGET), true, false).await;
+        let second = second_wallet(&first);
+        let (a, b) = tokio::join!(
+            first.fetch(TARGET, 200, 4096, "max_spec_bytes"),
+            second.fetch(TARGET, 200, 4096, "max_spec_bytes")
+        );
+        assert!(a.is_err() && b.is_err());
+        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
+    #[tokio::test]
+    async fn built_relays_share_wallet_clients_and_one_global_breaker() {
+        let config: crate::deployment::MetaConfig =
+            toml::from_str(include_str!("../examples/deployments/privacy.toml")).unwrap();
+        let policy = config.discovery_relay.as_ref().unwrap();
+        let bindings = resolve_wallets(
+            policy,
+            &config,
+            &crate::rotation::assignment::resolve(&config).unwrap(),
+            config.sources.keys().cloned(),
+        )
+        .unwrap();
+        let clients = config
+            .wallets
+            .keys()
+            .map(|w| (w.clone(), PaidClient::unsigned()))
+            .collect();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/privacy.toml");
+        let relays = build(policy, &path, &bindings, &clients).await.unwrap();
+        assert!(Arc::ptr_eq(&relays["exa"], &relays["company_otto"]));
+        assert!(!Arc::ptr_eq(&relays["social"], &relays["webinfo"]));
+        assert!(Arc::ptr_eq(
+            &relays["social"].state,
+            &relays["webinfo"].state
+        ));
+        assert_ne!(relays["social"].key, relays["webinfo"].key);
+    }
+    #[test]
+    fn default_wallet_selection_is_stable_scoped_and_honors_overrides() {
+        let mut config: crate::deployment::MetaConfig =
+            toml::from_str(include_str!("../examples/deployments/privacy.toml")).unwrap();
+        let policy = config.discovery_relay.clone().unwrap();
+        assert!(policy.wallet.is_none() && policy.serve && policy.warm);
+        let resolve = |config: &crate::deployment::MetaConfig, policy: &Policy| {
+            resolve_wallets(
+                policy,
+                config,
+                &crate::rotation::assignment::resolve(config).unwrap(),
+                config.sources.keys().cloned(),
+            )
+            .unwrap()
+        };
+        let first = resolve(&config, &policy);
+        assert_eq!(first["exa"], "company");
+        assert_eq!(first["social"], "social");
+        assert_eq!(first["webinfo"], "web");
+        let web = config.servers.remove("web").unwrap();
+        config
+            .servers
+            .insert("renamed_listener".into(), web.clone());
+        config.servers.insert("another_listener".into(), web);
+        assert_eq!(first, resolve(&config, &policy));
+        // Warming a subset chooses the same wallet as complete serving startup.
+        let subset = resolve_wallets(
+            &policy,
+            &config,
+            &crate::rotation::assignment::resolve(&config).unwrap(),
+            ["exa".into()],
+        )
+        .unwrap();
+        assert_eq!(subset.len(), 1);
+        assert_eq!(subset["exa"], first["exa"]);
+        let mut override_policy = policy.clone();
+        override_policy.wallet = Some("web".into());
+        assert!(
+            resolve(&config, &override_policy)
+                .values()
+                .all(|w| w == "web")
+        );
+        config.sources.get_mut("exa").unwrap().wallet = Some("social".into());
+        assert_eq!(resolve(&config, &policy)["exa"], "social");
+        // Automatic assignments select existing generated profiles, not new pools.
+        for server in config.servers.values_mut() {
+            server.wallet = None;
+        }
+        for source in config.sources.values_mut() {
+            source.wallet = None;
+        }
+        config
+            .wallet_templates
+            .insert("template".into(), config.wallets["web"].clone());
+        config.wallet_assignment = Some(crate::rotation::assignment::Assignment {
+            scope: crate::rotation::assignment::Scope::Binding,
+            template: "template".into(),
+        });
+        let assignment = crate::rotation::assignment::resolve(&config).unwrap();
+        let automatic = resolve_wallets(
+            &policy,
+            &config,
+            &assignment,
+            config.sources.keys().cloned(),
+        )
+        .unwrap();
+        for (source, wallet) in automatic {
+            assert!(assignment.generated.contains_key(&wallet));
+            assert!(
+                assignment
+                    .bindings
+                    .values()
+                    .any(|b| b.get(&source).is_some_and(|b| b.wallet == wallet))
+            );
+        }
     }
     #[tokio::test]
     async fn paid_failure_stops_all_queued_targets_and_never_replays() {
@@ -443,6 +672,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn cancellation_after_signed_submission_disables_relay() {
         let (relay, f, task) = fixture(envelope(TARGET), false, true).await;
+        let second = second_wallet(&relay);
         let r = relay.clone();
         let fetch = tokio::spawn(async move { r.fetch(TARGET, 200, 4096, "max_spec_bytes").await });
         tokio::time::timeout(std::time::Duration::from_secs(10), f.arrived.notified())
@@ -450,6 +680,12 @@ pub(crate) mod tests {
             .unwrap();
         fetch.abort();
         let _ = fetch.await;
+        assert!(
+            second
+                .fetch(TARGET, 200, 4096, "max_spec_bytes")
+                .await
+                .is_err()
+        );
         assert!(
             relay
                 .fetch(TARGET, 200, 4096, "max_spec_bytes")
