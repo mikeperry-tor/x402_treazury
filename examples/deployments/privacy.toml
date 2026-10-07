@@ -17,7 +17,8 @@ request_timeout_seconds = 240
 # Paid fallback for blocked catalog/pricing GETs, using each source's assigned
 # wallet. Shared sources choose one assigned profile deterministically; config
 # show reports discovery_wallets. Paid API calls retain their listener bindings.
-# Selected wallets must already have funds: funding workers start after discovery.
+# Serve bootstraps initial managed pairs before discovery when auto_fund=true.
+# Before paid warming, run wallet bootstrap --config YOUR_LOCAL_CONFIG.
 # Curl receives target URLs; connections retain wallet-bound Tor isolation.
 # A failure/cancellation disables further relay calls across all wallets this run.
 [discovery_relay]

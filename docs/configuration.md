@@ -15,6 +15,7 @@ subcommand; running it without arguments displays help and never starts serving.
 | `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
 | `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
 | `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices or funding |
+| `wallet bootstrap --config FILE` | Fund initial managed pairs before discovery, without listeners; requires `auto_fund=true` |
 | `wallet ...` | Administer the treasury |
 | `sources inspect --config FILE` | Read persisted agent-added source records |
 | `build-info` | Print build identity and provenance |
@@ -33,7 +34,9 @@ Ordinary deployment examples live in `examples/deployments/`, standalone network
 `examples/network/`, and reusable APIs in `providers/`. Paths resolve from the file
 that declares them. Existing user-owned local copies are not moved automatically.
 
-Managed serving defaults to automatic bootstrap/refill funding; explicitly set
+Managed serving confirms initial wallet pairs before discovery, then runs automatic
+replacement funding. `wallet bootstrap --config FILE` performs initial funding
+without catalogs or listeners. Explicitly set
 `funding.auto_fund = false` to pause it. Merely inspecting a config or compiling
 Zcash support does not spend funds. Source limits remain required. See the
 [wallet defaults and commands](wallet-cli.md#one-configuration-for-wallet-commands).
@@ -839,9 +842,10 @@ Curl, not the target's TLS policy. Never use it for authenticated discovery URLs
 The provider can also be exposed as ordinary MCP tools by adding it as a source;
 the relay setting alone does not expose a tool to listeners.
 
-Serving initializes wallets before catalogs when `serve=true`. Resolved relay wallets
-must already be funded: automatic funding workers do not start until catalog and
-pricing discovery finish. Warming opens only the wallets resolved for its selected
+With `funding.auto_fund=true`, ordinary managed serving completes initial wallet
+bootstrap before catalogs and pricing, so paid fallback can use the selected wallets.
+Static wallets require external funding. For paid warming, first use
+`wallet bootstrap --config FILE`; warming opens only the wallets resolved for its selected
 sources (including treasury ownership for managed wallets), denies new funding
 and starts no workers. Export
 static signing-key environment variables before warming. `--direct` always bypasses

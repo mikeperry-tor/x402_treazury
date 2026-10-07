@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 pub struct WalletArgs {
-    /// Deployment configuration; only treasury and network settings are consumed.
+    /// Deployment configuration; bootstrap also consumes wallet and funding settings.
     #[arg(long, alias = "meta-config", global = true, conflicts_with_all = ["network_config", "state_dir", "key_file", "treasury_id"])]
     config: Option<PathBuf>,
     #[arg(long, global = true)]
@@ -25,6 +25,8 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Fund initial managed wallet pairs and wait for confirmed USDC, without discovery.
+    Bootstrap,
     /// Create a new treasury; discovers its birthday unless supplied.
     Init {
         #[arg(long)]
@@ -104,6 +106,11 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
             .context("this wallet command requires --config FILE")
     };
     match args.command {
+        Action::Bootstrap => {
+            return Ok(Command::Bootstrap {
+                meta_config: configured_path()?,
+            });
+        }
         Action::Sync {
             qualification_parent_stdin,
         } => {
@@ -235,6 +242,9 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
 // Keep wallet commands recognizable in reduced builds so they can report feature requirements.
 #[cfg_attr(not(feature = "zcash"), allow(dead_code))]
 enum Command {
+    Bootstrap {
+        meta_config: PathBuf,
+    },
     /// Release an expired operation only after proving canonical absence and unspent inputs.
     RecoverExpired {
         meta_config: PathBuf,
@@ -274,7 +284,9 @@ enum Command {
         qualification_parent_stdin: bool,
     },
     /// Read last persisted metadata without unlocking or network access.
-    Status { state_dir: PathBuf },
+    Status {
+        state_dir: PathBuf,
+    },
     /// Initialize an encrypted treasury; discover a new wallet birthday unless supplied.
     Init {
         state_dir: PathBuf,
@@ -326,6 +338,12 @@ async fn run_args(
         "treasury commands require a build with --features zcash"
     );
     let command = resolve_args(args)?;
+    #[cfg(feature = "zcash")]
+    if let Command::Bootstrap { meta_config } = command {
+        let summary = crate::deployment::bootstrap_wallets(&meta_config).await?;
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+        return Ok(());
+    }
     if let Command::Status { state_dir } = command {
         let status =
             tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
@@ -449,7 +467,8 @@ async fn execute_wallet_command(
             treasury.ensure_pool(name, deposit_size).await?;
             treasury
         }
-        Command::Addresses { .. }
+        Command::Bootstrap { .. }
+        | Command::Addresses { .. }
         | Command::Status { .. }
         | Command::Backup { .. }
         | Command::RecoverUnprepared { .. } => {
@@ -683,7 +702,7 @@ async fn init(
 }
 
 #[cfg(feature = "zcash")]
-async fn shutdown_signal() -> std::io::Result<()> {
+pub(crate) async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

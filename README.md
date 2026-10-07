@@ -165,8 +165,10 @@ To keep discovery connections over Tor, the privacy example enables a
 [paid Curl discovery relay](docs/configuration.md#paid-discovery-relay) for serving
 and warming. It uses each source's assigned wallet; a source shared across wallets
 selects one deterministically. `config show` reports `discovery_wallets`. An explicit
-relay wallet remains an optional override. Resolved wallets must already be funded;
-use unsigned direct warming for initial bootstrap when necessary. A relay error
+relay wallet remains an optional override. With `auto_fund=true`, `serve` funds
+initial managed wallet pairs before discovery. For paid cache warming, first run
+`wallet bootstrap --config examples/deployments/privacy.local.toml` after depositing
+sufficient ZEC in the treasury. Static relay wallets need external USDC funding. A relay error
 disables further relay calls across all wallets for that run.
 
 ```sh
@@ -209,10 +211,25 @@ target/debug/x402_treazury wallet status --config examples/deployments/privacy.l
 Once the confirmed spendable balance is sufficient and you have reviewed those
 limits, launch the servers. **Managed serving automatically funds each wallet pool's
 initial USDC pair and later replacements**, using real ZEC within the configured
-limits, once you start the MCP server. Initialization, inspection, backup and
+limits. Initial pairs are funded and confirmed **before catalog/pricing discovery**;
+listeners start afterward. Initialization, inspection, backup and
 `wallet sync` do not perform USDC funding.
 
-Once you are ready to begin USDC funding, ensure `TREAZURY_MCP_TOKEN` is set, then:
+To fund initial pairs separately, without catalogs, listener tokens or MCP listeners:
+
+```sh
+target/debug/x402_treazury wallet bootstrap \
+  --config examples/deployments/privacy.local.toml
+```
+
+This requires `funding.auto_fund=true`, uses the existing funding limits and waits
+for confirmed USDC credit. Repeating it skips completed initial pairs; it does not
+reset funding jobs or recovery requirements. `auto_fund=false` pauses automatic
+bootstrap and causes the explicit command to refuse funding. Cache warming never
+starts funding itself.
+
+You can skip that command and let `serve` bootstrap automatically. Ensure
+`TREAZURY_MCP_TOKEN` is set, then:
 
 ```sh
 target/debug/x402_treazury serve --config examples/deployments/privacy.local.toml

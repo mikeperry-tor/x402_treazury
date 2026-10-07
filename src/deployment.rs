@@ -8,6 +8,10 @@ use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
 mod startup;
 pub use startup::StartupConfig;
+#[cfg(feature = "zcash")]
+mod bootstrap;
+#[cfg(feature = "zcash")]
+pub use bootstrap::{BootstrapSummary, bootstrap_wallets};
 mod cache_warm;
 pub use cache_warm::{CacheWarmSummary, warm_cache};
 
@@ -294,6 +298,10 @@ impl Deployment {
         Self::load_with_warnings(path, false, None).await
     }
     /// Warn for listener-bound sources before catalog I/O, including failed fetches.
+    /// Keyless serving keeps provider warnings but cannot bootstrap or pay a relay.
+    pub async fn load_for_unsigned_serving(path: &Path) -> Result<Self> {
+        Self::load_with_warnings(path, true, None).await
+    }
     pub async fn load_for_serving(path: &Path) -> Result<Self> {
         Self::load_for_serving_with_relay(path, &std::env::vars().collect(), Default::default())
             .await
@@ -332,6 +340,31 @@ impl Deployment {
             selected: BTreeMap::new(),
             config_path: path.to_owned(),
         };
+        #[cfg(feature = "zcash")]
+        if let Some((env, restriction)) = relay_env
+            && restriction != crate::rotation::restriction::FundingRestriction::DenyNewFunding
+            && !crate::qualification::active()
+            && !catalog_evidence::collecting()
+            && deployment
+                .config
+                .funding
+                .as_ref()
+                .is_some_and(|f| f.auto_fund)
+            && deployment
+                .wallet_resolution
+                .wallets
+                .values()
+                .any(WalletConfig::managed)
+        {
+            // Validate credentials and authored providers before funding can start.
+            for server in deployment.config.servers.values().filter(|s| s.auth) {
+                required_secret(env, &server.bearer_token_env)?;
+            }
+            for source in deployment.config.sources.values() {
+                crate::config::resolve(source.provider.clone(), path).await?;
+            }
+            deployment.bootstrap(env).await?;
+        }
         let relay = if let Some(policy) = deployment
             .config
             .discovery_relay
@@ -541,7 +574,7 @@ impl Deployment {
                 };
                 let t = self.config.treasury.as_ref().unwrap();
                 let f = self.config.funding.as_ref().unwrap();
-                // Resolve endpoints now; the treasury sync worker starts only when serving.
+                // Resolve endpoints before starting supervised bootstrap or serving workers.
                 let sync_settings = crate::treasury::SyncSettings::new(
                     t.indexer_endpoint(|name| env.get(name).cloned())?,
                     t.confirmations,

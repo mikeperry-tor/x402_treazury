@@ -8,9 +8,9 @@ Commands run from the repository root; `x402_treazury` means the built executabl
 ## One configuration for wallet commands
 
 Use the same deployment file for initialization, inspection, backup, sync and
-serving. `--meta-config` remains an alias for `--config`. Wallet commands consume
-only treasury/network settings: they do not fetch provider catalogs, need listener
-tokens, allocate pools automatically or start funding workers.
+serving. `--meta-config` remains an alias for `--config`. Wallet commands do not fetch provider catalogs or require listener tokens.
+`wallet bootstrap` also consumes wallet assignments and funding settings to fund
+initial managed pairs; other administration commands do not start funding workers.
 
 ```sh
 x402_treazury wallet init --config examples/deployments/privacy.local.toml
@@ -46,6 +46,37 @@ Standalone `--state-dir` remains available; `--key-file` defaults inside that
 directory and `--treasury-id` is an optional assertion. Do not combine those
 location overrides or `--network-config` with `--config`: the deployment owns its
 paths and network policy. `--birthday` and import options remain command-specific.
+
+## Bootstrap before discovery
+
+After depositing sufficient ZEC into the treasury, run:
+
+```sh
+x402_treazury wallet bootstrap --config examples/deployments/privacy.local.toml
+```
+
+This allocates all declared managed pools, runs the production treasury/funding
+workers, waits until each initial active/standby pair has confirmed USDC credit,
+and closes treasury ownership before exiting. It requires `funding.auto_fund=true`
+and respects existing source, fee, daily and attempt limits. Static wallets are
+excluded and need external funding. No catalogs, pricing, listener tokens, static
+signing keys or MCP listeners are needed. Network traffic follows the deployment
+policy, including Tor.
+
+The JSON result lists `bootstrapped_wallets`: durable completion of initial pairs,
+not a fresh balance or payment-admission guarantee. Repeating the command skips
+completed pairs and resumes existing incomplete jobs without resetting them.
+Degraded funding requires operator inspection/recovery; cancellation drains
+accepted financial work and preserves journals. Treasury ZEC funding and Base
+confirmation can take time. The command introduces no new spending limits.
+
+Ordinary managed `serve` performs the same bootstrap before catalog/pricing
+discovery when `auto_fund=true`, then starts normal serving and replacement funding.
+This allows a new deployment to pay for discovery fallback. It waits for all initial
+pairs, even if discovery would succeed without payment. `auto_fund=false` skips this
+startup step and makes explicit bootstrap fail; qualification funding restrictions
+retain their existing lifecycle. `catalog warm` never starts funding: use this
+command first when warming needs a managed paid relay wallet.
 
 ## Treasury and managed pools
 

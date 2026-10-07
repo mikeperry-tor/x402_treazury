@@ -50,8 +50,10 @@ bypasses qualification. See [discovery disk caching](configuration.md#automatic-
 It resolves one assigned wallet per source (or an explicit override), uses the
 ordinary paid client, serializes requests across wallets and disables
 further relay spending across all wallets after error or cancellation. Local bootstrap metadata avoids
-a catalog dependency cycle. Serving prepares wallets before catalog loading when
-enabled; warming starts no funding workers. Origin freshness and relay provenance
+a catalog dependency cycle. `deployment/bootstrap.rs` supervises initial funding
+and confirmation before ordinary managed serving loads catalogs, and also powers
+`wallet bootstrap`. It drains accepted work before reopening ownership for serving;
+completed initial pairs are not funded again. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#paid-discovery-relay).
 

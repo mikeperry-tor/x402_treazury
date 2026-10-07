@@ -112,9 +112,10 @@ and `catalog route` inspect tools; routing previews accept standalone providers 
 catalogs for deployments or standalone providers. No command means help, never
 serving. Keep these modes in the shared Clap tree; only `serve` accepts listener,
 authentication and supervised funding options. Wallet commands
-accept the same deployment file, consuming treasury/network settings without
-loading catalogs, requiring listener tokens or starting funding workers. Do not
-combine deployment configuration with standalone location/network overrides.
+accept the same deployment file without loading catalogs or requiring listener
+tokens. `wallet bootstrap` also consumes wallet assignments/funding settings and
+funds initial managed pairs; other wallet administration never starts funding
+workers. Do not combine deployment configuration with standalone location/network overrides.
 User-facing deployment examples live in `examples/deployments/`; network-only examples in
 `examples/network/`. Preserve user-owned local copies when changing layouts.
 
@@ -126,8 +127,8 @@ sufficient decryption material. External key paths remain supported. Never repla
 existing state on init. Endpoint defaults are shared with birthday lookup; explicit
 missing environment references fail, and submission otherwise follows the indexer.
 
-Managed serving defaults to automatic bootstrap and replacement funding, within
-required source/fee limits. `auto_fund=false` pauses it; build features, inspection,
+Managed serving completes initial pool bootstrap before discovery and defaults to
+automatic replacement funding, within required source/fee limits. `auto_fund=false` pauses it; build features, inspection,
 wallet initialization and sync never authorize automatic funding. Qualification
 restrictions remain authoritative, and bounded live demos retain explicit opt-outs.
 
@@ -284,7 +285,9 @@ and [the runtime architecture](docs/architecture.md).
   Relay cache entries retain separate provenance and explicit origin freshness;
   never revalidate through Curl, use outer relay headers or persist challenges.
   Serving initializes wallets before relay catalog I/O; warming denies funding and
-  opens only resolved wallets for selected sources. Neither starts funding workers before discovery.
+  opens only resolved wallets for selected sources. Ordinary managed serving with
+  auto_fund bootstraps initial pairs before discovery via the same supervised path
+  as `wallet bootstrap`; qualification restrictions preserve their existing lifecycle.
   Ordinary inspection remains unsigned; qualification cannot invoke paid relays.
 - HTTP MCP is stateless and JSON-response based, with bearer auth enabled by default.
   Disabling the gate requires the explicit configured or standalone opt-out.

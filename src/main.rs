@@ -382,11 +382,16 @@ async fn run_deployment(
     let loading = async {
         if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
             x402_treazury::deployment::Deployment::load(path).await
+        } else if args.qualification_unsigned {
+            x402_treazury::deployment::Deployment::load_for_unsigned_serving(path).await
         } else {
             x402_treazury::deployment::Deployment::load_for_serving_with_relay(
                 path,
                 env,
-                if args.qualification_no_new_funding {
+                // Supervised startup can be cancelled by parent EOF. Keep its
+                // funding lifecycle in the existing post-bind supervisor; ordinary
+                // startup bootstrap handles signals and drains before returning.
+                if args.qualification_no_new_funding || args.qualification_parent_stdin {
                     x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
                 } else {
                     Default::default()

@@ -424,3 +424,104 @@ async fn unsigned_qualification_cannot_use_stdio_or_dotenv_or_inspection_modes()
     .await);
     assert!(error.contains("cannot be used with"), "{error}");
 }
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn bootstrap_is_catalog_free_requires_policy_and_resumes_completed_pairs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let config = r#"version=1
+[treasury]
+state_dir="state"
+daily_input_zec="0.1"
+shield_max_fee_zec="0.001"
+indexer_url="https://127.0.0.1:1"
+[funding]
+auto_fund=false
+base_rpc_url_env="BASE"
+base_rpc_fallback_url_envs=[]
+[wallets.web]
+mode="zcash_rotation"
+max_input_zec="0.02"
+max_fee_bps=500
+[wallets.static_unused]
+mode="static"
+private_key_env="UNSET_STATIC_KEY"
+[sources.api]
+spec="missing-catalog.json"
+probe_pricing=false
+[servers.web]
+listen="127.0.0.1:0"
+sources=["api"]
+wallet="web"
+bearer_token_env="UNSET_LISTENER_TOKEN"
+"#;
+    std::fs::write(dir.join("deployment.toml"), config).unwrap();
+    let args = ["wallet", "bootstrap", "--config", "deployment.toml"];
+    let error = bad(run(dir, &args, &[]).await);
+    assert!(error.contains("auto_fund=true"), "{error}");
+    assert!(!dir.join("state").exists());
+    assert!(bad(run(dir, &["wallet", "bootstrap"], &[]).await).contains("--config"));
+    // A new, unfunded test-only treasury: explicit birthday prevents network I/O.
+    let output = run(
+        dir,
+        &[
+            "wallet",
+            "init",
+            "--config",
+            "deployment.toml",
+            "--birthday",
+            "2000000",
+        ],
+        &[],
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let state = dir.join("state");
+    let id = x402_treazury::rotation::store::status(&state)
+        .unwrap()
+        .treasury_id;
+    let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
+    store.ensure_pool("web", "2").unwrap();
+    for job in store.funding_jobs().unwrap() {
+        // Synthetic confirmed credit, never a real transfer or live RPC.
+        store
+            .record_credit(&job.wallet_id, &job.target, "fixture-block", 1)
+            .unwrap();
+    }
+    let jobs = store.status().unwrap().funding_jobs.len();
+    drop(store);
+    std::fs::write(
+        dir.join("deployment.toml"),
+        config.replace("auto_fund=false", "auto_fund=true"),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let summary = good(run(dir, &args, &[("BASE", "https://127.0.0.1:1")]).await);
+        assert_eq!(summary["bootstrapped_wallets"], json!(["web"]));
+        // Closed ownership is immediately available and no new jobs were queued.
+        let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
+        assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
+    }
+    let serving = ["serve", "--config", "deployment.toml"];
+    // Serving validates auth before bootstrap, then completes bootstrap before
+    // trying the deliberately missing catalog. No listener or network starts.
+    let error = bad(run(dir, &serving, &[("BASE", "https://127.0.0.1:1")]).await);
+    assert!(error.contains("UNSET_LISTENER_TOKEN"), "{error}");
+    assert!(!error.contains("bootstrap already complete"));
+    let env = [
+        ("BASE", "https://127.0.0.1:1"),
+        ("UNSET_LISTENER_TOKEN", "fixture-token"),
+    ];
+    let error = bad(run(dir, &serving, &env).await);
+    assert!(error.contains("bootstrap already complete"), "{error}");
+    std::fs::write(dir.join("deployment.toml"), config).unwrap();
+    let error = bad(run(dir, &serving, &env).await);
+    assert!(!error.contains("bootstrap already complete"), "{error}");
+    let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
+    assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
+}
