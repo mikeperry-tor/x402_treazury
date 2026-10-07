@@ -133,47 +133,12 @@ Keep the backup secure: it contains spending material.
 >
 > Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchonized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
 
-### 3. Review, fund and launch
+### 3. Fund and bootstrap the wallets
+
+Review the wallet bindings, funding targets and limits before sending funds:
 
 ```sh
-# Offline: inspect wallet bindings, funding targets and network policy.
 target/debug/x402_treazury config show \
-  --config examples/deployments/privacy.local.toml
-```
-
-Some providers may block catalog or pricing requests over Tor, or those requests
-may be slow. After creating the treasury, you can optionally warm the discovery
-cache directly before validating or launching:
-
-```sh
-target/debug/x402_treazury catalog warm \
-  --config examples/deployments/privacy.local.toml --direct --discover-pricing
-```
-
-**Omitting `--source` warms all declared providers/sources in the deployment.**
-Add `--source ID` to select one source, or repeat it for several. Omit
-`--discover-pricing` to warm catalogs only. If any selected source has
-`http_cache_enabled = false`, warming rejects the run; select only enabled sources
-in that case.
-
-Direct warming exposes these unsigned discovery requests to providers from your
-direct IP address. Paid calls and treasury traffic still use the configured Tor
-policy. Only responses with suitable caching headers can be reused while fresh;
-the command reports what was cached. Repeat the warm command when entries expire
-if their origins remain blocked over Tor—there is no automatic direct fallback.
-To keep discovery connections over Tor, the privacy example enables a
-[paid Curl discovery relay](docs/configuration.md#paid-discovery-relay) for serving
-and warming. It uses each source's assigned wallet; a source shared across wallets
-selects one deterministically. `config show` reports `discovery_wallets`. An explicit
-relay wallet remains an optional override. With `auto_fund=true`, `serve` funds
-initial managed wallet pairs before discovery. For paid cache warming, first run
-`wallet bootstrap --config examples/deployments/privacy.local.toml` after depositing
-sufficient ZEC in the treasury. Static relay wallets need external USDC funding. A relay error
-disables further relay calls across all wallets for that run.
-
-```sh
-# Validate selected tools, using fresh caches or fetching through Tor; no payments.
-target/debug/x402_treazury config check \
   --config examples/deployments/privacy.local.toml
 ```
 
@@ -208,43 +173,58 @@ target/debug/x402_treazury wallet sync \
 target/debug/x402_treazury wallet status --config examples/deployments/privacy.local.toml
 ```
 
-Once the confirmed spendable balance is sufficient and you have reviewed those
-limits, launch the servers. **Managed serving automatically funds each wallet pool's
-initial USDC pair and later replacements**, using real ZEC within the configured
-limits. Initial pairs are funded and confirmed **before catalog/pricing discovery**;
-listeners start afterward. Initialization, inspection, backup and
-`wallet sync` do not perform USDC funding.
-
-To fund initial pairs separately, without catalogs, listener tokens or MCP listeners:
+Once `wallet status` shows sufficient confirmed spendable ZEC, fund the initial
+active and standby USDC wallets:
 
 ```sh
 target/debug/x402_treazury wallet bootstrap \
   --config examples/deployments/privacy.local.toml
 ```
 
-This requires `funding.auto_fund=true`, uses the existing funding limits and waits
-for confirmed USDC credit. Repeating it skips completed initial pairs; it does not
-reset funding jobs or recovery requirements. `auto_fund=false` pauses automatic
-bootstrap and causes the explicit command to refuse funding. Cache warming never
-starts funding itself.
+Bootstrap uses the configured funding limits and waits for confirmed USDC credit.
+Repeating it skips completed initial pairs and resumes unfinished funding work.
+The wallets are now set up for paid discovery and API calls.
 
-You can skip that command and let `serve` bootstrap automatically. Ensure
-`TREAZURY_MCP_TOKEN` is set, then:
+### 4. Optionally warm the catalogs
+
+The privacy example automatically tries a [paid discovery relay](docs/configuration.md#paid-discovery-relay) when API catalog or pricing
+requests are blocked or time out over Tor. This relay service is also contacted
+over Tor. Its requests are paid by the wallet that is attached to the provider
+that it is contacting, and these requests use Tor circuit isolation derived from that same
+target wallet to connect to this relay service. If multiple wallets are assigned to a provider through multiple MCP servers (such as with the Exa provider in the privacy example conf),
+one wallet is always chosen deterministically for any relayed API catalog requests.
+
+To speed up discovery during MCP server launch, you can warm the catalog and
+pricing cache before serving, with or without Tor.
+
+The optional `--direct` flag bypasses Tor for these requests:
+
+```sh
+target/debug/x402_treazury catalog warm \
+  --config examples/deployments/privacy.local.toml --direct --discover-pricing
+```
+
+Omit `--direct` to warm through Tor, with paid relay fallback upon API catalog
+or pricing fetch failure. Direct warming reveals your IP address to providers;
+treasury traffic and paid API calls still use Tor. Only responses with suitable
+caching headers can be reused while fresh, and the command reports what was
+cached. See the [cache
+reference](docs/configuration.md#automatic-discovery-disk-cache) for details.
+
+### 5. Start serving
+
+Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 
 ```sh
 target/debug/x402_treazury serve --config examples/deployments/privacy.local.toml
 ```
 
-Connect your MCP client to the endpoint(s) in the table above, authenticating with
-`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`. Authentication is on by default;
-to disable it for a listener, set `auth = false` and omit `bearer_token_env` in its
-server table. Standalone HTTP supports `--no-auth`. Startup warns when auth is off.
+Serving handles discovery and subsequent wallet replacement funding automatically.
+If you skipped the explicit bootstrap command, serving also completes initial
+wallet funding before discovery.
 
-Wait for an active wallet and ready standby in each selected pool before paid
-use.  Where exposed, help text for help tools is fetched on upon first tool
-call and cached for the process. PDL person matches are vendor-listed at $0.28
-and exceed the social pool's default cap in the example privacy conf; raise
-that cap deliberately if you need paid matches.
+Connect your MCP client to the endpoint(s) in the table above, authenticating with
+`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
 
 `wallet status` reports persisted progress. Stop with Ctrl-C and allow the announced
 transaction-safety drain to finish. Wallet administration commands that need
