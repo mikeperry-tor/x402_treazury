@@ -36,6 +36,8 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum Catalog {
+    /// Warm discovery caches without wallets or listeners; --direct explicitly bypasses Tor.
+    Warm(Warm),
     /// List selected tools; optionally discover unsigned x402 prices.
     Tools(Tools),
     /// List available OpenAPI tags.
@@ -137,6 +139,22 @@ pub struct Serve {
     qualification_parent_stdin: bool,
     #[arg(long, hide = true, requires = "qualification_parent_stdin")]
     qualification_binding: Option<PathBuf>,
+}
+
+#[derive(ClapArgs)]
+pub struct Warm {
+    /// Deployment whose existing treasury state directory and cache policy are used.
+    #[arg(long, alias = "meta-config")]
+    pub config: PathBuf,
+    /// Source IDs to warm (repeat or comma-separate); defaults to all declared sources.
+    #[arg(long, value_delimiter = ',')]
+    pub source: Vec<String>,
+    /// Fetch directly and explicitly permit fresh cached data in this deployment's network policy.
+    #[arg(long)]
+    pub direct: bool,
+    /// Also discover/cache eligible unsigned pricing estimates, respecting listener filters.
+    #[arg(long)]
+    pub discover_pricing: bool,
 }
 
 #[derive(ClapArgs)]
@@ -267,6 +285,7 @@ impl From<Serve> for Args {
 impl From<Catalog> for Args {
     fn from(command: Catalog) -> Self {
         match command {
+            Catalog::Warm(_) => unreachable!("cache warming is dispatched separately"),
             Catalog::Tools(tools) => Self {
                 list_tools: true,
                 discover_pricing: tools.discover_pricing,

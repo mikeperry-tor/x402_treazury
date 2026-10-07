@@ -71,6 +71,10 @@ pub struct Config {
     #[serde(skip)]
     #[doc(hidden)]
     pub http_cache_directory: Option<std::path::PathBuf>,
+    /// Only the explicit cache-warming command sets this; serving never changes egress.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub http_cache_direct_warm_target: Option<crate::network::NetworkPolicy>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reliability_tags: Vec<crate::provider_status::ReliabilityTag>,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -132,6 +136,7 @@ impl Default for Config {
         Self {
             http_cache_enabled: true,
             http_cache_directory: None,
+            http_cache_direct_warm_target: None,
             reliability_tags: vec![],
             reliability_note: String::new(),
             response_mappings: BTreeMap::new(),

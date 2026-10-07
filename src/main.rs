@@ -88,6 +88,17 @@ async fn run() -> Result<()> {
             );
             return Ok(());
         }
+        cli::Command::Catalog(cli::Catalog::Warm(args)) => {
+            let summary = x402_treazury::deployment::warm_cache(
+                &args.config,
+                &args.source,
+                args.direct,
+                args.discover_pricing,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+            return Ok(());
+        }
         cli::Command::Serve(args) => args.into(),
         cli::Command::Catalog(args) => args.into(),
         cli::Command::Config(args) => args.into(),

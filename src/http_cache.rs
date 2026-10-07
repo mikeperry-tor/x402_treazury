@@ -19,6 +19,9 @@ pub(crate) struct Metadata {
     headers: std::collections::BTreeMap<String, String>,
     pub stored: u64,
     pub expires: u64,
+    // Ephemeral provenance: never written back as authority to revalidate.
+    #[serde(skip)]
+    direct_reuse: bool,
 }
 #[derive(Clone)]
 pub(crate) struct Entry {
@@ -137,6 +140,7 @@ impl Metadata {
             headers: selected,
             stored,
             expires,
+            direct_reuse: false,
         })
     }
     pub fn fresh(&self) -> bool {
@@ -144,6 +148,9 @@ impl Metadata {
         now >= self.stored && now < self.expires
     }
     pub fn conditional(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.direct_reuse {
+            return request;
+        }
         if let Some(etag) = self.headers.get("etag") {
             request.header("if-none-match", etag)
         } else if let Some(modified) = self.headers.get("last-modified") {
@@ -164,7 +171,8 @@ impl Metadata {
         !headers.contains_key("vary")
     }
     pub fn has_validator(&self) -> bool {
-        self.headers.contains_key("etag") || self.headers.contains_key("last-modified")
+        !self.direct_reuse
+            && (self.headers.contains_key("etag") || self.headers.contains_key("last-modified"))
     }
 }
 // Option<Option<T>>: absent is fine, malformed is not.
@@ -184,6 +192,8 @@ impl<T> TransposeOption<T> for Option<Option<T>> {
 pub(crate) struct Slot {
     directory: PathBuf,
     key: String,
+    direct_key: Option<String>,
+    resource: String,
     limit: usize,
 }
 impl Slot {
@@ -196,7 +206,12 @@ impl Slot {
         if !parsed.username().is_empty() || parsed.password().is_some() {
             return None;
         }
-        let network = serde_json::to_vec(&crate::network::global().policy).ok()?;
+        let network = serde_json::to_vec(
+            cfg.http_cache_direct_warm_target
+                .as_ref()
+                .unwrap_or(&crate::network::global().policy),
+        )
+        .ok()?;
         let key = format!(
             "{:x}",
             Sha256::digest(
@@ -215,13 +230,57 @@ impl Slot {
                 .ok()?
             )
         );
+        // Separate provenance: an ordinary direct-mode cache never crosses policy
+        // boundaries. Only explicitly warmed entries target another configured policy.
+        let direct_key = format!(
+            "{:x}",
+            Sha256::digest(format!("explicit-direct-warm-v1:{key}"))
+        );
+        let (key, direct_key) = if cfg.http_cache_direct_warm_target.is_some() {
+            if crate::network::global().policy.mode != crate::network::Mode::Direct {
+                return None;
+            }
+            (direct_key, None)
+        } else {
+            (key, Some(direct_key))
+        };
         Some(Self {
             directory,
             key,
+            direct_key,
+            resource: kind.to_owned(),
             limit,
         })
     }
     pub async fn read(&self) -> Option<Entry> {
+        let ordinary = self.read_primary().await;
+        if ordinary
+            .as_ref()
+            .is_some_and(|entry| entry.metadata.fresh())
+        {
+            return ordinary;
+        }
+        if let Some(key) = &self.direct_key {
+            let mut direct = self.clone();
+            direct.key = key.clone();
+            if let Some(mut entry) = direct
+                .read_primary()
+                .await
+                .filter(|entry| entry.metadata.fresh())
+            {
+                tracing::warn!(
+                    resource = self.resource,
+                    "Using explicitly directly warmed discovery cache; content was fetched with direct egress"
+                );
+                entry.metadata.direct_reuse = true;
+                return Some(entry);
+            }
+        }
+        // Never send a directly fetched validator through the configured network,
+        // and never refresh a direct entry automatically when it expires.
+        ordinary
+    }
+    async fn read_primary(&self) -> Option<Entry> {
         let slot = self.clone();
         let result = blocking(move || -> Result<Option<Entry>> {
             if !slot.directory.exists() {

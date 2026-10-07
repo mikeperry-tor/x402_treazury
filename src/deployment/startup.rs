@@ -46,6 +46,7 @@ type DownloadResult = std::result::Result<Document, SharedFailure>;
 struct Downloads {
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
+    direct_warm_target: Option<crate::network::NetworkPolicy>,
 }
 impl Downloads {
     async fn load(
@@ -147,6 +148,7 @@ pub(super) async fn load(
     let limit = config.startup.catalog_concurrency;
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, "Loading catalogs; startup waits for all sources");
     let downloads = Downloads {
+        direct_warm_target: None,
         entries: Mutex::default(),
         cache_directory: config
             .treasury
@@ -263,6 +265,7 @@ impl Source {
             .with_context(|| format!("source {id}"))?
             .settings;
         cfg.http_cache_directory = downloads.cache_directory.clone();
+        cfg.http_cache_direct_warm_target = downloads.direct_warm_target.clone();
         if warn {
             crate::provider_status::warn(id, &cfg);
         }
@@ -365,4 +368,84 @@ pub(super) async fn price_source<'a>(
             elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing failed; aborting startup");
     }
     result
+}
+
+pub(super) async fn warm(
+    config: &MetaConfig,
+    path: &Path,
+    selected: &std::collections::BTreeSet<String>,
+    direct: bool,
+    discover_pricing: bool,
+) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
+    let downloads = Downloads {
+        entries: Mutex::default(),
+        cache_directory: config
+            .treasury
+            .as_ref()
+            .map(|t| t.state_dir.join("http-cache")),
+        direct_warm_target: direct.then(|| config.network.clone()),
+    };
+    let pricing = crate::pricing::PricingCache::default();
+    let mut pending = stream::iter(selected.iter().map(|id| async {
+        let (_, source) = load_one(id, &config.sources[id], path, false, &downloads).await?;
+        let cfg = &source.config;
+        let catalog_cache = if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
+            let slot = crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
+            match if let Some(slot) = slot {
+                slot.read().await
+            } else {
+                None
+            } {
+                Some(entry) if entry.metadata.fresh() => "fresh",
+                Some(_) => "requires_revalidation",
+                None => "not_stored",
+            }
+        } else {
+            "local_file"
+        };
+        let mut fresh_pricing_entries = 0;
+        let evidence = if discover_pricing {
+            let tools = super::cache_warm::selected_tools(config, id, &source)?;
+            let discovery = pricing
+                .discover_observed(cfg, &source.document, &tools, &source.base_url)
+                .await?;
+            let mut inspected = std::collections::BTreeSet::new();
+            for tool in &tools {
+                if discovery
+                    .prices
+                    .contains_key(&(tool.method.clone(), tool.path.clone()))
+                {
+                    let url = tool.route(&source.base_url, &serde_json::Map::new())?.url;
+                    if !inspected.insert(url.clone()) {
+                        continue;
+                    }
+                    if let Some(slot) =
+                        crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024)
+                        && slot
+                            .read()
+                            .await
+                            .is_some_and(|entry| entry.metadata.fresh())
+                    {
+                        fresh_pricing_entries += 1;
+                    }
+                }
+            }
+            Some(discovery.evidence)
+        } else {
+            None
+        };
+        Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
+            source: id.clone(),
+            catalog_cache,
+            pricing: evidence,
+            fresh_pricing_entries,
+        })
+    }))
+    .buffer_unordered(config.startup.catalog_concurrency);
+    let mut results = Vec::new();
+    while let Some(result) = pending.next().await {
+        results.push(result?);
+    }
+    results.sort_by(|a, b| a.source.cmp(&b.source));
+    Ok(results)
 }

@@ -452,3 +452,52 @@ async fn last_modified_and_conflicting_validator_handling() {
     assert!(!metadata.matches_validation(&headers(&[("etag", "\"two\"")])));
     assert!(metadata.matches_validation(&HeaderMap::new()));
 }
+
+#[tokio::test]
+async fn explicit_direct_entries_have_separate_provenance_and_require_freshness() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    let url = "https://example.com/spec";
+    let mut warming = cfg.clone();
+    warming.http_cache_direct_warm_target = Some(crate::network::global().policy.clone());
+    let direct = Slot::new(&warming, url, "catalog", 1024).unwrap();
+    let normal = Slot::new(&cfg, url, "catalog", 1024).unwrap();
+    assert_ne!(direct.key, normal.key);
+    let metadata = Metadata::from_headers(
+        &headers(&[("cache-control", "max-age=600"), ("etag", "\"direct\"")]),
+        Duration::ZERO,
+        None,
+    )
+    .unwrap();
+    let mut entry = Entry {
+        metadata,
+        data: b"{}".to_vec(),
+    };
+    direct.write(Some(entry.clone())).await;
+    assert!(normal.read_primary().await.is_none());
+    let mut reused = normal.read().await.unwrap();
+    assert!(!reused.metadata.has_validator());
+    // Even if freshness expires during parsing, the direct validator cannot leak.
+    reused.metadata.expires = 0;
+    let request = reused
+        .metadata
+        .conditional(client(url).get(url))
+        .build()
+        .unwrap();
+    assert!(!request.headers().contains_key("if-none-match"));
+    let mut other = cfg.clone();
+    other.allow_http1 = true;
+    assert!(
+        Slot::new(&other, url, "catalog", 1024)
+            .unwrap()
+            .read()
+            .await
+            .is_none()
+    );
+    entry.metadata.expires = 0;
+    direct.write(Some(entry)).await;
+    // A warm command may revalidate its own stale entry using direct egress;
+    // a normal configured-network consumer must not receive that validator.
+    assert!(direct.read().await.unwrap().metadata.has_validator());
+    assert!(normal.read().await.is_none());
+}

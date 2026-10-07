@@ -49,6 +49,7 @@ fn executable_name_version_and_example_inspection_are_portable() {
     for args in [
         vec!["serve", "--help"],
         vec!["catalog", "tools", "--help"],
+        vec!["catalog", "warm", "--help"],
         vec!["catalog", "route", "--help"],
         vec!["config", "show", "--help"],
         vec!["wallet", "init", "--help"],

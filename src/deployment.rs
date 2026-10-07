@@ -8,6 +8,8 @@ use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
 mod startup;
 pub use startup::StartupConfig;
+mod cache_warm;
+pub use cache_warm::{CacheWarmSummary, warm_cache};
 
 /// Full frozen catalogs may exceed ordinary tool-result/evidence limits. Includes
 /// all source documents and inventories, with no response-schema truncation.

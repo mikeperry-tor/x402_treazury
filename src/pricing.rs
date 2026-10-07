@@ -38,6 +38,7 @@ type ProbeKey = (
     String,
     crate::network::HttpPolicy,
     Option<std::path::PathBuf>,
+    Option<Vec<u8>>,
     bool,
     bool,
 );
@@ -84,6 +85,9 @@ impl PricingCache {
                 url.clone(),
                 cfg.transport(),
                 cfg.http_cache_directory.clone(),
+                cfg.http_cache_direct_warm_target
+                    .as_ref()
+                    .map(|p| serde_json::to_vec(p).expect("serializable network policy")),
                 cfg.http_cache_enabled,
                 crate::qualification::active(),
             ))

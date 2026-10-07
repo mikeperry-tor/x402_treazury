@@ -266,6 +266,11 @@ and [the runtime architecture](docs/architecture.md).
   `http_cache_enabled=false`, network/transport scope, HTTP freshness and validators;
   never persist payment challenges or serve stale data on origin failures. Cache
   setup must not create treasury state. Qualification bypasses disk persistence.
+  `catalog warm --config FILE --source ID --direct` is a dedicated unsigned-only
+  process: direct-warm entries retain separate provenance and the target configured
+  network policy. Normal loading accepts them only while fresh, warns on reuse,
+  never sends their validators over Tor and never refreshes them directly. Warming
+  cannot open wallets, construct serving deployments or run during qualification.
 - HTTP MCP is stateless and JSON-response based, with bearer auth enabled by default.
   Disabling the gate requires the explicit configured or standalone opt-out.
 - Typed results flow through `PaidClient::execute_response`, `BoundTool::invoke_output`
@@ -337,6 +342,8 @@ defaults omit diagnostic/account/fund-moving routes and use lazy help when usefu
 
 `src/network.rs` is the only production egress factory. A process
 uses one immutable policy: direct by default or strict authenticated Tor SOCKS5.
+The explicit unsigned-only `catalog warm --direct` process is the cache-warming
+exception described above; it cannot return a serving deployment.
 Meta-config accepts `[network]`; standalone/wallet/example commands accept
 `--network-config FILE`. They cannot override a meta-config's policy. No isolation
 key file is used. Canonical typed identities produce deterministic SHA-256 tokens;

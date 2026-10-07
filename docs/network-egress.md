@@ -30,6 +30,19 @@ Schema version 10 adds that binding table; it does not rewrite wallet keys or si
 bytes. Pending shielding operations created without a recoverable recipient binding
 fail closed and require operator investigation; do not guess from current pool roles.
 
+## Explicit direct discovery warming
+
+`catalog warm --config FILE --source ID --direct` is a separate, unsigned-only
+process using the direct network factory. It does not construct a serving
+`Deployment`, payer or treasury. It writes separately identified cache entries
+bound to the deployment's original network/isolation policy. A later Tor process
+may use those entries while fresh, with a direct-origin warning, but cannot
+revalidate their validators over Tor or automatically refresh them directly.
+Ordinary direct cache data remains separated from Tor. This operator-selected
+exception exposes discovery interests to direct egress; it grants no payment or
+funding authority. Qualification rejects warming and bypasses persisted entries.
+See [cache warming](configuration.md#warming-a-selected-source-including-directly-for-a-tor-deployment).
+
 ## Timeout budgets and concurrency
 
 Tor defaults to `connect_timeout_seconds = 120` and

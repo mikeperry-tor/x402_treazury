@@ -746,6 +746,45 @@ Live qualification and captured qualification catalog loads bypass disk caching,
 so a historical cache hit cannot qualify a fresh network observation. Ordinary
 loads report fresh/revalidated catalog hits and pricing estimate hits on stderr.
 
+#### Warming a selected source, including directly for a Tor deployment
+
+```sh
+x402_treazury catalog warm --config deployment.toml --source provider_id
+x402_treazury catalog warm --config deployment.toml --source provider_id --direct --discover-pricing
+```
+
+`--source` selects authored source IDs from the deployment, not provider file paths;
+repeat it or use a comma-separated list. Omitting it selects every declared source.
+Only selected catalogs are fetched. `--discover-pricing` also warms eligible unsigned
+GET estimates, respecting source opt-outs, endpoint caps and the union of listener
+filters. The command requires an existing treasury state directory, never opens a
+wallet or starts listeners/funding, and rejects `http_cache_enabled = false` on a
+selected source. Without `--direct`, it uses the deployment's network policy.
+
+`--direct` is an explicit exception for this dedicated warming process. Its
+unsigned discovery requests use direct egress through the normal network factory,
+so those providers can observe the machine's direct IP address. The deployment
+file and serving policy remain unchanged. Entries have separate direct-warm
+provenance and are bound to the original configured network/isolation policy,
+URL, transport flags, timeouts and limits. Ordinary direct-mode cache entries do
+not gain this cross-policy permission.
+
+Normal serving/inspection can reuse explicitly warmed entries only while fresh,
+with a stderr warning identifying their direct origin. It never sends a directly
+fetched validator over Tor. Once entries expire, normal loading uses the configured
+network; it does not fall back to direct access. Repeat the explicit warm command
+to refresh directly. Paid requests, real payment challenges, lazy help, agent
+imports and treasury traffic always retain their configured policy. Qualification
+continues to bypass all disk caches and cannot invoke this warm path.
+
+The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
+`requires_revalidation`, `not_stored` and `local_file`; `fresh_pricing_entries`
+counts persistent, fresh estimates. Fetching successfully does not imply caching
+is supported: validator-only catalogs still require revalidation, and entries
+without explicit freshness cannot bypass a Tor-blocked origin. Normal HTTP storage
+restrictions and limits still apply; `--direct` does not force persistence or
+extend lifetimes. A failed multi-source warm can leave completed disposable entries.
+
 Pricing suffixes use compact provenance labels:
 
 - `Cost: ~$0.015/call [spec].` or `Cost: ~$0.01–$0.20/call [spec].`

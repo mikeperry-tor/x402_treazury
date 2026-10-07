@@ -139,8 +139,31 @@ Keep the backup secure: it contains spending material.
 # Offline: inspect wallet bindings, funding targets and network policy.
 target/debug/x402_treazury config show \
   --config examples/deployments/privacy.local.toml
+```
 
-# Fetch the catalog through Tor and validate selected tools; no payments.
+Some providers may block catalog or pricing requests over Tor, or those requests
+may be slow. After creating the treasury, you can optionally warm the discovery
+cache directly before validating or launching:
+
+```sh
+target/debug/x402_treazury catalog warm \
+  --config examples/deployments/privacy.local.toml --direct --discover-pricing
+```
+
+**Omitting `--source` warms all declared providers/sources in the deployment.**
+Add `--source ID` to select one source, or repeat it for several. Omit
+`--discover-pricing` to warm catalogs only. If any selected source has
+`http_cache_enabled = false`, warming rejects the run; select only enabled sources
+in that case.
+
+Direct warming exposes these unsigned discovery requests to providers from your
+direct IP address. Paid calls and treasury traffic still use the configured Tor
+policy. Only responses with suitable caching headers can be reused while fresh;
+the command reports what was cached. Repeat the warm command when entries expire
+if their origins remain blocked over Tor—there is no automatic direct fallback.
+
+```sh
+# Validate selected tools, using fresh caches or fetching through Tor; no payments.
 target/debug/x402_treazury config check \
   --config examples/deployments/privacy.local.toml
 ```
@@ -292,6 +315,10 @@ addition. Discovery does not grant spending or source-registration authority.
   cached for the process. These defaults are working choices, not a universal optimum.
 - **Automatic HTTP disk caching.** Deployments with existing treasury state reuse
   catalogs and pricing estimates when providers supply suitable caching headers.
+  `catalog warm --config FILE --direct --discover-pricing` explicitly warms
+  discovery data directly for a Tor deployment. Omitting `--source` selects all
+  declared sources; add `--source ID` to narrow the selection. Selected sources
+  with `http_cache_enabled = false` reject the warm run rather than being skipped.
   See [cache behavior and opt-out](docs/configuration.md#automatic-discovery-disk-cache).
 - **Plain agent results.** The server handles x402 challenge/sign/retry. Bounded text
   and supported inline images become MCP results, with explicit errors for limits.
