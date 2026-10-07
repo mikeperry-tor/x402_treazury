@@ -290,6 +290,9 @@ addition. Discovery does not grant spending or source-registration authority.
   pricing discovery uses a separate 16-request cap. Both are configurable. Compatible
   catalog aliases share downloads, and pricing results remain
   cached for the process. These defaults are working choices, not a universal optimum.
+- **Automatic HTTP disk caching.** Deployments with existing treasury state reuse
+  catalogs and pricing estimates when providers supply suitable caching headers.
+  See [cache behavior and opt-out](docs/configuration.md#automatic-discovery-disk-cache).
 - **Plain agent results.** The server handles x402 challenge/sign/retry. Bounded text
   and supported inline images become MCP results, with explicit errors for limits.
 

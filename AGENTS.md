@@ -261,6 +261,11 @@ and [the runtime architecture](docs/architecture.md).
   never probes. Respect source probe opt-outs. Distinguish advertised estimates,
   observed probe prices, metered maximums and unknown prices in descriptions.
   Help is lazy and cached after success.
+- `src/http_cache.rs` persists only header-supported remote catalogs and derived
+  pricing estimates under existing treasury `state_dir/http-cache/`. Respect
+  `http_cache_enabled=false`, network/transport scope, HTTP freshness and validators;
+  never persist payment challenges or serve stale data on origin failures. Cache
+  setup must not create treasury state. Qualification bypasses disk persistence.
 - HTTP MCP is stateless and JSON-response based, with bearer auth enabled by default.
   Disabling the gate requires the explicit configured or standalone opt-out.
 - Typed results flow through `PaidClient::execute_response`, `BoundTool::invoke_output`

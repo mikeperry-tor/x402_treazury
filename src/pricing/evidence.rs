@@ -18,6 +18,8 @@ pub enum Outcome {
 #[serde(rename_all = "snake_case")]
 pub enum CachePath {
     Initialized,
+    /// Process initializer reused a fresh persisted estimate; no HTTP observation.
+    Disk,
     Hit,
     Shared,
 }

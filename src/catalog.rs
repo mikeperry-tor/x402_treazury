@@ -67,6 +67,10 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    pub http_cache_enabled: bool,
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub http_cache_directory: Option<std::path::PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reliability_tags: Vec<crate::provider_status::ReliabilityTag>,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -126,6 +130,8 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            http_cache_enabled: true,
+            http_cache_directory: None,
             reliability_tags: vec![],
             reliability_note: String::new(),
             response_mappings: BTreeMap::new(),
@@ -291,36 +297,132 @@ pub async fn load_json_with_limit(
     http: &reqwest::Client,
     limit: usize,
 ) -> Result<Value> {
+    load_json_cached(source, http, limit, None).await
+}
+pub(crate) async fn load_json_cached(
+    source: &str,
+    http: &reqwest::Client,
+    limit: usize,
+    slot: Option<crate::http_cache::Slot>,
+) -> Result<Value> {
     let bytes = if source.starts_with("https://") || source.starts_with("http://") {
-        let started = std::time::Instant::now();
-        let response = http
-            .get(source)
-            .send()
-            .await
-            .map_err(reqwest::Error::without_url)
-            .context(LoadStage::Headers)?
-            .error_for_status()
-            .map_err(reqwest::Error::without_url)
-            .context(LoadStage::Headers)?;
-        tracing::debug!(target: "x402_treazury::startup",
-            headers_ms = started.elapsed().as_millis() as u64,
-            "Catalog response headers received; reading body");
-        crate::network::log_http(&response, "catalog");
-        let body_started = std::time::Instant::now();
-        let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
-            .await
-            .context(LoadStage::Body)?;
-        tracing::debug!(target: "x402_treazury::startup",
-            body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
-            "Catalog response body complete");
-        bytes
+        let cached = if let Some(slot) = &slot {
+            slot.read().await
+        } else {
+            None
+        };
+        let cached = match cached {
+            Some(entry) => match serde_json::from_slice::<Value>(&entry.data) {
+                Ok(document) => Some((entry, document)),
+                Err(_) => {
+                    tracing::warn!("Invalid HTTP cached catalog; fetching origin");
+                    if let Some(slot) = &slot {
+                        slot.write(None).await;
+                    }
+                    None
+                }
+            },
+            None => None,
+        };
+        if cached
+            .as_ref()
+            .is_some_and(|(entry, _)| entry.metadata.fresh())
+        {
+            tracing::info!("Catalog loaded from fresh HTTP disk cache");
+            return Ok(cached.expect("fresh cached document").1);
+        } else {
+            let started = std::time::Instant::now();
+            let request = http.get(source);
+            let conditional = cached
+                .as_ref()
+                .map(|(entry, _)| entry)
+                .filter(|e| e.metadata.has_validator());
+            let request =
+                conditional.map_or_else(|| http.get(source), |e| e.metadata.conditional(request));
+            let response = request
+                .send()
+                .await
+                .map_err(reqwest::Error::without_url)
+                .context(LoadStage::Headers)?;
+            tracing::debug!(target: "x402_treazury::startup",
+                headers_ms = started.elapsed().as_millis() as u64,
+                "Catalog response headers received; reading body");
+            crate::network::log_http(&response, "catalog");
+            if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+                let entry = conditional
+                    .context("unsolicited catalog HTTP 304")
+                    .context(LoadStage::Headers)?;
+                if !entry.metadata.matches_validation(response.headers()) {
+                    if let Some(slot) = &slot {
+                        slot.write(None).await;
+                    }
+                    return Err(anyhow::anyhow!(
+                        "catalog HTTP 304 did not validate cached representation"
+                    ))
+                    .context(LoadStage::Headers);
+                }
+                let metadata = crate::http_cache::Metadata::from_headers(
+                    response.headers(),
+                    started.elapsed(),
+                    Some(&entry.metadata),
+                );
+                if let Some(slot) = &slot {
+                    slot.write(metadata.map(|metadata| crate::http_cache::Entry {
+                        metadata,
+                        data: entry.data.clone(),
+                    }))
+                    .await;
+                }
+                tracing::info!("Catalog HTTP disk cache revalidated by origin");
+                return Ok(cached.expect("validated cached document").1);
+            } else {
+                // Invalidate before status/body/parse errors; never fall back to stale data.
+                if let Some(slot) = &slot {
+                    slot.write(None).await;
+                }
+                let response = response
+                    .error_for_status()
+                    .map_err(reqwest::Error::without_url)
+                    .context(LoadStage::Headers)?;
+                let metadata = if slot.is_some() && response.status() == reqwest::StatusCode::OK {
+                    crate::http_cache::Metadata::from_headers(
+                        response.headers(),
+                        started.elapsed(),
+                        None,
+                    )
+                } else {
+                    None
+                };
+                let body_started = std::time::Instant::now();
+                let bytes =
+                    crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
+                        .await
+                        .context(LoadStage::Body)?;
+                tracing::debug!(target: "x402_treazury::startup",
+                    body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
+                    "Catalog response body complete");
+                // Only complete, valid JSON catalogs reach persistent storage.
+                let document = parse_document(&bytes)?;
+                if let (Some(slot), Some(metadata)) = (&slot, metadata) {
+                    slot.write(Some(crate::http_cache::Entry {
+                        metadata,
+                        data: bytes,
+                    }))
+                    .await;
+                }
+                return Ok(document);
+            }
+        }
     } else {
         tokio::fs::read(source)
             .await
             .context(LoadStage::LocalRead)?
     };
+    parse_document(&bytes)
+}
+fn parse_document(bytes: &[u8]) -> Result<Value> {
     let started = std::time::Instant::now();
-    let document = serde_json::from_slice(&bytes).context(LoadStage::Parse)?;
+    let document = serde_json::from_slice(bytes).context(LoadStage::Parse)?;
     tracing::debug!(target: "x402_treazury::startup", parse_ms = started.elapsed().as_millis() as u64,
         bytes = bytes.len(), "Catalog JSON parse complete");
     Ok(document)

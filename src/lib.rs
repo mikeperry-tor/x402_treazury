@@ -35,3 +35,5 @@ pub mod supervision;
 pub mod build_identity;
 
 pub mod cover;
+
+mod http_cache;

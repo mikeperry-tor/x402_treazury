@@ -6636,6 +6636,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "h2",
+ "httpdate",
  "hyper",
  "hyper-util",
  "libc",

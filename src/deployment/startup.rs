@@ -20,6 +20,8 @@ type DownloadKey = (
     usize,
     crate::network::IsolationId,
     crate::network::HttpPolicy,
+    Option<std::path::PathBuf>,
+    bool,
 );
 type Document = Arc<serde_json::Value>;
 
@@ -41,7 +43,10 @@ type DownloadResult = std::result::Result<Document, SharedFailure>;
 /// One deployment load, one immutable network policy/runtime. Retain parsed remote
 /// documents only for this load; aliases still generate/filter/bind independently.
 #[derive(Default)]
-struct Downloads(Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>);
+struct Downloads {
+    entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
+    cache_directory: Option<std::path::PathBuf>,
+}
 impl Downloads {
     async fn load(
         &self,
@@ -62,9 +67,11 @@ impl Downloads {
             cfg.max_spec_bytes,
             crate::network::IsolationId::discovery(&cfg.spec)?,
             cfg.transport(),
+            cfg.http_cache_directory.clone(),
+            cfg.http_cache_enabled,
         );
         let cell = {
-            let mut entries = self.0.lock().expect("catalog download map poisoned");
+            let mut entries = self.entries.lock().expect("catalog download map poisoned");
             if entries.contains_key(&key) {
                 tracing::debug!(target: "x402_treazury::startup", source = id,
                     "Sharing compatible catalog download or parsed document");
@@ -73,10 +80,15 @@ impl Downloads {
         };
         // No detached tasks: cancellation drops the initializer and its HTTP request.
         cell.get_or_init(|| async {
-            catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes)
-                .await
-                .map(Arc::new)
-                .map_err(|error| SharedFailure(Arc::new(error)))
+            catalog::load_json_cached(
+                &cfg.spec,
+                http,
+                cfg.max_spec_bytes,
+                crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes),
+            )
+            .await
+            .map(Arc::new)
+            .map_err(|error| SharedFailure(Arc::new(error)))
         })
         .await
         .clone()
@@ -134,7 +146,18 @@ pub(super) async fn load(
     catalog_evidence::register(config.sources.keys())?;
     let limit = config.startup.catalog_concurrency;
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, "Loading catalogs; startup waits for all sources");
-    let downloads = Downloads::default();
+    let downloads = Downloads {
+        entries: Mutex::default(),
+        cache_directory: config
+            .treasury
+            .as_ref()
+            .filter(|t| {
+                t.state_dir.is_dir()
+                    && !catalog_evidence::collecting()
+                    && !crate::qualification::active()
+            })
+            .map(|t| t.state_dir.join("http-cache")),
+    };
     let mut loads = Vec::with_capacity(total);
     for (id, source) in &config.sources {
         let used = config.servers.values().any(|s| s.sources.contains(id));
@@ -239,6 +262,7 @@ impl Source {
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        cfg.http_cache_directory = downloads.cache_directory.clone();
         if warn {
             crate::provider_status::warn(id, &cfg);
         }

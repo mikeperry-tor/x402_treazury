@@ -40,6 +40,12 @@ first invocation; successful content is cached, failed initialization can retry,
 and simultaneous requests for the same resource coalesce. These caches are
 independent of fresh payment challenges.
 
+`src/http_cache.rs` adds disposable HTTP-aware persistence under an existing
+treasury state directory. Complete remote catalogs use explicit freshness or
+conditional GET validators; pricing stores only explicitly fresh derived estimates,
+never challenges. It partitions network/transport identities, bounds storage and
+bypasses qualification. See [discovery disk caching](configuration.md#automatic-discovery-disk-cache).
+
 `src/catalog_state.rs` publishes immutable snapshots. A tool invocation captures
 its route, output policy and payer binding so a concurrent catalog replacement
 cannot redirect an in-flight call. Listener filters constrain invocation as well

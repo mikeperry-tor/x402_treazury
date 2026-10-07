@@ -62,7 +62,7 @@ waiting message identifies remaining work. No response content or source URL is
 included in these progress messages. Remote spec aliases share a download and parsed document within one deployment
 load when the exact URL, requested timeout, byte limit, transport compatibility flags and discovery identity match.
 Each alias retains its own tools, filters, base URL and wallet binding. Local files
-are read independently; documents are not cached across deployment loads.
+are read independently. Compatible remote responses can also use the disk cache described below.
 Pricing discovery rolls across sources and endpoints with a shared 16-request cap.
 
 
@@ -695,13 +695,56 @@ of its observed slow pricing discovery; a source can explicitly re-enable it.
 Paid calls still validate the current challenge and enforce spend caps.
 
 A process-wide cache keys GET requests by their full routed URL (including any
-base URL path prefix) and transport compatibility flags. Sources and listeners
+base URL path prefix), transport compatibility flags, disk-cache scope and opt-out. Sources and listeners
 with the same policy share results; concurrent matching requests coalesce. Failures, malformed challenges, rate limits and
 unpaid successes are cached too. Redirects are not followed. Nothing refreshes
 a cached attempt during the process lifetime; TTL expiry makes its result
 unavailable to later catalog builds without making another request. Tool
 catalogs already built remain unchanged, so `tools/list` never performs network
-requests. Restarting the process resets discovery; there is no disk cache.
+requests. Restarting allows a new discovery attempt or reuse of a still-fresh disk estimate.
+
+### Automatic discovery disk cache
+
+Deployments with an **existing** `treasury.state_dir` automatically use its
+`http-cache/discovery-v1.sqlite` for remote API catalogs and pricing estimates.
+No wallet is opened and no state directory is created for caching. Standalone
+providers and deployments without existing treasury state retain their in-memory
+behavior. `config show` remains offline. A provider or source can opt out with
+`http_cache_enabled = false`; this also prevents sharing a disk-enabled alias's
+catalog load or pricing initialization.
+
+Support is detected from ordinary unsigned GET response headers; there are no
+extra HEAD probes. Catalogs use explicit `Cache-Control: max-age` or `Expires`
+freshness, accounting for `Date`, `Age` and request duration. Stale catalogs with
+`ETag` or `Last-Modified` use one conditional GET, accepting a matching 304 or
+replacing the complete document with a new response. `no-cache` requires
+revalidation. Failed requests never fall back to stale documents. Unsupported
+responses continue through normal downloads. This conservative cache declines
+`no-store`, `private`, all `Vary` variants, cookie-bearing responses and URLs with
+embedded credentials; it does not invent heuristic lifetimes.
+
+Pricing persists only the derived display estimate from a usable HTTP 402 with
+explicit, positive freshness, capped by `probe_ttl_seconds`. Payment challenges,
+headers and paid responses are never stored or reused for signing. An expired
+estimate triggers the ordinary single unsigned GET on a later startup, with no
+conditional pricing request. Within a process, one-shot success/failure caching
+and expiry-without-refresh remain unchanged. Previously built descriptions are
+still startup estimates. A disk hit retains its remaining lifetime rather than
+receiving a new full TTL.
+
+Keys separate exact URLs, discovery network/isolation policy, transport flags,
+timeouts, limits and resource kind. The owner-only SQLite cache holds at most
+4,096 entries and 128 MiB of payload/metadata, evicting oldest entries with a log.
+Its database is capped at 144 MiB; rollback journals can temporarily add up to
+another database-sized file. Cache errors log a fixed warning and fall back to
+normal origin loading, without retrying a failed origin request. Oversized origin
+catalogs still fail with the normal `max_spec_bytes` error. Cache contents may
+reveal provider interests; treat the directory as private disposable state. To
+clear it, stop the application and remove only `http-cache/`.
+
+Live qualification and captured qualification catalog loads bypass disk caching,
+so a historical cache hit cannot qualify a fresh network observation. Ordinary
+loads report fresh/revalidated catalog hits and pricing estimate hits on stderr.
 
 Pricing suffixes use compact provenance labels:
 

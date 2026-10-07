@@ -555,3 +555,7 @@ mod concurrency_tests {
         assert_eq!(claims, 1);
     }
 }
+
+pub(crate) fn active() -> bool {
+    ACTIVE.get().is_some()
+}

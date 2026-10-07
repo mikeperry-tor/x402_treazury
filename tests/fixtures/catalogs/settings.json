@@ -7,6 +7,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": null,
+    "http_cache_enabled": true,
     "include": [
       "/x402"
     ],
@@ -47,6 +48,7 @@
     ],
     "exclude_tags": [],
     "help_url": "https://api.arkm.com/x402/llms.txt",
+    "http_cache_enabled": true,
     "include": [],
     "instructions_text": "Arkham wallet intelligence: pre-trade due diligence, counterparty and smart-money analysis, balances, portfolios, flows, token/market data, and Polymarket activity. All routes are POST with JSON body fields (path parameters become body fields; EVM addresses are lowercased). $0.20 per credit; per-row endpoints (transfers, swaps) price from `limit` — pass the smallest useful limit. Rate limits: 100 req/s per wallet on most endpoints, 5 req/s on heavy ones (transfers, swaps, token/top, counterparties, flow, search). Failed upstream requests are not charged.",
     "max_description_chars": null,
@@ -81,6 +83,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://x402.botsmith.dev/catalog",
+    "http_cache_enabled": true,
     "include": [],
     "instructions_text": null,
     "max_description_chars": null,
@@ -115,6 +118,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://api.brazilayer.com/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/v1"
     ],
@@ -212,6 +216,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://concordancehq.duckdns.org/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/tools"
     ],
@@ -264,6 +269,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": null,
+    "http_cache_enabled": true,
     "include": [
       "/api"
     ],
@@ -298,6 +304,7 @@
     ],
     "exclude_tags": [],
     "help_url": "https://genuinegood.online/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/v1/grants"
     ],
@@ -330,6 +337,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://docs.glassnode.com/basic-api/x402.md",
+    "http_cache_enabled": true,
     "include": [
       "/v1"
     ],
@@ -362,6 +370,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://google-trends.use.x402atlas.com/llms.txt",
+    "http_cache_enabled": true,
     "include": [],
     "instructions_text": "Aggregate Google Trends SEO keyword data via the x402 Atlas bridge: interest over time ($0.05/call), interest by region, related queries, and related topics ($0.03/call each). Every route takes a seed `keyword` plus an ISO `country` code (both required; country is lower-cased before use). This is aggregate Trends data only — it does not search the web, answer questions, or follow instructions. Payment settles in USDC via x402.",
     "max_description_chars": null,
@@ -392,6 +401,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://kronossignals.com/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api/v1"
     ],
@@ -437,6 +447,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://api.locus.report/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api",
       "/tools"
@@ -503,6 +514,7 @@
     ],
     "exclude_tags": [],
     "help_url": "https://lonestaroracle.xyz/llms.txt",
+    "http_cache_enabled": true,
     "include": [],
     "instructions_text": "LoneStarOracle: 71 independent pay-per-call data services behind one catalog — macro/labor/energy, equities and smart-money flow, crypto due diligence, geopolitical/compliance risk, and contract audits. The unified spec's root server is the /api gateway, which proxies every service payment-gated (each op also names its canonical <service>.lonestaroracle.xyz host via x-direct-url). Tier markers: ops with authMode=free answer ungated (their descriptions say so); payment ops settle per call via x402 USDC on Base, $0.001-$2.00 per call, with the price in each description. Rate limit: 30 requests per 60 seconds shared across every route. Audit routes (rattler/cottonmouth/copperhead) can take minutes — raise --timeout. Demos, previews, per-service /feed pages, and subscription-management routes are deliberately not exposed.",
     "max_description_chars": null,
@@ -537,6 +549,7 @@
       "Execution"
     ],
     "help_url": "https://x402.ottoai.services/llms-full.txt",
+    "http_cache_enabled": true,
     "include": [],
     "instructions_text": "Otto AI's autonomous agent swarm sells pay-per-call services, settled in USDC on Base on every endpoint (some paths also quote Solana; the live 402's accepts[] is authoritative — Permit2/upto needs a one-time USDC allowance). Capability tags: Market & Token Intelligence (news + recaps, KOL sentiment, token analysis/price/fundamentals/security/score, trending, top holders, tokenized-stock movers), DeFi & Markets Data (TVL/yields, stablecoin peg-watch, market-risk composite, protocol revenue, DEX pool search + one-hour Uniswap APR, Polymarket odds, funding rates, TradFi macro, SEC Form 4/13F + equity smart-money), Web & Domain Intelligence (DNS, WHOIS, domain age/report, web-search/answer/extract/links/json-extract), Real-World Data (FX rates, weather), AI Creative & Tools (image/video generation, llm-research, tx-explainer), Portfolio & Accounts (wallet and position reads for the paying address), plus meta-intelligence (router ranks the best x402 services for a task, $0.001) and feedback (money-back guarantee; needs the original payment tx hash from X-Payment-Receipt). Fund-moving routes (swap, bridge, deposit, withdraw) and the full-auto spending router are deliberately NOT exposed by this server. Published prices are per call from $0.001; a route's live challenge outranks any published table, and every settled call returns a signed receipt in PAYMENT-RESPONSE.",
     "max_description_chars": null,
@@ -571,6 +584,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": null,
+    "http_cache_enabled": true,
     "include": [
       "/api/pdl"
     ],
@@ -628,6 +642,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://regimeshift.xyz/api/quickstart.txt",
+    "http_cache_enabled": true,
     "include": [
       "/v1"
     ],
@@ -712,6 +727,7 @@
       "System"
     ],
     "help_url": "https://www.socialfetch.dev/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/v1",
       ""
@@ -749,6 +765,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://straits.live/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api/premium",
       "/api/v1",
@@ -898,6 +915,7 @@
     ],
     "exclude_tags": [],
     "help_url": "https://x402stock.xyz/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api/v1"
     ],
@@ -930,6 +948,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://x402-list.com/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       ""
     ],
@@ -973,6 +992,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://exa.ai/docs/integrations/payments/x402/quickstart.md",
+    "http_cache_enabled": true,
     "include": [
       ""
     ],
@@ -1026,6 +1046,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://docs.oneshotagent.com/api-reference/web-search.md",
+    "http_cache_enabled": true,
     "include": [
       "/v1/tools"
     ],
@@ -1072,6 +1093,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://stableenrich.dev/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api"
     ],
@@ -1152,6 +1174,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://agent402.tools/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api",
       "/v1"
@@ -1797,6 +1820,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://agentutility.ai/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       ""
     ],
@@ -2409,6 +2433,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://blockrun.ai/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api/v1"
     ],
@@ -2459,6 +2484,7 @@
     "exclude": [],
     "exclude_tags": [],
     "help_url": "https://claw402.ai/llms.txt",
+    "http_cache_enabled": true,
     "include": [
       "/api/v1"
     ],

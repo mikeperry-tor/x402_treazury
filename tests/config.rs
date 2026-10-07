@@ -30,6 +30,7 @@ description = "Old"
 tags = []
 timeout = 42
 allow_http1 = false
+http_cache_enabled = false
 max_help_bytes = 80
 [overrides.stable_new]
 description = "New"
@@ -38,6 +39,11 @@ description = "New"
     .unwrap();
     let resolved = config::resolve(source, &deployment).await.unwrap();
     assert!(!resolved.settings.allow_http1);
+    assert!(!resolved.settings.http_cache_enabled);
+    assert_eq!(
+        resolved.origins["http_cache_enabled"],
+        deployment.display().to_string()
+    );
     assert!(resolved.settings.allow_tls12);
     assert!(resolved.origins["allow_tls12"].ends_with("provider.toml"));
     assert_eq!(

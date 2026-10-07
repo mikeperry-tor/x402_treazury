@@ -18,6 +18,9 @@ struct CachedProbe {
     line: Option<String>,
     outcome: Outcome,
     http_status: Option<u16>,
+    disk: bool,
+    lifetime: Duration,
+    observed_age: Duration,
 }
 struct Observation {
     line: Option<String>,
@@ -31,9 +34,16 @@ pub struct Discovery {
     pub evidence: Evidence,
 }
 type Entry = Arc<OnceCell<CachedProbe>>;
+type ProbeKey = (
+    String,
+    crate::network::HttpPolicy,
+    Option<std::path::PathBuf>,
+    bool,
+    bool,
+);
 #[derive(Default)]
 pub struct PricingCache {
-    entries: Mutex<BTreeMap<(String, crate::network::HttpPolicy), Entry>>,
+    entries: Mutex<BTreeMap<ProbeKey, Entry>>,
 }
 static CACHE: OnceLock<PricingCache> = OnceLock::new();
 pub(crate) const CONCURRENCY: usize = 16;
@@ -65,18 +75,18 @@ pub fn validate(cfg: &Config) -> Result<()> {
     Ok(())
 }
 impl PricingCache {
-    async fn get(
-        &self,
-        url: String,
-        http: reqwest::Client,
-        ttl: f64,
-        policy: crate::network::HttpPolicy,
-    ) -> Observation {
+    async fn get(&self, url: String, http: reqwest::Client, ttl: f64, cfg: &Config) -> Observation {
         let cell = self
             .entries
             .lock()
             .await
-            .entry((url.clone(), policy))
+            .entry((
+                url.clone(),
+                cfg.transport(),
+                cfg.http_cache_directory.clone(),
+                cfg.http_cache_enabled,
+                crate::qualification::active(),
+            ))
             .or_default()
             .clone();
         let ready = cell.get().is_some();
@@ -85,26 +95,32 @@ impl PricingCache {
             .get_or_init(|| async {
                 initialized.store(true, std::sync::atomic::Ordering::Relaxed);
                 let _permit = LIMIT.acquire().await.expect("probe semaphore open");
-                let (line, outcome, http_status) = probe_request(&http, &url).await;
+                let slot = crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024);
+                let entry = probe_request(&http, &url, slot, ttl).await;
                 tracing::debug!(
-                    discovered = line.is_some(),
+                    discovered = entry.line.is_some(),
                     "pricing attempt cached; no automatic retry"
                 );
-                CachedProbe {
-                    created: Instant::now(),
-                    line,
-                    outcome,
-                    http_status,
-                }
+                entry
             })
             .await;
-        let expired = entry.created.elapsed().as_secs_f64() >= ttl;
+        let expired = entry.created.elapsed() >= entry.lifetime
+            || entry
+                .created
+                .elapsed()
+                .saturating_add(entry.observed_age)
+                .as_secs_f64()
+                >= ttl;
         Observation {
             line: if expired { None } else { entry.line.clone() },
             outcome: entry.outcome,
             http_status: entry.http_status,
             cache: if initialized.load(std::sync::atomic::Ordering::Relaxed) {
-                CachePath::Initialized
+                if entry.disk {
+                    CachePath::Disk
+                } else {
+                    CachePath::Initialized
+                }
             } else if ready {
                 CachePath::Hit
             } else {
@@ -125,11 +141,7 @@ impl PricingCache {
             Duration::from_secs_f64(cfg.probe_timeout),
             cfg.transport(),
         )?;
-        Ok((
-            tool,
-            self.get(url, http, cfg.probe_ttl_seconds, cfg.transport())
-                .await,
-        ))
+        Ok((tool, self.get(url, http, cfg.probe_ttl_seconds, cfg).await))
     }
     pub async fn discover(
         &self,
@@ -230,7 +242,71 @@ impl PricingCache {
 async fn probe_request(
     http: &reqwest::Client,
     url: &str,
-) -> (Option<String>, Outcome, Option<u16>) {
+    slot: Option<crate::http_cache::Slot>,
+    ttl: f64,
+) -> CachedProbe {
+    if let Some(slot) = &slot {
+        if let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) {
+            if let Ok(line) = String::from_utf8(entry.data) {
+                tracing::info!("Pricing estimate loaded from fresh HTTP disk cache");
+                let lifetime = Duration::from_secs(
+                    entry
+                        .metadata
+                        .expires
+                        .saturating_sub(crate::http_cache::now()),
+                );
+                return CachedProbe {
+                    created: Instant::now(),
+                    line: Some(line),
+                    outcome: Outcome::Discovered,
+                    http_status: Some(402),
+                    disk: true,
+                    lifetime,
+                    observed_age: Duration::from_secs(
+                        crate::http_cache::now().saturating_sub(entry.metadata.stored),
+                    ),
+                };
+            }
+            tracing::warn!("Invalid HTTP cached pricing estimate; fetching origin");
+        }
+        // 402 is not heuristically cacheable. Never conditionally validate a stored
+        // payment challenge: persist only its derived display estimate with explicit freshness.
+        slot.write(None).await;
+    }
+    let (line, outcome, status, metadata) = probe_network(http, url, slot.is_some()).await;
+    if let (Some(slot), Some(mut metadata), Some(line)) = (&slot, metadata, &line) {
+        metadata.expires = metadata
+            .expires
+            .min(metadata.stored.saturating_add(ttl as u64));
+        if metadata.fresh() {
+            slot.write(Some(crate::http_cache::Entry {
+                metadata,
+                data: line.as_bytes().to_vec(),
+            }))
+            .await;
+        }
+    }
+    CachedProbe {
+        created: Instant::now(),
+        line,
+        outcome,
+        http_status: status,
+        disk: false,
+        lifetime: Duration::MAX,
+        observed_age: Duration::ZERO,
+    }
+}
+async fn probe_network(
+    http: &reqwest::Client,
+    url: &str,
+    persist: bool,
+) -> (
+    Option<String>,
+    Outcome,
+    Option<u16>,
+    Option<crate::http_cache::Metadata>,
+) {
+    let started = Instant::now();
     let response = match http.get(url).send().await {
         Ok(response) => response,
         Err(e) => {
@@ -244,14 +320,20 @@ async fn probe_request(
                     Outcome::HttpTransport
                 },
                 None,
+                None,
             );
         }
     };
     crate::network::log_http(&response, "pricing");
     let status = Some(response.status().as_u16());
     if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
-        return (None, Outcome::UnexpectedHttpStatus, status);
+        return (None, Outcome::UnexpectedHttpStatus, status, None);
     }
+    let metadata = if persist {
+        crate::http_cache::Metadata::from_headers(response.headers(), started.elapsed(), None)
+    } else {
+        None
+    };
     let mut outcome = Outcome::MissingHeader;
     for name in ["payment-required", "x-payment-required"] {
         let Some(raw) = response.headers().get(name) else {
@@ -277,9 +359,10 @@ async fn probe_request(
                 Outcome::UnusableOffer
             },
             status,
+            metadata,
         );
     }
-    (None, outcome, status)
+    (None, outcome, status, None)
 }
 fn challenge_line(c: &Value) -> Option<String> {
     let amount = c.get("amount").or_else(|| c.get("maxAmountRequired"))?;
