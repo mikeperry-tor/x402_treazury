@@ -176,7 +176,7 @@ impl HttpPolicy {
 
 /// Only protocol metadata: never log URLs, credentials or payment headers.
 pub fn log_http(response: &reqwest::Response, stage: &str) {
-    tracing::info!(target: "x402_treazury::network", stage,
+    tracing::debug!(target: "x402_treazury::network", stage,
         http_version = ?response.version(), "HTTP response protocol");
 }
 

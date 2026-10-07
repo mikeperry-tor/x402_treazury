@@ -64,7 +64,7 @@ async fn main() -> std::process::ExitCode {
 async fn run() -> Result<()> {
     let matches = cli::Cli::command().get_matches();
     let command = cli::Cli::from_arg_matches(&matches)?.command;
-    let default_filter = "warn,x402_treazury::startup=info,x402_treazury::network=info,x402_treazury::rotation::funding=info";
+    let default_filter = "warn,x402_treazury=info";
     let filter = match std::env::var("RUST_LOG") {
         Ok(value) => {
             tracing_subscriber::EnvFilter::try_new(value).context("invalid RUST_LOG filter")?
@@ -174,11 +174,14 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .unwrap_or(catalog::default_prefix(&base)?);
     x402_treazury::pricing::validate(&cfg)?;
     let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    tracing::info!(target: "x402_treazury::startup", tools = tools.len(), "Catalog ready");
     if args.list_tools {
         if args.discover_pricing {
             let prices = x402_treazury::pricing::process_cache()
                 .discover(&cfg, &root, &tools, &base)
                 .await?;
+            tracing::info!(target: "x402_treazury::startup", enabled = cfg.probe_pricing,
+                prices = prices.len(), "Startup pricing source finished");
             tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
         }
         println!("{}", serde_json::to_string_pretty(&tools)?);
@@ -213,6 +216,8 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     let prices = x402_treazury::pricing::process_cache()
         .discover(&cfg, &root, &tools, &base)
         .await?;
+    tracing::info!(target: "x402_treazury::startup", enabled = cfg.probe_pricing,
+        prices = prices.len(), "Startup pricing source finished");
     tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
     let mut server = Server::new(
         tools,
@@ -257,7 +262,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
         };
         let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
-        tracing::warn!(address = %listener.local_addr()?, "MCP listening at /mcp");
+        tracing::info!(address = %listener.local_addr()?, "MCP listening at /mcp");
         serve_http(listener, server, token, shutdown_signal()).await?;
     }
     Ok(())
@@ -432,7 +437,7 @@ async fn run_deployment(
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during binding; startup cancelled"); }
     };
     for (server, address) in running.addresses() {
-        tracing::warn!(server, %address, "MCP listening at /mcp");
+        tracing::info!(server, %address, "MCP listening at /mcp");
     }
     let shutdown = tokio_util::sync::CancellationToken::new();
     let serving = running.serve(shutdown.clone());

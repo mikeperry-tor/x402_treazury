@@ -66,7 +66,7 @@ impl Downloads {
         let cell = {
             let mut entries = self.0.lock().expect("catalog download map poisoned");
             if entries.contains_key(&key) {
-                tracing::info!(target: "x402_treazury::startup", source = id,
+                tracing::debug!(target: "x402_treazury::startup", source = id,
                     "Sharing compatible catalog download or parsed document");
             }
             entries.entry(key).or_default().clone()
@@ -166,7 +166,7 @@ pub(super) async fn load(
                 }
                 None => break,
             },
-            _ = heartbeat.tick() => tracing::info!(target: "x402_treazury::startup", completed = sources.len(), total,
+            _ = heartbeat.tick() => tracing::debug!(target: "x402_treazury::startup", completed = sources.len(), total,
                 failed = failures, remaining = total - sources.len() - failures, elapsed_ms = started.elapsed().as_millis() as u64,
                 "Startup waiting for catalogs; remaining count includes queued sources"),
         }
@@ -193,7 +193,7 @@ async fn load_one(
         started: Instant::now(),
         finished: false,
     };
-    tracing::info!(target: "x402_treazury::startup", source = id, "Catalog load started");
+    tracing::debug!(target: "x402_treazury::startup", source = id, "Catalog load started");
     let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
     progress.finished = true;
     if let Err(error) = &result {
@@ -256,13 +256,13 @@ impl Source {
         )?;
         progress.phase = "fetch_parse";
         let fetch_started = Instant::now();
-        tracing::info!(target: "x402_treazury::startup", source = id, phase = progress.phase,
+        tracing::debug!(target: "x402_treazury::startup", source = id, phase = progress.phase,
             "Loading catalog document");
         let document = downloads.load(id, &cfg, &http)
-            .instrument(tracing::info_span!(target: "x402_treazury::startup", "catalog_download", source = id))
+            .instrument(tracing::debug_span!(target: "x402_treazury::startup", "catalog_download", source = id))
             .await
             .with_context(|| format!("source {id}: loading spec"))?;
-        tracing::info!(target: "x402_treazury::startup", source = id,
+        tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
         let generation_started = Instant::now();
@@ -284,7 +284,7 @@ impl Source {
         );
         let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
             .with_context(|| format!("source {id}: catalog generation"))?;
-        tracing::info!(target: "x402_treazury::startup", source = id, tools = tools.len(),
+        tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");
         Ok(Self {
             tools,
@@ -308,7 +308,7 @@ pub(super) async fn price_source<'a>(
         started: Instant::now(),
         finished: false,
     };
-    tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
+    tracing::debug!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
         "Startup pricing source started");
     crate::qualification::record_pricing(id, crate::qualification::PricingStage::Started).await?;
     let result = async {
@@ -320,10 +320,10 @@ pub(super) async fn price_source<'a>(
         };
         crate::qualification::record_pricing(id,stage).await?;
         let prices=discovery?.prices;
-        tracing::info!(target: "x402_treazury::startup", source = id, prices = prices.len(),
+        tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing, prices = prices.len(),
             elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
         if prices.is_empty() {
-            tracing::info!(target: "x402_treazury::startup", source = id,
+            tracing::debug!(target: "x402_treazury::startup", source = id,
                 "No discovered prices; reusing original tool definitions");
             return Ok((id, source.tools.iter().cloned().map(|t| (t.name.clone(), t)).collect()));
         }
@@ -331,7 +331,7 @@ pub(super) async fn price_source<'a>(
         let tools = catalog::build_tools_with_prices(
             &source.config, &source.document, source.config.prefix.as_deref().unwrap(), &prices,
         )?.into_iter().map(|t| (t.name.clone(), t)).collect();
-        tracing::info!(target: "x402_treazury::startup", source = id,
+        tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = rebuild_started.elapsed().as_millis() as u64, "Startup pricing descriptions rebuilt");
         Ok((id, tools))
     }.await;

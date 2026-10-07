@@ -387,7 +387,7 @@ pub(crate) const SHUTDOWN_TIMEOUT_MESSAGE: &str =
     "shutdown deadline exceeded; pending paid calls may have unknown outcomes";
 
 pub(crate) fn log_http_shutdown() {
-    tracing::warn!(
+    tracing::info!(
         "Shutting down: draining in-flight requests for up to 10 seconds to let pending payments finish safely. Please wait."
     );
 }

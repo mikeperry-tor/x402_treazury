@@ -190,8 +190,11 @@ Keep `.env`, `state/`, `secrets/`, local example overrides, and reference checko
 untracked. Do not inspect or print secret values unnecessarily. User-owned `TODO`,
 `run_servers.sh`, `FUCK.md` and editor files are not part of automatic cleanup.
 All logs go to stderr: stdout is the MCP wire or the requested CLI JSON output.
-Process `RUST_LOG` overrides the default filter for all commands; funding phase
-progress defaults to info. Sync failures log fixed categories, never upstream prose.
+Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter for all
+commands. Info reports catalog/pricing completion, listener startup and funding
+progress; download/parse/protocol details and accepted tip lag are debug. Warnings
+indicate failures, degraded operation or actionable configuration issues. Sync
+failures log fixed categories, never upstream prose.
 Keep ordinary CLI errors legible even with backtrace environment variables enabled.
 
 ## Agent source management

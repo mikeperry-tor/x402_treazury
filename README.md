@@ -310,12 +310,15 @@ the binary with absolute config paths or a repository working directory. Logs go
 stderr; stdout carries MCP or requested CLI output. Build without the embedded Zcash
 wallet with `scripts/zcash.sh build --no-default-features`.
 
-Logging defaults to warnings, with startup, network and funding phase progress at
-`info`. Accepted treasury tip lag is logged only at `debug`. Override the filter
+Logging defaults to `warn,x402_treazury=info`: application milestones at `info`,
+with dependency warnings and errors. Catalog and pricing completions, HTTP listener
+startup and funding phase changes are milestones. Download/parse timings, HTTP
+protocol details, individual cover episodes and accepted treasury tip lag are
+`debug` diagnostics. Override the filter
 through the process environment (including for wallet commands):
 
 ```sh
-RUST_LOG='warn,x402_treazury::rotation::funding=info,x402_treazury::treasury=debug' \
+RUST_LOG='warn,x402_treazury=info,x402_treazury::treasury=debug' \
   target/debug/x402_treazury serve --config /path/to/deployment.toml
 ```
 

@@ -499,7 +499,7 @@ impl Engine {
         drop(registry);
         self.record(&s, reason);
         let e = s.episode.lock().unwrap();
-        tracing::info!(
+        tracing::debug!(
             code = reason,
             mode = "extra_body",
             sampled_body_bytes = e.target,

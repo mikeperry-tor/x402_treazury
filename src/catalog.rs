@@ -302,7 +302,7 @@ pub async fn load_json_with_limit(
             .error_for_status()
             .map_err(reqwest::Error::without_url)
             .context(LoadStage::Headers)?;
-        tracing::info!(target: "x402_treazury::startup",
+        tracing::debug!(target: "x402_treazury::startup",
             headers_ms = started.elapsed().as_millis() as u64,
             "Catalog response headers received; reading body");
         crate::network::log_http(&response, "catalog");
@@ -310,7 +310,7 @@ pub async fn load_json_with_limit(
         let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
             .await
             .context(LoadStage::Body)?;
-        tracing::info!(target: "x402_treazury::startup",
+        tracing::debug!(target: "x402_treazury::startup",
             body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
             "Catalog response body complete");
         bytes
@@ -321,7 +321,7 @@ pub async fn load_json_with_limit(
     };
     let started = std::time::Instant::now();
     let document = serde_json::from_slice(&bytes).context(LoadStage::Parse)?;
-    tracing::info!(target: "x402_treazury::startup", parse_ms = started.elapsed().as_millis() as u64,
+    tracing::debug!(target: "x402_treazury::startup", parse_ms = started.elapsed().as_millis() as u64,
         bytes = bytes.len(), "Catalog JSON parse complete");
     Ok(document)
 }
