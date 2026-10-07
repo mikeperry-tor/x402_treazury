@@ -92,8 +92,10 @@ impl Treasury {
                     }
                 }
                 _ = interval.tick() => {
-                    if self.sync_once(&stop).await.is_err() && !stop.is_cancelled() {
-                        tracing::warn!("treasury sync unavailable");
+                    if let Err(error) = self.sync_once(&stop).await {
+                        if !stop.is_cancelled() {
+                            tracing::warn!(category = super::diagnostics::sync_failure(&error), "treasury sync unavailable");
+                        }
                     }
                 }
             }

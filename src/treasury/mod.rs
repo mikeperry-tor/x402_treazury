@@ -1,6 +1,7 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
 pub mod actor;
 pub mod birthday;
+pub(crate) mod diagnostics;
 mod expiry;
 mod freshness;
 mod refunds;
@@ -406,7 +407,10 @@ impl Treasury {
                     return Err(error);
                 }
                 if !stop.is_cancelled() {
-                    tracing::warn!("treasury sync unavailable; retrying");
+                    tracing::warn!(
+                        category = diagnostics::sync_failure(&error),
+                        "treasury sync unavailable; retrying"
+                    );
                 }
             }
             tokio::select! {
@@ -482,7 +486,8 @@ impl SyncSession {
             crate::network::global().grpc(&self.identity, &settings.endpoint),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
+        .map_err(|_| anyhow::anyhow!("indexer connection timed out"))?
+        .context("indexer connection failed")?;
         self.client.set_indexer(indexer.clone());
         let info = tokio::time::timeout(
             crate::network::global().request_timeout(Duration::from_secs(15)),
@@ -649,7 +654,7 @@ impl SyncSession {
             settings.max_age_seconds,
         )?;
         if lag > 0 {
-            tracing::warn!(
+            tracing::debug!(
                 scanned_height = height,
                 observed_tip_height = info.block_height,
                 lag_blocks = lag,

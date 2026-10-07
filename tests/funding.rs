@@ -128,6 +128,15 @@ impl FundingBackend for Fake {
 }
 #[tokio::test]
 async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let writer = log.reopen().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(std::sync::Mutex::new(writer))
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     let dir = tempfile::tempdir().unwrap();
     let mut s = Store::create(
         &dir.path().join("state"),
@@ -201,6 +210,11 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
         store.call(|s| s.status()).await.unwrap().funding_jobs[0].phase,
         x402_treazury::rotation::store::funding::FundingPhase::Complete
     );
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(logs.contains("funding phase changed"), "{logs}");
+    assert!(logs.contains("to=Quoted"), "{logs}");
+    assert!(logs.contains("to=Complete"), "{logs}");
+    assert!(logs.contains("job_id="), "{logs}");
     drop(worker);
     drop(store);
     task.await.unwrap();

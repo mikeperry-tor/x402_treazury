@@ -64,6 +64,18 @@ async fn main() -> std::process::ExitCode {
 async fn run() -> Result<()> {
     let matches = cli::Cli::command().get_matches();
     let command = cli::Cli::from_arg_matches(&matches)?.command;
+    let default_filter = "warn,x402_treazury::startup=info,x402_treazury::network=info,x402_treazury::rotation::funding=info";
+    let filter = match std::env::var("RUST_LOG") {
+        Ok(value) => {
+            tracing_subscriber::EnvFilter::try_new(value).context("invalid RUST_LOG filter")?
+        }
+        Err(std::env::VarError::NotPresent) => tracing_subscriber::EnvFilter::new(default_filter),
+        Err(error) => return Err(error).context("invalid RUST_LOG environment value"),
+    };
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(filter)
+        .init();
     let args: Args = match command {
         cli::Command::Wallet(args) => return x402_treazury::wallet_cli::run(args).await,
         cli::Command::Sources(cli::Sources::Inspect { config }) => {
@@ -102,10 +114,6 @@ async fn run() -> Result<()> {
         args.allowed_hosts.clone(),
         args.disable_host_check,
     )?;
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter("warn,x402_treazury::startup=info,x402_treazury::network=info")
-        .init();
     if args.show_config {
         return show_config(&args).await;
     }

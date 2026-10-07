@@ -92,7 +92,30 @@ impl<B: FundingBackend> FundingWorker<B> {
             job.timed_out = true;
         }
         let result = self.step(&job, instant).await;
-        self.finish_step(&job, instant, result).await
+        self.finish_step(&job, instant, result).await?;
+        // Read committed state: backend credit/preparation can advance phases too.
+        let id = job.id.clone();
+        let current = self
+            .store
+            .call(move |s| {
+                Ok(s.status()?
+                    .funding_jobs
+                    .into_iter()
+                    .find(|job| job.id == id))
+            })
+            .await?;
+        if let Some(current) = current {
+            if current.phase != job.phase {
+                tracing::info!(
+                    job_id = %job.id,
+                    pool_id = %job.pool_id,
+                    from = ?job.phase,
+                    to = ?current.phase,
+                    "funding phase changed"
+                );
+            }
+        }
+        Ok(())
     }
     async fn finish_step(&self, job: &FundingJob, instant: u64, result: Result<()>) -> Result<()> {
         let error = result
@@ -100,7 +123,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             .err()
             .map(|error| safe_error(error, &job.phase));
         if let Some(category) = &error {
-            tracing::warn!(phase = ?job.phase, category, "funding step deferred or failed");
+            tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase, category, "funding step deferred or failed");
         }
         let streak = if error.is_some() {
             job.error_streak.saturating_add(1)
@@ -516,6 +539,10 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
     let category = safe_error_category(error, phase);
     if let Some(stage) = error.downcast_ref::<NearStage>() {
         return format!("{category}; NEAR {}: {}", stage.0, near_diagnostic(error));
+    }
+    let sync_category = crate::treasury::diagnostics::sync_failure(error);
+    if sync_category != "sync_internal_or_storage_failure" {
+        return format!("{category}; treasury: {sync_category}");
     }
     category.into()
 }

@@ -101,7 +101,7 @@ freshly observed target, identically for direct and Tor. The starting observatio
 age includes sync time; never renew freshness at completion. Persist the final
 `observed_tip_height` separately from scanned `height`; confirmations use the latter.
 Expiry recovery requires equality on both syncs before releasing reservations.
-The treasury is exclusively spent here; accepted lag must appear in logs/CLI output.
+The treasury is exclusively spent here; accepted lag appears at debug level and in CLI output.
 
 ## Configuration and wallet workflow
 
@@ -190,6 +190,8 @@ Keep `.env`, `state/`, `secrets/`, local example overrides, and reference checko
 untracked. Do not inspect or print secret values unnecessarily. User-owned `TODO`,
 `run_servers.sh`, `FUCK.md` and editor files are not part of automatic cleanup.
 All logs go to stderr: stdout is the MCP wire or the requested CLI JSON output.
+Process `RUST_LOG` overrides the default filter for all commands; funding phase
+progress defaults to info. Sync failures log fixed categories, never upstream prose.
 Keep ordinary CLI errors legible even with backtrace environment variables enabled.
 
 ## Agent source management
