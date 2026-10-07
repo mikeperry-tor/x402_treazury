@@ -5,6 +5,11 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 [workspace]
+
+# This independent workspace does not inherit the application's profiles.
+[profile.dev]
+debug = "line-tables-only"
+
 [dependencies]
 x402_treazury = { path = "../..", default-features = false }
 zingolib = { path = "../../vendor/zingolib", default-features = false }

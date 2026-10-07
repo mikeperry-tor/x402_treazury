@@ -6,6 +6,11 @@ rust-version = "1.93"
 publish = false
 default-run = "x402_treazury"
 
+# Keep file/line backtraces without full type and variable debug information.
+# The test profile inherits these settings; release settings remain unchanged.
+[profile.dev]
+debug = "line-tables-only"
+
 [[bin]]
 name = "x402_treazury"
 path = "src/main.rs"

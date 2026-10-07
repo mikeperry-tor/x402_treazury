@@ -159,7 +159,11 @@ python3 vendor/verify_zingo.py
 python3 scripts/check_compat.py
 ```
 
-Run commands from the repository root. `rust-toolchain.toml` pins the development
+Run commands from the repository root. `scripts/zcash.sh build` (or no command) defaults
+to release with incremental caches disabled, including the protoc helper.
+`build --developer` enables an incremental development build; it cannot accompany
+`--release` or `--profile`. Explicit build profiles disable incremental caches.
+Tests, checks and Clippy retain normal Cargo profiles and inherited environment. `rust-toolchain.toml` pins the development
 compiler; the Zcash/check wrappers enforce it for non-rustup installations too.
 Run `sh scripts/check_toolchain.sh` before plain Homebrew Cargo commands.
 Release reproducibility uses `python3 scripts/reproducible.py` on the version-checked
@@ -167,7 +171,7 @@ macOS profile; see `docs/reproducible-builds.md`. It builds committed HEAD only,
 requires prefetched dependencies/parameters and blocks build-time network access.
 Do not weaken the sandbox or silently update toolchain/profile pins to make a run pass.
 
-`target/debug/x402_treazury serve --help` lists serving
+`target/release/x402_treazury serve --help` lists serving
 options; `x402_treazury wallet --help` lists treasury commands. Default builds include
 the embedded Zcash wallet; `--no-default-features` disables it. Plain Cargo builds
 require protoc; the Zcash wrapper supplies Cargo-managed protoc and respects

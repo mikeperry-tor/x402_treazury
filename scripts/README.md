@@ -31,6 +31,15 @@ Set `CARGO_NET_OFFLINE=true` to require cached Cargo inputs; it does not block
 network requests from build scripts. Release qualification adds an OS network
 sandbox and validates prefetched proving parameters.
 
+`zcash.sh build` (also the default with no command) produces
+`target/release/x402_treazury` with incremental caches disabled, including for the
+protoc helper. `zcash.sh build --developer` selects an incremental development
+build at `target/debug/x402_treazury`. Explicit `--release` or `--profile NAME`
+selects a non-incremental build and cannot be combined with `--developer`.
+Tests, checks and Clippy retain normal Cargo profiles and environment behavior.
+See [build storage options](../docs/development.md#build-storage-options) for
+debug-information settings and selective cache cleanup.
+
 Regenerate the independent cryptographic vectors with:
 
 ```sh

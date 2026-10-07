@@ -53,7 +53,6 @@ retrieval, llm help text, and pricing queries use separate Tor identities
 grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
 uses remote DNS and has no direct-network fallback.
 
-
 The CLI uses explicit commands: `serve` starts MCP serving, `catalog tools` and
 `catalog tags` inspect API inventories, and `config show` / `config check` inspect
 and validate configuration. `wallet` manages the treasury; `sources inspect`
@@ -90,6 +89,15 @@ See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
 The cargo download dependencies and Zcash proving parameters are downloaded
 outside of Tor routing by default.
 
+> **NOTE:**
+>
+> `scripts/zcash.sh build` defaults to an optimized release build with incremental
+> compiler caches disabled, including for the protoc helper. The executable is
+> `target/release/x402_treazury`. Use `scripts/zcash.sh build --developer` for an
+> incremental development build at `target/debug/x402_treazury`, with file/line
+> backtraces and reduced debug information. See
+> [build storage options](docs/development.md#build-storage-options) for tradeoffs.
+
 Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
 the application. The [example privacy conf file](examples/deployments/privacy.toml)
 connects to Tor Browser's `127.0.0.1:9150` SOCKS port. `x402_treazury` uses
@@ -104,8 +112,8 @@ Keep Tor running throughout.
 ### 2. Create the treasury
 
 ```sh
-target/debug/x402_treazury wallet init --config examples/deployments/privacy.local.toml
-target/debug/x402_treazury wallet addresses --config examples/deployments/privacy.local.toml
+target/release/x402_treazury wallet init --config examples/deployments/privacy.local.toml
+target/release/x402_treazury wallet addresses --config examples/deployments/privacy.local.toml
 ```
 
 Initialization creates the wallet directory specified by the config file. It
@@ -123,7 +131,7 @@ parent directory; the backup destination itself must not already exist.
 ```sh
 mkdir -p secrets
 chmod 700 secrets
-target/debug/x402_treazury wallet backup \
+target/release/x402_treazury wallet backup \
   --config examples/deployments/privacy.local.toml --destination secrets/privacy-backup
 ```
 
@@ -138,7 +146,7 @@ Keep the backup secure: it contains spending material.
 Review the wallet bindings, funding targets and limits before sending funds:
 
 ```sh
-target/debug/x402_treazury config show \
+target/release/x402_treazury config show \
   --config examples/deployments/privacy.local.toml
 ```
 
@@ -168,16 +176,16 @@ they may need deliberate adjustment for the current route. Daily limits reset an
 per-payment caps are not lifetime budgets.
 
 ```sh
-target/debug/x402_treazury wallet sync \
+target/release/x402_treazury wallet sync \
   --config examples/deployments/privacy.local.toml
-target/debug/x402_treazury wallet status --config examples/deployments/privacy.local.toml
+target/release/x402_treazury wallet status --config examples/deployments/privacy.local.toml
 ```
 
 Once `wallet status` shows sufficient confirmed spendable ZEC, fund the initial
 active and standby USDC wallets:
 
 ```sh
-target/debug/x402_treazury wallet bootstrap \
+target/release/x402_treazury wallet bootstrap \
   --config examples/deployments/privacy.local.toml
 ```
 
@@ -200,7 +208,7 @@ pricing cache before serving, with or without Tor.
 The optional `--direct` flag bypasses Tor for these requests:
 
 ```sh
-target/debug/x402_treazury catalog warm \
+target/release/x402_treazury catalog warm \
   --config examples/deployments/privacy.local.toml --direct --discover-pricing
 ```
 
@@ -216,7 +224,7 @@ reference](docs/configuration.md#automatic-discovery-disk-cache) for details.
 Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 
 ```sh
-target/debug/x402_treazury serve --config examples/deployments/privacy.local.toml
+target/release/x402_treazury serve --config examples/deployments/privacy.local.toml
 ```
 
 Serving handles discovery and subsequent wallet replacement funding automatically.
@@ -337,7 +345,7 @@ For a simpler static-key stdio setup, provide `EVM_PRIVATE_KEY` through the envi
 or a private `.env` file:
 
 ```sh
-target/debug/x402_treazury serve --provider providers/socialfetch.toml \
+target/release/x402_treazury serve --provider providers/socialfetch.toml \
   --network-config examples/network/tor.toml --env-file .env
 ```
 
@@ -355,7 +363,7 @@ through the process environment (including for wallet commands):
 
 ```sh
 RUST_LOG='warn,x402_treazury=info,x402_treazury::treasury=debug' \
-  target/debug/x402_treazury serve --config /path/to/deployment.toml
+  target/release/x402_treazury serve --config /path/to/deployment.toml
 ```
 
 `RUST_LOG` replaces the default filter and must be set before starting the process;

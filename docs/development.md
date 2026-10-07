@@ -3,6 +3,59 @@
 See [testing and qualification](testing.md) for test boundaries and acceptance limits.
 Commands run from the repository root.
 
+## Build storage options
+
+For end users, build an optimized executable without incremental compiler caches:
+
+```sh
+scripts/zcash.sh build
+target/release/x402_treazury --help
+```
+
+The wrapper defaults `build` (and an invocation without a command) to release
+mode and sets `CARGO_INCREMENTAL=0`, including for its protoc helper. Explicit
+`--release` and `--profile NAME` remain supported with incremental caches disabled.
+Release compilation takes longer, but produces optimized code without debug info.
+This ordinary build is separate from the qualified
+[reproducible release workflow](reproducible-builds.md).
+
+Development and test builds use `debug = "line-tables-only"` in the application
+and independent Zingolib compatibility workspace. This retains file/line
+backtraces but omits type and variable information needed for richer debugger
+inspection. Enable incremental development builds explicitly:
+
+```sh
+scripts/zcash.sh build --developer
+# Development profile without incremental caches:
+scripts/zcash.sh build --profile dev
+```
+
+`--developer` sets `CARGO_INCREMENTAL=1` and cannot be combined with `--release`
+or `--profile`. The build wrapper selects its incremental setting even when a
+value is inherited from the shell. `test`, `check`, and `clippy` retain normal Cargo
+profiles and respect the inherited environment; `--developer` is build-only.
+To disable incremental compilation for tests:
+
+```sh
+CARGO_INCREMENTAL=0 scripts/zcash.sh test --all-targets -- --test-threads=1
+```
+
+For full debugger information, set `CARGO_PROFILE_DEV_DEBUG=2` with `build --developer` or
+`CARGO_PROFILE_TEST_DEBUG=2` for tests. Profile changes can require dependency
+recompilation and leave previous artifacts on disk. Disabling incremental
+compilation does not delete existing caches or other dependency/test artifacts.
+
+With builds stopped, the regenerable incremental caches can be removed directly:
+
+```sh
+rm -rf target/debug/incremental compat/zingolib/target/debug/incremental
+```
+
+The next compilation will rebuild any needed cache. Preserve the rest of
+`target/`: it also contains retained live qualification evidence, pinned
+executables and reports. Do not use blanket `cargo clean` or delete `target/`
+as routine disk cleanup.
+
 ## Verification
 
 Run `scripts/check.sh` for both build configurations, all-feature Clippy and
