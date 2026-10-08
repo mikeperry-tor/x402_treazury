@@ -498,7 +498,8 @@ apply in both network modes. See the [provider caveats](../providers/CAVEATS.md)
 `providers/socialfetch.toml` uses the vendor's live OpenAPI tags through the generic
 catalog. It exposes platform routes, excludes `Auth`, `Monitors` and `System`,
 and disables pricing probes because credit prices are embedded in the spec.
-The server instructions explain the credit unit and metering caveats.
+Each selected tool retains credit terms and a USDC estimate calculated with the
+provider’s explicit `credit_pricing` rate, independently of server instructions.
 
 ```sh
 target/debug/x402_treazury catalog tags --provider providers/socialfetch.toml
@@ -900,6 +901,31 @@ use `[spec, dynamic]`; unrecognized vendor pricing structures retain their detai
 with `[spec]`. Unknown assets retain their denomination and network information.
 Dollar amounts elsewhere in prose do not suppress the suffix: only an identical
 suffix already at the end is omitted.
+
+Providers with structured credit tariffs can opt into display conversion:
+
+```toml
+pricing_key = "x-socialfetch-credits-pricing" # preserve original billing prose
+[credit_pricing]
+credit_cost_key = "x-socialfetch-pricing"
+usdc_per_credit = "0.014"
+```
+
+The decimal rate must be positive, with at most six decimal places. Conversion uses
+exact integer arithmetic and changes descriptions only, never payment challenges,
+spending caps or signing. The supported version-1 metadata describes `baseCredits`,
+`maxCredits`, `normalizationFailureCredits`, `surcharges`, optional URL batches and
+per-returned-record metering. Conditional surcharge amounts are shown as upper
+bounds, since the metadata may describe a maximum across multiple assets.
+Original credit prose remains alongside the estimate. Missing, malformed or unknown
+metadata retains that prose and the configured rate, explicitly marks the per-call
+estimate unavailable, and logs a warning.
+
+SocialFetch enables this using the historical 0.014 USDC/credit estimate; it is not
+a verified current x402 tariff. Every converted tool names the configured rate and
+states that the payment challenge is authoritative. Source instruction overrides
+and tag filtering (including `privacy.toml`) preserve these per-tool estimates.
+An explicit tool description override still replaces the generated description.
 
 MCP server instructions preserve authored guidance and include this caveat once:
 

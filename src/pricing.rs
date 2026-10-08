@@ -1,5 +1,5 @@
 //! Unsigned, one-shot discovery. Successful and failed attempts never refresh.
-use crate::catalog::{Config, ToolSpec, operations};
+use crate::catalog::{Config, ToolSpec, operations_with_credits};
 use anyhow::{Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::{StreamExt, stream};
@@ -54,6 +54,9 @@ pub fn process_cache() -> &'static PricingCache {
     CACHE.get_or_init(PricingCache::default)
 }
 pub fn validate(cfg: &Config) -> Result<()> {
+    if let Some(credits) = &cfg.credit_pricing {
+        credits.validate()?;
+    }
     ensure!(
         cfg.probe_concurrency > 0,
         "probe_concurrency must be positive"
@@ -177,16 +180,28 @@ impl PricingCache {
                 evidence,
             });
         }
-        let priced: BTreeSet<_> = operations(root, cfg.pricing_key.as_deref())?
-            .into_iter()
-            .filter(|o| !o["pricing"].is_null() && o["pricing"] != serde_json::json!({}))
-            .map(|o| {
-                (
-                    o["method"].as_str().unwrap_or("").to_uppercase(),
-                    o["path"].as_str().unwrap_or("").to_owned(),
-                )
+        let priced: BTreeSet<_> = operations_with_credits(
+            root,
+            cfg.pricing_key.as_deref(),
+            cfg.credit_pricing
+                .as_ref()
+                .map(|c| c.credit_cost_key.as_str()),
+        )?
+        .into_iter()
+        .filter(|o| {
+            ["pricing", "credit_pricing"].iter().any(|key| {
+                (*key != "credit_pricing" || cfg.credit_pricing.is_some())
+                    && !o[key].is_null()
+                    && o[key] != serde_json::json!({})
             })
-            .collect();
+        })
+        .map(|o| {
+            (
+                o["method"].as_str().unwrap_or("").to_uppercase(),
+                o["path"].as_str().unwrap_or("").to_owned(),
+            )
+        })
+        .collect();
         let mut candidates = Vec::new();
         for tool in tools {
             if tool.help_url.is_some() {

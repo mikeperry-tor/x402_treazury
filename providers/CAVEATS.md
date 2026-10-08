@@ -54,8 +54,12 @@ retains other API versions: `socialfetch_twitter_profiles_handle` and
 `socialfetch_v2_linkedin_*`. Original request paths remain intact; keep the base
 URL at `https://api.socialfetch.dev`.
 
-Credit pricing comes from `x-socialfetch-credits-pricing`, supplemented by
-credit-to-USDC guidance in `instructions_text`. Pricing probes are disabled;
+Credit prose comes from `x-socialfetch-credits-pricing`. The provider's
+`credit_pricing` setting converts structured `x-socialfetch-pricing` metadata
+into per-tool USDC estimates, including metered costs and maximums, while retaining
+that prose. The configured 0.014 USDC/credit is a historical estimate, not a verified
+current x402 tariff; the payment challenge remains authoritative. Instruction
+overrides and platform filters retain estimates. Pricing probes are disabled;
 no endpoint sweep is needed. Fetching the live spec still requires one startup
 request. Use a 90-second timeout for slow search/transcript calls.
 

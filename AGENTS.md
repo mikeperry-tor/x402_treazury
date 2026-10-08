@@ -273,6 +273,11 @@ and [the runtime architecture](docs/architecture.md).
   never probes. Respect source probe opt-outs. Distinguish advertised estimates,
   observed probe prices, metered maximums and unknown prices in descriptions.
   Help is lazy and cached after success.
+- Optional provider `credit_pricing` converts structured credit tariffs into per-tool
+  USDC display estimates using an explicit decimal rate. Preserve original billing
+  prose and estimate provenance; unsupported metadata must remain visibly unknown.
+  Conversion never changes payment authority. Instruction overrides and tag filters
+  retain estimates; authored tool description overrides still apply last.
 - `src/http_cache.rs` persists only header-supported remote catalogs and derived
   pricing estimates under existing treasury `state_dir/http-cache/`. Respect
   `http_cache_enabled=false`, network/transport scope, HTTP freshness and validators;

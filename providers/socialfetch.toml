@@ -14,3 +14,8 @@ help_url = "https://www.socialfetch.dev/llms.txt"
 
 [overrides.socialfetch_help]
 description = "Read Social Fetch's API usage guide, fetched on demand and cached for this process. The guide describes its API-key product and broader monitor/webhook workflows; this integration uses the x402 host and selected tools with Treazury-managed payment, without a vendor API key. Preserve lookupStatus, partial-result and provenance fields."
+
+# Convert structured credit costs into USDC estimates in each tool description.
+[credit_pricing]
+credit_cost_key = "x-socialfetch-pricing"
+usdc_per_credit = "0.014"

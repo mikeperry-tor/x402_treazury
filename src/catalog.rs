@@ -1,3 +1,6 @@
+mod credit_pricing;
+pub use credit_pricing::CreditPricing;
+
 use anyhow::{Context, Result, bail, ensure};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use regex::Regex;
@@ -114,6 +117,8 @@ pub struct Config {
     pub tags: Vec<String>,
     pub exclude_tags: Vec<String>,
     pub pricing_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credit_pricing: Option<CreditPricing>,
     pub probe_pricing: bool,
     pub probe_ttl_seconds: f64,
     pub probe_concurrency: usize,
@@ -168,6 +173,7 @@ impl Default for Config {
             tags: vec![],
             exclude_tags: vec![],
             pricing_key: None,
+            credit_pricing: None,
             probe_pricing: true,
             probe_ttl_seconds: 3600.0,
             probe_concurrency: 4,
@@ -615,12 +621,28 @@ fn schema(node: &Value) -> Value {
 }
 
 pub fn operations(root: &Value, pricing_key: Option<&str>) -> Result<Vec<Value>> {
+    operations_with_credits(root, pricing_key, None)
+}
+
+pub(crate) fn operations_with_credits(
+    root: &Value,
+    pricing_key: Option<&str>,
+    credit_key: Option<&str>,
+) -> Result<Vec<Value>> {
     if root.get("paths").is_none() {
-        return root
+        let mut ops = root
             .get("operations")
             .and_then(Value::as_array)
             .cloned()
-            .context("expected OpenAPI paths or operations digest");
+            .context("expected OpenAPI paths or operations digest")?;
+        if let Some(key) = credit_key {
+            for op in &mut ops {
+                if let Some(metadata) = op.get(key).cloned() {
+                    op["credit_pricing"] = metadata;
+                }
+            }
+        }
+        return Ok(ops);
     }
     let mut ops = Vec::new();
     for (path, item) in root["paths"]
@@ -654,7 +676,7 @@ pub fn operations(root: &Value, pricing_key: Option<&str>) -> Result<Vec<Value>>
             });
             ops.push(json!({"path":path, "method":method, "summary":op["summary"],
                 "description":op["description"], "tags":op.get("tags").cloned().unwrap_or(json!([])),
-                "pricing":pricing_key.and_then(|k| op.get(k)), "params":params, "body":body}));
+                "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body}));
         }
     }
     Ok(ops)
@@ -779,6 +801,9 @@ pub fn build_tools_with_prices(
     prefix: &str,
     prices: &BTreeMap<(String, String), String>,
 ) -> Result<Vec<ToolSpec>> {
+    if let Some(credits) = &cfg.credit_pricing {
+        credits.validate()?;
+    }
     let selected = selected_operations(cfg, root, prefix)?;
     let mut tools = selected
         .into_iter()
@@ -831,7 +856,13 @@ fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
 
 // Selection and collision naming depend on the entire sorted inventory.
 fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(Value, String)>> {
-    let mut ops = operations(root, cfg.pricing_key.as_deref())?;
+    let mut ops = operations_with_credits(
+        root,
+        cfg.pricing_key.as_deref(),
+        cfg.credit_pricing
+            .as_ref()
+            .map(|c| c.credit_cost_key.as_str()),
+    )?;
     for op in &ops {
         ensure!(
             op["path"].is_string() && op["method"].is_string(),
@@ -1038,6 +1069,14 @@ fn operation_description(
         ))
     {
         price = line.clone();
+    }
+    if let Some(credits) = &cfg.credit_pricing {
+        let estimate = credits.describe(&op["credit_pricing"]);
+        price = if price == DEFAULT_PRICE {
+            estimate
+        } else {
+            format!("{price} {estimate}")
+        };
     }
     // Dollar amounts elsewhere in vendor prose do not establish price provenance.
     // Only omit a suffix that is already present verbatim.

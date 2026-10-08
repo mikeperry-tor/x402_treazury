@@ -709,6 +709,10 @@
     "reliability_note": "Catalog/help timeouts and partially degraded paid results have occurred. Inspect per-upstream errors separately from useful data. Tor causation is not established."
   },
   "providers/socialfetch.toml": {
+    "credit_pricing": {
+      "credit_cost_key": "x-socialfetch-pricing",
+      "usdc_per_credit": "0.014"
+    },
     "additional_properties": null,
     "allow_http1": false,
     "allow_tls12": false,
