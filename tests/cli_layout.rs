@@ -53,6 +53,7 @@ fn executable_name_version_and_example_inspection_are_portable() {
         vec!["catalog", "route", "--help"],
         vec!["config", "show", "--help"],
         vec!["wallet", "init", "--help"],
+        vec!["wallet", "recover", "--help"],
         vec!["sources", "inspect", "--help"],
     ] {
         let result = run(&args);

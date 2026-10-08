@@ -69,8 +69,10 @@ policy, including Tor.
 
 The JSON result lists `bootstrapped_wallets`: durable completion of initial pairs,
 not a fresh balance or payment-admission guarantee. Repeating the command skips
-completed pairs and resumes existing incomplete jobs without resetting them.
-Degraded funding requires operator inspection/recovery; cancellation drains
+completed pairs and resumes incomplete jobs, including eligible recovery. Signed
+transactions are replaced only after the existing canonical expiry and unspent-input
+proof succeeds. Unknown preparation outcomes and conflicting evidence still require
+operator review; cancellation drains
 accepted financial work and preserves journals. Treasury ZEC funding and Base
 confirmation can take time. The command introduces no new spending limits.
 
@@ -236,19 +238,29 @@ entire backup as spending material. To restore, stop the original process and us
 original and restored copies simultaneously. A Zcash mnemonic alone cannot restore
 random EVM keys, pending payment authorizations or the rotation journal.
 
-To retry a job that never produced signed bytes, stop serving and run:
+To assess existing funding problems and perform one recovery pass, stop serving and run:
 
 ```sh
-target/debug/x402_treazury wallet recover-unprepared \
-  --state-dir /path/to/state --key-file /path/to/key \
-  --treasury-id <UUID> --job-id <UUID-from-status>
+target/release/x402_treazury wallet recover --config servers.toml
 ```
 
-This archives the encrypted quote/refund bindings, releases only an unconsumed
-reservation, and assigns a new operation ID and refund derivation for the retry.
-It refuses any outgoing transaction record, including resolved transactions.
-Use `wallet reconcile` for possibly submitted deposits; neither a failed swap nor
-an absent/expired transaction is enough to release source liability.
+The JSON report distinguishes `recovered`, `waiting`, `operator_required` and
+`check_failed`. This command does not create pools, request quotes, prepare deposits
+or broadcast transactions. It uses the same recovery logic as bootstrap and serving.
+A known pre-preparation failure can reset an eligible unprepared job. A signed
+operation retains its reservation until verified expiry; submitted or ambiguous
+operations are reconciled first, never automatically rebroadcast. Recovery archives
+the original operation and resets the job under a new operation ID. Run bootstrap
+after successful standalone recovery to continue funding.
+
+The wallet profile's `max_attempts` also bounds recovery using archived job history,
+including quote refreshes, across process restarts. Reaching that bound requires
+operator review; repeated bootstrap/recover commands do not reset it. Funding budgets
+still apply to every replacement. Qualification runs require separately authorized
+recovery; this path does not grant new qualification authority. Missing bytes alone never authorize retry after
+uncertain preparation. Refund handling and confirmed deposits with unresolved swap
+outcomes are reported for operator review. The low-level recovery commands remain
+available for advanced use, but are omitted from ordinary help.
 
 Managed serving reconciles each pool's Base balances and authorizations every five
 seconds, sharing the admission gate with paid calls. This can resolve confirmed
@@ -306,9 +318,10 @@ operation ID with `wallet reconcile --config servers.toml --operation-id UUID
 only the fee counts as new expense. Each proposal selects one address, never
 combining unrelated swaps. Both calculation and submission use the existing
 restart-safe outgoing journal. Refund principal becomes shielded spendable only
-after the shielding transaction confirms. For an expired deposit or shielding operation, use
-`wallet recover-expired --config servers.toml --operation-id UUID` with serving
-stopped. It requires a fresh tip beyond expiry by the configured confirmation
+after the shielding transaction confirms. Expired funding deposits use automatic
+recovery or `wallet recover --config servers.toml`. For an individual shielding
+operation, the advanced `wallet recover-expired --config servers.toml --operation-id UUID`
+remains available with serving stopped. Expiry recovery requires a fresh tip beyond expiry by the configured confirmation
 count, no positive indexer inclusion, synced invalidation, and confirmed unspent inputs
 matched against the immutable preparation snapshot. It then releases the reservation
 and resets any unfinished funding job with a new operation ID. Signed bytes and
@@ -643,7 +656,8 @@ and every five seconds in the background.
 
 Pools can spend independently verified Base balances and promote funded standbys.
 Queued replacements are funded only with `funding.auto_fund = true`. Refund shielding
-and source-expiry recovery require the explicit operator commands described above.
+requires explicit operator handling. Eligible source-expiry recovery runs automatically
+with funding, or through `wallet recover` while serving is stopped.
 
 The [lifecycle qualification matrix](../tests/LIFECYCLE.md) maps each recovery and
 funding invariant to its offline or consensus test. The combined lifecycle test

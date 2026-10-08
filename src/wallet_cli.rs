@@ -66,7 +66,10 @@ enum Action {
         #[arg(long)]
         rebroadcast: bool,
     },
+    /// Classify existing funding jobs and perform one guarded recovery pass; never submits funds.
+    Recover,
     /// Release an expired operation after proving canonical absence and unspent inputs.
+    #[command(hide = true)]
     RecoverExpired {
         #[arg(long)]
         operation_id: String,
@@ -77,6 +80,7 @@ enum Action {
         job_id: String,
     },
     /// Retry an unprepared funding job; refuses operations with signed bytes.
+    #[command(hide = true)]
     RecoverUnprepared {
         #[arg(long)]
         job_id: String,
@@ -127,6 +131,11 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
                 meta_config: configured_path()?,
                 operation_id,
                 rebroadcast,
+            });
+        }
+        Action::Recover => {
+            return Ok(Command::Recover {
+                meta_config: configured_path()?,
             });
         }
         Action::RecoverExpired { operation_id } => {
@@ -245,6 +254,9 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
 // Keep wallet commands recognizable in reduced builds so they can report feature requirements.
 #[cfg_attr(not(feature = "zcash"), allow(dead_code))]
 enum Command {
+    Recover {
+        meta_config: PathBuf,
+    },
     Bootstrap {
         meta_config: PathBuf,
     },
@@ -346,6 +358,10 @@ async fn run_args(
         let summary = crate::deployment::bootstrap_wallets(&meta_config).await?;
         println!("{}", serde_json::to_string_pretty(&summary)?);
         return Ok(());
+    }
+    #[cfg(feature = "zcash")]
+    if let Command::Recover { meta_config } = command {
+        return recover_funding(meta_config, network).await;
     }
     if let Command::Status { state_dir } = command {
         let status =
@@ -474,11 +490,55 @@ async fn execute_wallet_command(
         | Command::Addresses { .. }
         | Command::Status { .. }
         | Command::Backup { .. }
-        | Command::RecoverUnprepared { .. } => {
+        | Command::RecoverUnprepared { .. }
+        | Command::Recover { .. } => {
             unreachable!()
         }
     };
     Ok(treasury)
+}
+
+#[cfg(feature = "zcash")]
+async fn recover_funding(
+    path: PathBuf,
+    network: crate::rotation::store::TreasuryNetwork,
+) -> Result<()> {
+    let config: crate::deployment::MetaConfig =
+        toml::from_str(&tokio::fs::read_to_string(&path).await?)?;
+    let wallets = config.validate()?.wallets;
+    let (mut treasury, settings) = configured(&path, network).await?;
+    let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
+    let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
+        indexer.clone(),
+        indexer,
+        network,
+    )?;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let result = finish_on_shutdown(&stop, async {
+        let status = treasury.status().await?;
+        let mut reports = Vec::new();
+        for job in status.funding_jobs.iter().filter(|job| crate::treasury::recovery::needs_recovery(job) || job.last_error.is_some()) {
+            let outcome = match wallets.get(&job.pool_name) {
+                Some(crate::rotation::config::WalletConfig::ZcashRotation { max_attempts, .. }) => {
+                    match treasury.recover_funding_job(job.id.clone(), *max_attempts, &mut sender, &stop).await {
+                        Ok(outcome) => serde_json::to_value(outcome)?,
+                        Err(error) => serde_json::json!({"status":"check_failed", "reason":crate::treasury::diagnostics::sync_failure(&error)}),
+                    }
+                }
+                _ => serde_json::json!({"status":"operator_required", "reason":"wallet_profile_missing"}),
+            };
+            reports.push(serde_json::json!({"job_id":job.id, "pool_name":job.pool_name, "previous_error":job.last_error, "outcome":outcome}));
+            if stop.is_cancelled() { break; }
+        }
+        anyhow::ensure!(!stop.is_cancelled(), "wallet recovery interrupted; accepted recovery results retained");
+        anyhow::Ok(reports)
+    }).await;
+    treasury.close().await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({"recovery":result?}))?
+    );
+    Ok(())
 }
 
 #[cfg(feature = "zcash")]

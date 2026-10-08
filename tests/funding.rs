@@ -10,6 +10,7 @@ struct Fake {
     store: StoreHandle,
     sends: usize,
     reconcile_error: Option<&'static str>,
+    recovery: Option<x402_treazury::treasury::recovery::RecoveryOutcome>,
     chain_credit: bool,
     status_error: bool,
     status_calls: usize,
@@ -23,6 +24,13 @@ struct Fake {
     timeout: u64,
 }
 impl FundingBackend for Fake {
+    async fn recover(
+        &mut self,
+        _: &FundingJob,
+    ) -> Result<Option<x402_treazury::treasury::recovery::RecoveryOutcome>> {
+        Ok(self.recovery.clone())
+    }
+
     fn swap_timeout_seconds(&self) -> u64 {
         self.timeout
     }
@@ -182,6 +190,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             store: store.clone(),
             sends: 0,
             reconcile_error: None,
+            recovery: None,
             chain_credit: false,
             status_error: false,
             status_calls: 0,
@@ -273,6 +282,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             store: store.clone(),
             sends: 0,
             reconcile_error: None,
+            recovery: None,
             chain_credit: true,
             status_error: false,
             status_calls: 0,
@@ -340,6 +350,7 @@ async fn fixture() -> (
             store: store.clone(),
             sends: 0,
             reconcile_error: None,
+            recovery: None,
             chain_credit: false,
             status_error: false,
             status_calls: 0,
@@ -1055,6 +1066,43 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
         status.funding_jobs[0].phase,
         x402_treazury::rotation::store::funding::FundingPhase::Swapping
     );
+    drop(worker);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
+    use x402_treazury::{
+        rotation::store::funding::FundingPhase, treasury::recovery::RecoveryOutcome,
+    };
+    let (_dir, mut worker, task) = fixture().await;
+    let now = x402_treazury::rotation::base::now().unwrap();
+    worker.backend.quote_deadline = now + 450;
+    worker.tick(now).await.unwrap();
+    worker.tick(now + 100).await.unwrap();
+    worker.tick(now + 200).await.unwrap();
+    worker.backend.recovery = Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
+    for i in 3..6 {
+        worker.tick(now + i * 1000).await.unwrap();
+        let status = worker.store.call(|s| s.status()).await.unwrap();
+        assert_eq!(status.funding_jobs[0].phase, FundingPhase::RecoveryRequired);
+        assert_eq!(status.treasury_operations[0].submission, "PREPARED");
+        assert_eq!(status.treasury_operations[0].attempts, 0);
+        assert_eq!(worker.backend.sends, 0);
+    }
+    worker.backend.recovery = Some(RecoveryOutcome::OperatorRequired(
+        "recovery_attempt_limit_reached",
+    ));
+    worker.tick(now + 6000).await.unwrap();
+    let status = worker.store.call(|s| s.status()).await.unwrap();
+    assert!(
+        status.funding_jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("recovery_attempt_limit_reached")
+    );
+    assert_eq!(worker.backend.sends, 0);
     drop(worker);
     task.await.unwrap();
 }

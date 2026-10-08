@@ -4,6 +4,7 @@ pub mod birthday;
 pub(crate) mod diagnostics;
 mod expiry;
 mod freshness;
+pub mod recovery;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;

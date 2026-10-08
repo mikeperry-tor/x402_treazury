@@ -185,7 +185,12 @@ target/release/x402_treazury wallet bootstrap \
 ```
 
 Bootstrap uses the configured funding limits and waits for confirmed USDC credit.
-Repeating it skips completed initial pairs and resumes unfinished funding work.
+Repeating it skips completed initial pairs and resumes unfinished funding work,
+including eligible automatic recovery. Prepared deposits that missed their quote
+window wait for verified transaction expiry before funding retries. For a single
+recovery pass with serving stopped, use `wallet recover --config FILE`; it reports
+what recovered, what is waiting, and what needs operator attention without sending
+funds. Recovery attempts remain bounded across restarts.
 The wallets are now set up for paid discovery and API calls.
 
 ### 4. Optionally warm the catalogs

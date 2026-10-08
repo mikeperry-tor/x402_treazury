@@ -13,6 +13,14 @@ use std::future::Future;
 use tokio_util::sync::CancellationToken;
 
 pub trait FundingBackend {
+    fn recover(
+        &mut self,
+        _job: &FundingJob,
+    ) -> impl Future<Output = Result<Option<crate::treasury::recovery::RecoveryOutcome>>> + Send
+    {
+        async { Ok(None) }
+    }
+
     fn swap_timeout_seconds(&self) -> u64 {
         1800
     }
@@ -56,14 +64,13 @@ impl<B: FundingBackend> FundingWorker<B> {
         // though the ordinary funding scheduler no longer selects them.
         let status = self.store.call(|s| s.status()).await?;
         for job in &status.funding_jobs {
-            if matches!(
-                job.phase,
-                FundingPhase::Complete | FundingPhase::RecoveryRequired
-            ) && status.treasury_operations.iter().any(|o| {
-                o.operation_id == job.operation_id
-                    && o.attempts > 0
-                    && !matches!(o.submission.as_str(), "CONFIRMED" | "EXPIRED")
-            }) && job.next_poll <= instant
+            if matches!(job.phase, FundingPhase::Complete)
+                && status.treasury_operations.iter().any(|o| {
+                    o.operation_id == job.operation_id
+                        && o.attempts > 0
+                        && !matches!(o.submission.as_str(), "CONFIRMED" | "EXPIRED")
+                })
+                && job.next_poll <= instant
             {
                 let result = self
                     .backend
@@ -71,6 +78,43 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .await
                     .map(|_| ())
                     .context("source_reconciliation_failed");
+                self.finish_step(job, instant, result).await?;
+            }
+        }
+        if let Some(job) = status
+            .funding_jobs
+            .iter()
+            .filter(|job| {
+                crate::treasury::recovery::needs_recovery(job)
+                    && job.phase != FundingPhase::RefundPending
+                    && job.next_poll <= instant
+            })
+            .min_by_key(|job| job.next_poll)
+        {
+            let recovery = self.backend.recover(job).await;
+            let handled = !matches!(
+                &recovery,
+                Ok(None)
+                    | Ok(Some(crate::treasury::recovery::RecoveryOutcome::Waiting(
+                        "source_confirmed_waiting_for_swap"
+                    )))
+            );
+            let result = match recovery {
+                Ok(Some(crate::treasury::recovery::RecoveryOutcome::Recovered)) => {
+                    tracing::info!(job_id = %job.id, pool_id = %job.pool_id, "funding recovery verified; retrying with a new quote under existing funding limits");
+                    Ok(())
+                }
+                Ok(Some(crate::treasury::recovery::RecoveryOutcome::Waiting(reason))) => {
+                    tracing::debug!(job_id = %job.id, pool_id = %job.pool_id, reason, "funding recovery waiting; will check again automatically");
+                    Ok(())
+                }
+                Ok(Some(crate::treasury::recovery::RecoveryOutcome::OperatorRequired(reason))) => {
+                    Err(anyhow::anyhow!(RecoveryBlocked(reason)))
+                }
+                Ok(None) => Ok(()),
+                Err(error) => Err(error),
+            };
+            if handled {
                 self.finish_step(job, instant, result).await?;
             }
         }
@@ -304,6 +348,15 @@ impl<B: FundingBackend> FundingWorker<B> {
     }
 }
 
+#[derive(Debug)]
+struct RecoveryBlocked(&'static str);
+impl std::fmt::Display for RecoveryBlocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for RecoveryBlocked {}
+
 /// Production adapters are assembled by the owner, never by MCP arguments.
 pub struct Backend {
     pub treasury: crate::treasury::actor::TreasuryHandle,
@@ -356,6 +409,16 @@ impl Backend {
     }
 }
 impl FundingBackend for Backend {
+    async fn recover(
+        &mut self,
+        job: &FundingJob,
+    ) -> Result<Option<crate::treasury::recovery::RecoveryOutcome>> {
+        self.treasury
+            .recover_funding(job.id.clone(), self.max_attempts(job))
+            .await
+            .map(Some)
+    }
+
     fn swap_timeout_seconds(&self) -> u64 {
         self.funding.swap_timeout_seconds
     }
@@ -600,6 +663,10 @@ fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'stati
 /// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
 /// quote addresses or arbitrary error prose into the public journal.
 fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
+    if let Some(blocked) = error.downcast_ref::<RecoveryBlocked>() {
+        return format!("funding_recovery_requires_operator; {}", blocked.0);
+    }
+
     if error
         .downcast_ref::<super::base::VerificationStage>()
         .is_some_and(|stage| stage.0 == "funding credit persistence")
@@ -677,10 +744,10 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
             }
             "prepared_quote_window_exhausted" => {
-                return "prepared_quote_window_exhausted; fewer than 300 seconds remained before the swap quote deadline; no submission attempted; signed bytes retained; use wallet recover-expired after transaction expiry, then retry bootstrap";
+                return "prepared_quote_window_exhausted; fewer than 300 seconds remained before the swap quote deadline; no submission attempted; signed bytes retained; automatic recovery will wait for transaction expiry before retrying funding; wallet recover can inspect recovery";
             }
             "quote_refresh_exhausted" => {
-                return "quote_refresh_exhausted; review deadlines and recover-unprepared explicitly";
+                return "quote_refresh_exhausted; automatic recovery can retry within the durable recovery limit; use wallet recover for an assessment";
             }
             "source_reconciliation_failed" => {
                 return "source_reconciliation_failed; retain reservation and inspect wallet status";

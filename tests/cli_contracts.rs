@@ -487,6 +487,37 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         .treasury_id;
     let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
     store.ensure_pool("web", "2").unwrap();
+    let recovery_job = store.funding_jobs().unwrap().remove(0);
+    store
+        .advance_funding(
+            &recovery_job.id,
+            FundingPhase::Allocated,
+            FundingPhase::RecoveryRequired,
+        )
+        .unwrap();
+    store
+        .defer_funding(
+            &recovery_job.id,
+            0,
+            Some("quote_refresh_exhausted; no preparation started"),
+            false,
+        )
+        .unwrap();
+    drop(store);
+    // Recovery works with auto_fund=false and unavailable catalog/RPC URLs;
+    // safe unprepared reset requires no network, listener token or new transfer.
+    let report = good(
+        run(
+            dir,
+            &["wallet", "recover", "--config", "deployment.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(report["recovery"][0]["outcome"]["status"], "recovered");
+    let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
+    assert!(store.status().unwrap().treasury_operations.is_empty());
+    assert_eq!(store.funding_recovery_count(&recovery_job.id).unwrap(), 1);
     for job in store.funding_jobs().unwrap() {
         // Synthetic confirmed credit, never a real transfer or live RPC.
         store

@@ -197,6 +197,18 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     };
     assert_eq!(id, job.operation_id);
     assert!(!retry);
+    let (recovered, observed) = tokio::join!(backend.recover(&job), commands.test_observe());
+    assert!(matches!(
+        recovered.unwrap(),
+        Some(crate::treasury::recovery::RecoveryOutcome::Waiting(
+            "waiting_for_transaction_expiry"
+        ))
+    ));
+    let ObservedCommand::RecoverFunding(id, limit) = observed else {
+        panic!("wrong recovery command")
+    };
+    assert_eq!(id, job.id);
+    assert_eq!(limit, backend.max_attempts(&job));
     let (result, observed) = tokio::join!(backend.reconcile(&job), commands.test_observe());
     assert!(result.is_err());
     let ObservedCommand::Reconcile(id) = observed else {

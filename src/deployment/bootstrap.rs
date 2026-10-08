@@ -86,9 +86,6 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
             .find(|pool| &pool.name == name)
             .context("bootstrap pool missing from state")?;
         ensure!(pool.enabled, "wallet {name}: pool is disabled");
-        if pool.bootstrapped {
-            continue;
-        }
         let blocked: Vec<_> = status
             .funding_jobs
             .iter()
@@ -101,8 +98,19 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
                         ))
             })
             .collect();
-        if !blocked.is_empty() {
-            let details = blocked
+        if pool.bootstrapped && blocked.is_empty() {
+            continue;
+        }
+        let automatic = !blocked.is_empty()
+            && blocked
+                .iter()
+                .all(|job| crate::treasury::recovery::can_recover(status, job));
+        let manual: Vec<_> = blocked
+            .into_iter()
+            .filter(|job| !crate::treasury::recovery::can_recover(status, job))
+            .collect();
+        if !manual.is_empty() {
+            let details = manual
                 .into_iter()
                 .map(|job| blocked_job(status, job))
                 .collect::<Vec<_>>()
@@ -110,7 +118,7 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
             bail!("wallet {name}: bootstrap blocked; completed funding is retained\n{details}");
         }
         ensure!(
-            !pool.funding_degraded,
+            !pool.funding_degraded || automatic,
             "wallet {name}: funding is degraded with no recovery job identified; inspect wallet status --config FILE; completed funding is retained"
         );
         ready = false;
@@ -130,27 +138,7 @@ fn blocked_job(status: &Status, job: &crate::rotation::store::funding::FundingJo
         .unwrap_or_else(|| {
             "not recorded; this alone does not prove preparation never started".into()
         });
-    let next = if job.phase == FundingPhase::RecoveryRequired && operation.is_none() {
-        format!(
-            "To explicitly retry an unprepared job, run wallet recover-unprepared --config FILE --job-id {}; this resets only an eligible unprepared job and refuses signed bytes or consumed budget. After successful recovery, rerun bootstrap.",
-            job.id
-        )
-    } else if job.phase == FundingPhase::RecoveryRequired
-        && operation.is_some_and(|op| op.submission == "PREPARED" && op.attempts == 0)
-    {
-        format!(
-            "Prepared bytes exist with no recorded submission. After transaction expiry, run wallet recover-expired --config FILE --operation-id {}; it verifies canonical absence and unspent inputs before resetting this job. Then rerun bootstrap. Quote deadline and transaction expiry are different; do not use recover-unprepared or rebroadcast.",
-            job.operation_id
-        )
-    } else if operation.is_some_and(|op| op.submission != "CONFIRMED" && op.submission != "EXPIRED")
-    {
-        format!(
-            "Run wallet reconcile --config FILE --operation-id {} to observe the existing deposit without rebroadcasting. Reconciliation alone may not clear the funding recovery state; do not create a replacement deposit.",
-            job.operation_id
-        )
-    } else {
-        "Inspect wallet status --config FILE and the swap/refund outcome; source confirmation alone does not establish destination credit or authorize a replacement deposit.".into()
-    };
+    let next = "Run wallet recover --config FILE for a guarded recovery assessment. Eligible jobs recover automatically during bootstrap; unresolved preparation, refunds and conflicting evidence require review. Completed funding and reservations are retained.";
     format!(
         "  job={} phase={} timed_out={} quote_attempts={}\n  last_error={}\n  source_operation={}\n  {}",
         job.id,
@@ -185,7 +173,15 @@ async fn supervise(
     let initial = store
         .call(|s| s.status())
         .await
-        .and_then(|s| complete(&s, &names));
+        .and_then(|s| {
+            let recovering = s.funding_jobs.iter().filter(|job| names.contains(&job.pool_name)
+                && crate::treasury::recovery::needs_recovery(job)
+                && crate::treasury::recovery::can_recover(&s, job)).count();
+            if recovering > 0 {
+                tracing::info!(jobs = recovering, "Recovering existing funding before bootstrap; waiting for verified transaction expiry where required; no manual recovery command needed");
+            }
+            complete(&s, &names)
+        });
     if !matches!(initial, Ok(false)) {
         drop(funding_runtime);
         drop(store);
@@ -379,7 +375,7 @@ mod tests {
         assert!(error.contains(&job.id));
         assert!(error.contains("RECOVERY_REQUIRED"));
         assert!(error.contains("last_error=not recorded"));
-        assert!(error.contains("wallet recover-unprepared --config FILE --job-id"));
+        assert!(error.contains("wallet recover --config FILE"));
         assert!(!error.contains(&job.recipient));
         status
             .treasury_operations
@@ -395,23 +391,26 @@ mod tests {
                 submission: "UNKNOWN".into(),
                 attempts: 1,
             });
-        let error = complete(&status, &names).unwrap_err().to_string();
+        assert!(!complete(&status, &names).unwrap());
+        let error = blocked_job(&status, &status.funding_jobs[0]);
         assert!(error.contains("source_operation=UNKNOWN (submission attempts=1)"));
-        assert!(error.contains("wallet reconcile --config FILE --operation-id"));
+        assert!(error.contains("wallet recover --config FILE"));
         assert!(!error.contains("recover-unprepared"));
         assert!(!error.contains("private-txid"));
         assert!(!error.contains("--rebroadcast"));
         status.treasury_operations[0].submission = "PREPARED".into();
         status.treasury_operations[0].attempts = 0;
-        let error = complete(&status, &names).unwrap_err().to_string();
-        assert!(error.contains("wallet recover-expired --config FILE --operation-id"));
+        assert!(!complete(&status, &names).unwrap());
+        let error = blocked_job(&status, &status.funding_jobs[0]);
+        assert!(error.contains("wallet recover --config FILE"));
         assert!(!error.contains("Run wallet reconcile"));
-        status.funding_jobs[0].last_error = Some("quote_refresh_exhausted".into());
+        status.funding_jobs[0].last_error =
+            Some("funding_recovery_requires_operator; recovery_attempt_limit_reached".into());
         assert!(
             complete(&status, &names)
                 .unwrap_err()
                 .to_string()
-                .contains("quote_refresh_exhausted")
+                .contains("recovery_attempt_limit_reached")
         );
     }
 

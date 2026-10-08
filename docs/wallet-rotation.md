@@ -271,22 +271,22 @@ and storage failures remain warnings with error backoff. Swap timeout, failed/re
 status and incomplete deposits emit explicit warnings describing continued
 reconciliation or required recovery.
 
-Bootstrap stops on funding jobs requiring recovery and reports their job IDs,
-phases, recorded errors and source submission status. A missing recorded reason
-is reported explicitly. `recover-unprepared` is a guarded mutation for eligible
-jobs without signed bytes or consumed budget; `reconcile` observes an existing
-deposit and does not, by itself, reset a funding job requiring recovery. Completed
-funding remains retained when bootstrap stops. Use the same deployment configuration
-for status, recovery and subsequent bootstrap commands.
+Bootstrap and the serving funding worker recover eligible jobs automatically.
+The operator can run `wallet recover --config FILE` with serving stopped for one
+pass through the same classifier, without starting funding or submitting transactions.
+Reports distinguish recovered, waiting, failed checks and operator-required cases.
+Unknown preparation outcomes, refunds and unresolved confirmed swaps require review.
 
 A prepared deposit is not submitted when fewer than 300 seconds remain before its
-swap quote deadline. The job enters `RECOVERY_REQUIRED` with
-`prepared_quote_window_exhausted`; its signed bytes and reservation remain retained.
-This is distinct from transaction expiry at a Zcash block height. For a prepared,
-unsubmitted operation, use `wallet recover-expired --operation-id ID --config FILE`
-after transaction expiry. Recovery verifies canonical absence and unspent inputs,
-then resets the funding job with a new operation identity; bootstrap can obtain a
-new quote. `recover-unprepared` cannot reset an operation with signed bytes.
+swap quote deadline. Its signed bytes and reservation remain retained while recovery
+waits for transaction expiry, which is a separate Zcash block height. Existing
+canonical absence, fresh-tip and unspent-input proofs authorize recovery; elapsed
+time alone does not. Submitted/ambiguous operations are reconciled before expiry
+recovery, never automatically rebroadcast. A successful recovery archives the old
+operation and returns the job to allocation under its existing funding budgets.
+The profile's `max_attempts` bounds resets using durable recovery/quote-refresh
+history; neither process restart nor operation replacement erases this count.
+
 
 The treasury receives/synchronizes Ironwood with capability checks on the injected
 lightwalletd transport. Network integration uses reviewed vendored channel-injection

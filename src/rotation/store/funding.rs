@@ -74,6 +74,16 @@ fn completed_error(error: Option<&str>) -> Option<&str> {
     error.filter(|e| e.starts_with("source_reconciliation_failed;"))
 }
 impl Store {
+    /// Recovery history survives restarts and operation replacement.
+    pub fn funding_recovery_count(&self, job: &str) -> Result<u64> {
+        let count: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM funding_recovery WHERE job_id=?1",
+            [job],
+            |r| r.get(0),
+        )?;
+        Ok(u64::try_from(count)?)
+    }
+
     /// Called only after a typed response proving the preparer was never invoked.
     /// Absence of bytes by itself is not authority to repeat preparation.
     pub fn defer_unstarted_preparation(&mut self, job: &str) -> Result<()> {

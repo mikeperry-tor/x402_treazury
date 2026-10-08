@@ -11,6 +11,11 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 enum Command {
+    RecoverFunding(
+        String,
+        u32,
+        oneshot::Sender<Result<super::recovery::RecoveryOutcome>>,
+    ),
     Refund(String, oneshot::Sender<Result<String>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(PrepareRequest, oneshot::Sender<Result<PreparedTransaction>>),
@@ -29,6 +34,15 @@ pub fn channel() -> (TreasuryHandle, TreasuryCommands) {
     (TreasuryHandle { sender }, TreasuryCommands { receiver })
 }
 impl TreasuryHandle {
+    pub async fn recover_funding(
+        &self,
+        id: String,
+        max_attempts: u32,
+    ) -> Result<super::recovery::RecoveryOutcome> {
+        self.call(|reply| Command::RecoverFunding(id, max_attempts, reply))
+            .await
+    }
+
     async fn call<T>(&self, make: impl FnOnce(oneshot::Sender<Result<T>>) -> Command) -> Result<T> {
         let (send, recv) = oneshot::channel();
         self.sender
@@ -76,6 +90,8 @@ impl Treasury {
                 command = commands.receiver.recv() => {
                     let Some(command) = command else { break };
                     match command {
+                        Command::RecoverFunding(id, max_attempts, reply) => { let _ = reply.send(self.recover_funding_job(id, max_attempts, &mut submission, &stop).await); }
+
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
                         Command::Prepare(request, reply) => {
@@ -116,6 +132,7 @@ impl Treasury {
 // Observe the real command boundary without substituting a fake FundingBackend.
 #[cfg(test)]
 pub(crate) enum ObservedCommand {
+    RecoverFunding(String, u32),
     Prepare(PrepareRequest),
     Submit(String, bool),
     Reconcile(String),
@@ -127,6 +144,12 @@ impl TreasuryCommands {
     }
     pub(crate) async fn test_observe(&mut self) -> ObservedCommand {
         match self.receiver.recv().await.expect("command channel closed") {
+            Command::RecoverFunding(id, limit, reply) => {
+                let _ = reply.send(Ok(super::recovery::RecoveryOutcome::Waiting(
+                    "waiting_for_transaction_expiry",
+                )));
+                ObservedCommand::RecoverFunding(id, limit)
+            }
             Command::Prepare(request, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
                 ObservedCommand::Prepare(request)

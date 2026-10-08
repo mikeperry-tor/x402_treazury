@@ -115,7 +115,12 @@ authentication and supervised funding options. Wallet commands
 accept the same deployment file without loading catalogs or requiring listener
 tokens. `wallet bootstrap` also consumes wallet assignments/funding settings and
 funds initial managed pairs; other wallet administration never starts funding
-workers. Do not combine deployment configuration with standalone location/network overrides.
+workers. `wallet recover --config FILE` performs one recovery pass without new
+allocations or submissions. Bootstrap/automatic funding share its eligibility logic:
+known unprepared failures or canonically expired signed operations only; uncertain
+preparation, refunds and unresolved confirmed swaps require review. Recovery reset
+limits use durable `funding_recovery` history and profile `max_attempts`, never a
+process-local counter. Do not combine deployment configuration with standalone location/network overrides.
 User-facing deployment examples live in `examples/deployments/`; network-only examples in
 `examples/network/`. Preserve user-owned local copies when changing layouts.
 

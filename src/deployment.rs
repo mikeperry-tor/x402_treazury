@@ -136,7 +136,7 @@ pub(crate) fn pattern(text: &str) -> Result<Regex> {
     Ok(Regex::new(&expression)?)
 }
 impl MetaConfig {
-    fn validate(&self) -> Result<Resolution> {
+    pub(crate) fn validate(&self) -> Result<Resolution> {
         self.startup.validate()?;
         self.network.validate()?;
         crate::discovery::policy::validate(self)?;
