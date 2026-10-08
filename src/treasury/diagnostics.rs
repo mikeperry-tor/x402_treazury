@@ -47,7 +47,7 @@ pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::E
             SyncError::SyncModeError(e) => mode_reason(e),
             SyncError::ChainError(..) => "wallet_ahead_of_chain",
             SyncError::BirthdayBelowSapling(..) => "birthday_below_sapling",
-            SyncError::ShardTreeError(_) => "shard_tree_error",
+            SyncError::ShardTreeError(e) => shard_reason(e),
             SyncError::TruncationError(..) => "truncation_checkpoint_missing",
             SyncError::PoolHistoryReopened { .. } => "pool_history_reopened",
             SyncError::TransparentAddressDerivationError(_) => "transparent_address_derivation",
@@ -121,13 +121,37 @@ fn scan_reason(error: &ScanError, diagnostic: &mut SyncDiagnostic) -> &'static s
     }
 }
 
+/// Match variants only: tree positions and addresses can reveal wallet activity.
+fn shard_reason(
+    error: &shardtree::error::ShardTreeError<std::convert::Infallible>,
+) -> &'static str {
+    use shardtree::error::{InsertionError, QueryError, ShardTreeError};
+    match error {
+        ShardTreeError::Query(QueryError::NotContained(_)) => "shard_query_not_contained",
+        ShardTreeError::Query(QueryError::CheckpointPruned) => "shard_checkpoint_pruned",
+        ShardTreeError::Query(QueryError::TreeIncomplete(_)) => "shard_tree_incomplete",
+        ShardTreeError::Insert(InsertionError::NotContained(_)) => "shard_insert_not_contained",
+        ShardTreeError::Insert(InsertionError::OutOfRange(..)) => "shard_insert_out_of_range",
+        ShardTreeError::Insert(InsertionError::Conflict(_)) => "shard_root_conflict",
+        ShardTreeError::Insert(InsertionError::CheckpointOutOfOrder) => {
+            "shard_checkpoint_out_of_order"
+        }
+        ShardTreeError::Insert(InsertionError::TreeFull) => "shard_tree_full",
+        ShardTreeError::Insert(InsertionError::InputMalformed(_)) => "shard_input_malformed",
+        ShardTreeError::Insert(InsertionError::MarkedRetentionInvalid) => {
+            "shard_marked_retention_invalid"
+        }
+        ShardTreeError::Storage(never) => match *never {},
+    }
+}
+
 fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'static str {
     match error {
         WalletError::CalculatedTxScanError(e) => scan_reason(e, diagnostic),
         WalletError::NoSyncData => "wallet_no_sync_data",
         WalletError::SyncIncomplete => "wallet_sync_incomplete",
         WalletError::CheckpointNotFound { .. } => "wallet_checkpoint_missing",
-        WalletError::ShardTreeError(_) => "wallet_shard_tree_error",
+        WalletError::ShardTreeError(e) => shard_reason(e),
         WalletError::TransactionRead(_) => "wallet_transaction_read",
         WalletError::TransactionWrite(_) => "wallet_transaction_write",
         WalletError::MigrationStateCorrupt(_) => "wallet_migration_state_corrupt",
@@ -200,6 +224,46 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shard_failures_distinguish_query_and_insertion_in_both_sync_paths() {
+        use shardtree::error::{InsertionError, QueryError, ShardTreeError};
+        let cases = [
+            (
+                ShardTreeError::Query(QueryError::CheckpointPruned),
+                "shard_checkpoint_pruned",
+            ),
+            (
+                ShardTreeError::Query(QueryError::TreeIncomplete(vec![])),
+                "shard_tree_incomplete",
+            ),
+            (
+                ShardTreeError::Insert(InsertionError::CheckpointOutOfOrder),
+                "shard_checkpoint_out_of_order",
+            ),
+            (
+                ShardTreeError::Insert(InsertionError::TreeFull),
+                "shard_tree_full",
+            ),
+            (
+                ShardTreeError::Insert(InsertionError::MarkedRetentionInvalid),
+                "shard_marked_retention_invalid",
+            ),
+        ];
+        for (cause, reason) in cases {
+            for error in [
+                LightClientError::SyncError(SyncError::ShardTreeError(cause.clone())),
+                LightClientError::WalletError(WalletError::ShardTreeError(cause)),
+            ] {
+                let error = client_failure(error, false);
+                assert_eq!(
+                    error.to_string(),
+                    format!("sync_scan_failed: reason={reason}")
+                );
+                assert_eq!(error.chain().count(), 1);
+            }
+        }
+    }
 
     #[test]
     fn grpc_causes_survive_nested_sync_errors_without_private_data() {

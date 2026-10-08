@@ -123,7 +123,12 @@ include numeric `grpc_code` and a fixed `grpc_status`, for example
 Code 4 (`DeadlineExceeded`) distinguishes a request deadline from code 14
 (`Unavailable`); neither alone establishes Tor as the cause.
 Other reasons distinguish tree-size mismatches, missing checkpoints, invalid
-indexer data and mempool shutdown timeouts. CLI errors and saved sync
+indexer data and mempool shutdown timeouts. Shard-tree errors identify the precise
+variant: for example, `shard_root_conflict`, `shard_checkpoint_pruned`,
+`shard_checkpoint_out_of_order` or `shard_tree_incomplete`. These describe the
+failed tree operation, not its root cause; they do not by themselves establish
+wallet corruption or authorize a reset/rescan. Tree addresses and note positions
+are omitted. CLI errors and saved sync
 `last_error` retain the same sanitized details. Upstream messages, metadata and
 wallet identifiers are omitted. These diagnostics do not change retry or funding
 policy; a successful sync is still required before new treasury preparation.
