@@ -93,6 +93,7 @@ required-features = ["zcash"]
 [patch."https://github.com/zingolabs/zingolib"]
 zingolib = { path = "vendor/zingolib" }
 zingo-netutils = { path = "vendor/zingo-netutils" }
+pepper-sync = { path = "vendor/pepper-sync" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -47,3 +47,4 @@ path = "../../tests/crypto_vectors.rs"
 [patch."https://github.com/zingolabs/zingolib"]
 zingolib = { path = "../../vendor/zingolib" }
 zingo-netutils = { path = "../../vendor/zingo-netutils" }
+pepper-sync = { path = "../../vendor/pepper-sync" }

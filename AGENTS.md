@@ -200,7 +200,8 @@ commands. Info reports catalog/pricing completion, listener startup and funding
 progress; download/parse/protocol details and accepted tip lag are debug. Warnings
 indicate failures, degraded operation or actionable configuration issues. Sync
 failures log fixed categories and typed reasons, plus numeric gRPC codes and fixed
-status names when available. Sanitize Zingolib errors before persistence or logging;
+status names when available. Shard-tree errors retain fixed pool and operation
+labels from the pinned Pepper Sync diagnostic patch. Sanitize Zingolib errors before persistence or logging;
 never retain upstream prose, metadata, wallet identifiers or credentials.
 Keep ordinary CLI errors legible even with backtrace environment variables enabled.
 

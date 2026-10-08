@@ -127,10 +127,12 @@ indexer data and mempool shutdown timeouts. Shard-tree errors identify the preci
 variant: for example, `shard_root_conflict`, `shard_checkpoint_pruned`,
 `shard_checkpoint_out_of_order` or `shard_tree_incomplete`. These describe the
 failed tree operation, not its root cause; they do not by themselves establish
-wallet corruption or authorize a reset/rescan. Tree addresses and note positions
-are omitted. CLI errors and saved sync
-`last_error` retain the same sanitized details. Upstream messages, metadata and
-wallet identifiers are omitted. These diagnostics do not change retry or funding
+wallet corruption or authorize a reset/rescan. Returned sync-engine tree failures
+also name `pool` (`sapling`, `orchard`, `ironwood`) and `operation`
+(`scan_merge`, `reorg_rollback`, `pool_recovery_rollback`). These fields survive in
+CLI errors and saved status, so a failed retry need not be reproduced just to
+recover the context. Tree addresses, note positions, upstream messages, metadata
+and wallet identifiers are omitted. These diagnostics do not change retry or funding
 policy; a successful sync is still required before new treasury preparation.
 
 

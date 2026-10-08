@@ -3789,7 +3789,6 @@ dependencies = [
 [[package]]
 name = "pepper-sync"
 version = "0.5.0"
-source = "git+https://github.com/zingolabs/zingolib?rev=c6381534f802b1022041beda4b01c106ad132329#c6381534f802b1022041beda4b01c106ad132329"
 dependencies = [
  "bip32",
  "byteorder",

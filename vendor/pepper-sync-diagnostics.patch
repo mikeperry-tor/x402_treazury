@@ -1,0 +1,295 @@
+--- a/pepper-sync/src/error.rs
++++ b/pepper-sync/src/error.rs
+@@ -22,6 +22,17 @@
+         link = cause.source();
+     }
+     texts.join(CAUSE_CHAIN_SEPARATOR)
++}
++
++/// Application diagnostic context; carries no wallet identifiers.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum ShardTreeOperation {
++    /// Merge scanned note commitments into retained tree data.
++    ScanMerge,
++    /// Roll back a pool to a retained checkpoint during reorg handling.
++    ReorgRollback,
++    /// Rewind an earlier pool during pool-history recovery.
++    PoolRecoveryRollback,
+ }
+ 
+ /// Top level error enumerating any error that may occur during sync
+@@ -53,6 +64,17 @@
+     /// Shard tree error.
+     #[error("shard tree error")]
+     ShardTreeError(#[from] ShardTreeError<Infallible>),
++    /// Same shard-tree failure with the pool and operation retained.
++    #[error("shard tree error in {pool} during {operation:?}")]
++    ShardTreeContext {
++        /// Pool whose tree rejected the operation.
++        pool: PoolType,
++        /// Operation that returned the original shard-tree error.
++        operation: ShardTreeOperation,
++        /// Original typed failure; caller must sanitize before logging.
++        #[source]
++        error: ShardTreeError<Infallible>,
++    },
+     /// Critical non-recoverable truncation error due to missing shard tree checkpoints.
+     #[error(
+         "critical non-recoverable truncation error at height {0} due to missing {1} shard tree checkpoints. wallet data cleared. rescan required."
+@@ -110,6 +132,7 @@
+             | SyncError::ChainError(..)
+             | SyncError::BirthdayBelowSapling(..)
+             | SyncError::ShardTreeError(_)
++            | SyncError::ShardTreeContext { .. }
+             | SyncError::TruncationError(..)
+             | SyncError::TransparentAddressDerivationError(_)
+             | SyncError::WalletError(_) => false,
+@@ -184,6 +207,7 @@
+             | SyncError::ChainError(..)
+             | SyncError::BirthdayBelowSapling(..)
+             | SyncError::ShardTreeError(_)
++            | SyncError::ShardTreeContext { .. }
+             | SyncError::TruncationError(..)
+             | SyncError::TransparentAddressDerivationError(_)
+             | SyncError::WalletError(_) => SyncRecoveryObservables::Abort,
+--- a/pepper-sync/src/sync.rs
++++ b/pepper-sync/src/sync.rs
+@@ -1695,13 +1695,28 @@
+         } else {
+             match pool {
+                 ShieldedPool::Sapling => {
+-                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.sapling)?;
++                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.sapling)
++                        .map_err(|error| SyncError::ShardTreeContext {
++                            pool: PoolType::SAPLING,
++                            operation: crate::error::ShardTreeOperation::PoolRecoveryRollback,
++                            error,
++                        })?;
+                 }
+                 ShieldedPool::Orchard => {
+-                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.orchard)?;
++                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.orchard)
++                        .map_err(|error| SyncError::ShardTreeContext {
++                            pool: PoolType::ORCHARD,
++                            operation: crate::error::ShardTreeOperation::PoolRecoveryRollback,
++                            error,
++                        })?;
+                 }
+                 ShieldedPool::Ironwood => {
+-                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.ironwood)?;
++                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.ironwood)
++                        .map_err(|error| SyncError::ShardTreeContext {
++                            pool: PoolType::IRONWOOD,
++                            operation: crate::error::ShardTreeOperation::PoolRecoveryRollback,
++                            error,
++                        })?;
+                 }
+             }
+         }
+--- a/pepper-sync/src/wallet/traits.rs
++++ b/pepper-sync/src/wallet/traits.rs
+@@ -17,7 +17,7 @@
+ use zcash_protocol::{PoolType, ShieldedPool};
+ use zip32::AccountId;
+ 
+-use crate::error::{ServerError, SyncError};
++use crate::error::{ServerError, ShardTreeOperation, SyncError};
+ use crate::keys::transparent::TransparentAddressId;
+ use crate::reset_spends;
+ use crate::shardtree_ext::{RollbackOutcome, ShardTreeExt};
+@@ -407,17 +407,32 @@
+             for tree in sapling_located_trees {
+                 shard_trees
+                     .sapling
+-                    .insert_tree(tree.subtree, tree.checkpoints)?;
++                    .insert_tree(tree.subtree, tree.checkpoints)
++                    .map_err(|error| SyncError::ShardTreeContext {
++                        pool: PoolType::SAPLING,
++                        operation: ShardTreeOperation::ScanMerge,
++                        error,
++                    })?;
+             }
+             for tree in orchard_located_trees {
+                 shard_trees
+                     .orchard
+-                    .insert_tree(tree.subtree, tree.checkpoints)?;
++                    .insert_tree(tree.subtree, tree.checkpoints)
++                    .map_err(|error| SyncError::ShardTreeContext {
++                        pool: PoolType::ORCHARD,
++                        operation: ShardTreeOperation::ScanMerge,
++                        error,
++                    })?;
+             }
+             for tree in ironwood_located_trees {
+                 shard_trees
+                     .ironwood
+-                    .insert_tree(tree.subtree, tree.checkpoints)?;
++                    .insert_tree(tree.subtree, tree.checkpoints)
++                    .map_err(|error| SyncError::ShardTreeContext {
++                        pool: PoolType::IRONWOOD,
++                        operation: ShardTreeOperation::ScanMerge,
++                        error,
++                    })?;
+             }
+ 
+             Ok(())
+@@ -482,7 +497,13 @@
+     match plan_pool_truncation(tree_facts(tree, truncate_height), truncate_height) {
+         PoolTruncation::Untouched => Ok(()),
+         PoolTruncation::ToCheckpoint { checkpoint } => {
+-            match tree.rollback_to_checkpoint(checkpoint)? {
++            match tree.rollback_to_checkpoint(checkpoint).map_err(|error| {
++                SyncError::ShardTreeContext {
++                    pool,
++                    operation: ShardTreeOperation::ReorgRollback,
++                    error,
++                }
++            })? {
+                 RollbackOutcome::RolledBack => Ok(()),
+                 RollbackOutcome::NoSuchCheckpoint => {
+                     tracing::error!(
+@@ -567,3 +588,144 @@
+ 
+     Ok(())
+ }
++
++#[cfg(test)]
++mod diagnostic_tests {
++    use super::*;
++    use crate::sync::ScanPriority;
++    use incrementalmerkletree::{Address, Level};
++    use shardtree::{
++        LocatedPrunableTree, RetentionFlags,
++        error::{InsertionError, ShardTreeError},
++    };
++
++    struct TreeWallet {
++        trees: ShardTrees,
++        sync: SyncState,
++        addresses: BTreeMap<TransparentAddressId, String>,
++    }
++    impl SyncWallet for TreeWallet {
++        type Error = std::convert::Infallible;
++        fn get_birthday(&self) -> Result<BlockHeight, Self::Error> {
++            Ok(0u32.into())
++        }
++        fn get_sync_state(&self) -> Result<&SyncState, Self::Error> {
++            Ok(&self.sync)
++        }
++        fn get_sync_state_mut(&mut self) -> Result<&mut SyncState, Self::Error> {
++            Ok(&mut self.sync)
++        }
++        fn get_unified_full_viewing_keys(
++            &self,
++        ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
++            Ok(HashMap::new())
++        }
++        fn add_orchard_address(
++            &mut self,
++            _: AccountId,
++            _: orchard::Address,
++            _: DiversifierIndex,
++        ) -> Result<(), Self::Error> {
++            unreachable!("merge fixture does not derive addresses")
++        }
++        fn add_sapling_address(
++            &mut self,
++            _: AccountId,
++            _: sapling_crypto::PaymentAddress,
++            _: DiversifierIndex,
++        ) -> Result<(), Self::Error> {
++            unreachable!("merge fixture does not derive addresses")
++        }
++        fn get_transparent_addresses(
++            &self,
++        ) -> Result<&BTreeMap<TransparentAddressId, String>, Self::Error> {
++            Ok(&self.addresses)
++        }
++        fn get_transparent_addresses_mut(
++            &mut self,
++        ) -> Result<&mut BTreeMap<TransparentAddressId, String>, Self::Error> {
++            Ok(&mut self.addresses)
++        }
++    }
++    impl SyncShardTrees for TreeWallet {
++        fn get_shard_trees(&self) -> Result<&ShardTrees, Self::Error> {
++            Ok(&self.trees)
++        }
++        fn get_shard_trees_mut(&mut self) -> Result<&mut ShardTrees, Self::Error> {
++            Ok(&mut self.trees)
++        }
++    }
++
++    fn conflict_pair<H: Hashable + Clone + PartialEq>()
++    -> (LocatedPrunableTree<H>, LocatedTreeData<H>) {
++        let address = Address::from_parts(Level::from(crate::witness::SHARD_HEIGHT), 0);
++        let existing = H::empty_leaf();
++        let incoming = H::combine(Level::from(0), &existing, &existing);
++        assert!(existing != incoming);
++        (
++            LocatedPrunableTree::with_root_value(address, (existing, RetentionFlags::EPHEMERAL)),
++            LocatedTreeData {
++                subtree: LocatedPrunableTree::with_root_value(
++                    address,
++                    (incoming, RetentionFlags::EPHEMERAL),
++                ),
++                checkpoints: BTreeMap::new(),
++            },
++        )
++    }
++
++    #[tokio::test]
++    async fn scan_merge_conflict_preserves_pool_context() {
++        for pool in [PoolType::SAPLING, PoolType::ORCHARD, PoolType::IRONWOOD] {
++            let mut wallet = TreeWallet {
++                trees: ShardTrees::new(),
++                sync: SyncState::new(),
++                addresses: BTreeMap::new(),
++            };
++            let mut sapling = vec![];
++            let mut orchard = vec![];
++            let mut ironwood = vec![];
++            let trees = wallet.get_shard_trees_mut().unwrap();
++            match pool {
++                PoolType::SAPLING => {
++                    let (existing, incoming) = conflict_pair();
++                    trees.sapling.store_mut().put_shard(existing).unwrap();
++                    sapling.push(incoming);
++                }
++                PoolType::ORCHARD => {
++                    let (existing, incoming) = conflict_pair();
++                    trees.orchard.store_mut().put_shard(existing).unwrap();
++                    orchard.push(incoming);
++                }
++                PoolType::IRONWOOD => {
++                    let (existing, incoming) = conflict_pair();
++                    trees.ironwood.store_mut().put_shard(existing).unwrap();
++                    ironwood.push(incoming);
++                }
++                _ => unreachable!(),
++            }
++            let (sender, mut receiver) = mpsc::unbounded_channel();
++            // Empty checkpoint range isolates the actual tree merge without RPCs.
++            let range = ScanRange::from_parts(1u32.into()..1u32.into(), ScanPriority::Historic);
++            let error = wallet
++                .update_shard_trees(
++                    sender,
++                    &range,
++                    100_000u32.into(),
++                    None,
++                    sapling,
++                    orchard,
++                    ironwood,
++                )
++                .await
++                .unwrap_err();
++            assert!(matches!(error, SyncError::ShardTreeContext {
++                pool: actual,
++                operation: ShardTreeOperation::ScanMerge,
++                error: ShardTreeError::Insert(InsertionError::Conflict(_)),
++            } if actual == pool));
++            assert!(!error.recommend_same_server());
++            assert!(receiver.try_recv().is_err());
++        }
++    }
++}

@@ -11,7 +11,7 @@ for name, expected in manifest["files"].items():
     path = root / name
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         errors.append(name)
-for package in ("zingolib", "zingo-netutils"):
+for package in ("zingolib", "zingo-netutils", "pepper-sync"):
     for path in (root / package).rglob("*"):
         if not path.is_file() or path.suffix == ".params":
             continue
@@ -19,4 +19,4 @@ for package in ("zingolib", "zingo-netutils"):
             errors.append(str(path.relative_to(root)))
 if errors:
     raise SystemExit("Zingo vendor verification failed: " + ", ".join(errors))
-print(f"Verified {len(manifest['files'])} vendored files from {manifest['revision']} plus reviewed connector patch")
+print(f"Verified {len(manifest['files'])} vendored files from {manifest['revision']} plus reviewed connector and diagnostic patches")

@@ -11,11 +11,19 @@ use zingolib::{lightclient::error::LightClientError, wallet::error::WalletError}
 struct SyncDiagnostic {
     category: &'static str,
     reason: &'static str,
+    pool: Option<&'static str>,
+    operation: Option<&'static str>,
     grpc_code: Option<tonic::Code>,
 }
 impl std::fmt::Display for SyncDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: reason={}", self.category, self.reason)?;
+        if let Some(pool) = self.pool {
+            write!(f, " pool={pool}")?;
+        }
+        if let Some(operation) = self.operation {
+            write!(f, " operation={operation}")?;
+        }
         if let Some(code) = self.grpc_code {
             write!(f, " grpc_code={} grpc_status={code:?}", code as i32)?;
         }
@@ -32,6 +40,8 @@ pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::E
             "sync_scan_failed"
         },
         reason: "lightclient_error",
+        pool: None,
+        operation: None,
         grpc_code: None,
     };
     diagnostic.reason = match &error {
@@ -48,6 +58,26 @@ pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::E
             SyncError::ChainError(..) => "wallet_ahead_of_chain",
             SyncError::BirthdayBelowSapling(..) => "birthday_below_sapling",
             SyncError::ShardTreeError(e) => shard_reason(e),
+            SyncError::ShardTreeContext {
+                pool,
+                operation,
+                error,
+            } => {
+                use pepper_sync::error::ShardTreeOperation;
+                use zcash_protocol::PoolType;
+                diagnostic.pool = Some(match *pool {
+                    PoolType::SAPLING => "sapling",
+                    PoolType::ORCHARD => "orchard",
+                    PoolType::IRONWOOD => "ironwood",
+                    _ => "unknown",
+                });
+                diagnostic.operation = Some(match operation {
+                    ShardTreeOperation::ScanMerge => "scan_merge",
+                    ShardTreeOperation::ReorgRollback => "reorg_rollback",
+                    ShardTreeOperation::PoolRecoveryRollback => "pool_recovery_rollback",
+                });
+                shard_reason(error)
+            }
             SyncError::TruncationError(..) => "truncation_checkpoint_missing",
             SyncError::PoolHistoryReopened { .. } => "pool_history_reopened",
             SyncError::TransparentAddressDerivationError(_) => "transparent_address_derivation",
@@ -167,6 +197,8 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
     tracing::warn!(
         category = sync_failure(error),
         reason = diagnostic.map(|d| d.reason),
+        pool = diagnostic.and_then(|d| d.pool),
+        operation = diagnostic.and_then(|d| d.operation),
         grpc_code = diagnostic.and_then(|d| d.grpc_code).map(|c| c as i32),
         grpc_status = diagnostic
             .and_then(|d| d.grpc_code)
@@ -224,6 +256,62 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shard_context_is_preserved_in_errors_and_logs() {
+        use pepper_sync::error::{ShardTreeOperation, SyncRecoveryObservables};
+        use shardtree::error::{InsertionError, ShardTreeError};
+        use zcash_protocol::PoolType;
+        for (pool, pool_name) in [
+            (PoolType::SAPLING, "sapling"),
+            (PoolType::ORCHARD, "orchard"),
+            (PoolType::IRONWOOD, "ironwood"),
+        ] {
+            for (operation, operation_name) in [
+                (ShardTreeOperation::ScanMerge, "scan_merge"),
+                (ShardTreeOperation::ReorgRollback, "reorg_rollback"),
+                (
+                    ShardTreeOperation::PoolRecoveryRollback,
+                    "pool_recovery_rollback",
+                ),
+            ] {
+                let cause: SyncError<WalletError> = SyncError::ShardTreeContext {
+                    pool,
+                    operation,
+                    error: ShardTreeError::Insert(InsertionError::CheckpointOutOfOrder),
+                };
+                assert!(!cause.recommend_same_server());
+                assert_eq!(
+                    cause.recovery_recommendation(),
+                    SyncRecoveryObservables::Abort
+                );
+                let error = client_failure(LightClientError::SyncError(cause), false);
+                assert_eq!(
+                    error.to_string(),
+                    format!(
+                        "sync_scan_failed: reason=shard_checkpoint_out_of_order pool={pool_name} operation={operation_name}"
+                    )
+                );
+                assert_eq!(error.chain().count(), 1);
+                let log = tempfile::NamedTempFile::new().unwrap();
+                let subscriber = tracing_subscriber::fmt()
+                    .without_time()
+                    .with_ansi(false)
+                    .with_writer(log.reopen().unwrap())
+                    .finish();
+                {
+                    let _guard = tracing::subscriber::set_default(subscriber);
+                    warn_sync_failure(&error);
+                }
+                let logs = std::fs::read_to_string(log.path()).unwrap();
+                assert!(logs.contains(&format!(r#"pool="{pool_name}""#)), "{logs}");
+                assert!(
+                    logs.contains(&format!(r#"operation="{operation_name}""#)),
+                    "{logs}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn shard_failures_distinguish_query_and_insertion_in_both_sync_paths() {
