@@ -331,16 +331,10 @@ or [static-wallet example](examples/deployments/agent-sources.toml).
 [source_management]
 wallet = "agent_shared" # an existing wallet profile; no new pool per added API
 registry_file = "../../state/agent-sources.sqlite" # omit for temporary registrations
-# directory_tool = "x402_list_services" # default: a visible static GET directory tool
-
-[sources.directory]
-extends = "../../providers/x402-list.toml"
-wallet = "agent_shared"
 
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "RESEARCH_MCP_TOKEN"
-sources = ["directory"]
 source_management = true
 ```
 
@@ -349,14 +343,26 @@ examples. Existing wallet payment caps apply to directory searches and added API
 adding a source never allocates or funds a wallet. A server's explicit `wallet`
 overrides the shared dynamic wallet. Ordinary server filters still limit added tools.
 
-Agents get four stable tools:
+Enabling source management automatically adds **four tools** to the endpoint.
+Directory search uses bundled x402 List search metadata; no directory provider
+or static source configuration is required. Its schema is available
+offline; a search contacts the live directory through the configured network policy.
 
-| Tool | Arguments and result |
-| --- | --- |
-| `x402_treazury_sources_search` | Uses the configured directory tool's input schema. With the bundled directory, use `q`, `network`, `page`, and `per_page`; returns directory leads. |
-| `x402_treazury_source_add` | Required `spec_url`, optional `name`; returns `source_id` and tool count. Repeating the same URL on the same endpoint returns the existing registration. |
-| `x402_treazury_tools_search` | Optional `source_id`, `query`, `cursor`, `limit`; returns descriptions, complete input schemas, and `tool_ref` values. |
-| `x402_treazury_tool_call` | Required `tool_ref` and `arguments`; invokes a discovered tool through the normal payment path. |
+| Tool | Why the agent needs it | Arguments |
+| --- | --- | --- |
+| `x402_treazury_sources_search` | Find candidate APIs in x402 List without loading the entire directory into context. Listings are leads, not executable schemas. | `q`, `network`, `page`, `per_page` and other directory filters. |
+| `x402_treazury_source_add` | Add a chosen public OpenAPI API to this endpoint. The operator controls wallet selection and persistence. | Required `spec_url`; optional `name`. Repeating the same URL returns the existing registration. |
+| `x402_treazury_tools_search` | Retrieve selected tool descriptions, complete argument schemas and opaque `tool_ref` values when needed. This also works when the agent framework retains an older MCP tool list. | Optional `source_id`, `query`, `cursor`, `limit`. |
+| `x402_treazury_tool_call` | Call a tool discovered through `tools_search`, even if the framework has not refreshed its advertised tools. Uses normal payment admission. | Required `tool_ref` and `arguments`. |
+
+Source management itself contributes four definitions, including the directory's
+search filters. Searches return directory results and selected tool signatures on
+demand. Registered APIs also advertise their selected tools through MCP `tools/list`,
+including persisted registrations restored at startup. Frameworks that include the
+full tool list may therefore grow their prompt. The search/call pair supports clients
+that cache their original tool list; it does not control the framework's prompt size. No separate `x402_list_*` tools
+are automatically advertised. Configure x402-list explicitly only if you also want
+its broader API surface.
 
 For example, search with `{"q":"weather","network":"BSE","per_page":10}`.
 Directory results do not necessarily include an OpenAPI document; verify the vendor's

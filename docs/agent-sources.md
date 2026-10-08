@@ -1,7 +1,7 @@
 # Agent API discovery and source management
 
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
-search a configured directory, add public OpenAPI APIs, inspect tool signatures and
+search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.
 See the [README workflow](../README.md#let-agents-discover-and-add-apis),
 [static-wallet example](../examples/deployments/agent-sources.toml) and
@@ -13,11 +13,11 @@ See the [README workflow](../README.md#let-agents-discover-and-add-apis),
 [source_management]
 wallet = "agent_shared"
 registry_file = "../../state/agent-sources.sqlite" # optional persistence
-# directory_tool = "x402_list_services" # default
 
 [servers.research]
 source_management = true
-# Existing listen, bearer_token_env, sources and other server settings go here.
+# Existing listen, bearer_token_env and other server settings go here.
+# Static sources are optional.
 ```
 
 The shared block names an existing wallet and optionally a separate registry file.
@@ -45,18 +45,26 @@ not removed by API filters.
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | The input schema of the configured directory tool; bundled x402 List supports `q`, `network`, `page`, `per_page` and other directory filters. |
+| `x402_treazury_sources_search` | The built-in x402 List search schema supports `q`, `network`, `page`, `per_page` and other directory filters. |
 | `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
 | `x402_treazury_tools_search` | Optional `query`, `source_id`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Required `tool_ref` and `arguments`. |
 
-The directory must be a static GET API tool visible on the enabled endpoint.
-`directory_tool` selects its exact generated name. Serving rejects an unavailable
-or unsuitable binding. Search uses the same tool schema, response handling, payer
-and payment admission as a normal invocation; it is not an unsigned bypass. The
+Directory search is provided automatically, using an embedded reviewed search schema
+and the live x402 List API. It needs no static source or tool selector, and startup
+does not fetch its catalog or probe its prices. Search uses the endpoint's
+source-management wallet (including its explicit listener override), normal response
+handling and payment admission, and the configured direct/Tor network policy. The
 bundled directory can charge after its shared-IP quota. Results are leads, not
 payment/delivery guarantees, and may lack an OpenAPI URL. Verify the vendor's published
 specification rather than inferring schemas from endpoint descriptions.
+
+Source management contributes four definitions; searches return directory leads
+and selected tool signatures on demand. Registered tools, including persisted
+registrations restored at startup, are also advertised by `tools/list`, so clients
+that include their entire tool inventory may expand the prompt. The stable search/call pair also works with clients that cache their initial
+inventory. The built-in directory is not exposed as additional `x402_list_*` tools.
+An explicit x402-list provider remains available for its broader API surface.
 
 Add accepts a public HTTPS OpenAPI 3 JSON document. The API address comes from the
 first root OpenAPI server, resolving relative addresses against the specification

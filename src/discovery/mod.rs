@@ -1,4 +1,5 @@
 //! Operator-authorized source registration; all paid work stays in the common dispatcher.
+mod directory;
 mod import;
 pub mod policy;
 mod store;
@@ -65,6 +66,8 @@ pub struct Manager {
     commit_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     #[cfg(test)]
     fixture_endpoint: Mutex<Option<String>>,
+    #[cfg(test)]
+    fixture_directory: Mutex<Option<String>>,
     #[cfg(test)]
     fail_after_commit: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -150,13 +153,37 @@ impl Manager {
     }
     pub fn directory(&self, owner: &str) -> Result<BoundTool> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        let snapshot = self.catalog.read();
-        let bound = crate::catalog_state::find(&snapshot, owner, &self.policy.directory_tool)?;
-        ensure!(
-            bound.source.is_none() && bound.tool.method == "GET" && bound.tool.help_url.is_none(),
-            "directory_tool must be a visible static GET API tool"
-        );
-        Ok(bound.clone())
+        let wallet = policy::wallet(&self.policy, &self.listeners[owner]);
+        let client = self
+            .payers
+            .get(wallet)
+            .context("directory wallet unavailable")?
+            .clone()
+            .with_timeout(Duration::from_secs(self.policy.fetch_timeout_seconds))
+            .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes);
+        let base = directory::BASE.to_owned();
+        #[cfg(test)]
+        if let Some(base) = self.fixture_directory.lock().unwrap().clone() {
+            let client = if base.starts_with("https://") {
+                client.public_destinations()
+            } else {
+                client
+            };
+            return Ok(BoundTool {
+                tool: directory::tool().clone(),
+                client,
+                base,
+                source: None,
+                help: Arc::new(OnceCell::new()),
+            });
+        }
+        Ok(BoundTool {
+            tool: directory::tool().clone(),
+            client: client.public_destinations(),
+            base,
+            source: None,
+            help: Arc::new(OnceCell::new()),
+        })
     }
     pub async fn new(
         policy: policy::Policy,
@@ -185,6 +212,8 @@ impl Manager {
         let manager = Arc::new(Self {
             #[cfg(test)]
             fixture_endpoint: Mutex::new(None),
+            #[cfg(test)]
+            fixture_directory: Mutex::new(None),
             #[cfg(test)]
             fail_after_commit: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]

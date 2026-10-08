@@ -117,15 +117,7 @@ impl Server {
     fn management_tools(&self) -> Vec<Tool> {
         self.discovery
             .as_ref()
-            .map(|m| {
-                crate::discovery::tools::definitions(
-                    m.enabled(&self.catalog_server),
-                    m.directory(&self.catalog_server)
-                        .ok()
-                        .as_ref()
-                        .map(|b| &b.tool),
-                )
-            })
+            .map(|m| crate::discovery::tools::definitions(m.enabled(&self.catalog_server)))
             .unwrap_or_default()
     }
     fn limit(&self, mut output: crate::output::ToolOutput) -> crate::output::ToolOutput {

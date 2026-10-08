@@ -226,8 +226,11 @@ and [the runtime architecture](docs/architecture.md).
 - HTTP is stateless: expose stable search/call tools, without advertising list-change
   notifications. Standalone stdio has no dynamic management. Cursors bind to process
   catalog instance, generation and caller/query. The four tools are sources_search,
-  source_add, tools_search and tool_call under `x402_treazury_`. Directory search delegates
-  to a visible static GET tool through normal payment admission.
+  source_add, tools_search and tool_call under `x402_treazury_`. Directory search uses an embedded reviewed x402 List search schema and the endpoint's
+  source-management wallet through normal payment admission and network policy.
+  It requires no static directory source or selector, does no startup catalog I/O,
+  and exposes only the management wrapper. Keep its schema aligned with the pinned
+  directory contract; importing sources never grants a directory transport bypass.
 - Agent imports require public HTTPS and bounded bytes/reference expansion. Direct
   DNS validation happens in the network factory's resolver; Tor preserves remote DNS
   and depends on Tor's internal-address rejection. Dynamic paid clients must retain

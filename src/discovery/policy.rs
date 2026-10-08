@@ -8,9 +8,6 @@ use std::{
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
-    /// Existing static GET tool used for directory search.
-    #[serde(default = "directory_tool")]
-    pub directory_tool: String,
     pub wallet: String,
     pub registry_file: Option<PathBuf>,
     #[serde(default = "sources")]
@@ -29,9 +26,6 @@ pub struct Policy {
     pub fetch_timeout_seconds: u64,
     #[serde(default)]
     pub allowed_origins: Vec<String>,
-}
-fn directory_tool() -> String {
-    "x402_list_services".into()
 }
 fn sources() -> usize {
     16

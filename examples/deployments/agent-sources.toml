@@ -11,24 +11,15 @@ max_api_payment_usdc = "0.05"
 wallet = "agent_shared"
 # Omit registry_file to keep agent-added sources only until exit.
 registry_file = "../../state/agent-sources.sqlite"
-# Optional exact HTTPS origin allowlist covers spec URLs AND API destinations.
+# Optional exact HTTPS origin allowlist covers imported spec URLs AND added API destinations.
 # allowed_origins = ["https://api.example.com"]
-
-[sources.directory]
-extends = "../../providers/x402-list.toml"
-# Offline startup snapshot; the actual directory tool calls use its live API.
-spec = "../../tests/fixtures/x402_list_openapi.json"
-wallet = "agent_shared"
 
 [servers.research]
 source_management = true
 listen = "127.0.0.1:8000"
 bearer_token_env = "RESEARCH_MCP_TOKEN"
-sources = ["directory"]
-
 
 [servers.analysis]
 source_management = true
 listen = "127.0.0.1:8001"
 bearer_token_env = "ANALYSIS_MCP_TOKEN"
-sources = ["directory"]

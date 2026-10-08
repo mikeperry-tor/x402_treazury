@@ -840,17 +840,8 @@ async fn real_http_directory_search_and_cached_client_workflow() {
         async move { axum::Json(json!({"query":query,"services":[{"spec_url":"https://api.example.com/openapi.json"}]})) }
     }))).await;
     let m = manager(None).await;
-    let cfg = crate::catalog::Config::default();
-    let tools=crate::catalog::build_tools(&cfg,&json!({"paths":{"/services":{"get":{"parameters":[{"in":"query","name":"q","schema":{"type":"string"}}]}}}}),"x402_list").unwrap();
-    let mut snap = (*m.catalog.read()).clone();
-    snap.views.get_mut("writer").unwrap().push(BoundTool {
-        tool: tools[0].clone(),
-        client: payer(),
-        base: vendor,
-        source: None,
-        help: Arc::new(OnceCell::new()),
-    });
-    m.catalog.publish(snap);
+    *m.fixture_directory.lock().unwrap() = Some(vendor);
+    assert!(m.catalog.read().views["writer"].is_empty());
     let (base, task) = listen(crate::server::http_app(
         server(&m, "writer"),
         "test-token".into(),
@@ -1127,4 +1118,236 @@ async fn saved_nonlocal_bindings_stay_disabled_and_duplicate_add_is_readable() {
     assert!(result["disabled"].is_string());
     assert_eq!(result["tool_count"], 0);
     assert!(m.catalog.read().views.values().all(Vec::is_empty));
+}
+
+#[test]
+fn embedded_directory_matches_reviewed_search_contract() {
+    let cfg: crate::catalog::Config =
+        toml::from_str(include_str!("../../providers/x402-list.toml")).unwrap();
+    assert_eq!(cfg.base_url.as_deref(), Some(directory::BASE));
+    let doc =
+        serde_json::from_str(include_str!("../../tests/fixtures/x402_list_openapi.json")).unwrap();
+    let expected = crate::catalog::build_tools(&cfg, &doc, "x402_list")
+        .unwrap()
+        .into_iter()
+        .find(|t| t.name == "x402_list_services")
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(directory::tool()).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+    assert!(
+        serde_json::from_value::<policy::Policy>(
+            json!({"wallet":"shared","directory_tool":"custom"})
+        )
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn management_only_deployment_starts_and_lists_exactly_four_tools() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("config.toml");
+    std::fs::write(
+        &path,
+        r#"
+version = 1
+[wallets.shared]
+mode = "static"
+private_key_env = "TEST_KEY"
+[source_management]
+wallet = "shared"
+[servers.research]
+listen = "127.0.0.1:0"
+bearer_token_env = "TEST_TOKEN"
+source_management = true
+# API filters must not hide management tools.
+exclude_tools = ["*"]
+"#,
+    )
+    .unwrap();
+    let deployment = crate::deployment::Deployment::load(&path).await.unwrap();
+    let inventory = deployment.inventory();
+    assert_eq!(inventory[0].management_tools.len(), 4);
+    assert!(inventory[0].tools.is_empty());
+    let running = deployment
+        .bind(&BTreeMap::from([
+            ("TEST_KEY".into(), format!("{:064x}", 1)),
+            ("TEST_TOKEN".into(), "test-token".into()),
+        ]))
+        .await
+        .unwrap();
+    let address = running.addresses()[0].1;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let listed = rpc(
+        &format!("http://{address}"),
+        "test-token",
+        "tools/list",
+        json!({}),
+    )
+    .await;
+    let actual = listed["tools"].as_array().unwrap();
+    assert_eq!(actual.len(), 4);
+    for expected in &inventory[0].management_tools {
+        assert!(actual.contains(&serde_json::to_value(expected).unwrap()));
+    }
+    assert!(
+        actual
+            .iter()
+            .all(|t| t["name"].as_str().unwrap().starts_with("x402_treazury_"))
+    );
+    stop.cancel();
+    task.await.unwrap().unwrap();
+}
+
+#[test]
+fn automatic_directory_uses_endpoint_wallet_caps_and_tor() {
+    if std::env::var_os("TREAZURY_DIRECTORY_CHILD").is_some() {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(directory_payment_fixture());
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "discovery::tests::automatic_directory_uses_endpoint_wallet_caps_and_tor",
+            "--nocapture",
+        ])
+        .env("TREAZURY_DIRECTORY_CHILD", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+async fn directory_payment_fixture() {
+    use crate::{
+        network::{IsolationId, Mode, NetworkContext, NetworkPolicy},
+        test_socks::{Fault, Socks},
+    };
+    use axum::{
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::get,
+    };
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let requests = Arc::new(AtomicUsize::new(0));
+    let signatures = Arc::new(Mutex::new(Vec::new()));
+    let (count, signed) = (requests.clone(), signatures.clone());
+    let (address, vendor_task) = crate::test_tls::serve(axum::Router::new().route("/api/v1/services", get(move |headers: HeaderMap| {
+        let (count, signed) = (count.clone(), signed.clone());
+        async move {
+            count.fetch_add(1, Ordering::SeqCst);
+            if let Some(header) = headers.get("payment-signature") {
+                let payload = serde_json::from_slice(&STANDARD.decode(header.as_bytes()).unwrap()).unwrap();
+                signed.lock().unwrap().push(crate::test_signatures::recover_exact(&payload).to_string());
+                return axum::Json(json!({"services":[]})).into_response();
+            }
+            let challenge = json!({"x402Version":2,"resource":{"url":"https://api.example.com/api/v1/services","description":"search","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
+        }
+    }))).await;
+    let proxy = Socks::start(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    crate::network::install_test_context(
+        NetworkContext::new(NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(proxy.address),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
+    );
+    let mut ls = listeners(false);
+    ls.get_mut("reader").unwrap().wallet = Some("split".into());
+    let mut blocked = ls["writer"].clone();
+    blocked.wallet = Some("capped".into());
+    ls.insert("blocked".into(), blocked);
+    let clients = [
+        (1, "shared", "0.01"),
+        (2, "split", "0.01"),
+        (3, "capped", "0.001"),
+    ]
+    .into_iter()
+    .map(|(key, name, cap)| {
+        (
+            name.into(),
+            PaidClient::new(
+                Payer::new(&format!("{key:064x}"), SpendPolicy::dollars(cap).unwrap()).unwrap(),
+            ),
+        )
+    })
+    .collect();
+    let snapshot = CatalogSnapshot {
+        views: ls.keys().map(|name| (name.clone(), vec![])).collect(),
+        ..Default::default()
+    };
+    let manager = Manager::new(
+        policy(None),
+        ls,
+        clients,
+        Arc::new(CatalogState::new(snapshot)),
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(manager.directory("writer").unwrap().base, directory::BASE);
+    // Use the public hostname on the fixture certificate; retain public-destination checks.
+    *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
+    assert!(manager.directory("hidden").is_err());
+    assert_eq!(tools::definitions(true).len(), 4);
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        0,
+        "initialization fetched a catalog or probed prices"
+    );
+    for owner in ["writer", "reader"] {
+        let result = server(&manager, owner)
+            .invoke("x402_treazury_sources_search", &Default::default())
+            .await
+            .unwrap();
+        assert!(result.contains("services"));
+    }
+    assert!(
+        server(&manager, "blocked")
+            .invoke("x402_treazury_sources_search", &Default::default())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        5,
+        "cap failure must not sign or retry"
+    );
+    let addresses: Vec<_> = (1..=3)
+        .map(|key| {
+            let signer: alloy_signer_local::PrivateKeySigner =
+                format!("{key:064x}").parse().unwrap();
+            signer.address().to_string()
+        })
+        .collect();
+    assert_eq!(*signatures.lock().unwrap(), addresses[..2]);
+    {
+        let records = proxy.records.lock().unwrap();
+        assert_eq!(records.len(), 3);
+        for (record, address) in records.iter().zip(&addresses) {
+            assert_eq!(record.address_type, 3);
+            assert_eq!(
+                (record.user.clone(), record.password.clone()),
+                crate::network::global().credentials(&IsolationId::evm(address).unwrap())
+            );
+        }
+    }
+    vendor_task.abort();
 }

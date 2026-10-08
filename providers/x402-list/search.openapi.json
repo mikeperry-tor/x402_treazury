@@ -1,0 +1,179 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "contact": {
+      "email": "info@x402-list.com",
+      "name": "x402 List",
+      "url": "https://x402-list.com"
+    },
+    "description": "Public REST API for x402-list.com - the directory of all services using the x402 protocol (HTTP 402 Payment Required). x402 is an open standard by Coinbase for internet-native, agent-first payments. This API provides programmatic access to service listings, uptime monitoring data, pricing information, and network stats. No authentication required for read access. Rate limited to 200 req/min per IP. Reads are free for agents and point queries; sustained bulk pulling beyond 2,000 GET requests/day per IP (UTC day) on /api/v1/* is metered via x402 at $0.01/request on Base. Metered responses carry an X-Meter-Remaining header (free requests left today for this IP) and an X-Meter-Reset header (the Unix timestamp in seconds at which that daily quota resets, the next 00:00 UTC). The directory data returned by this API is licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/); the API specification document itself stays MIT (see license). Reuse is permitted with attribution to x402-list.com. Every 2xx JSON response from the endpoints documented here is wrapped in an envelope carrying a single top-level provenance object (see the Provenance schema) that declares the data license, the required attribution string, and a cite_as canonical URL; those responses also send a Link: <https://creativecommons.org/licenses/by/4.0/>; rel=\"license\" header. To request delisting, email info@x402-list.com or update your listing at /services/<slug>/update. Example values shown throughout this specification are illustrative and synthetic; query the live endpoints for current figures.",
+    "license": {
+      "name": "MIT"
+    },
+    "termsOfService": "https://x402-list.com/terms",
+    "title": "x402 List API",
+    "version": "1.0.0",
+    "x-data-license": "CC-BY-4.0"
+  },
+  "servers": [
+    {
+      "description": "Production",
+      "url": "https://x402-list.com/api/v1"
+    }
+  ],
+  "paths": {
+    "/services": {
+      "get": {
+        "description": "Returns a paginated list of registered x402 services with computed fields like uptime, pricing, and endpoint count. Supports filtering by network, status, category, verification state, signability of the 402 envelope, and full-text search.",
+        "operationId": "listServices",
+        "parameters": [
+          {
+            "description": "Filter by single network abbreviation (e.g. BSE, SOL, POL; the full list is served by /networks). An unrecognized abbreviation returns 400 Bad Request.",
+            "example": "BSE",
+            "in": "query",
+            "name": "network",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by service status. An unrecognized value returns 400 Bad Request; omit the parameter to include every status.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "online",
+                "degraded",
+                "offline",
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by category, one of the closed category set (case-insensitive). A value outside the set returns 400 Bad Request; omit to include every category.",
+            "example": "AI",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "enum": [
+                "AI",
+                "Blockchain",
+                "Compute",
+                "Content",
+                "Data",
+                "Finance",
+                "Other",
+                "Verification"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by the FORTE verification tier: a paid delivery-probe settled on-chain and delivered AND the badge was not since revoked on payTo/schema drift (no time decay). true = delivery-verified only, false = everything else. Omit to include both. SEMANTIC CHANGE (treno D3): this filter previously meant \"answered a valid x402 challenge and is alive\" - that broad signal is now the payment_ready parameter. This tier starts empty and grows only with real payments, so verified=true can legitimately return 0 rows. Applied server-side, so meta.total counts the filtered set. Any other value returns 400 Bad Request.",
+            "example": "true",
+            "in": "query",
+            "name": "verified",
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by the BASE payment-ready tier: the endpoint answered a valid x402 402 challenge and is alive within the decay window (a probe success within the last 7 days, or it is api-key exempt). true = payment-ready only, false = everything else. Omit to include both. This is the broad discovery signal the verified parameter used to carry before treno D3. Applied server-side, so meta.total counts the filtered set. Any other value returns 400 Bad Request.",
+            "example": "true",
+            "in": "query",
+            "name": "payment_ready",
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by provenance (how the listing entered the directory, matching the source field on each item): submitted, imported (any imported:* origin), imported:bazaar, imported:x402scan, or all for no filter. An unrecognized value returns 400 Bad Request.",
+            "example": "submitted",
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "enum": [
+                "submitted",
+                "imported",
+                "imported:bazaar",
+                "imported:x402scan",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter on the SIGNABILITY of the last observed 402 envelope: true = no EVM route of the service was observed missing the EIP-712 domain parameters (extra.name and extra.version) that a standard x402 client requires in order to sign a payment; false = at least one such route was observed. This describes the payment envelope on the wire, not the merit or reliability of the service. Derived from the eip712_domain_extra check of the latest assessment (the same id that appears in assessment.compliance_failed_checks). A service whose latest assessment has not measured that check yet (never assessed, assessed before the check existed, or assessed with no 402 payload captured at all) matches NEITHER value: omit the parameter to include it. Applied server-side, so meta.total counts the filtered set. Any other value returns 400 Bad Request.",
+            "example": "true",
+            "in": "query",
+            "name": "signable",
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sort order. A value outside the enum returns 400 Bad Request.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "newest",
+              "enum": [
+                "newest",
+                "uptime",
+                "cheapest",
+                "endpoints"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Case-insensitive substring search across name, description, category, and base URL. The search and query parameters are accepted as aliases; q takes precedence when more than one is sent.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Results per page",
+            "in": "query",
+            "name": "per_page",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "summary": "List all x402 services",
+        "tags": [
+          "Services"
+        ]
+      }
+    }
+  }
+}

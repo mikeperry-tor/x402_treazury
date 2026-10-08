@@ -409,19 +409,6 @@ impl Deployment {
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
             let tools = select_listener_tools(name, server, &sources)?;
-            if server.source_management {
-                let directory = &config
-                    .source_management
-                    .as_ref()
-                    .context("source management settings missing")?
-                    .directory_tool;
-                ensure!(
-                    tools.iter().any(|(_, t)| &t.name == directory
-                        && t.method == "GET"
-                        && t.help_url.is_none()),
-                    "server {name}: source_management.directory_tool must select a visible static GET tool"
-                );
-            }
             selected.insert(name.clone(), tools);
         }
         let mut cover_owners = BTreeMap::new();
@@ -482,15 +469,7 @@ impl Deployment {
                 listen: s.listen,
                 default_wallet: s.wallet.clone(),
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
-                management_tools: {
-                    let directory = self.config.source_management.as_ref().and_then(|p| {
-                        self.selected[name]
-                            .iter()
-                            .find(|(_, t)| t.name == p.directory_tool)
-                            .map(|(_, t)| t)
-                    });
-                    crate::discovery::tools::definitions(s.source_management, directory)
-                },
+                management_tools: crate::discovery::tools::definitions(s.source_management),
                 tools: self.selected[name]
                     .iter()
                     .map(|(source, tool)| InventoryTool {
@@ -988,8 +967,13 @@ impl Deployment {
                 cfg.disable_host_check,
             )?;
             if cfg.source_management {
-                manager.as_ref().context("source management unavailable")?.directory(name)
-                    .with_context(|| format!("server {name}: source_management.directory_tool must select a visible static GET tool"))?;
+                manager
+                    .as_ref()
+                    .context("source management unavailable")?
+                    .directory(name)
+                    .with_context(|| {
+                        format!("server {name}: directory search wallet unavailable")
+                    })?;
             }
             server.discovery = manager.clone();
             let listener = TcpListener::bind(cfg.listen)
