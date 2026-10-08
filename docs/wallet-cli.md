@@ -75,6 +75,10 @@ proof succeeds. Unknown preparation outcomes and conflicting evidence still requ
 operator review; cancellation drains
 accepted financial work and preserves journals. Treasury ZEC funding and Base
 confirmation can take time. The command introduces no new spending limits.
+While waiting, it logs unfinished jobs and their sync/submission state once a
+minute. A completed swap's retained timeout does not block bootstrap: confirmed
+USDC credit satisfies that job, while pending source accounting retains its
+reservations and continues reconciling during serving.
 
 Ordinary managed `serve` performs the same bootstrap before catalog/pricing
 discovery when `auto_fund=true`, then starts normal serving and replacement funding.

@@ -91,6 +91,10 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
             .iter()
             .filter(|job| {
                 job.pool_id == pool.id
+                    // Confirmed destination credit completes bootstrap even if
+                    // source accounting still retains a historical timeout.
+                    // The funding worker reconciles that outbox independently.
+                    && job.phase != FundingPhase::Complete
                     && (job.timed_out
                         || matches!(
                             job.phase,
@@ -118,7 +122,11 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
             bail!("wallet {name}: bootstrap blocked; completed funding is retained\n{details}");
         }
         ensure!(
-            !pool.funding_degraded || automatic,
+            !pool.funding_degraded
+                || automatic
+                || status.funding_jobs.iter().any(|job| {
+                    job.pool_id == pool.id && job.phase == FundingPhase::Complete && job.timed_out
+                }),
             "wallet {name}: funding is degraded with no recovery job identified; inspect wallet status --config FILE; completed funding is retained"
         );
         ready = false;
@@ -203,10 +211,15 @@ async fn supervise(
     );
     let monitored_names = names.clone();
     let monitor = async move {
+        let mut next_progress = tokio::time::Instant::now();
         loop {
             let status = store.call(|s| s.status()).await?;
             if complete(&status, &monitored_names)? {
                 return Ok(());
+            }
+            if tokio::time::Instant::now() >= next_progress {
+                log_progress(&status, &monitored_names);
+                next_progress = tokio::time::Instant::now() + Duration::from_secs(60);
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -225,6 +238,29 @@ async fn supervise(
     Ok(BootstrapSummary {
         bootstrapped_wallets: names.into_iter().collect(),
     })
+}
+
+fn log_progress(status: &Status, names: &BTreeSet<String>) {
+    for job in &status.funding_jobs {
+        if !names.contains(&job.pool_name) || job.phase == FundingPhase::Complete {
+            continue;
+        }
+        let operation = status
+            .treasury_operations
+            .iter()
+            .find(|op| op.operation_id == job.operation_id);
+        tracing::info!(
+            wallet = %job.pool_name,
+            job_id = %job.id,
+            phase = ?job.phase,
+            timed_out = job.timed_out,
+            source_submission = operation.map(|op| op.submission.as_str()),
+            expiry_height = operation.map(|op| op.facts.expiry_height),
+            sync_height = status.sync.as_ref().and_then(|sync| sync.height),
+            sync_fresh = status.sync_fresh,
+            "Bootstrap waiting for existing funding; progress checked automatically"
+        );
+    }
 }
 
 // The monitor owns its store handle. Dropping it before joining the owner is
@@ -347,6 +383,42 @@ mod tests {
         assert!(complete(&store.status().unwrap(), &names).unwrap());
         store.ensure_pool("web", "2").unwrap();
         assert_eq!(store.funding_jobs().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn completed_swap_timeout_does_not_block_bootstrap_or_clear_accounting() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::rotation::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture snapshot",
+        )
+        .unwrap();
+        store.ensure_pool("web", "2").unwrap();
+        let names = BTreeSet::from(["web".to_owned()]);
+        let jobs = store.funding_jobs().unwrap();
+        store.mark_funding_timeout(&jobs[0].id).unwrap();
+        store
+            .record_credit(&jobs[0].wallet_id, &jobs[0].target, "fixture", 1)
+            .unwrap();
+        assert!(!complete(&store.status().unwrap(), &names).unwrap());
+        store
+            .record_credit(&jobs[1].wallet_id, &jobs[1].target, "fixture", 1)
+            .unwrap();
+        let status = store.status().unwrap();
+        assert_eq!(status.funding_jobs[0].phase, FundingPhase::Complete);
+        assert!(status.funding_jobs[0].timed_out);
+        assert!(complete(&status, &names).unwrap());
+        assert!(store.status().unwrap().funding_jobs[0].timed_out);
+
+        // A genuinely unfinished timeout still waits, even in a pool whose
+        // initial pair was previously funded.
+        let mut unfinished = status;
+        unfinished.funding_jobs[0].phase = FundingPhase::Swapping;
+        assert!(!complete(&unfinished, &names).unwrap());
+        unfinished.funding_jobs[0].phase = FundingPhase::RefundPending;
+        assert!(complete(&unfinished, &names).is_err());
     }
 
     #[test]
