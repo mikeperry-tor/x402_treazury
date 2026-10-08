@@ -80,7 +80,8 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
         {"method":"GET","path":"/known","pricing":{"amount":"0.25","currency":"USD"}},
         {"method":"GET","path":"/items/{id}"},
         {"method":"POST","path":"/write"},
-        {"method":"GET","path":"/excluded"}
+        {"method":"GET","path":"/excluded"},
+        {"method":"GET","path":"/needs-argument","params":[{"name":"at","in":"query","required":true,"schema":{"type":"string"}}]}
     ]});
     let mut cfg = Config {
         exclude: vec!["/excluded".into()],
@@ -98,7 +99,8 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
     let b = b.unwrap();
     assert_eq!(a.prices, b.prices);
     assert_eq!(a.evidence.eligible, 5);
-    assert_eq!(a.evidence.selected_tools, 9);
+    assert_eq!(a.evidence.selected_tools, 10);
+    assert_eq!(a.evidence.skipped_arguments, 1);
     assert_eq!(a.evidence.skipped_embedded, 1);
     assert_eq!(a.evidence.skipped_template, 1);
     assert_eq!(a.evidence.skipped_method, 1);
@@ -159,6 +161,7 @@ async fn discovery_is_shared_one_shot_and_preserves_description_rules() {
     assert_eq!(expired.evidence.available_prices, 0);
     let snapshot = counts.lock().unwrap().clone();
     assert_eq!(snapshot.len(), 5);
+    assert!(!snapshot.contains_key("/needs-argument"));
     assert!(snapshot.values().all(|n| *n == 1));
     // An alias with different protocol permissions gets its own one-shot entries.
     cfg.probe_ttl_seconds = 3600.0;

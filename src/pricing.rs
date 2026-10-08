@@ -212,6 +212,14 @@ impl PricingCache {
                 evidence.skipped_template += 1;
             } else if priced.contains(&(tool.method.clone(), tool.path.clone())) {
                 evidence.skipped_embedded += 1;
+            } else if tool.input_schema["required"]
+                .as_array()
+                .is_some_and(|required| !required.is_empty())
+            {
+                // Discovery sends a bare GET; never invent agent arguments or pay
+                // a relay to repeat a request known to be incomplete.
+                evidence.skipped_arguments += 1;
+                tracing::debug!(tool = %tool.name, "Pricing probe skipped: required arguments are unavailable");
             } else {
                 candidates.push(tool);
             }
@@ -562,7 +570,7 @@ mod relay_tests {
 
     #[tokio::test]
     async fn only_failed_http_or_challenge_probes_use_relay() {
-        for status in [0, 200, 201, 204, 206, 299, 403, 429, 503, 500, 402] {
+        for status in [0, 200, 201, 204, 206, 299, 400, 403, 429, 503, 500, 402] {
             for reject in [false, true] {
                 let log = tempfile::NamedTempFile::new().unwrap();
                 let subscriber = tracing_subscriber::fmt()

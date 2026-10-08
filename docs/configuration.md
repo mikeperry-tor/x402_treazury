@@ -801,6 +801,9 @@ GETs that fail, including HTTP errors, timeouts, connection resets, body/parse e
 and missing or unusable pricing headers on a 402 response. Successful 2xx pricing
 responses leave the price unknown and do not trigger paid fallback: no payment
 challenge was observed, which does not establish that the API is free.
+Pricing discovery skips tools with required arguments: it sends bare GETs and cannot
+supply agent inputs (for example, Straits’ `/api/v1/since` requires `at`).
+These exclusions are recorded as `skipped_arguments` and never invoke the relay.
 These discovery requests do not immediately
 retry the origin: each failure gets one configured relay fallback. Local-file failures
 remain local. This does not diagnose Tor blocking; the same policy applies on a direct

@@ -276,7 +276,9 @@ and [the runtime architecture](docs/architecture.md).
   body argument and restore its original body key on the wire. Header parameters
   are not agent-settable. Normalize OpenAPI boolean exclusive bounds to numeric ones.
 - Startup pricing is unsigned GET-only, bounded and cached including failures;
-  expiration never triggers refresh. `catalog tools --discover-pricing` explicitly
+  skip tools with required arguments because probes send bare GETs. Record these
+  exclusions as skipped_arguments; never invent inputs or invoke paid fallback for them.
+  Expiration never triggers refresh. `catalog tools --discover-pricing` explicitly
   reuses that path without signers, wallet access or listeners; ordinary inspection
   never probes. Respect source probe opt-outs. Distinguish advertised estimates,
   observed probe prices, metered maximums and unknown prices in descriptions.

@@ -34,6 +34,8 @@ pub struct Evidence {
     pub skipped_method: usize,
     pub skipped_template: usize,
     pub skipped_embedded: usize,
+    #[serde(default)]
+    pub skipped_arguments: usize,
     pub skipped_duplicate: usize,
     pub eligible: usize,
     pub capped: usize,
@@ -111,6 +113,7 @@ impl Evidence {
             self.skipped_method,
             self.skipped_template,
             self.skipped_embedded,
+            self.skipped_arguments,
             self.skipped_duplicate,
             self.eligible,
         ])?;
