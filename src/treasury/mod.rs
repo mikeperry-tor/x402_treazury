@@ -407,10 +407,7 @@ impl Treasury {
                     return Err(error);
                 }
                 if !stop.is_cancelled() {
-                    tracing::warn!(
-                        category = diagnostics::sync_failure(&error),
-                        "treasury sync unavailable; retrying"
-                    );
+                    diagnostics::warn_sync_failure(&error);
                 }
             }
             tokio::select! {
@@ -518,10 +515,10 @@ impl SyncSession {
         self.client
             .sync()
             .await
-            .map_err(|_| anyhow::anyhow!("treasury sync launch failed"))?;
+            .map_err(|error| diagnostics::client_failure(error, true))?;
         let result = loop {
             tokio::select! {
-                result = self.client.await_sync() => break result.map_err(|_| anyhow::anyhow!("treasury sync failed"))?,
+                result = self.client.await_sync() => break result.map_err(|error| diagnostics::client_failure(error, false))?,
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {
                     if let Some(progress) = self.client.latest_sync_status() {
                         observation.scanned_blocks = progress.total_blocks_scanned;

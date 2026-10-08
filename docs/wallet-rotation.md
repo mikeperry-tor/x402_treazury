@@ -116,6 +116,19 @@ to bound its native-asset permits.
 
 ## Treasury sync freshness
 
+Recurring `treasury sync unavailable` warnings include a broad `category` and,
+for Zingolib scan/launch failures, a fixed `reason`. Indexer request failures also
+include numeric `grpc_code` and a fixed `grpc_status`, for example
+`reason="indexer_request_failed" grpc_code=14 grpc_status="Unavailable"`.
+Code 4 (`DeadlineExceeded`) distinguishes a request deadline from code 14
+(`Unavailable`); neither alone establishes Tor as the cause.
+Other reasons distinguish tree-size mismatches, missing checkpoints, invalid
+indexer data and mempool shutdown timeouts. CLI errors and saved sync
+`last_error` retain the same sanitized details. Upstream messages, metadata and
+wallet identifiers are omitted. These diagnostics do not change retry or funding
+policy; a successful sync is still required before new treasury preparation.
+
+
 The Zcash treasury is exclusively spent by this application. Direct and Tor sync
 use the same bounded policy: a successful scan must reach the tip observed at the
 start, and may trail the final indexer observation by at most **three blocks**.
