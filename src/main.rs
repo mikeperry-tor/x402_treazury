@@ -252,7 +252,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             .with_transport(cfg.transport())
             .with_cover(
                 cfg.cover_traffic.clone(),
-                x402_treazury::cover::status::Scope {
+                x402_treazury::cover::Scope {
                     listener: "standalone".into(),
                     source: "standalone".into(),
                 },
@@ -268,7 +268,6 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     }
     server.host_policy =
         x402_treazury::server::host::HostPolicy::new(args.allowed_hosts, args.disable_host_check)?;
-    server.validate_cover()?;
     if args.transport == "stdio" {
         server
             .serve(rmcp::transport::stdio())

@@ -181,7 +181,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn inventory_includes_pinned_local_tools_and_rejects_drift() {
-        let local = serde_json::to_value(x402_treazury::cover::status::definition()).unwrap();
+        let local = json!({"name":"fixture_local","description":"local fixture","inputSchema":{"type":"object","properties":{}}});
         let api = json!({"name":"api_read","description":"read","inputSchema":{"type":"object","properties":{}}});
         let tools = std::sync::Arc::new(std::sync::Mutex::new(vec![api.clone(), local.clone()]));
         let state = tools.clone();

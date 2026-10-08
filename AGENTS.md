@@ -456,9 +456,9 @@ unsigned and cannot enter payment/funding paths. Real requests preempt cover unt
 final headers. Failures cannot replay signed requests. HPACK padding is sensitive /
 never-indexed; HTTP/1-compatible profiles skip it explicitly. Initial qualification failure can try the configured fallback once within existing
 budgets, except rate limits/deadlines/protocol failure/cancellation. Selected
-resource and negative results persist for owner lifetime. Scope agent status to selected listener/source
-bindings; never expose shared-wallet aggregate counters there. Limits/refusals and
-status evictions must be visible. Optional-task shutdown precedes financial drain;
+resource and negative results persist for owner lifetime. Cover diagnostics go to stderr,
+with listener/source attribution and explicit limits/refusals; never add diagnostic
+MCP tools or cover advisories to API results. Optional-task shutdown precedes financial drain;
 aggregate stderr evidence follows it. Pool reuse is best-effort, not a same-channel
 or privacy guarantee. `cover_fixture` and the ignored distribution matrix provide
 zero-spend qualification; see `tests/live/INTEGRATION.md`.

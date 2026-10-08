@@ -153,7 +153,7 @@ async fn run() {
                     )
                     .with_cover(
                         (profile != "none").then_some(cfg),
-                        status::Scope {
+                        Scope {
                             listener: "matrix".into(),
                             source: format!("case_{index}"),
                         },

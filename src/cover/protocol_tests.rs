@@ -110,7 +110,7 @@ async fn run() {
     )
     .with_cover(
         Some(cfg.clone()),
-        status::Scope {
+        Scope {
             listener: "fixture".into(),
             source: "api".into(),
         },
@@ -162,7 +162,7 @@ async fn run() {
     )
     .with_cover(
         Some(cfg.clone()),
-        status::Scope {
+        Scope {
             listener: "second".into(),
             source: "api".into(),
         },
@@ -173,7 +173,7 @@ async fn run() {
     );
     let discovery = PaidClient::unsigned().with_cover(
         Some(cfg),
-        status::Scope {
+        Scope {
             listener: "unsigned".into(),
             source: "api".into(),
         },
@@ -233,6 +233,24 @@ async fn run() {
 
 #[tokio::test]
 async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
+    #[derive(Clone)]
+    struct Writer(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let logs = Writer(Arc::default());
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     let app = axum::Router::new().fallback(|| async { "ordinary API" });
     let (address, server) =
         crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"http/1.1"]).await;
@@ -264,11 +282,10 @@ async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
         )
         .unwrap();
     let engine = ctx.cover.as_ref().unwrap();
-    let scope = status::Scope {
+    let scope = Scope {
         listener: "h1".into(),
         source: "api".into(),
     };
-    engine.register(scope.clone());
     let owner = registry::Owner {
         runtime: tokio::runtime::Handle::current().id(),
         identity,
@@ -297,15 +314,14 @@ async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
     call.protocol(response.version());
     call.response_headers();
     assert_eq!(response.text().await.unwrap(), "ordinary API");
-    assert!(call.advisory().unwrap().contains("cover_http2_unavailable"));
     call.complete();
     drop(call);
     engine.shutdown().await;
+    let evidence = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(evidence.contains("cover_http2_unavailable"), "{evidence}");
     assert!(
-        engine
-            .status(&[scope])
-            .to_string()
-            .contains("cover_http2_unavailable")
+        evidence.contains("listener=h1") && evidence.contains("source=api"),
+        "{evidence}"
     );
     server.abort();
 }

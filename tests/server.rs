@@ -142,7 +142,6 @@ async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
     .unwrap();
     assert_eq!(tools[0].name, "x402_treazury_cover_status");
     let server = Server::new(tools, PaidClient::unsigned(), vendor, None, None);
-    server.validate_cover().unwrap();
     assert!(server.get_tool("x402_treazury_cover_status").is_some());
     assert_eq!(
         server

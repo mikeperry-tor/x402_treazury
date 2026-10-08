@@ -23,6 +23,10 @@ use std::{
 #[test]
 fn paid_cover_lifecycle_in_isolated_process() {
     if std::env::var_os("TREAZURY_COVER_FIXTURE_CHILD").is_some() {
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .init();
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(paid_fixture());
@@ -43,6 +47,10 @@ fn paid_cover_lifecycle_in_isolated_process() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let logs = String::from_utf8_lossy(&output.stderr);
+    for code in ["cover_shutdown", "TREAZURY_COVER_REPORT"] {
+        assert!(logs.contains(code), "missing {code}: {logs}");
+    }
 }
 fn fixed(unit: &str, value: u64) -> sampling::Distribution {
     toml::from_str(&format!(
@@ -114,7 +122,7 @@ async fn paid_fixture() {
     config.ranges = fixed("bytes", 1024);
     config.padding.as_mut().unwrap().size = fixed("bytes", 128);
     config.validate().unwrap();
-    let scope = status::Scope {
+    let scope = Scope {
         listener: "a".into(),
         source: "fixture".into(),
     };
@@ -140,6 +148,7 @@ async fn paid_fixture() {
     for response in [a.unwrap(), b.unwrap()] {
         assert_eq!(response.bytes, b"paid");
         assert!(response.paid_submission);
+        assert!(response.advisories.is_empty());
     }
     assert_eq!(signed.load(Ordering::SeqCst), 2);
     assert!(ranges.load(Ordering::SeqCst) >= 2);
@@ -165,41 +174,14 @@ async fn paid_fixture() {
         None,
     );
     use rmcp::ServerHandler;
-    assert!(mcp.get_tool(status::TOOL_NAME).is_some());
+    assert!(mcp.get_tool("x402_treazury_cover_status").is_none());
     let before = ranges.load(Ordering::SeqCst);
-    let result = mcp
-        .invoke(status::TOOL_NAME, &Default::default())
-        .await
-        .unwrap();
-    assert!(result.contains("fixture") && !result.contains("other"));
-    assert_eq!(ranges.load(Ordering::SeqCst), before);
-    let unscoped = crate::server::Server::new(
-        vec![tool.clone()],
-        PaidClient::unsigned(),
-        "https://api.example.com".into(),
-        None,
-        None,
-    );
-    assert!(unscoped.get_tool(status::TOOL_NAME).is_none());
     assert!(
-        unscoped
-            .invoke(status::TOOL_NAME, &Default::default())
+        mcp.invoke("x402_treazury_cover_status", &Default::default())
             .await
             .is_err()
     );
-    let mut collision = tool.clone();
-    collision.name = status::TOOL_NAME.into();
-    assert!(
-        crate::server::Server::new(
-            vec![collision],
-            client.clone(),
-            "https://api.example.com".into(),
-            None,
-            None
-        )
-        .validate_cover()
-        .is_err()
-    );
+    assert_eq!(ranges.load(Ordering::SeqCst), before);
     // Synthetic managed pool: the first unsigned payer is empty, standby is funded.
     // Admission must promote before signing, preserving the new identity's cover owner.
     let dir = tempfile::tempdir().unwrap();
@@ -239,7 +221,7 @@ async fn paid_fixture() {
     );
     let managed = PaidClient::managed(manager).with_cover(
         Some(config),
-        status::Scope {
+        Scope {
             listener: "managed".into(),
             source: "fixture".into(),
         },
@@ -257,8 +239,6 @@ async fn paid_fixture() {
     worker.await.unwrap();
     let engine = crate::network::global().cover.as_ref().unwrap();
     engine.shutdown().await;
-    let report = engine.status(&[scope]);
-    assert!(report.to_string().contains("cover_shutdown"));
     let before = ranges.load(Ordering::SeqCst);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(ranges.load(Ordering::SeqCst), before);

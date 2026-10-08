@@ -6,7 +6,12 @@ pub mod range;
 pub mod registry;
 pub mod runtime;
 pub mod sampling;
-pub mod status;
+/// Operator-selected listener/source binding for cover diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Scope {
+    pub listener: String,
+    pub source: String,
+}
 use anyhow::{Result, ensure};
 use sampling::{Distribution, Unit};
 use serde::{Deserialize, Serialize};

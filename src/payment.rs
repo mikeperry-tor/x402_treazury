@@ -65,7 +65,7 @@ impl Payer {
 }
 #[derive(Clone)]
 pub struct PaidClient {
-    cover: Option<(Arc<crate::cover::Config>, crate::cover::status::Scope)>,
+    cover: Option<(Arc<crate::cover::Config>, crate::cover::Scope)>,
     unsigned_only: bool,
     transport: crate::network::HttpPolicy,
     public_only: bool,
@@ -119,16 +119,12 @@ impl PaidClient {
     pub fn with_cover(
         mut self,
         config: Option<crate::cover::Config>,
-        scope: crate::cover::status::Scope,
+        scope: crate::cover::Scope,
     ) -> Self {
-        if let (Some(config), Some(engine)) = (config, &crate::network::global().cover) {
-            engine.register(scope.clone());
+        if let (Some(config), Some(_)) = (config, &crate::network::global().cover) {
             self.cover = Some((Arc::new(config), scope));
         }
         self
-    }
-    pub fn cover_scope(&self) -> Option<&crate::cover::status::Scope> {
-        self.cover.as_ref().map(|c| &c.1)
     }
     pub fn with_transport(mut self, transport: crate::network::HttpPolicy) -> Self {
         self.transport = transport;
@@ -195,7 +191,7 @@ impl PaidClient {
         let mut extensions_omitted = false;
         // Only a pre-signing managed identity change can restart this loop.
         // The new unsigned challenge must use the new identity-bound transport.
-        let (response, mut cover, unavailable) = loop {
+        let (response, mut cover) = loop {
             let candidate = match &self.managed {
                 Some(pool) if !unsigned_only => Some(pool.candidate().await?),
                 _ => None,
@@ -218,7 +214,6 @@ impl PaidClient {
                 self.public_only,
                 self.transport,
             )?;
-            let mut unavailable = None;
             let mut cover = self.cover.as_ref().and_then(|(config, scope)| {
                 let engine = factory.cover.as_ref()?;
                 let owner = crate::cover::registry::Owner {
@@ -232,8 +227,7 @@ impl PaidClient {
                 match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
                     Ok(call) => Some(call),
                     Err(error) => {
-                        tracing::warn!("optional cover unavailable: {error}");
-                        unavailable = Some(format!("Optional cover unavailable: {error}"));
+                        tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
                         None
                     }
                 }
@@ -331,19 +325,13 @@ impl PaidClient {
             if let Some(call) = &mut cover {
                 call.response_headers();
             }
-            break (response, cover, unavailable);
+            break (response, cover);
         };
-        let mut result = self.response_output(response, paid_submission).await;
+        let result = self.response_output(response, paid_submission).await;
         if let Some(call) = &mut cover
             && result.is_ok()
         {
             call.complete();
-        }
-        if let Ok(output) = &mut result {
-            output.advisories.extend(unavailable);
-            output
-                .advisories
-                .extend(cover.as_ref().and_then(|c| c.advisory()));
         }
         if extensions_omitted {
             result.context(crate::rotation::manager::OMITTED_EXTENSIONS)

@@ -489,16 +489,7 @@ impl Deployment {
                             .find(|(_, t)| t.name == p.directory_tool)
                             .map(|(_, t)| t)
                     });
-                    let mut tools =
-                        crate::discovery::tools::definitions(s.source_management, directory);
-                    if self.config.network.cover_enabled()
-                        && self.selected[name].iter().any(|(id, t)| {
-                            t.help_url.is_none() && self.sources[id].config.cover_traffic.is_some()
-                        })
-                    {
-                        tools.push(crate::cover::status::definition());
-                    }
-                    tools
+                    crate::discovery::tools::definitions(s.source_management, directory)
                 },
                 tools: self.selected[name]
                     .iter()
@@ -789,7 +780,7 @@ impl Deployment {
                             .with_transport(source.config.transport())
                             .with_cover(
                                 source.config.cover_traffic.clone(),
-                                crate::cover::status::Scope {
+                                crate::cover::Scope {
                                     listener: name.clone(),
                                     source: id.clone(),
                                 },
@@ -959,7 +950,6 @@ impl Deployment {
         let mut servers = self.build_servers(&wallets);
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
-            server.validate_cover()?;
             let tools = server.catalog.read().views["default"].clone();
             if self.config.source_management.is_some() {
                 ensure!(

@@ -1,12 +1,11 @@
 //! Lifecycle-owned cover tasks on the existing identity-bound HTTP client.
 use super::{
-    Config, Limits,
+    Config, Limits, Scope,
     budget::Budget,
     episode::Episode,
     range::{self, Range, Representation},
     registry::{Capability, Owner, Registry},
     sampling::Unit,
-    status::{Scope, Status},
 };
 use anyhow::Result;
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -25,7 +24,6 @@ pub struct Engine {
     registry: Mutex<Registry>,
     budget: Budget,
     rng: Mutex<Option<StdRng>>,
-    status: Mutex<Status>,
     tasks: TaskTracker,
     stop: CancellationToken,
 }
@@ -40,7 +38,6 @@ pub struct Session {
     episode: Arc<Mutex<Episode>>,
     config: Arc<Config>,
     scopes: Mutex<BTreeSet<Scope>>,
-    reason: Mutex<BTreeSet<&'static str>>,
     notify: Notify,
     padding_disabled: Arc<Mutex<bool>>,
     http1_allowed: bool,
@@ -49,7 +46,6 @@ pub struct Session {
 pub struct Call {
     engine: Arc<Engine>,
     pub session: Arc<Session>,
-    scope: Scope,
     completed: bool,
     request_pending: bool,
 }
@@ -62,7 +58,6 @@ impl Engine {
             registry: Mutex::new(Registry::new(limits.clone())),
             budget: Budget::new(limits),
             rng: Mutex::new(None),
-            status: Mutex::new(Status::default()),
             tasks: TaskTracker::new(),
             stop: CancellationToken::new(),
         })
@@ -93,36 +88,29 @@ impl Engine {
         *self.metrics.lock().unwrap() = Default::default();
         *self.rng.lock().unwrap() = Some(StdRng::seed_from_u64(seed));
     }
-    pub fn register(&self, scope: Scope) {
-        self.status.lock().unwrap().register(scope);
-    }
-    pub fn status(&self, scopes: &[Scope]) -> serde_json::Value {
-        serde_json::to_value(self.status.lock().unwrap().report(scopes))
-            .expect("cover status serializable")
-    }
     fn record(&self, session: &Session, reason: &'static str) {
-        session.reason.lock().unwrap().insert(reason);
-        tracing::warn!(
-            code = reason,
-            episode_request_limit = session.config.max_requests_per_episode,
-            episode_body_byte_limit = session.config.max_cover_body_bytes_per_episode,
-            process_request_limit = self.limits.max_requests_per_window,
-            process_body_byte_limit = self.limits.max_cover_body_bytes_per_window,
-            process_padding_byte_limit = self.limits.max_padding_value_bytes_per_window,
-            episode_padding_byte_limit = session
-                .config
-                .padding
-                .as_ref()
-                .map(|p| p.max_value_bytes_per_episode),
-            header_list_byte_limit = session
-                .config
-                .padding
-                .as_ref()
-                .map(|p| p.max_total_header_list_bytes),
-            "optional cover status; pooled best-effort connection reuse"
-        );
         for scope in session.scopes.lock().unwrap().iter() {
-            self.status.lock().unwrap().record(scope, reason);
+            tracing::warn!(
+                listener = %scope.listener,
+                source = %scope.source,
+                code = reason,
+                episode_request_limit = session.config.max_requests_per_episode,
+                episode_body_byte_limit = session.config.max_cover_body_bytes_per_episode,
+                process_request_limit = self.limits.max_requests_per_window,
+                process_body_byte_limit = self.limits.max_cover_body_bytes_per_window,
+                process_padding_byte_limit = self.limits.max_padding_value_bytes_per_window,
+                episode_padding_byte_limit = session
+                    .config
+                    .padding
+                    .as_ref()
+                    .map(|p| p.max_value_bytes_per_episode),
+                header_list_byte_limit = session
+                    .config
+                    .padding
+                    .as_ref()
+                    .map(|p| p.max_total_header_list_bytes),
+                "optional cover status; pooled best-effort connection reuse"
+            );
         }
     }
     pub fn begin(
@@ -147,7 +135,6 @@ impl Engine {
                 episode,
                 config,
                 scopes: Mutex::new(BTreeSet::new()),
-                reason: Mutex::new(BTreeSet::new()),
                 notify: Notify::new(),
                 padding_disabled: state.padding_disabled.clone(),
                 http1_allowed: owner.transport.allow_http1,
@@ -170,10 +157,7 @@ impl Engine {
         }
         session.notify.notify_one();
         session.scopes.lock().unwrap().insert(scope.clone());
-        self.status
-            .lock()
-            .unwrap()
-            .record(&scope, "cover_episode_active");
+        tracing::debug!(listener = %scope.listener, source = %scope.source, code = "cover_episode_active", "optional cover episode active");
         if let Capability::Unavailable(code) = state.capability {
             self.record(&session, code);
         }
@@ -194,7 +178,6 @@ impl Engine {
         Ok(Call {
             engine: self.clone(),
             session,
-            scope,
             completed: false,
             request_pending: true,
         })
@@ -562,18 +545,6 @@ impl Call {
             self.session.notify.notify_one();
         }
     }
-    pub fn advisory(&self) -> Option<String> {
-        let reasons = self
-            .session
-            .reason
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|c| **c != "cover_budget_completed")
-            .copied()
-            .collect::<Vec<_>>();
-        (!reasons.is_empty()).then(||format!("Optional cover traffic: {}. Connection reuse is pooled/best-effort; consult x402_treazury_cover_status.",reasons.join(", ")))
-    }
     pub fn protocol(&self, version: reqwest::Version) {
         if version != reqwest::Version::HTTP_2 {
             self.session
@@ -621,13 +592,6 @@ impl Drop for Call {
         }
         drop(e);
         self.session.notify.notify_one();
-        for reason in self.session.reason.lock().unwrap().iter() {
-            self.engine
-                .status
-                .lock()
-                .unwrap()
-                .record(&self.scope, reason);
-        }
     }
 }
 

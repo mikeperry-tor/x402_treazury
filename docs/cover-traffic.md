@@ -239,8 +239,7 @@ failure, within the same episode/global budgets. Rate limits, HTTP/2 unavailabil
 deadlines and cancellation do not trigger fallback. Success pins that resource for
 the owner lifetime; failure of both candidates disables ranges. Failure after a
 successful qualification does not switch resources. There is no full-download
-fallback, periodic requalification, paid retry or cross-origin redirect. Logs and
-scoped agent status retain the primary refusal and `cover_fallback_selected`.
+fallback, periodic requalification, paid retry or cross-origin redirect. Logs retain the primary refusal and `cover_fallback_selected`.
 
 Header values use random visible ASCII, protected-name/collision checks and a
 separate conservative header-list budget. Sensitive/never-indexed HPACK fields
@@ -263,15 +262,10 @@ refusal, never permission to drop accounting or queue real calls indefinitely.
 Byte counts describe application-reader bytes and uncompressed header values,
 not encrypted wire traffic. Buffered TCP/TLS/Tor bytes can exceed the requested
 range before cancellation. Observed overrun chunks remain accounted. Admission
-adjustments, sampling exhaustion and failures emit reasons in stderr and scoped
-agent evidence. Successful real results keep their content and append separate
-cover advisories where needed.
-
-`x402_treazury_cover_status()` is a local, no-argument tool exposed only for selected
-static cover bindings when the effective process switch is on. It reports the listener's
-selected sources, not wallet IDs or shared-owner totals. Each binding retains
-32 events and an explicit eviction count. It performs no network I/O. Disabled
-mode adds no tool, randomness, probes or background tasks.
+adjustments, sampling exhaustion and failures emit structured reasons and applicable
+limits to stderr, attributed to the selected listener/source bindings. Cover diagnostics
+do not add MCP tools or advisories to API results. Disabled mode adds no randomness,
+probes or background tasks.
 
 Clean shutdown emits one stderr `TREAZURY_COVER_REPORT` JSON line with aggregate
 operator counters: episodes, range requests/outcomes, observed cover body bytes,

@@ -24,6 +24,10 @@ use std::{
 #[test]
 fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
     if std::env::var_os("TREAZURY_COVER_REJECTION_CHILD").is_some() {
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .init();
         tokio::runtime::Runtime::new().unwrap().block_on(run());
         return;
     }
@@ -34,6 +38,14 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    let logs = String::from_utf8_lossy(&out.stderr);
+    for code in [
+        "cover_padding_rejected",
+        "cover_forbidden",
+        "cover_fallback_selected",
+    ] {
+        assert!(logs.contains(code), "missing {code}: {logs}");
+    }
 }
 async fn run() {
     let signed = Arc::new(AtomicUsize::new(0));
@@ -87,7 +99,7 @@ async fn run() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let scope = status::Scope {
+    let scope = Scope {
         listener: "main".into(),
         source: "api".into(),
     };
@@ -134,6 +146,7 @@ async fn run() {
         .unwrap()
         .unwrap();
         assert_eq!(result.bytes, b"free");
+        assert!(result.advisories.is_empty());
         crate::network::global()
             .cover
             .as_ref()
@@ -237,9 +250,6 @@ async fn run() {
     );
     let engine = crate::network::global().cover.as_ref().unwrap();
     engine.shutdown().await;
-    let evidence = engine.status(&[scope]).to_string();
-    assert!(evidence.contains("cover_padding_rejected") && evidence.contains("cover_forbidden"));
-    assert!(evidence.contains("cover_fallback_selected"));
     assert_eq!(engine.metrics().in_flight_ranges, 0);
     server.abort();
 }
