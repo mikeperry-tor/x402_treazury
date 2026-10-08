@@ -305,7 +305,8 @@ and [the runtime architecture](docs/architecture.md).
   unsigned GET-only; only relay payment uses PaidClient. Reuse existing wallet caps
   and byte/time limits. Serialize calls, coalesce successful targets, and disable
   the relay for the run on relay-service failure or cancellation before any retry can spend.
-  Every failed remote catalog fetch or unsuccessful pricing probe can use the
+  Successful 2xx pricing probes leave prices unknown without invoking the relay.
+  Every failed remote catalog fetch or failed HTTP/challenge pricing probe can use the
   configured relay once; no origin-error allowlist. Log source, discovery stage,
   fixed failure category and available HTTP status without URLs or upstream prose.
   Relay cache entries retain separate provenance and explicit origin freshness;

@@ -798,7 +798,10 @@ extend lifetimes. A failed multi-source warm can leave completed disposable entr
 
 A deployment can opt into Curl HTTP Request as a fallback for catalog and pricing
 GETs that fail, including HTTP errors, timeouts, connection resets, body/parse errors,
-and missing or unusable pricing headers. These discovery requests do not immediately
+and missing or unusable pricing headers on a 402 response. Successful 2xx pricing
+responses leave the price unknown and do not trigger paid fallback: no payment
+challenge was observed, which does not establish that the API is free.
+These discovery requests do not immediately
 retry the origin: each failure gets one configured relay fallback. Local-file failures
 remain local. This does not diagnose Tor blocking; the same policy applies on a direct
 deployment. Warnings identify the source, catalog/pricing stage, fixed failure category

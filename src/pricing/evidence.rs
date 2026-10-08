@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Discovered,
+    /// Successful HTTP response without a 402 challenge; price is unknown, not free.
+    NoPaymentChallenge,
     UnexpectedHttpStatus,
     MissingHeader,
     MalformedChallenge,
@@ -85,7 +87,18 @@ impl Evidence {
         ensure!(
             statuses.checked_add(transport) == Some(self.observed)
                 && *self.http_statuses.get(&402).unwrap_or(&0) == headers
-                && headers.checked_add(count(Outcome::UnexpectedHttpStatus)) == Some(statuses),
+                && sum(vec![
+                    headers,
+                    count(Outcome::UnexpectedHttpStatus),
+                    count(Outcome::NoPaymentChallenge),
+                ])? == statuses
+                && count(Outcome::NoPaymentChallenge)
+                    <= sum(self
+                        .http_statuses
+                        .iter()
+                        .filter(|(status, _)| (200..300).contains(*status))
+                        .map(|(_, count)| *count)
+                        .collect())?,
             "pricing HTTP outcomes disagree with status counts"
         );
         ensure!(

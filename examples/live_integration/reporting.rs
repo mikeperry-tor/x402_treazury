@@ -140,7 +140,11 @@ pub fn markdown(report: &Value) -> Result<String> {
             p.pricing.iter().any(|s| {
                 s.pricing_evidence.as_ref().is_some_and(|e| {
                     e.outcomes.iter().any(|(kind, count)| {
-                        *kind != x402_treazury::pricing::Outcome::Discovered && *count > 0
+                        !matches!(
+                            kind,
+                            x402_treazury::pricing::Outcome::Discovered
+                                | x402_treazury::pricing::Outcome::NoPaymentChallenge
+                        ) && *count > 0
                     })
                 })
             })

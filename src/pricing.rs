@@ -303,7 +303,7 @@ async fn probe_request(
     }
     let mut result = probe_network(http, url, slot.is_some()).await;
     let mut write_slot = slot;
-    if result.1 != Outcome::Discovered
+    if !matches!(result.1, Outcome::Discovered | Outcome::NoPaymentChallenge)
         && let Some(relay) = &cfg.discovery_relay
     {
         let reason = match result.1 {
@@ -314,7 +314,9 @@ async fn probe_request(
             Outcome::MissingHeader => "missing_payment_header",
             Outcome::MalformedChallenge => "malformed_payment_challenge",
             Outcome::UnusableOffer => "unusable_payment_offer",
-            Outcome::Discovered => unreachable!("successful probes do not use fallback"),
+            Outcome::Discovered | Outcome::NoPaymentChallenge => {
+                unreachable!("successful HTTP probes do not use fallback")
+            }
         };
         crate::discovery_relay::log_fallback(cfg, "pricing", reason, result.2);
         match relay.fetch(url, 402, 64 * 1024, "max_response_bytes").await {
@@ -386,6 +388,13 @@ async fn probe_network(
     };
     crate::network::log_http(&response, "pricing");
     let status = Some(response.status().as_u16());
+    if response.status().is_success() {
+        tracing::debug!(
+            http_status = status,
+            "Pricing probe succeeded without a payment challenge; price remains unknown"
+        );
+        return (None, Outcome::NoPaymentChallenge, status, None);
+    }
     if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
         return (None, Outcome::UnexpectedHttpStatus, status, None);
     }
@@ -552,11 +561,12 @@ mod relay_tests {
     }
 
     #[tokio::test]
-    async fn every_failed_probe_uses_one_relay_and_failed_relay_stops() {
-        for status in [0, 403, 429, 503, 500, 200, 402] {
+    async fn only_failed_http_or_challenge_probes_use_relay() {
+        for status in [0, 200, 201, 204, 206, 299, 403, 429, 503, 500, 402] {
             for reject in [false, true] {
                 let log = tempfile::NamedTempFile::new().unwrap();
                 let subscriber = tracing_subscriber::fmt()
+                    .with_max_level(tracing::Level::DEBUG)
                     .without_time()
                     .with_ansi(false)
                     .with_writer(log.reopen().unwrap())
@@ -611,8 +621,39 @@ mod relay_tests {
                     discovery_relay: Some(relay),
                     ..Default::default()
                 };
-                let result = probe_request(&http, url, None, 60.0, &cfg).await;
+                let cache = PricingCache::default();
+                let result = cache.get(url.into(), http.clone(), 60.0, &cfg).await;
                 assert_eq!(calls.load(Ordering::SeqCst), usize::from(status != 0));
+                if (200..300).contains(&status) {
+                    assert_eq!(result.outcome, Outcome::NoPaymentChallenge);
+                    assert_eq!(result.http_status, Some(status));
+                    assert!(result.line.is_none());
+                    let second = cache.get(url.into(), http.clone(), 60.0, &cfg).await;
+                    assert_eq!(second.cache, CachePath::Hit);
+                    assert_eq!(second.outcome, Outcome::NoPaymentChallenge);
+                    assert!(second.line.is_none());
+                    assert_eq!(calls.load(Ordering::SeqCst), 1);
+                    assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
+                    let logs = std::fs::read_to_string(log.path()).unwrap();
+                    assert!(logs.contains("price remains unknown"), "{logs}");
+                    assert!(!logs.contains("trying configured paid Curl"), "{logs}");
+                    let mut evidence = Evidence {
+                        enabled: true,
+                        selected_tools: 1,
+                        eligible: 1,
+                        observed: 1,
+                        cache: BTreeMap::from([(CachePath::Initialized, 1)]),
+                        outcomes: BTreeMap::from([(Outcome::NoPaymentChallenge, 1)]),
+                        http_statuses: BTreeMap::from([(status, 1)]),
+                        ..Default::default()
+                    };
+                    evidence.validate().unwrap();
+                    evidence.http_statuses = BTreeMap::from([(403, 1)]);
+                    assert!(evidence.validate().is_err());
+                    task.abort();
+                    origin.abort();
+                    continue;
+                }
                 assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
                 if reject {
                     assert!(result.line.is_none());
