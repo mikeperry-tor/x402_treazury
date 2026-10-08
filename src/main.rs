@@ -81,6 +81,22 @@ async fn run() -> Result<()> {
         cli::Command::Sources(cli::Sources::Inspect { config }) => {
             return x402_treazury::discovery::inspect_cli(&config).await;
         }
+        cli::Command::Sources(cli::Sources::Remove {
+            config,
+            server,
+            source_id,
+        }) => {
+            return x402_treazury::discovery::maintain_cli(&config, &server, &source_id, false)
+                .await;
+        }
+        cli::Command::Sources(cli::Sources::Refresh {
+            config,
+            server,
+            source_id,
+        }) => {
+            return x402_treazury::discovery::maintain_cli(&config, &server, &source_id, true)
+                .await;
+        }
         cli::Command::BuildInfo => {
             println!(
                 "{}",

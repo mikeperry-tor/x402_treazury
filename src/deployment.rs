@@ -76,7 +76,8 @@ pub struct ListenerConfig {
     #[serde(default)]
     pub bearer_token_env: String,
     pub wallet: Option<String>,
-    pub source_management: Option<crate::discovery::policy::Grant>,
+    #[serde(default)]
+    pub source_management: bool,
     #[serde(default)]
     pub sources: Vec<String>,
     #[serde(default)]
@@ -205,11 +206,7 @@ impl MetaConfig {
                 );
             }
             ensure!(
-                !server.sources.is_empty()
-                    || server
-                        .source_management
-                        .as_ref()
-                        .is_some_and(|g| g.accept_sources),
+                !server.sources.is_empty() || server.source_management,
                 "server {name}: sources cannot be empty"
             );
             ensure!(
@@ -411,7 +408,21 @@ impl Deployment {
         let sources = startup::load(config, path, warn, relay).await?;
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
-            selected.insert(name.clone(), select_listener_tools(name, server, &sources)?);
+            let tools = select_listener_tools(name, server, &sources)?;
+            if server.source_management {
+                let directory = &config
+                    .source_management
+                    .as_ref()
+                    .context("source management settings missing")?
+                    .directory_tool;
+                ensure!(
+                    tools.iter().any(|(_, t)| &t.name == directory
+                        && t.method == "GET"
+                        && t.help_url.is_none()),
+                    "server {name}: source_management.directory_tool must select a visible static GET tool"
+                );
+            }
+            selected.insert(name.clone(), tools);
         }
         let mut cover_owners = BTreeMap::new();
         for (server, tools) in &selected {
@@ -472,9 +483,14 @@ impl Deployment {
                 default_wallet: s.wallet.clone(),
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
                 management_tools: {
-                    let g = crate::discovery::policy::grant(&self.config, name);
+                    let directory = self.config.source_management.as_ref().and_then(|p| {
+                        self.selected[name]
+                            .iter()
+                            .find(|(_, t)| t.name == p.directory_tool)
+                            .map(|(_, t)| t)
+                    });
                     let mut tools =
-                        crate::discovery::tools::definitions(g.enabled, g.accept_sources);
+                        crate::discovery::tools::definitions(s.source_management, directory);
                     if self.config.network.cover_enabled()
                         && self.selected[name].iter().any(|(id, t)| {
                             t.help_url.is_none() && self.sources[id].config.cover_traffic.is_some()
@@ -854,11 +870,7 @@ impl Deployment {
         let initialized = if unsigned {
             ensure!(
                 self.config.source_management.is_none()
-                    && self
-                        .config
-                        .servers
-                        .values()
-                        .all(|s| s.source_management.is_none()),
+                    && self.config.servers.values().all(|s| !s.source_management),
                 "unsigned qualification forbids agent source management"
             );
             ensure!(
@@ -951,8 +963,10 @@ impl Deployment {
             let tools = server.catalog.read().views["default"].clone();
             if self.config.source_management.is_some() {
                 ensure!(
-                    tools.iter().all(|t| !t.tool.name.starts_with("treazury_")
-                        && !t.tool.name.starts_with("dyn_")),
+                    tools
+                        .iter()
+                        .all(|t| !t.tool.name.starts_with("x402_treazury_")
+                            && !t.tool.name.starts_with("dyn_")),
                     "static tool uses reserved namespace"
                 );
             }
@@ -983,6 +997,10 @@ impl Deployment {
                 cfg.allowed_hosts.clone(),
                 cfg.disable_host_check,
             )?;
+            if cfg.source_management {
+                manager.as_ref().context("source management unavailable")?.directory(name)
+                    .with_context(|| format!("server {name}: source_management.directory_tool must select a visible static GET tool"))?;
+            }
             server.discovery = manager.clone();
             let listener = TcpListener::bind(cfg.listen)
                 .await
@@ -1065,11 +1083,7 @@ fn select_listener_tools(
         .map(|(_, t)| t)
         .collect();
     ensure!(
-        !tools.is_empty()
-            || server
-                .source_management
-                .as_ref()
-                .is_some_and(|g| g.accept_sources),
+        !tools.is_empty() || server.source_management,
         "server {name}: no tools selected"
     );
     Ok(tools)

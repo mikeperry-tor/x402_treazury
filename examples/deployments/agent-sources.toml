@@ -1,5 +1,5 @@
 # Copy beside this file as agent-sources.local.toml to customize.
-# Both listeners share one named wallet for every agent-added API.
+# Registrations are endpoint-local; both endpoints use one shared payment wallet.
 version = 1
 
 [wallets.agent_shared]
@@ -9,12 +9,8 @@ max_api_payment_usdc = "0.05"
 
 [source_management]
 wallet = "agent_shared"
+# Omit registry_file to keep agent-added sources only until exit.
 registry_file = "../../state/agent-sources.sqlite"
-max_sources = 16
-max_tools_per_source = 100
-max_tools_per_server = 200
-max_spec_bytes = 33554432
-fetch_timeout_seconds = 30
 # Optional exact HTTPS origin allowlist covers spec URLs AND API destinations.
 # allowed_origins = ["https://api.example.com"]
 
@@ -25,24 +21,14 @@ spec = "../../tests/fixtures/x402_list_openapi.json"
 wallet = "agent_shared"
 
 [servers.research]
+source_management = true
 listen = "127.0.0.1:8000"
 bearer_token_env = "RESEARCH_MCP_TOKEN"
 sources = ["directory"]
 
-[servers.research.source_management]
-enabled = true
-accept_sources = true
-allowed_targets = ["research", "analysis"]
-allow_process_scope = true
-allow_persistence = true
-max_owned_sources = 8
 
 [servers.analysis]
+source_management = true
 listen = "127.0.0.1:8001"
 bearer_token_env = "ANALYSIS_MCP_TOKEN"
-sources = []
-
-[servers.analysis.source_management]
-accept_sources = true
-# Receives sources and can search/call them; cannot add, update or remove them.
-# wallet = "another_named_profile" # Optional explicit server/group isolation.
+sources = ["directory"]

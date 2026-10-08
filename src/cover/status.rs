@@ -2,7 +2,7 @@
 use serde::Serialize;
 use std::collections::{BTreeMap, VecDeque};
 
-pub const TOOL_NAME: &str = "treazury_cover_status";
+pub const TOOL_NAME: &str = "x402_treazury_cover_status";
 pub const RETAINED: usize = 32;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Scope {

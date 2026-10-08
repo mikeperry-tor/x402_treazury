@@ -154,7 +154,7 @@ fields. Provider response mappings also appear in `config show` and resolved too
 inventories. Limits and unused mappings validate at config load. Agent-added sources
 use the default image limits; agents cannot supply provider response-mapping TOML
 through source registration. Raw images use the same typed path for static tools,
-dynamic tools and `treazury_tool_call`, retaining existing scope/revision checks.
+dynamic tools and `x402_treazury_tool_call`, retaining existing scope/revision checks.
 See [artifact storage plan](../docs/plans/artifact_storage.md) for large files,
 audio/video, retrieval and optional asset capture.
 

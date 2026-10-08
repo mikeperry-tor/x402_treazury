@@ -56,6 +56,24 @@ pub enum Configuration {
 
 #[derive(Subcommand)]
 pub enum Sources {
+    /// Remove a saved source while serving is stopped. Does not affect wallet state.
+    Remove {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        server: String,
+        #[arg(long)]
+        source_id: String,
+    },
+    /// Fetch and validate a saved source's current specification while serving is stopped.
+    Refresh {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        server: String,
+        #[arg(long)]
+        source_id: String,
+    },
     /// Read persisted agent-added sources without fetching or modifying them.
     Inspect {
         #[arg(long, alias = "meta-config")]

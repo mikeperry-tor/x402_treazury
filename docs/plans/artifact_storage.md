@@ -13,7 +13,7 @@ fields. Metadata contains numbered attachment markers. `catalog::Config` has
 `image_limits` and method/path keyed `response_mappings`; `ToolSpec` carries the
 resolved mapping. `PaidClient::execute_response` reports whether payment was
 submitted. `BoundTool::invoke_output` and `Server::invoke_output` share the typed
-path for direct calls and `treazury_tool_call`. Text-only convenience methods
+path for direct calls and `x402_treazury_tool_call`. Text-only convenience methods
 reject image results. There is no artifact store, resource retrieval capability,
 automatic asset download, transcoding or resumable job implementation.
 

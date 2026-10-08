@@ -952,7 +952,7 @@
     "include": [
       ""
     ],
-    "instructions_text": "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. Use a documented OpenAPI URL with treazury_source_preview/add when those tools are authorized. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL.",
+    "instructions_text": "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. Use a documented OpenAPI URL with x402_treazury_source_add when those tools are authorized. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL.",
     "max_description_chars": null,
     "max_help_bytes": 4194304,
     "max_response_bytes": 16777216,

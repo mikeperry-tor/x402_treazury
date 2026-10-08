@@ -85,7 +85,7 @@ impl Server {
                     .into_iter()
                     .flatten()
                     .any(|b| b.tool.name == crate::cover::status::TOOL_NAME),
-                "duplicate reserved tool treazury_cover_status"
+                "duplicate reserved tool x402_treazury_cover_status"
             );
         }
         Ok(())
@@ -131,13 +131,17 @@ impl Server {
             )?));
         }
         if let Some(manager) = &self.discovery
-            && name.starts_with("treazury_")
+            && name.starts_with("x402_treazury_")
         {
             anyhow::ensure!(
                 self.management_tools().iter().any(|t| t.name == name),
                 "unknown tool"
             );
-            if name != "treazury_tool_call" {
+            if name == "x402_treazury_sources_search" {
+                let bound = manager.directory(&self.catalog_server)?;
+                return Ok(self.limit(bound.invoke_output(args).await?));
+            }
+            if name != "x402_treazury_tool_call" {
                 return Ok(crate::output::ToolOutput::text(serde_json::to_string(
                     &manager
                         .invoke(
@@ -150,12 +154,7 @@ impl Server {
             }
             let call: crate::discovery::Call =
                 serde_json::from_value(serde_json::Value::Object(args.clone()))?;
-            let snapshot = self.catalog.read();
-            let bound = catalog_state::find(&snapshot, &self.catalog_server, &call.tool_id)?;
-            anyhow::ensure!(
-                bound.source.as_ref().map_or(0, |s| s.1) == call.expected_revision,
-                "source_revision_conflict"
-            );
+            let bound = manager.find_reference(&self.catalog_server, &call.tool_ref)?;
             return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
         }
         let snapshot = self.catalog.read();
@@ -171,7 +170,10 @@ impl Server {
             .map(|m| {
                 crate::discovery::tools::definitions(
                     m.enabled(&self.catalog_server),
-                    m.accepts(&self.catalog_server),
+                    m.directory(&self.catalog_server)
+                        .ok()
+                        .as_ref()
+                        .map(|b| &b.tool),
                 )
             })
             .unwrap_or_default();
@@ -293,8 +295,8 @@ impl ServerHandler for Server {
             .map(crate::qualification::failure_category);
         let result = match invocation {
             Ok(output) => {
-                let structured = if request.name.starts_with("treazury_")
-                    && request.name != "treazury_tool_call"
+                let structured = if request.name.starts_with("x402_treazury_")
+                    && request.name != "x402_treazury_tool_call"
                 {
                     serde_json::from_str(&output.text).ok()
                 } else {

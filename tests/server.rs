@@ -140,13 +140,13 @@ async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
         "x402_treazury",
     )
     .unwrap();
-    assert_eq!(tools[0].name, "treazury_cover_status");
+    assert_eq!(tools[0].name, "x402_treazury_cover_status");
     let server = Server::new(tools, PaidClient::unsigned(), vendor, None, None);
     server.validate_cover().unwrap();
-    assert!(server.get_tool("treazury_cover_status").is_some());
+    assert!(server.get_tool("x402_treazury_cover_status").is_some());
     assert_eq!(
         server
-            .invoke("treazury_cover_status", &Default::default())
+            .invoke("x402_treazury_cover_status", &Default::default())
             .await
             .unwrap(),
         "ordinary API"

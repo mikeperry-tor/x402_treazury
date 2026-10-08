@@ -316,7 +316,7 @@ pub async fn collect_catalogs_confined(
             && config
                 .servers
                 .values()
-                .all(|s| s.source_management.is_none()),
+                .all(|s| !s.source_management),
         "qualification refuses source management"
     );
     for listener in config.servers.values() {

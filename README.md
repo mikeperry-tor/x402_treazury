@@ -320,12 +320,77 @@ with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage gu
 Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
 entire large catalog to the agent.
 
-Optional [agent source management](docs/agent-sources.md) lets authorized agents
-inspect and add OpenAPI sources within configured listener, process or persistent
-scope. It is disabled by default; grants control destinations, persistence and wallet
-bindings. Start with [the managed example](examples/deployments/agent-sources-managed.toml),
-which shares an explicit wallet for agent-added sources to avoid a funded pool per
-addition. Discovery does not grant spending or source-registration authority.
+### Let agents discover and add APIs
+
+Set `source_management = true` on each HTTP endpoint that should support agent-added
+APIs. Registrations belong only to that endpoint, even when endpoints share a wallet.
+Start with the [managed-wallet example](examples/deployments/agent-sources-managed.toml)
+or [static-wallet example](examples/deployments/agent-sources.toml).
+
+```toml
+[source_management]
+wallet = "agent_shared" # an existing wallet profile; no new pool per added API
+registry_file = "../../state/agent-sources.sqlite" # omit for temporary registrations
+# directory_tool = "x402_list_services" # default: a visible static GET directory tool
+
+[sources.directory]
+extends = "../../providers/x402-list.toml"
+wallet = "agent_shared"
+
+[servers.research]
+listen = "127.0.0.1:8000"
+bearer_token_env = "RESEARCH_MCP_TOKEN"
+sources = ["directory"]
+source_management = true
+```
+
+Paths are relative to the deployment file. Define `wallets.agent_shared` as in the
+examples. Existing wallet payment caps apply to directory searches and added APIs;
+adding a source never allocates or funds a wallet. A server's explicit `wallet`
+overrides the shared dynamic wallet. Ordinary server filters still limit added tools.
+
+Agents get four stable tools:
+
+| Tool | Arguments and result |
+| --- | --- |
+| `x402_treazury_sources_search` | Uses the configured directory tool's input schema. With the bundled directory, use `q`, `network`, `page`, and `per_page`; returns directory leads. |
+| `x402_treazury_source_add` | Required `spec_url`, optional `name`; returns `source_id` and tool count. Repeating the same URL on the same endpoint returns the existing registration. |
+| `x402_treazury_tools_search` | Optional `source_id`, `query`, `cursor`, `limit`; returns descriptions, complete input schemas, and `tool_ref` values. |
+| `x402_treazury_tool_call` | Required `tool_ref` and `arguments`; invokes a discovered tool through the normal payment path. |
+
+For example, search with `{"q":"weather","network":"BSE","per_page":10}`.
+Directory results do not necessarily include an OpenAPI document; verify the vendor's
+published specification URL. Then:
+
+1. Add it with `{"spec_url":"https://api.example.com/openapi.json","name":"weather"}`.
+2. Inspect its signatures with `{"source_id":"<returned source_id>"}` using
+   `x402_treazury_tools_search`.
+3. Pass a returned reference and arguments matching its schema to
+   `x402_treazury_tool_call`: `{"tool_ref":"<returned tool_ref>","arguments":{...}}`.
+
+The last two tools work even when the agent framework caches its original MCP tool
+list. References are endpoint- and process-specific; search again after restart or
+if a reference is stale. Clients that refresh their MCP tool list can also call the
+new `dyn_*` tools directly. Imported APIs must publish public HTTPS OpenAPI 3 JSON.
+
+Persistence is an operator choice: configuring `registry_file` retains accepted
+specifications across restarts; omitting it keeps additions only until exit. Restart
+reuses the saved bytes, without automatically adopting vendor changes. Agents cannot
+choose persistence, share sources with other endpoints, or alter operator limits.
+
+Inspect saved sources at any time. Stop serving before refreshing or removing one:
+
+```sh
+target/release/x402_treazury sources inspect --config examples/deployments/agent-sources.local.toml
+target/release/x402_treazury sources refresh --config examples/deployments/agent-sources.local.toml \
+  --server research --source-id SOURCE_ID
+target/release/x402_treazury sources remove --config examples/deployments/agent-sources.local.toml \
+  --server research --source-id SOURCE_ID
+```
+
+Refresh validates a new specification; removal affects API access only, never wallet
+balances or financial journals. See [agent source management](docs/agent-sources.md)
+for advanced limits, network rules, and registry administration.
 
 ## MCP and startup behavior
 

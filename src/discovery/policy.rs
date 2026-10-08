@@ -8,6 +8,9 @@ use std::{
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
+    /// Existing static GET tool used for directory search.
+    #[serde(default = "directory_tool")]
+    pub directory_tool: String,
     pub wallet: String,
     pub registry_file: Option<PathBuf>,
     #[serde(default = "sources")]
@@ -27,6 +30,9 @@ pub struct Policy {
     #[serde(default)]
     pub allowed_origins: Vec<String>,
 }
+fn directory_tool() -> String {
+    "x402_list_services".into()
+}
 fn sources() -> usize {
     16
 }
@@ -42,21 +48,6 @@ fn bytes() -> usize {
 fn timeout() -> u64 {
     30
 }
-fn owned() -> usize {
-    8
-}
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Grant {
-    pub enabled: bool,
-    pub accept_sources: bool,
-    pub allowed_targets: Option<Vec<String>>,
-    pub allow_process_scope: bool,
-    pub allow_persistence: bool,
-    #[serde(default = "owned")]
-    pub max_owned_sources: usize,
-    pub wallet: Option<String>,
-}
 impl Policy {
     pub fn resolve(&mut self, path: &Path) {
         if let Some(file) = &mut self.registry_file
@@ -66,17 +57,8 @@ impl Policy {
         }
     }
 }
-pub fn grant(config: &MetaConfig, id: &str) -> Grant {
-    config.servers[id]
-        .source_management
-        .clone()
-        .unwrap_or(Grant {
-            max_owned_sources: 8,
-            ..Default::default()
-        })
-}
-pub fn wallet<'a>(policy: &'a Policy, g: &'a Grant) -> &'a str {
-    g.wallet.as_deref().unwrap_or(&policy.wallet)
+pub fn wallet<'a>(policy: &'a Policy, listener: &'a crate::deployment::ListenerConfig) -> &'a str {
+    listener.wallet.as_deref().unwrap_or(&policy.wallet)
 }
 pub fn validate(config: &MetaConfig) -> Result<()> {
     if let Some(p) = &config.source_management {
@@ -107,35 +89,16 @@ pub fn validate(config: &MetaConfig) -> Result<()> {
             );
         }
     }
-    for id in config.servers.keys() {
-        let g = grant(config, id);
-        if config.servers[id].source_management.is_none() {
-            continue;
-        }
-        let p = config
-            .source_management
-            .as_ref()
-            .context("listener source_management requires deployment policy")?;
-        ensure!(
-            (1..=1024).contains(&g.max_owned_sources),
-            "invalid max_owned_sources"
-        );
-        ensure!(
-            !g.enabled || g.accept_sources,
-            "source management writers must accept sources"
-        );
-        ensure!(
-            config.wallets.contains_key(wallet(p, &g)),
-            "unknown dynamic wallet override"
-        );
-        ensure!(
-            !g.allow_persistence || (g.enabled && p.registry_file.is_some()),
-            "persistent grants require registry_file and enabled management"
-        );
-        if let Some(targets) = &g.allowed_targets {
-            for t in targets {
-                ensure!(config.servers.contains_key(t), "unknown allowed target");
-            }
+    for (id, listener) in &config.servers {
+        if listener.source_management {
+            let p = config
+                .source_management
+                .as_ref()
+                .context("source_management=true requires deployment source_management settings")?;
+            ensure!(
+                config.wallets.contains_key(wallet(p, listener)),
+                "server {id}: unknown dynamic wallet"
+            );
         }
     }
     Ok(())
@@ -146,28 +109,11 @@ pub fn wallets(config: &MetaConfig) -> BTreeSet<String> {
     };
     config
         .servers
-        .keys()
-        .filter_map(|id| {
-            let g = grant(config, id);
-            (g.accept_sources || g.enabled).then(|| wallet(p, &g).to_owned())
-        })
+        .values()
+        .filter(|l| l.source_management)
+        .map(|l| wallet(p, l).to_owned())
         .collect()
 }
-
-impl Default for Grant {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            accept_sources: false,
-            allowed_targets: None,
-            allow_process_scope: false,
-            allow_persistence: false,
-            max_owned_sources: 8,
-            wallet: None,
-        }
-    }
-}
-
 /// Configuration-only inspection; never opens registry, credentials or treasury state.
 pub fn inspection(config: &MetaConfig) -> serde_json::Value {
     let Some(p) = &config.source_management else {
@@ -175,14 +121,11 @@ pub fn inspection(config: &MetaConfig) -> serde_json::Value {
     };
     let bindings: std::collections::BTreeMap<_, _> = config
         .servers
-        .keys()
-        .filter_map(|id| {
-            let g = grant(config, id);
-            g.accept_sources
-                .then(|| (id.clone(), wallet(p, &g).to_owned()))
-        })
+        .iter()
+        .filter(|(_, l)| l.source_management)
+        .map(|(id, l)| (id.clone(), wallet(p, l).to_owned()))
         .collect();
-    serde_json::json!({"policy":p,"wallet_bindings":bindings,"grants":config.servers.keys().map(|id|(id,grant(config,id))).collect::<std::collections::BTreeMap<_,_>>(),"provider_filters_apply_to":"API tools only; management tools have separate grants"})
+    serde_json::json!({"policy":p,"wallet_bindings":bindings,"persistent":p.registry_file.is_some(),"scope":"endpoint_local"})
 }
 pub fn protected_paths(config: &MetaConfig, path: &Path) -> Vec<PathBuf> {
     let mut paths = vec![path.to_owned()];

@@ -3,16 +3,13 @@ use crate::{
     payment::{Payer, SpendPolicy},
     server::Server,
 };
-
+fn listeners(_persistent: bool) -> BTreeMap<String, ListenerConfig> {
+    ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"source_management":id != "hidden"})).unwrap())).collect()
+}
 fn policy(file: Option<PathBuf>) -> policy::Policy {
     serde_json::from_value(json!({"wallet":"shared","registry_file":file})).unwrap()
 }
-fn listeners(persistent: bool) -> BTreeMap<String, ListenerConfig> {
-    ["writer","reader","hidden"].into_iter().map(|id| {
-        let enabled=id=="writer";
-        (id.into(),serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"source_management":{"enabled":enabled,"accept_sources":id!="hidden","allowed_targets":["writer","reader"],"allow_process_scope":enabled,"allow_persistence":enabled&&persistent}})).unwrap())
-    }).collect()
-}
+
 fn payer() -> PaidClient {
     PaidClient::new(
         Payer::new(
@@ -22,6 +19,7 @@ fn payer() -> PaidClient {
         .unwrap(),
     )
 }
+
 async fn manager_with(
     policy: policy::Policy,
     listeners: BTreeMap<String, ListenerConfig>,
@@ -40,16 +38,20 @@ async fn manager_with(
     .await
     .unwrap()
 }
+
 async fn manager(file: Option<PathBuf>) -> Arc<Manager> {
     let persist = file.is_some();
     manager_with(policy(file), listeners(persist)).await
 }
+
 fn spec() -> Value {
     json!({"openapi":"3.0.3","servers":[{"url":"https://api.example.com"}],"paths":{"/read":{"get":{"tags":["read"],"description":"Read item","parameters":[{"in":"query","name":"q","schema":{"type":"string"}}]}},"/write":{"post":{"tags":["write"],"description":"Write item"}}}})
 }
+
 fn candidate(name: &str, lifetime: &str, visibility: &str) -> Value {
     json!({"name":name,"spec_url":"https://api.example.com/openapi.json","lifetime":lifetime,"visibility":visibility})
 }
+
 async fn seed(m: &Manager) {
     let cell = OnceCell::new();
     cell.set(Ok(Arc::new(serde_json::to_vec(&spec()).unwrap())))
@@ -59,16 +61,7 @@ async fn seed(m: &Manager) {
         (Instant::now(), Arc::new(cell)),
     );
 }
-async fn add(m: &Arc<Manager>, name: &str, lifetime: &str, visibility: &str) -> Value {
-    seed(m).await;
-    m.invoke(
-        "writer",
-        "treazury_source_add",
-        json!({"candidate":candidate(name,lifetime,visibility),"idempotency_key":name}),
-    )
-    .await
-    .unwrap()
-}
+
 fn server(m: &Arc<Manager>, id: &str) -> Server {
     let mut s = Server::new(
         vec![],
@@ -82,244 +75,51 @@ fn server(m: &Arc<Manager>, id: &str) -> Server {
     s.discovery = Some(m.clone());
     s
 }
-#[tokio::test]
-async fn scopes_permissions_idempotency_and_revision_guards() {
-    let m = manager(None).await;
-    let result = add(&m, "demo", "process", "process").await;
-    assert_eq!(result["targets"], json!(["reader", "writer"]));
-    assert_eq!(
-        result["wallet_profiles"],
-        json!({"reader":"shared","writer":"shared"})
-    );
-    let snap = m.catalog.read();
-    assert_eq!(snap.views["writer"].len(), 2);
-    assert_eq!(snap.views["reader"].len(), 2);
-    assert!(snap.views["hidden"].is_empty());
-    let a = json!({"candidate":candidate("demo","process","process"),"idempotency_key":"demo"});
-    assert_eq!(
-        m.invoke("writer", "treazury_source_add", a.clone())
-            .await
-            .unwrap(),
-        result
-    );
-    let mut changed = a;
-    changed["candidate"]["name"] = json!("other");
-    assert!(
-        m.invoke("writer", "treazury_source_add", changed)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("idempotency_conflict")
-    );
-    let remove =
-        json!({"source_id":result["source_id"],"expected_revision":1,"idempotency_key":"remove"});
-    assert!(
-        m.invoke("reader", "treazury_source_remove", remove.clone())
-            .await
-            .is_err()
-    );
-    assert!(
-        m.invoke("hidden", "treazury_sources_list", json!({}))
-            .await
-            .is_err()
-    );
-    let visible = m
-        .invoke("reader", "treazury_sources_list", json!({}))
-        .await
-        .unwrap();
-    assert_eq!(visible["items"][0]["targets"], json!(["reader"]));
-    assert_eq!(visible["items"][0]["can_manage"], false);
-    let search = m
-        .invoke("writer", "treazury_tools_search", json!({"limit":1}))
-        .await
-        .unwrap();
-    let tool = search["items"][0]["tool_id"].as_str().unwrap();
-    let fallback = server(&m, "writer")
-        .invoke(
-            "treazury_tool_call",
-            json!({"tool_id":tool,"arguments":{},"expected_revision":0})
-                .as_object()
-                .unwrap(),
-        )
-        .await
-        .unwrap_err();
-    assert!(fallback.to_string().contains("revision_conflict"));
-    let removed = m
-        .invoke("writer", "treazury_source_remove", remove.clone())
-        .await
-        .unwrap();
-    assert_eq!(
-        m.invoke("writer", "treazury_source_remove", remove)
-            .await
-            .unwrap(),
-        removed
-    );
-    assert!(m.catalog.read().views["writer"].is_empty());
-    assert_eq!(snap.views["writer"].len(), 2);
-    assert!(
-        m.invoke(
-            "writer",
-            "treazury_tools_search",
-            json!({"cursor":search["next_cursor"]})
-        )
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("stale_cursor")
-    );
-    assert!(
-        server(&m, "writer")
-            .invoke(tool, &Default::default())
-            .await
-            .is_err()
-    );
+
+async fn listen(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    (
+        url,
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
+    )
 }
-#[tokio::test]
-async fn preview_pagination_filters_and_atomic_quota_races() {
-    let mut ls = listeners(false);
-    ls.get_mut("reader").unwrap().exclude_tags = vec!["write".into()];
-    let mut p = policy(None);
-    p.max_sources = 1;
-    let m = manager_with(p, ls).await;
-    seed(&m).await;
-    let preview = m
-        .invoke(
-            "writer",
-            "treazury_source_preview",
-            json!({"candidate":candidate("demo","process","process"),"limit":1}),
-        )
+
+async fn rpc(base: &str, token: &str, method: &str, params: Value) -> Value {
+    crate::network::discovery(base, Duration::from_secs(5))
+        .unwrap()
+        .post(format!("{base}/mcp"))
+        .bearer_auth(token)
+        .header("accept", "application/json, text/event-stream")
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+        .send()
         .await
-        .unwrap();
-    assert_eq!(preview["items"].as_array().unwrap().len(), 1);
-    assert!(m.catalog.read().views["writer"].is_empty());
-    let next = m
-        .invoke(
-            "writer",
-            "treazury_source_preview",
-            json!({"preview_id":preview["preview_id"],"cursor":preview["next_cursor"],"limit":1}),
-        )
+        .unwrap()
+        .json::<Value>()
         .await
-        .unwrap();
-    assert_ne!(preview["items"], next["items"]);
-    let args = json!({"candidate":candidate("demo","process","process"),"preview_id":preview["preview_id"],"idempotency_key":"same"});
-    let (a, b) = tokio::join!(
-        m.invoke("writer", "treazury_source_add", args.clone()),
-        m.invoke("writer", "treazury_source_add", args)
-    );
-    assert_eq!(a.unwrap(), b.unwrap());
-    assert_eq!(m.catalog.read().views["reader"].len(), 1);
-    assert!(
-        m.invoke(
-            "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("second","process","process"),"idempotency_key":"second"})
-        )
-        .await
-        .is_err()
-    );
-    assert_eq!(m.catalog.read().generation, 1);
-    let id = preview["source_id"].clone();
-    let u = json!({"source_id":id,"expected_revision":1,"idempotency_key":"update","selection":{"tags":["read"]}});
-    let r = json!({"source_id":id,"expected_revision":1,"idempotency_key":"remove"});
-    let (a, b) = tokio::join!(
-        m.invoke("writer", "treazury_source_update", u),
-        m.invoke("writer", "treazury_source_remove", r)
-    );
-    assert_ne!(a.is_ok(), b.is_ok());
-    assert_eq!(m.catalog.read().generation, 2);
+        .unwrap()["result"]
+        .clone()
 }
-#[tokio::test]
-async fn persistence_exact_bytes_replay_withdrawal_and_revocation() {
-    let tmp = tempfile::tempdir().unwrap();
-    let file = tmp.path().join("sources.sqlite");
-    let m = manager(Some(file.clone())).await;
-    let first = add(&m, "saved", "persistent", "process").await;
-    add(&m, "temporary", "process", "server").await;
-    let id = first["source_id"].clone();
-    drop(m);
-    let m = manager(Some(file.clone())).await;
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
-    let args =
-        json!({"candidate":candidate("saved","persistent","process"),"idempotency_key":"saved"});
-    assert_eq!(
-        m.invoke("writer", "treazury_source_add", args)
-            .await
-            .unwrap(),
-        first
-    ); // no seeded cache or external fetch
-    m.invoke("writer","treazury_source_update",json!({"source_id":id,"expected_revision":1,"idempotency_key":"withdraw","lifetime":"process"})).await.unwrap();
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    drop(m);
-    let m = manager(Some(file.clone())).await;
-    assert!(m.catalog.read().views["writer"].is_empty());
-    let second = add(&m, "another", "persistent", "process").await;
-    drop(m);
-    let mut ls = listeners(true);
-    ls.get_mut("reader")
-        .unwrap()
-        .source_management
-        .as_mut()
-        .unwrap()
-        .accept_sources = false;
-    let m = manager_with(policy(Some(file.clone())), ls).await;
-    assert!(m.catalog.read().views["writer"].is_empty());
-    let list = m
-        .invoke("writer", "treazury_sources_list", json!({}))
-        .await
-        .unwrap();
-    assert!(list["items"][0]["disabled"].is_string());
-    m.invoke(
-        "writer",
-        "treazury_source_remove",
-        json!({"source_id":second["source_id"],"expected_revision":1,"idempotency_key":"remove"}),
+
+async fn call(base: &str, name: &str, args: Value) -> Value {
+    rpc(
+        base,
+        "test-token",
+        "tools/call",
+        json!({"name":name,"arguments":args}),
     )
     .await
-    .unwrap();
-    drop(m);
-    let report = store::inspect(&file).unwrap();
-    assert!(
-        report["sources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|r| r["removed"] == true)
-    );
 }
-#[tokio::test]
-async fn promotion_restores_fixed_targets_and_format_changes_disable() {
-    let tmp = tempfile::tempdir().unwrap();
-    let file = tmp.path().join("sources.sqlite");
-    let m = manager(Some(file.clone())).await;
-    let r = add(&m, "promote", "process", "server").await;
-    m.invoke("writer","treazury_source_update",json!({"source_id":r["source_id"],"expected_revision":1,"idempotency_key":"promote","lifetime":"persistent","name":"renamed"})).await.unwrap();
-    drop(m);
-    let m = manager(Some(file.clone())).await;
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    assert!(m.catalog.read().views["reader"].is_empty());
-    {
-        let mut inner = m.inner.lock().unwrap();
-        inner.state.records.values_mut().next().unwrap().format = 99;
-        let state = inner.state.clone();
-        inner.store.as_mut().unwrap().save(&state).unwrap();
-    }
-    drop(m);
-    let m = manager(Some(file)).await;
-    assert!(m.catalog.read().views["writer"].is_empty());
-    assert!(
-        m.inner
-            .lock()
-            .unwrap()
-            .state
-            .records
-            .values()
-            .next()
-            .unwrap()
-            .disabled
-            .as_ref()
-            .unwrap()
-            .contains("format")
-    );
+
+async fn add(m: &Arc<Manager>, name: &str, _lifetime: &str, _visibility: &str) -> Value {
+    seed(m).await;
+    m.invoke(
+        "writer",
+        "x402_treazury_source_add",
+        json!({"spec_url":"https://api.example.com/openapi.json","name":name}),
+    )
+    .await
+    .unwrap()
 }
 #[test]
 fn importer_rejects_unsafe_and_expanding_documents() {
@@ -364,6 +164,7 @@ fn importer_rejects_unsafe_and_expanding_documents() {
             .contains("complexity")
     );
 }
+
 #[test]
 fn import_pipeline_preserves_origin_checks_and_validation_before_selection() {
     let mut p = policy(None);
@@ -480,457 +281,6 @@ fn registry_ownership_aliases_corruption_and_inspection_do_not_overwrite() {
     assert_eq!(std::fs::read(&bad).unwrap(), b"not a database");
 }
 
-#[tokio::test]
-async fn durable_commit_is_recovered_and_failed_writes_do_not_publish() {
-    let tmp = tempfile::tempdir().unwrap();
-    let file = tmp.path().join("sources.sqlite");
-    let m = manager(Some(file.clone())).await;
-    seed(&m).await;
-    m.fail_after_commit
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    let args =
-        json!({"candidate":candidate("saved","persistent","server"),"idempotency_key":"crash"});
-    assert!(
-        m.invoke("writer", "treazury_source_add", args.clone())
-            .await
-            .is_err()
-    );
-    assert!(m.catalog.read().views["writer"].is_empty());
-    drop(m);
-    let m = manager(Some(file.clone())).await;
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    let r = m
-        .invoke("writer", "treazury_source_add", args)
-        .await
-        .unwrap();
-    m.inner
-        .lock()
-        .unwrap()
-        .store
-        .as_ref()
-        .unwrap()
-        .reject_writes();
-    assert!(m.invoke("writer","treazury_source_remove",json!({"source_id":r["source_id"],"expected_revision":1,"idempotency_key":"failed-write"})).await.is_err());
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    drop(m);
-    assert_eq!(
-        manager(Some(file)).await.catalog.read().views["writer"].len(),
-        2
-    );
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::await_holding_lock)] // Deliberately stall only the blocking commit worker.
-async fn accepted_mutation_survives_cancelled_waiter() {
-    let m = manager(None).await;
-    let r = add(&m, "cancel", "process", "server").await;
-    let id = r["source_id"].as_str().unwrap().to_owned();
-    let lock = m.inner.lock().unwrap();
-    let worker = m.clone();
-    let task = tokio::spawn(async move {
-        worker
-            .commit(
-                "writer".into(),
-                "remove:cancel".into(),
-                json!({"source_id":id}),
-                Change::Remove(id, 1),
-            )
-            .await
-    });
-    tokio::time::timeout(Duration::from_secs(3), async {
-        while m.mutations.available_permits() == 16 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    task.abort();
-    drop(lock);
-    tokio::time::timeout(Duration::from_secs(3), async {
-        while !m.catalog.read().views["writer"].is_empty() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(m.catalog.read().generation, 2);
-}
-#[tokio::test]
-async fn config_is_strict_inspection_is_offline_and_paths_are_protected() {
-    let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("deployment.toml");
-    let text = r#"version=1
-[wallets.shared]
-mode="static"
-private_key_env="NEVER_READ_ME"
-[source_management]
-wallet="shared"
-registry_file="registry.sqlite"
-[servers.writer]
-listen="127.0.0.1:0"
-bearer_token_env="NEVER_READ_TOKEN"
-[servers.writer.source_management]
-enabled=true
-accept_sources=true
-allow_persistence=true
-"#;
-    std::fs::write(&path, text).unwrap();
-    let shown = crate::deployment::Deployment::show_config(&path)
-        .await
-        .unwrap();
-    assert_eq!(
-        shown["source_management"]["wallet_bindings"]["writer"],
-        "shared"
-    );
-    assert!(!tmp.path().join("registry.sqlite").exists());
-    for (from, to) in [
-        ("wallet=\"shared\"", "wallet=\"unknown\""),
-        (
-            "enabled=true",
-            "enabled=true\nallowed_targets=[\"missing\"]",
-        ),
-        ("accept_sources=true", "accept_sources=false"),
-        (
-            "registry_file=\"registry.sqlite\"",
-            "registry_file=\"deployment.toml\"",
-        ),
-        ("registry_file=\"registry.sqlite\"", "max_sources=0"),
-        ("wallet=\"shared\"", "wallet=\"shared\"\nunknown=1"),
-    ] {
-        std::fs::write(&path, text.replace(from, to)).unwrap();
-        assert!(
-            crate::deployment::Deployment::show_config(&path)
-                .await
-                .is_err(),
-            "{to}"
-        );
-    }
-}
-
-async fn listen(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    (
-        url,
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
-    )
-}
-async fn rpc(base: &str, token: &str, method: &str, params: Value) -> Value {
-    crate::network::discovery(base, Duration::from_secs(5))
-        .unwrap()
-        .post(format!("{base}/mcp"))
-        .bearer_auth(token)
-        .header("accept", "application/json, text/event-stream")
-        .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
-        .send()
-        .await
-        .unwrap()
-        .json::<Value>()
-        .await
-        .unwrap()["result"]
-        .clone()
-}
-async fn call(base: &str, name: &str, args: Value) -> Value {
-    rpc(
-        base,
-        "test-token",
-        "tools/call",
-        json!({"name":name,"arguments":args}),
-    )
-    .await
-}
-#[tokio::test]
-async fn real_http_cached_client_management_and_payment_fallback() {
-    use axum::{
-        http::{HeaderMap, StatusCode},
-        response::IntoResponse,
-        routing::get,
-    };
-    use base64::Engine;
-    let m = manager(None).await;
-    seed(&m).await;
-    let (writer, w) = listen(crate::server::http_app(
-        server(&m, "writer"),
-        "test-token".into(),
-    ))
-    .await;
-    let (reader, r) = listen(crate::server::http_app(
-        server(&m, "reader"),
-        "test-token".into(),
-    ))
-    .await;
-    let init=rpc(&writer,"test-token","initialize",json!({"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cached","version":"1"}})).await;
-    assert_ne!(init["capabilities"]["tools"]["listChanged"], true);
-    let initial = rpc(&writer, "test-token", "tools/list", json!({})).await;
-    assert_eq!(initial["tools"].as_array().unwrap().len(), 7);
-    let receiver = rpc(&reader, "test-token", "tools/list", json!({})).await;
-    assert_eq!(receiver["tools"].as_array().unwrap().len(), 3);
-    let unauthorized = crate::network::discovery(&writer, Duration::from_secs(5))
-        .unwrap()
-        .post(format!("{writer}/mcp"))
-        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(unauthorized.status(), 401);
-    let preview = call(
-        &writer,
-        "treazury_source_preview",
-        json!({"candidate":candidate("http","process","process")}),
-    )
-    .await;
-    assert_ne!(preview["isError"], true, "{preview}");
-    let added=call(&writer,"treazury_source_add",json!({"candidate":candidate("http","process","process"),"preview_id":preview["structuredContent"]["preview_id"],"idempotency_key":"http"})).await;
-    assert_ne!(added["isError"], true, "{added}");
-    let id = added["structuredContent"]["source_id"].clone();
-    let search = call(&reader, "treazury_tools_search", json!({"query":"Read"})).await;
-    let name = search["structuredContent"]["items"][0]["tool_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let blocked = call(
-        &reader,
-        "treazury_source_remove",
-        json!({"source_id":id,"expected_revision":1,"idempotency_key":"wrong-owner"}),
-    )
-    .await;
-    assert_eq!(blocked["isError"], true);
-    // Explicit test-only fixture routing: import still validates public URLs. Production
-    // has no field or flag that can turn off the public-destination guard.
-    let price = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let unsigned = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let signed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let (p, u, s) = (price.clone(), unsigned.clone(), signed.clone());
-    let (vendor,v)=listen(axum::Router::new().route("/read",get(move |headers:HeaderMap| {let(p,u,s)=(p.clone(),u.clone(),s.clone());async move {
-        if let Some(signature)=headers.get("payment-signature") {s.fetch_add(1,std::sync::atomic::Ordering::SeqCst);let value:Value=serde_json::from_slice(&base64::engine::general_purpose::STANDARD.decode(signature.as_bytes()).unwrap()).unwrap();return axum::Json(json!({"paid":true,"payer":value["payload"]["authorization"]["from"]})).into_response();}
-        u.fetch_add(1,std::sync::atomic::Ordering::SeqCst);let amount=p.load(std::sync::atomic::Ordering::SeqCst);if amount==0 {return "free".into_response()}
-        let challenge=json!({"x402Version":2,"resource":{"url":"https://api.example.com/read","description":"read","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":amount.to_string(),"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
-        (StatusCode::PAYMENT_REQUIRED,[("payment-required",base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
-    }}))).await;
-    let mut snapshot = (*m.catalog.read()).clone();
-    for view in snapshot.views.values_mut() {
-        for bound in view {
-            bound.base = vendor.clone();
-            bound.client = m.payers["shared"].clone();
-        }
-    }
-    m.catalog.publish(snapshot);
-    let args = json!({"tool_id":name,"arguments":{},"expected_revision":1});
-    let free = call(&reader, "treazury_tool_call", args.clone()).await;
-    assert_eq!(free["content"][0]["text"], "free");
-    price.store(20000, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(
-        call(&reader, "treazury_tool_call", args.clone()).await["isError"],
-        true
-    );
-    assert_eq!(signed.load(std::sync::atomic::Ordering::SeqCst), 0);
-    price.store(5000, std::sync::atomic::Ordering::SeqCst);
-    let paid = call(&writer, "treazury_tool_call", args.clone()).await;
-    assert_ne!(paid["isError"], true, "{paid}");
-    assert_eq!(signed.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let update=call(&writer,"treazury_source_update",json!({"source_id":id,"expected_revision":1,"idempotency_key":"update","selection":{"tags":["read"]}})).await;
-    assert_ne!(update["isError"], true, "{update}");
-    let before = unsigned.load(std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(
-        call(&reader, "treazury_tool_call", args).await["isError"],
-        true
-    );
-    assert_eq!(unsigned.load(std::sync::atomic::Ordering::SeqCst), before);
-    let removed = call(
-        &writer,
-        "treazury_source_remove",
-        json!({"source_id":id,"expected_revision":2,"idempotency_key":"remove"}),
-    )
-    .await;
-    assert_ne!(removed["isError"], true, "{removed}");
-    assert!(
-        call(&reader, "treazury_tools_search", json!({})).await["structuredContent"]["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    w.abort();
-    r.abort();
-    v.abort();
-}
-
-#[tokio::test]
-async fn bounded_fetch_deadlines_redirects_coalescing_and_explicit_refresh() {
-    use axum::{response::Redirect, routing::get};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    let hits = Arc::new(AtomicUsize::new(0));
-    let h = hits.clone();
-    let app = axum::Router::new()
-        .route(
-            "/spec",
-            get(move || {
-                let h = h.clone();
-                async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                    axum::Json(spec())
-                }
-            }),
-        )
-        .route("/redirect", get(|| async { Redirect::temporary("/spec") }))
-        .route("/large", get(|| async { "x".repeat(4096) }))
-        .route(
-            "/slow",
-            get(|| async {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                axum::Json(spec())
-            }),
-        );
-    let (url, task) = listen(app).await;
-    let mut p = policy(None);
-    p.max_spec_bytes = 1024;
-    p.fetch_timeout_seconds = 1;
-    for route in ["large", "redirect", "slow"] {
-        assert!(
-            import::fixture_fetch(&p, &format!("{url}/{route}"))
-                .await
-                .is_err(),
-            "{route}"
-        );
-    }
-    assert_eq!(hits.load(Ordering::SeqCst), 0);
-    let mut ls = listeners(false);
-    ls.get_mut("reader")
-        .unwrap()
-        .source_management
-        .as_mut()
-        .unwrap()
-        .enabled = true;
-    let m = manager_with(policy(None), ls).await;
-    *m.fixture_endpoint.lock().unwrap() = Some(format!("{url}/spec"));
-    let a = json!({"candidate":candidate("one","process","server")});
-    let (a, b) = tokio::join!(
-        m.invoke("writer", "treazury_source_preview", a.clone()),
-        m.invoke("reader", "treazury_source_preview", a)
-    );
-    assert!(a.is_ok() && b.is_ok());
-    assert_eq!(hits.load(Ordering::SeqCst), 1);
-    let added = m
-        .invoke(
-            "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("one","process","server"),"idempotency_key":"add"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(hits.load(Ordering::SeqCst), 1);
-    m.invoke("writer","treazury_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true})).await.unwrap();
-    assert_eq!(hits.load(Ordering::SeqCst), 2);
-    task.abort();
-}
-#[tokio::test]
-async fn shared_managed_registration_does_not_allocate_or_fund() {
-    use crate::rotation::{
-        base::BaseRpc,
-        manager::ManagedPool,
-        store::{Store, StoreHandle},
-    };
-    let tmp = tempfile::tempdir().unwrap();
-    let mut store = Store::create(
-        &tmp.path().join("state"),
-        &tmp.path().join("key"),
-        1,
-        b"fixture",
-    )
-    .unwrap();
-    let pool = store.ensure_pool("shared", "5").unwrap();
-    let before = serde_json::to_value(store.status().unwrap()).unwrap();
-    let (store, worker) = StoreHandle::spawn(store);
-    let managed = PaidClient::managed(Arc::new(
-        ManagedPool::new(
-            store.clone(),
-            pool,
-            BaseRpc::new("http://127.0.0.1:1/rpc", 12, 120).unwrap(),
-            "5",
-            SpendPolicy::dollars("0.01").unwrap(),
-            1,
-        )
-        .unwrap(),
-    ));
-    let ls = listeners(true);
-    let registry = tmp.path().join("registry.sqlite");
-    let (url, task) = listen(
-        axum::Router::new().route("/spec", axum::routing::get(|| async { axum::Json(spec()) })),
-    )
-    .await;
-    let snapshot = CatalogSnapshot {
-        generation: 0,
-        views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
-    };
-    let m = Manager::new(
-        policy(Some(registry.clone())),
-        ls.clone(),
-        BTreeMap::from([("shared".into(), managed.clone())]),
-        Arc::new(CatalogState::new(snapshot)),
-        vec![],
-    )
-    .await
-    .unwrap();
-    *m.fixture_endpoint.lock().unwrap() = Some(format!("{url}/spec"));
-    m.invoke(
-        "writer",
-        "treazury_source_preview",
-        json!({"candidate":candidate("one","persistent","process")}),
-    )
-    .await
-    .unwrap();
-    let a = add(&m, "one", "persistent", "process").await;
-    add(&m, "two", "persistent", "process").await;
-    m.invoke("writer", "treazury_source_update", json!({"source_id":a["source_id"],"expected_revision":1,"idempotency_key":"refresh","refresh_spec":true,"selection":{"tags":["read"]}})).await.unwrap();
-    m.invoke(
-        "writer",
-        "treazury_source_remove",
-        json!({"source_id":a["source_id"],"expected_revision":2,"idempotency_key":"remove"}),
-    )
-    .await
-    .unwrap();
-    let after = store
-        .call(|s| Ok(serde_json::to_value(s.status()?)?))
-        .await
-        .unwrap();
-    assert_eq!(before, after);
-    drop(m);
-    let reopened = Manager::new(
-        policy(Some(registry)),
-        ls.clone(),
-        BTreeMap::from([("shared".into(), managed)]),
-        Arc::new(CatalogState::new(CatalogSnapshot {
-            generation: 0,
-            views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
-        })),
-        vec![],
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        reopened
-            .inner
-            .lock()
-            .unwrap()
-            .state
-            .records
-            .values()
-            .filter(|r| !r.removed)
-            .count(),
-        1
-    );
-    assert_eq!(
-        before,
-        store
-            .call(|s| Ok(serde_json::to_value(s.status()?)?))
-            .await
-            .unwrap()
-    );
-    drop(reopened);
-    task.abort();
-    drop(store);
-    worker.await.unwrap();
-}
-
 #[test]
 fn existing_registry_rows_cannot_silently_default_to_empty_state() {
     let tmp = tempfile::tempdir().unwrap();
@@ -950,12 +300,21 @@ fn existing_registry_rows_cannot_silently_default_to_empty_state() {
 fn registry_crash_child() {
     let file = PathBuf::from(std::env::var("TREAZURY_TEST_REGISTRY").unwrap());
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let m=manager(Some(file)).await;seed(&m).await;
-        m.crash_after_commit.store(true,std::sync::atomic::Ordering::SeqCst);
-        let _=m.invoke("writer","treazury_source_add",json!({"candidate":candidate("crash","persistent","server"),"idempotency_key":"crash"})).await;
+        let m = manager(Some(file)).await;
+        seed(&m).await;
+        m.crash_after_commit
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = m
+            .invoke(
+                "writer",
+                "x402_treazury_source_add",
+                json!({"spec_url":"https://api.example.com/openapi.json","name":"crash"}),
+            )
+            .await;
         panic!("crash hook was not reached");
     });
 }
+
 #[tokio::test]
 async fn process_exit_between_sqlite_commit_and_catalog_publication_recovers() {
     let tmp = tempfile::tempdir().unwrap();
@@ -982,177 +341,15 @@ async fn process_exit_between_sqlite_commit_and_catalog_publication_recovers() {
     let r = m
         .invoke(
             "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("crash","persistent","server"),"idempotency_key":"crash"}),
+            "x402_treazury_source_add",
+            json!({"spec_url":"https://api.example.com/openapi.json","name":"crash"}),
         )
         .await
         .unwrap();
     assert_eq!(r["revision"], 1);
     assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
 }
-#[tokio::test]
-async fn actual_mcp_pagination_and_cross_query_cursors_reject_stale_views() {
-    let mut p = policy(None);
-    p.max_tools_per_source = 150;
-    let m = manager_with(p, listeners(false)).await;
-    let mut doc = spec();
-    doc["paths"] = json!({});
-    for n in 0..105 {
-        doc["paths"][format!("/item{n}")] = json!({"get":{"description":"item"}});
-    }
-    let cell = OnceCell::new();
-    cell.set(Ok(Arc::new(serde_json::to_vec(&doc).unwrap())))
-        .unwrap();
-    m.fetches.lock().unwrap().insert(
-        "https://api.example.com/openapi.json".into(),
-        (Instant::now(), Arc::new(cell)),
-    );
-    let added = m
-        .invoke(
-            "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("pages","process","server"),"idempotency_key":"pages"}),
-        )
-        .await
-        .unwrap();
-    let (base, task) = listen(crate::server::http_app(
-        server(&m, "writer"),
-        "test-token".into(),
-    ))
-    .await;
-    let first = rpc(&base, "test-token", "tools/list", json!({})).await;
-    assert_eq!(first["tools"].as_array().unwrap().len(), 100);
-    let second = rpc(
-        &base,
-        "test-token",
-        "tools/list",
-        json!({"cursor":first["nextCursor"]}),
-    )
-    .await;
-    assert_eq!(second["tools"].as_array().unwrap().len(), 12);
-    let names: std::collections::BTreeSet<_> = first["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .chain(second["tools"].as_array().unwrap())
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(names.len(), 112);
-    assert!(second.get("nextCursor").is_none());
-    let expected: std::collections::BTreeSet<_> = m.catalog.read().views["writer"]
-        .iter()
-        .map(|t| t.tool.name.clone())
-        .chain(
-            crate::discovery::tools::definitions(true, true)
-                .into_iter()
-                .map(|t| t.name.into_owned()),
-        )
-        .collect();
-    assert_eq!(
-        names
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<std::collections::BTreeSet<_>>(),
-        expected
-    );
 
-    let search = m
-        .invoke("writer", "treazury_tools_search", json!({"limit":1}))
-        .await
-        .unwrap();
-    assert!(
-        m.invoke(
-            "writer",
-            "treazury_tools_search",
-            json!({"query":"different","cursor":search["next_cursor"]})
-        )
-        .await
-        .is_err()
-    );
-    m.invoke(
-        "writer",
-        "treazury_source_remove",
-        json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"remove"}),
-    )
-    .await
-    .unwrap();
-    assert!(
-        rpc(
-            &base,
-            "test-token",
-            "tools/list",
-            json!({"cursor":first["nextCursor"]})
-        )
-        .await
-        .is_null()
-    );
-    task.abort();
-}
-
-#[tokio::test]
-async fn explicit_wallet_override_and_parallel_add_quota_are_enforced() {
-    let mut ls = listeners(false);
-    ls.get_mut("reader")
-        .unwrap()
-        .source_management
-        .as_mut()
-        .unwrap()
-        .wallet = Some("reader_wallet".into());
-    let snapshot = CatalogSnapshot {
-        generation: 0,
-        views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
-    };
-    let mut p = policy(None);
-    p.max_sources = 1;
-    let shared = payer();
-    let other = payer();
-    let m = Manager::new(
-        p,
-        ls,
-        BTreeMap::from([
-            ("shared".into(), shared.clone()),
-            ("reader_wallet".into(), other.clone()),
-        ]),
-        Arc::new(CatalogState::new(snapshot)),
-        vec![],
-    )
-    .await
-    .unwrap();
-    seed(&m).await;
-    let (a, b) = tokio::join!(
-        m.invoke(
-            "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("a","process","process"),"idempotency_key":"a"})
-        ),
-        m.invoke(
-            "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("b","process","process"),"idempotency_key":"b"})
-        )
-    );
-    assert_ne!(a.is_ok(), b.is_ok());
-    assert_eq!(m.catalog.read().generation, 1);
-    let snapshot = m.catalog.read();
-    assert!(
-        snapshot.views["writer"][0]
-            .client
-            .shares_profile_with(&shared)
-    );
-    assert!(
-        snapshot.views["reader"][0]
-            .client
-            .shares_profile_with(&other)
-    );
-    assert!(
-        !snapshot.views["reader"][0]
-            .client
-            .shares_profile_with(&shared)
-    );
-}
-
-// The real import and public-only payer are exercised in a fresh process because
-// all production outbound paths share one immutable process network policy.
 #[tokio::test]
 async fn production_public_transport_is_exercised_without_fixture_client_replacement() {
     let result = tokio::process::Command::new(std::env::current_exe().unwrap())
@@ -1178,6 +375,7 @@ async fn production_public_transport_is_exercised_without_fixture_client_replace
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
 #[tokio::test]
 #[ignore = "isolated immutable Tor policy; exercised by parent"]
 async fn public_transport_child() {
@@ -1255,28 +453,62 @@ async fn public_transport_child() {
         IsolationId::discovery("https://spec.example.com").unwrap(),
         IsolationId::evm(&signer.address().to_string()).unwrap(),
     ];
-    let records = proxy.records.lock().unwrap();
-    assert_eq!(
-        records.len(),
-        2,
-        "redirect or private URL caused an extra connection"
-    );
-    for (record, id) in records.iter().zip(ids) {
-        assert_eq!(record.address_type, 3);
+    {
+        let records = proxy.records.lock().unwrap();
         assert_eq!(
-            (record.user.clone(), record.password.clone()),
-            ctx.credentials(&id)
+            records.len(),
+            2,
+            "redirect or private URL caused an extra connection"
         );
+        for (record, id) in records.iter().zip(ids) {
+            assert_eq!(record.address_type, 3);
+            assert_eq!(
+                (record.user.clone(), record.password.clone()),
+                ctx.credentials(&id)
+            );
+        }
     }
-    drop(records);
+    // Operator refresh uses the same public/Tor import path without loading keys.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let config = operator_config(dir.path(), &file);
+    let mut config_value: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    config_value.as_table_mut().unwrap().insert(
+        "network".into(),
+        toml::Value::try_from(&ctx.policy).unwrap(),
+    );
+    std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
+    let m = manager(Some(file.clone())).await;
+    let added = add(&m, "refresh", "", "").await;
+    let id = added["source_id"].as_str().unwrap();
+    assert!(maintain_cli(&config, "writer", id, true).await.is_err());
+    drop(m);
+    maintain_cli(&config, "writer", id, true).await.unwrap();
+    let saved = store::Store::open(&file, &[]).unwrap().load().unwrap();
+    assert_eq!(saved.records[id].revision, 2);
+    assert_eq!(
+        serde_json::from_str::<Value>(&saved.records[id].document).unwrap(),
+        spec()
+    );
+    // A refused refresh leaves the saved revision untouched.
+    config_value["source_management"]
+        .as_table_mut()
+        .unwrap()
+        .insert("max_tools_per_server".into(), toml::Value::Integer(1));
+    std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
+    assert!(maintain_cli(&config, "writer", id, true).await.is_err());
+    assert_eq!(
+        store::Store::open(&file, &[])
+            .unwrap()
+            .load()
+            .unwrap()
+            .records[id]
+            .revision,
+        2
+    );
     task.abort();
 }
-
-#[path = "../../tests/support/permissions.rs"]
-mod permissions;
-
-#[path = "../../tests/support/dynamic_scope.rs"]
-mod dynamic_scope;
 
 #[cfg(unix)]
 #[test]
@@ -1326,122 +558,573 @@ fn registry_protected_aliases_and_sidecars_preserve_targets() {
     assert!(!parent.join("registry.sqlite").exists());
 }
 
+#[path = "../../tests/support/import_limits.rs"]
+mod import_limits;
 #[path = "../../tests/support/mcp_execution.rs"]
 mod mcp_execution;
 
-#[path = "../../tests/support/import_limits.rs"]
-mod import_limits;
-
 #[tokio::test]
-async fn malformed_imports_never_publish_or_leave_partial_records() {
-    for bytes in [
-        b"{broken".to_vec(),
-        format!("{}invalid{}", "[".repeat(200), "]".repeat(200)).into_bytes(),
-        br##"{"paths": {"/x":{"get":{"parameters":[{"schema":{"$ref":"#/missing"}}]}}}}"##.to_vec(),
-    ] {
-        let m = manager(None).await;
-        let cell = OnceCell::new();
-        cell.set(Ok(Arc::new(bytes))).unwrap();
-        m.fetches.lock().unwrap().insert(
-            "https://api.example.com/openapi.json".into(),
-            (Instant::now(), Arc::new(cell)),
-        );
-        let generation = m.catalog.read().generation;
-        assert!(
-            m.invoke(
-                "writer",
-                "treazury_source_add",
-                json!({"candidate":candidate("bad","process","server"),"idempotency_key":"bad"})
-            )
-            .await
-            .is_err()
-        );
-        assert_eq!(m.catalog.read().generation, generation);
-        assert!(m.inner.lock().unwrap().state.records.is_empty());
-        assert!(m.catalog.read().views.values().all(Vec::is_empty));
-    }
-}
-
-#[path = "../../tests/support/discovery_concurrency.rs"]
-mod concurrency;
-
-#[tokio::test]
-async fn image_results_survive_dynamic_fallback_and_listener_revision_guards() {
+async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
+    use rmcp::ServerHandler;
     let m = manager(None).await;
-    let added = add(&m, "media", "process", "process").await;
-    let id = added["source_id"].clone();
-    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
-    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let calls = count.clone();
-    let (vendor, vendor_task) = listen(axum::Router::new().route(
-        "/read",
-        axum::routing::get(move || {
-            let calls = calls.clone();
-            async move {
-                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                axum::Json(json!({"image":png,"model":"fixture"}))
-            }
-        }),
-    ))
+    let args = json!({"spec_url":"https://api.example.com/openapi.json"});
+    seed(&m).await;
+    let results = futures_util::future::join_all(
+        (0..8).map(|_| m.invoke("writer", "x402_treazury_source_add", args.clone())),
+    )
     .await;
-    let mut snapshot = (*m.catalog.read()).clone();
-    let mut name = String::new();
-    for view in snapshot.views.values_mut() {
-        for bound in view {
-            bound.base = vendor.clone();
-            bound.client = m.payers["shared"].clone();
-            bound.tool.response_mapping = Some(
-                serde_json::from_value(
-                    json!({"images":[{"pointer":"/image","mime_type":"image/png"}]}),
-                )
-                .unwrap(),
-            );
-            if bound.tool.path == "/read" {
-                name = bound.tool.name.clone();
-            }
-        }
-    }
-    m.catalog.publish(snapshot);
-    let (reader, task) = listen(crate::server::http_app(
-        server(&m, "reader"),
-        "test-token".into(),
-    ))
-    .await;
+    let first = results[0].as_ref().unwrap();
+    assert!(results.iter().all(|r| r.as_ref().unwrap() == first));
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    assert!(m.catalog.read().views["reader"].is_empty());
+    let other = m
+        .invoke("reader", "x402_treazury_source_add", args.clone())
+        .await
+        .unwrap();
+    assert_ne!(first["source_id"], other["source_id"]);
     assert!(
-        server(&m, "hidden")
-            .invoke_output(&name, &Default::default())
+        m.invoke("hidden", "x402_treazury_source_add", args)
             .await
             .is_err()
     );
-    let args = json!({"tool_id":name,"arguments":{},"expected_revision":1});
-    for (tool, args) in [
-        (name.as_str(), json!({})),
-        ("treazury_tool_call", args.clone()),
-    ] {
-        let result = call(&reader, tool, args).await;
-        assert_eq!(result["content"][1]["type"], "image", "{result}");
-        assert_eq!(result["content"][1]["data"], png);
-        assert!(result.get("structuredContent").is_none());
+    let s = server(&m, "writer");
+    for name in ["sources_search", "source_add", "tools_search", "tool_call"] {
+        assert!(s.get_tool(&format!("x402_treazury_{name}")).is_some());
     }
-    let invalid = call(
-        &reader,
-        "treazury_tool_call",
-        json!({"tool_id":name,"arguments":{},"expected_revision":2}),
+    for name in [
+        "source_preview",
+        "sources_list",
+        "source_update",
+        "source_remove",
+    ] {
+        assert!(s.get_tool(&format!("x402_treazury_{name}")).is_none());
+        assert!(
+            m.invoke("writer", &format!("x402_treazury_{name}"), json!({}))
+                .await
+                .is_err()
+        );
+    }
+    for extra in [
+        "targets",
+        "visibility",
+        "lifetime",
+        "idempotency_key",
+        "candidate",
+        "wallet",
+        "selection",
+    ] {
+        let mut args = json!({"spec_url":"https://api.example.com/openapi.json"});
+        args[extra] = json!("forbidden");
+        assert!(
+            m.invoke("writer", "x402_treazury_source_add", args)
+                .await
+                .is_err(),
+            "{extra}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn references_and_cursors_bind_endpoint_revision_and_process() {
+    let m = manager(None).await;
+    add(&m, "demo", "", "").await;
+    let search = m
+        .invoke("writer", "x402_treazury_tools_search", json!({"limit":1}))
+        .await
+        .unwrap();
+    let reference = search["items"][0]["tool_ref"].as_str().unwrap();
+    assert!(m.find_reference("writer", reference).is_ok());
+    assert!(m.find_reference("reader", reference).is_err());
+    assert!(
+        m.invoke(
+            "reader",
+            "x402_treazury_tools_search",
+            json!({"cursor":search["next_cursor"]})
+        )
+        .await
+        .is_err()
+    );
+    let mut snapshot = (*m.catalog.read()).clone();
+    for b in snapshot.views.get_mut("writer").unwrap() {
+        b.source.as_mut().unwrap().1 += 1;
+    }
+    snapshot.generation += 1;
+    m.catalog.publish(snapshot);
+    assert!(m.find_reference("writer", reference).is_err());
+    assert!(
+        m.invoke(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"cursor":search["next_cursor"]})
+        )
+        .await
+        .is_err()
+    );
+    let another = manager(None).await;
+    add(&another, "demo", "", "").await;
+    assert!(another.find_reference("writer", reference).is_err());
+}
+
+#[tokio::test]
+async fn registry_persistence_is_operator_controlled_and_revocation_is_local() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let m = manager(Some(file.clone())).await;
+    let first = add(&m, "saved", "", "").await;
+    assert_eq!(first["lifetime"], "persistent");
+    drop(m);
+    let m = manager(Some(file.clone())).await;
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    // No seed or network fetch: repeated add returns persisted registration.
+    let again = m
+        .invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":"https://api.example.com/openapi.json"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(again["source_id"], first["source_id"]);
+    drop(m);
+    let mut ls = listeners(true);
+    ls.get_mut("writer").unwrap().source_management = false;
+    let m = manager_with(policy(Some(file)), ls).await;
+    assert!(m.catalog.read().views.values().all(Vec::is_empty));
+    assert!(
+        m.inner
+            .lock()
+            .unwrap()
+            .state
+            .records
+            .values()
+            .next()
+            .unwrap()
+            .disabled
+            .is_some()
+    );
+    let temporary = manager(None).await;
+    assert_eq!(
+        add(&temporary, "temporary", "", "").await["lifetime"],
+        "process"
+    );
+}
+
+#[tokio::test]
+async fn quota_races_never_publish_partial_sources() {
+    let mut p = policy(None);
+    p.max_sources = 1;
+    let m = manager_with(p, listeners(false)).await;
+    seed(&m).await;
+    let args = json!({"spec_url":"https://api.example.com/openapi.json"});
+    let (a, b) = tokio::join!(
+        m.invoke("writer", "x402_treazury_source_add", args.clone()),
+        m.invoke("reader", "x402_treazury_source_add", args)
+    );
+    assert_ne!(a.is_ok(), b.is_ok());
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
+    assert_eq!(
+        m.catalog.read().views.values().map(Vec::len).sum::<usize>(),
+        2
+    );
+    let mut p = policy(None);
+    p.max_tools_per_server = 1;
+    let m = manager_with(p, listeners(false)).await;
+    seed(&m).await;
+    assert!(
+        m.invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":"https://api.example.com/openapi.json"})
+        )
+        .await
+        .is_err()
+    );
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+    assert!(m.catalog.read().views.values().all(Vec::is_empty));
+}
+
+#[tokio::test]
+async fn failed_persistence_never_publishes_and_committed_add_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let m = manager(Some(file.clone())).await;
+    seed(&m).await;
+    m.fail_after_commit
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let args = json!({"spec_url":"https://api.example.com/openapi.json"});
+    assert!(
+        m.invoke("writer", "x402_treazury_source_add", args.clone())
+            .await
+            .is_err()
+    );
+    assert!(m.catalog.read().views["writer"].is_empty());
+    drop(m);
+    let m = manager(Some(file.clone())).await;
+    assert_eq!(
+        m.invoke("writer", "x402_treazury_source_add", args)
+            .await
+            .unwrap()["revision"],
+        1
+    );
+    // A failed SQLite transaction must not publish another registration.
+    m.inner
+        .lock()
+        .unwrap()
+        .store
+        .as_ref()
+        .unwrap()
+        .reject_writes();
+    seed(&m).await;
+    assert!(
+        m.invoke(
+            "reader",
+            "x402_treazury_source_add",
+            json!({"spec_url":"https://api.example.com/openapi.json"})
+        )
+        .await
+        .is_err()
+    );
+    assert!(m.catalog.read().views["reader"].is_empty());
+}
+
+#[path = "../../tests/support/dynamic_scope.rs"]
+mod dynamic_scope;
+
+#[tokio::test]
+async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
+    let mut ls = listeners(false);
+    ls.get_mut("reader").unwrap().wallet = Some("other".into());
+    ls.get_mut("reader").unwrap().tags = vec!["read".into()];
+    let shared = payer();
+    let other = payer();
+    let snapshot = CatalogSnapshot {
+        generation: 0,
+        views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
+    };
+    let m = Manager::new(
+        policy(None),
+        ls,
+        BTreeMap::from([
+            ("shared".into(), shared.clone()),
+            ("other".into(), other.clone()),
+        ]),
+        Arc::new(CatalogState::new(snapshot)),
+        vec![],
+    )
+    .await
+    .unwrap();
+    add(&m, "first", "", "").await;
+    m.invoke(
+        "reader",
+        "x402_treazury_source_add",
+        json!({"spec_url":"https://api.example.com/openapi.json"}),
+    )
+    .await
+    .unwrap();
+    let snap = m.catalog.read();
+    assert_eq!(snap.views["writer"].len(), 2);
+    assert_eq!(snap.views["reader"].len(), 1);
+    assert!(snap.views["writer"][0].client.shares_profile_with(&shared));
+    assert!(snap.views["reader"][0].client.shares_profile_with(&other));
+    assert!(!snap.views["reader"][0].client.shares_profile_with(&shared));
+}
+
+#[tokio::test]
+async fn real_http_directory_search_and_cached_client_workflow() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let requests = Arc::new(AtomicUsize::new(0));
+    let count = requests.clone();
+    let (vendor, vendor_task)=listen(axum::Router::new().route("/services",axum::routing::get(move |axum::extract::Query(query):axum::extract::Query<BTreeMap<String,String>>| {
+        count.fetch_add(1,Ordering::SeqCst);
+        async move { axum::Json(json!({"query":query,"services":[{"spec_url":"https://api.example.com/openapi.json"}]})) }
+    }))).await;
+    let m = manager(None).await;
+    let cfg = crate::catalog::Config::default();
+    let tools=crate::catalog::build_tools(&cfg,&json!({"paths":{"/services":{"get":{"parameters":[{"in":"query","name":"q","schema":{"type":"string"}}]}}}}),"x402_list").unwrap();
+    let mut snap = (*m.catalog.read()).clone();
+    snap.views.get_mut("writer").unwrap().push(BoundTool {
+        tool: tools[0].clone(),
+        client: payer(),
+        base: vendor,
+        source: None,
+        help: Arc::new(OnceCell::new()),
+    });
+    m.catalog.publish(snap);
+    let (base, task) = listen(crate::server::http_app(
+        server(&m, "writer"),
+        "test-token".into(),
+    ))
+    .await;
+    let denied = crate::network::discovery(&base,Duration::from_secs(5)).unwrap()
+        .post(format!("{base}/mcp")).bearer_auth("wrong-token")
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x402_treazury_sources_search","arguments":{"q":"weather"}}}))
+        .send().await.unwrap();
+    assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+    let found = call(
+        &base,
+        "x402_treazury_sources_search",
+        json!({"q":"weather"}),
     )
     .await;
-    assert_eq!(invalid["isError"], true);
+    assert_ne!(found["isError"], true, "{found}");
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    seed(&m).await;
+    let added = call(
+        &base,
+        "x402_treazury_source_add",
+        json!({"spec_url":"https://api.example.com/openapi.json"}),
+    )
+    .await;
+    let id = added["structuredContent"]["source_id"].clone();
+    assert!(id.is_string(), "{added}");
+    let signatures = call(&base, "x402_treazury_tools_search", json!({"source_id":id})).await;
+    let item = &signatures["structuredContent"]["items"][0];
+    assert!(item["input_schema"].is_object());
+    assert!(item["tool_ref"].is_string());
+    assert_eq!(
+        call(
+            &base,
+            "x402_treazury_tool_call",
+            json!({"tool_ref":"stale","arguments":{}})
+        )
+        .await["isError"],
+        true
+    );
+    task.abort();
+    vendor_task.abort();
+}
+
+#[tokio::test]
+async fn shared_managed_registration_does_not_allocate_or_fund() {
+    use crate::rotation::{
+        base::BaseRpc,
+        manager::ManagedPool,
+        store::{Store, StoreHandle},
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &tmp.path().join("state"),
+        &tmp.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = store.ensure_pool("shared", "5").unwrap();
+    let before = serde_json::to_value(store.status().unwrap()).unwrap();
+    let (store, worker) = StoreHandle::spawn(store);
+    let managed = PaidClient::managed(Arc::new(
+        ManagedPool::new(
+            store.clone(),
+            pool,
+            BaseRpc::new("http://127.0.0.1:1/rpc", 12, 120).unwrap(),
+            "5",
+            SpendPolicy::dollars("0.01").unwrap(),
+            1,
+        )
+        .unwrap(),
+    ));
+    let ls = listeners(true);
+    let registry = tmp.path().join("registry.sqlite");
+    let (url, task) = listen(
+        axum::Router::new().route("/spec", axum::routing::get(|| async { axum::Json(spec()) })),
+    )
+    .await;
+    let snapshot = CatalogSnapshot {
+        generation: 0,
+        views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
+    };
+    let m = Manager::new(
+        policy(Some(registry.clone())),
+        ls.clone(),
+        BTreeMap::from([("shared".into(), managed.clone())]),
+        Arc::new(CatalogState::new(snapshot)),
+        vec![],
+    )
+    .await
+    .unwrap();
+    *m.fixture_endpoint.lock().unwrap() = Some(format!("{url}/spec"));
+    add(&m, "one", "", "").await;
     m.invoke(
-        "writer",
-        "treazury_source_remove",
-        json!({"source_id":id,"expected_revision":1,"idempotency_key":"remove-media"}),
+        "reader",
+        "x402_treazury_source_add",
+        json!({"spec_url":"https://api.example.com/openapi.json"}),
+    )
+    .await
+    .unwrap();
+    let after = store
+        .call(|s| Ok(serde_json::to_value(s.status()?)?))
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    drop(m);
+    let reopened = Manager::new(
+        policy(Some(registry)),
+        ls.clone(),
+        BTreeMap::from([("shared".into(), managed)]),
+        Arc::new(CatalogState::new(CatalogSnapshot {
+            generation: 0,
+            views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
+        })),
+        vec![],
     )
     .await
     .unwrap();
     assert_eq!(
-        call(&reader, "treazury_tool_call", args).await["isError"],
-        true
+        reopened
+            .inner
+            .lock()
+            .unwrap()
+            .state
+            .records
+            .values()
+            .filter(|r| !r.removed)
+            .count(),
+        2
     );
-    assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        before,
+        store
+            .call(|s| Ok(serde_json::to_value(s.status()?)?))
+            .await
+            .unwrap()
+    );
+    drop(reopened);
     task.abort();
-    vendor_task.abort();
+    drop(store);
+    worker.await.unwrap();
+}
+
+fn operator_config(dir: &std::path::Path, file: &std::path::Path) -> PathBuf {
+    let path = dir.join("deployment.toml");
+    let config = json!({"version":1,"wallets":{"shared":{"mode":"static","private_key_env":"UNUSED_KEY"}},
+        "source_management":{"wallet":"shared","registry_file":file},"servers":{"writer":{"listen":"127.0.0.1:8000","bearer_token_env":"UNUSED_TOKEN","source_management":true}}});
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    path
+}
+#[tokio::test]
+async fn operator_removal_requires_exclusive_ownership_and_allows_readdition() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let config = operator_config(dir.path(), &file);
+    let m = manager(Some(file.clone())).await;
+    let first = add(&m, "saved", "", "").await;
+    let id = first["source_id"].as_str().unwrap();
+    assert!(maintain_cli(&config, "writer", id, false).await.is_err());
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    drop(m);
+    assert!(maintain_cli(&config, "reader", id, false).await.is_err());
+    maintain_cli(&config, "writer", id, false).await.unwrap();
+    let m = manager(Some(file)).await;
+    assert!(m.catalog.read().views["writer"].is_empty());
+    assert!(m.inner.lock().unwrap().state.records[id].removed);
+    let second = add(&m, "saved", "", "").await;
+    assert_ne!(first["source_id"], second["source_id"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::await_holding_lock)] // Stall only the blocking commit worker to cancel its waiter.
+async fn accepted_add_commits_after_waiter_cancellation() {
+    let m = manager(None).await;
+    add(&m, "initial", "", "").await;
+    let lock = m.inner.lock().unwrap();
+    let mut record = lock.state.records.values().next().unwrap().clone();
+    record.id = Uuid::new_v4().to_string();
+    record.candidate.name = "second".into();
+    record.candidate.spec_url = "https://api.example.com/second.json".into();
+    let worker = m.clone();
+    let task = tokio::spawn(async move {
+        worker
+            .commit("writer".into(), "cancel-test".into(), json!({}), record)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while m.mutations.available_permits() == 16 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    drop(lock);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while m.catalog.read().views["writer"].len() != 4 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 2);
+}
+
+#[tokio::test]
+async fn boolean_config_and_examples_are_strict_and_offline() {
+    for example in [
+        "examples/deployments/agent-sources.toml",
+        "examples/deployments/agent-sources-managed.toml",
+    ] {
+        let shown = crate::deployment::Deployment::show_config(std::path::Path::new(example))
+            .await
+            .unwrap();
+        assert_eq!(shown["servers"]["research"]["source_management"], true);
+        assert_eq!(shown["source_management"]["scope"], "endpoint_local");
+        assert_eq!(
+            shown["source_management"]["wallet_bindings"]["analysis"],
+            "agent_shared"
+        );
+    }
+    for value in [json!({"enabled":true}), json!("manage")] {
+        assert!(
+            serde_json::from_value::<ListenerConfig>(
+                json!({"listen":"127.0.0.1:0","source_management":value})
+            )
+            .is_err()
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("not-created.sqlite");
+    let config = operator_config(dir.path(), &file);
+    crate::deployment::Deployment::show_config(&config)
+        .await
+        .unwrap();
+    assert!(!file.exists());
+    assert!(
+        maintain_cli(&config, "writer", "missing", false)
+            .await
+            .is_err()
+    );
+    assert!(!file.exists());
+}
+
+#[tokio::test]
+async fn saved_nonlocal_bindings_stay_disabled_and_duplicate_add_is_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let m = manager(Some(file.clone())).await;
+    let added = add(&m, "old", "", "").await;
+    {
+        let mut inner = m.inner.lock().unwrap();
+        let mut state = inner.state.clone();
+        state
+            .records
+            .get_mut(added["source_id"].as_str().unwrap())
+            .unwrap()
+            .targets
+            .push("removed_endpoint".into());
+        inner.store.as_mut().unwrap().save(&state).unwrap();
+    }
+    drop(m);
+    let m = manager(Some(file)).await;
+    let result = m
+        .invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":"https://api.example.com/openapi.json"}),
+        )
+        .await
+        .unwrap();
+    assert!(result["disabled"].is_string());
+    assert_eq!(result["tool_count"], 0);
+    assert!(m.catalog.read().views.values().all(Vec::is_empty));
 }

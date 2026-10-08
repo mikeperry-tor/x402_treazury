@@ -215,26 +215,33 @@ and [the runtime architecture](docs/architecture.md).
   arrangement table describes deployment, listener and group sharing; preserve this
   boundary if adding higher-level agent privacy defaults.
 - Listener ID through bearer-authenticated routing is the principal. Agent/session
-  fields never select an owner. Receivers cannot mutate another listener's records;
-  static TOML sources are immutable. Source visibility and persistence are independent.
-- Mutation tools are separately authorized under `treazury_`; API filters cannot
+  fields never select an owner. `source_management=true` enables endpoint-local
+  registration only; static TOML sources are immutable. Registry configuration, not
+  agent arguments, controls persistence. Explicit listener `wallet` overrides the
+  shared dynamic wallet.
+- Mutation tools are separately authorized under `x402_treazury_`; API filters cannot
   remove them. Dynamic names contain the full UUID under `dyn_`. Both prefixes are
   reserved in participating deployments. Every direct/fallback call captures one
-  snapshot. Fallback checks source revision before any HTTP request.
+  snapshot. Fallback validates an opaque endpoint/process/revision-bound tool reference before HTTP.
 - HTTP is stateless: expose stable search/call tools, without advertising list-change
   notifications. Standalone stdio has no dynamic management. Cursors bind to process
-  catalog instance, generation and caller/query; previews bind to their own cache entry.
+  catalog instance, generation and caller/query. The four tools are sources_search,
+  source_add, tools_search and tool_call under `x402_treazury_`. Directory search delegates
+  to a visible static GET tool through normal payment admission.
 - Agent imports require public HTTPS and bounded bytes/reference expansion. Direct
   DNS validation happens in the network factory's resolver; Tor preserves remote DNS
   and depends on Tor's internal-address rejection. Dynamic paid clients must retain
   `public_destinations()`. No pricing probes on registration or refresh.
 - Durable mutations commit before publishing all listener views. A cancelled waiter
-  does not undo an accepted blocking-worker job. Stored process targets stay fixed at
-  restart. Revalidate grants/quotas/format, disable invalid records, retain tombstones.
+  does not undo an accepted blocking-worker job. Add deduplicates canonical spec URLs
+  per endpoint, including races and restart. Revalidate endpoint enablement, local
+  scope, quotas and format on restart; disable invalid records and retain tombstones.
   Registry, ownership sidecar and SQLite sidecars must not alias config/treasury paths.
 - Source removal never retires wallets or deletes payment/funding/refund journals.
   `config show` never opens the registry; `sources inspect` is read-only and cannot
-  create a missing registry. Persistent metadata/specs can still reveal user interests.
+  create a missing registry. `sources refresh/remove` require exclusive registry ownership
+  while serving is stopped; refresh fetches and validates without wallet credentials.
+  Persistent metadata/specs can still reveal user interests.
 - Tests in `src/discovery/tests.rs` inject public-URL documents/local fixtures only
   under `cfg(test)`; no production loopback bypass is permitted. Tests use unfunded
   keys/temporary state and cover actual HTTP management, caps, concurrency and recovery.

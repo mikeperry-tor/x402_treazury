@@ -267,7 +267,7 @@ adjustments, sampling exhaustion and failures emit reasons in stderr and scoped
 agent evidence. Successful real results keep their content and append separate
 cover advisories where needed.
 
-`treazury_cover_status()` is a local, no-argument tool exposed only for selected
+`x402_treazury_cover_status()` is a local, no-argument tool exposed only for selected
 static cover bindings when the effective process switch is on. It reports the listener's
 selected sources, not wallet IDs or shared-owner totals. Each binding retains
 32 events and an explicit eviction count. It performs no network I/O. Disabled

@@ -572,7 +572,7 @@ impl Call {
             .filter(|c| **c != "cover_budget_completed")
             .copied()
             .collect::<Vec<_>>();
-        (!reasons.is_empty()).then(||format!("Optional cover traffic: {}. Connection reuse is pooled/best-effort; consult treazury_cover_status.",reasons.join(", ")))
+        (!reasons.is_empty()).then(||format!("Optional cover traffic: {}. Connection reuse is pooled/best-effort; consult x402_treazury_cover_status.",reasons.join(", ")))
     }
     pub fn protocol(&self, version: reqwest::Version) {
         if version != reqwest::Version::HTTP_2 {

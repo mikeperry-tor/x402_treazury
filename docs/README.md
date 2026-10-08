@@ -12,7 +12,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, double buffering, funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
 | [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling and evidence |
-| [Agent sources](agent-sources.md) | Agent grants, wallet sharing, dynamic catalogs and persistence |
+| [Agent sources](agent-sources.md) | Endpoint-local APIs, wallet selection, dynamic tools and persistence |
 | [Testing](testing.md) | Offline checks, coverage, consensus, Tor and funded qualification boundaries |
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |

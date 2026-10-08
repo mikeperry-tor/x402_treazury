@@ -418,7 +418,7 @@ method, URL, query and JSON body without making a request or loading a signer.
 ## Optional agent API discovery
 
 Authorize agents to register public OpenAPI sources in a running multi-server
-HTTP deployment with `[source_management]` and per-listener grants. The
+HTTP deployment with `[source_management]` and `source_management = true` on each participating endpoint. The
 [static-wallet example](../examples/deployments/agent-sources.toml) and
 [managed-wallet example](../examples/deployments/agent-sources-managed.toml) use one named
 `agent_shared` wallet for all added APIs. At a $5 managed deposit size, that is
@@ -428,19 +428,18 @@ Registration does not create wallet pools or trigger funding.
 | Arrangement | Configuration | Payment identity sharing |
 | --- | --- | --- |
 | All agent-added APIs share one wallet (recommended) | Global `source_management.wallet = "agent_shared"` | Across APIs and participating listeners |
-| Listener-specific wallets | Listener `source_management.wallet` overrides | Across added APIs on that listener |
+| Listener-specific wallets | Listener `wallet` overrides | Across added APIs on that listener |
 | Operator-selected listener groups | Several listener overrides reference the same named profile | Within the configured group |
 
-A listener's bearer token defines its authority. Grants separately control source
-creation, receiving sources, permitted targets, process visibility and persistence.
-Visibility (`server`, `servers`, `process`) is independent of lifetime (`process`,
-`persistent`). Existing listener filters still constrain imported API tools. Parallel
-callers on the same listener share its authority, quotas and one import slot.
-Concurrent additions publish complete catalog snapshots; busy errors can be retried
-with the same arguments and idempotency key. See the concurrency rules in the
-[agent source guide](agent-sources.md#concurrent-agents).
+A listener's bearer token defines its authority. Registrations remain local to that
+endpoint; they cannot be published to another endpoint. The operator selects persistence
+by configuring `source_management.registry_file`; agents cannot choose scope or lifetime.
+Existing listener filters still constrain imported API tools. Parallel callers on the
+same endpoint share one import slot. Concurrent additions publish complete snapshots;
+repeat a busy or lost add with the same specification URL. Duplicate URLs return the
+existing registration on that endpoint. See the [agent source guide](agent-sources.md).
 
-The stable `treazury_tools_search` and `treazury_tool_call` tools let clients use new
+The stable `x402_treazury_tools_search` and `x402_treazury_tool_call` tools let clients use new
 APIs even when they cache their initial tool list. HTTP remains stateless and does
 not advertise list-change notifications. Imports require public HTTPS, use the same
 direct/Tor network factory, and never run pricing sweeps. Persistent registrations

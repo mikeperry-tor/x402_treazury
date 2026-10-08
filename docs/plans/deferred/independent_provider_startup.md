@@ -118,7 +118,7 @@ availability and should be corrected, rather than treating this as priority rout
 
 ## Agent and operator visibility
 
-Expose a read-only `treazury_source_status` tool on background-loading listeners,
+Expose a read-only `x402_treazury_source_status` tool on background-loading listeners,
 independent of agent source-management grants. It reports only sources declared
 for that listener plus dynamic sources already visible under existing permissions.
 Use source IDs, state, phase and sanitized errors; omit sensitive spec query

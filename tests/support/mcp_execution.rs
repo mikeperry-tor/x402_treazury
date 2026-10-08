@@ -62,14 +62,15 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
     });
     let s = server(&m, "writer");
     assert!(s.get_tool(&name).is_some());
-    assert!(s.get_tool("treazury_tool_call").is_some());
+    assert!(s.get_tool("x402_treazury_tool_call").is_some());
     assert!(s.get_tool("missing").is_none());
     assert!(server(&m, "hidden").get_tool(&name).is_none());
     assert!(
         server(&m, "hidden")
-            .get_tool("treazury_source_add")
+            .get_tool("x402_treazury_source_add")
             .is_none()
     );
+    let reference = m.tool_reference("writer", &m.catalog.read().views["writer"][0]);
     for limit in [0, 2, 3, 4] {
         let mut s = s.clone();
         s.max_response_chars = Some(limit);
@@ -79,8 +80,8 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             let result = if fallback {
                 call(
                     &base,
-                    "treazury_tool_call",
-                    json!({"tool_id":name,"expected_revision":0,"arguments":args}),
+                    "x402_treazury_tool_call",
+                    json!({"tool_ref":reference,"arguments":args}),
                 )
                 .await
             } else {
@@ -97,7 +98,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             assert_eq!(result["content"][0]["text"], expected);
             assert_ne!(result["isError"], true);
         }
-        let structured = call(&base, "treazury_sources_list", json!({})).await;
+        let structured = call(&base, "x402_treazury_tools_search", json!({})).await;
         assert_ne!(structured["isError"], true, "{structured}");
         assert_eq!(
             serde_json::from_str::<Value>(structured["content"][0]["text"].as_str().unwrap())
@@ -136,8 +137,8 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
     for (tool, args) in [
         (name.as_str(), json!({})),
         ("missing", json!({})),
-        ("treazury_tool_call", json!({})),
-        ("treazury_source_add", json!({})),
+        ("x402_treazury_tool_call", json!({})),
+        ("x402_treazury_source_add", json!({})),
     ] {
         assert_eq!(call(&base, tool, args).await["isError"], true);
     }
@@ -149,8 +150,8 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             let result = if fallback {
                 call(
                     &base,
-                    "treazury_tool_call",
-                    json!({"tool_id":name,"expected_revision":0,"arguments":{"id":"error"}}),
+                    "x402_treazury_tool_call",
+                    json!({"tool_ref":reference,"arguments":{"id":"error"}}),
                 )
                 .await
             } else {
@@ -170,7 +171,7 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
     for remove in [false, true] {
         for fallback in [false, true] {
             let m = manager(None).await;
-            let added = add(&m, "captured", "process", "process").await;
+            let _added = add(&m, "captured", "process", "process").await;
             let entered = Arc::new(tokio::sync::Notify::new());
             let release = Arc::new(tokio::sync::Notify::new());
             let counts = Arc::new(AtomicUsize::new(0));
@@ -208,13 +209,17 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
             let s = server(&m, "writer");
             let (base, task) =
                 listen(crate::server::http_app(s.clone(), "test-token".into())).await;
-            let (url, n) = (base.clone(), name.clone());
+            let reference = m.tool_reference(
+                "writer",
+                crate::catalog_state::find(&m.catalog.read(), "writer", &name).unwrap(),
+            );
+            let (url, n, pending_reference) = (base.clone(), name.clone(), reference.clone());
             let pending = tokio::spawn(async move {
                 if fallback {
                     call(
                         &url,
-                        "treazury_tool_call",
-                        json!({"tool_id":n,"arguments":{},"expected_revision":1}),
+                        "x402_treazury_tool_call",
+                        json!({"tool_ref":pending_reference,"arguments":{}}),
                     )
                     .await
                 } else {
@@ -224,27 +229,26 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
             tokio::time::timeout(Duration::from_secs(5), entered.notified())
                 .await
                 .unwrap();
+            // Publication changes do not replace bindings captured by in-flight calls.
+            let mut snapshot = (*m.catalog.read()).clone();
+            snapshot.generation += 1;
+            let view = snapshot.views.get_mut("writer").unwrap();
             if remove {
-                m.invoke("writer","treazury_source_remove",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"remove"})).await.unwrap();
+                view.clear();
             } else {
-                m.invoke("writer","treazury_source_update",json!({"source_id":added["source_id"],"expected_revision":1,"idempotency_key":"update","selection":{"tags":["write"]}})).await.unwrap();
-                assert_eq!(m.catalog.read().views["writer"].len(), 1);
-                assert_eq!(
-                    m.catalog.read().views["writer"][0]
-                        .source
-                        .as_ref()
-                        .unwrap()
-                        .1,
-                    2
-                );
+                view.retain(|b| b.tool.path != "/read");
+                for b in view {
+                    b.source.as_mut().unwrap().1 += 1;
+                }
             }
+            m.catalog.publish(snapshot);
             assert!(s.get_tool(&name).is_none());
             assert_eq!(call(&base, &name, json!({})).await["isError"], true);
             assert_eq!(
                 call(
                     &base,
-                    "treazury_tool_call",
-                    json!({"tool_id":name,"arguments":{},"expected_revision":1})
+                    "x402_treazury_tool_call",
+                    json!({"tool_ref":reference,"arguments":{}})
                 )
                 .await["isError"],
                 true

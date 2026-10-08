@@ -98,18 +98,7 @@ async fn scope_child() {
     let p = policy(None);
     let mut ls = listeners(false);
     ls.insert("sibling".into(), ls["reader"].clone());
-    ls.get_mut("writer")
-        .unwrap()
-        .source_management
-        .as_mut()
-        .unwrap()
-        .allowed_targets = Some(vec!["writer".into(), "reader".into(), "sibling".into()]);
-    ls.get_mut("reader")
-        .unwrap()
-        .source_management
-        .as_mut()
-        .unwrap()
-        .wallet = Some("reader_wallet".into());
+    ls.get_mut("reader").unwrap().wallet = Some("reader_wallet".into());
     let shared = payer();
     let other = PaidClient::new(
         Payer::new(
@@ -132,18 +121,17 @@ async fn scope_child() {
     .await
     .unwrap();
     // No seeded cache or fixture client replacement: registration fetches HTTPS.
-    let added = m
-        .invoke(
-            "writer",
-            "treazury_source_add",
-            json!({"candidate":candidate("scoped","process","process"),"idempotency_key":"scoped"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        added["wallet_profiles"],
-        json!({"writer":"shared","reader":"reader_wallet","sibling":"shared"})
-    );
+    for owner in ["writer", "reader", "sibling"] {
+        let added = m
+            .invoke(
+                owner,
+                "x402_treazury_source_add",
+                json!({"spec_url":"https://api.example.com/openapi.json","name":"scoped"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(added["targets"], json!([owner]));
+    }
     // Help and pricing are discovery traffic even when invoked from a paid binding.
     let mut help = m.catalog.read().views["writer"]
         .iter()
@@ -183,6 +171,13 @@ async fn scope_child() {
     let direct = NetworkContext::new(NetworkPolicy::default()).unwrap();
     let mut tasks = vec![];
     for (id, key) in [("writer", 1), ("reader", 2), ("sibling", 1)] {
+        let bound = m.catalog.read().views[id]
+            .iter()
+            .find(|b| b.tool.method == "GET")
+            .unwrap()
+            .clone();
+        let name = bound.tool.name.clone();
+        let reference = m.tool_reference(id, &bound);
         let (url, t) = listen(crate::server::http_app(
             server(&m, id),
             format!("{id}-token"),
@@ -192,7 +187,7 @@ async fn scope_child() {
         let client = direct.discovery(&url, Duration::from_secs(3)).unwrap();
         for fallback in [false, true] {
             let params = if fallback {
-                json!({"name":"treazury_tool_call","arguments":{"tool_id":name,"arguments":{},"expected_revision":1}})
+                json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":reference,"arguments":{}}})
             } else {
                 json!({"name":name,"arguments":{}})
             };
@@ -218,87 +213,20 @@ async fn scope_child() {
     }
     assert_eq!(requests.load(Ordering::SeqCst), 12);
     assert_eq!(signatures.lock().unwrap().len(), 6);
-    hold.store(true, Ordering::SeqCst);
-    let pending_server = server(&m, "writer");
-    let pending_name = name.clone();
-    let pending = tokio::spawn(async move {
-        pending_server
-            .invoke(&pending_name, &Default::default())
-            .await
-            .unwrap()
-    });
-    arrived.notified().await;
-    // Keep an actual guarded HTTPS payment in flight while additions and an
-    // update atomically replace the shared catalog on multiple worker threads.
-    let barrier = Arc::new(tokio::sync::Barrier::new(4));
-    *m.commit_barrier.lock().unwrap() = Some(barrier.clone());
-    let mut mutations = tokio::task::JoinSet::new();
-    for name in ["parallel_a", "parallel_b"] {
-        let c = candidate(name, "process", "process");
-        let preview = m
-            .invoke("writer", "treazury_source_preview", json!({"candidate":c}))
-            .await
-            .unwrap();
-        let manager = m.clone();
-        mutations.spawn(async move { manager.invoke("writer", "treazury_source_add", json!({"candidate":c,"preview_id":preview["preview_id"],"idempotency_key":name})).await });
-    }
-    let manager = m.clone();
-    let source = added["source_id"].clone();
-    mutations.spawn(async move { manager.invoke("writer", "treazury_source_update", json!({"source_id":source,"expected_revision":1,"selection":{"tags":["read"]},"idempotency_key":"during-payment"})).await });
-    tokio::time::timeout(Duration::from_secs(5), barrier.wait())
-        .await
-        .unwrap();
-    while let Some(result) = mutations.join_next().await {
-        result.unwrap().unwrap();
-    }
-    *m.commit_barrier.lock().unwrap() = None;
-    assert_eq!(m.catalog.read().generation, 4);
-    assert!(!pending.is_finished());
-    assert_eq!(signatures.lock().unwrap().len(), 6);
-    m.payers["shared"].replace_payer(
-        Payer::new(
-            &format!("{:064x}", 3),
-            SpendPolicy::dollars("0.01").unwrap(),
-        )
-        .unwrap(),
-    );
-    release.notify_one();
-    let old: Value = serde_json::from_str(&pending.await.unwrap()).unwrap();
-    let old_signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
-    assert_eq!(old["payer"], old_signer.address().to_string());
-    let new: Value = serde_json::from_str(
-        &server(&m, "sibling")
+    let before = requests.load(Ordering::SeqCst);
+    assert!(
+        server(&m, "reader")
             .invoke(&name, &Default::default())
             .await
-            .unwrap(),
-    )
-    .unwrap();
-    let new_signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 3).parse().unwrap();
-    assert_eq!(new["payer"], new_signer.address().to_string());
-    assert_eq!(requests.load(Ordering::SeqCst), 16);
-    assert_eq!(signatures.lock().unwrap().len(), 8);
-    let before = requests.load(Ordering::SeqCst);
-    m.invoke("writer","treazury_source_update",json!({"source_id":added["source_id"],"expected_revision":2,"selection":{"tags":["write"]},"idempotency_key":"hide"})).await.unwrap();
-    for id in ["writer", "reader"] {
-        let server = server(&m, id);
-        assert!(server.invoke(&name, &Default::default()).await.is_err());
-        assert!(
-            server
-                .invoke(
-                    "treazury_tool_call",
-                    json!({"tool_id":name,"expected_revision":1,"arguments":{}})
-                        .as_object()
-                        .unwrap()
-                )
-                .await
-                .is_err()
-        );
-    }
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        before,
-        "denied invocation reached seller"
+            .is_err()
     );
+    assert!(
+        server(&m, "hidden")
+            .invoke(&name, &Default::default())
+            .await
+            .is_err()
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), before);
     let mut expected = vec![
         crate::network::global()
             .credentials(&IsolationId::discovery("https://api.example.com").unwrap()),
@@ -306,7 +234,7 @@ async fn scope_child() {
     // Tor normalizes spec/help/pricing deadlines to the same floor. Public-only
     // imports still use a separate pool; all discovery keeps the same credential.
     expected.push(expected[0].clone());
-    for key in [1, 2, 3] {
+    for key in [1, 2] {
         let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
         expected.push(
             crate::network::global()
@@ -316,7 +244,7 @@ async fn scope_child() {
     let records = proxy.records.lock().unwrap();
     assert_eq!(
         records.len(),
-        5,
+        4,
         "spec/challenge/retry pools should reuse only within identity"
     );
     assert_eq!(

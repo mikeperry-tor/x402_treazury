@@ -552,3 +552,31 @@ async fn payment_and_wallet_funding_help_use_explicit_usdc_names() {
         assert!(!help.contains(obsolete), "{help}");
     }
 }
+
+#[tokio::test]
+async fn source_maintenance_has_explicit_operator_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    for command in ["refresh", "remove"] {
+        let output = run(dir.path(), &["sources", command, "--help"], &[]).await;
+        assert!(output.status.success());
+        let help = String::from_utf8(output.stdout).unwrap();
+        for option in ["--config", "--server", "--source-id"] {
+            assert!(help.contains(option), "{help}");
+        }
+        bad(run(
+            dir.path(),
+            &[
+                "sources",
+                command,
+                "--config",
+                "missing.toml",
+                "--server",
+                "research",
+                "--source-id",
+                "missing",
+            ],
+            &[],
+        )
+        .await);
+    }
+}

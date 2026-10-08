@@ -59,13 +59,6 @@ struct Inner {
     state: State,
     store: Option<store::Store>,
 }
-struct Preview {
-    owner: String,
-    candidate: Candidate,
-    document: Arc<Vec<u8>>,
-    created: Instant,
-    id: String,
-}
 type FetchCell = Arc<OnceCell<std::result::Result<Arc<Vec<u8>>, String>>>;
 pub struct Manager {
     #[cfg(test)]
@@ -82,47 +75,16 @@ pub struct Manager {
     catalog: Arc<CatalogState>,
     base: CatalogSnapshot,
     inner: Mutex<Inner>,
-    previews: Mutex<BTreeMap<String, Preview>>,
     fetches: Mutex<BTreeMap<String, (Instant, FetchCell)>>,
     global_import: Arc<Semaphore>,
     owner_import: BTreeMap<String, Arc<Semaphore>>,
     mutations: Arc<Semaphore>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Add {
-    candidate: Candidate,
-    idempotency_key: String,
-    preview_id: Option<String>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Update {
+    spec_url: String,
     name: Option<String>,
-    source_id: String,
-    expected_revision: u64,
-    idempotency_key: String,
-    selection: Option<Selection>,
-    visibility: Option<Visibility>,
-    targets: Option<Vec<String>>,
-    lifetime: Option<Lifetime>,
-    #[serde(default)]
-    refresh_spec: bool,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Remove {
-    source_id: String,
-    expected_revision: u64,
-    idempotency_key: String,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PreviewRequest {
-    candidate: Option<Candidate>,
-    preview_id: Option<String>,
-    cursor: Option<String>,
-    limit: Option<usize>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -135,67 +97,66 @@ struct Query {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Call {
-    pub tool_id: String,
+    pub tool_ref: String,
     pub arguments: serde_json::Map<String, Value>,
-    pub expected_revision: u64,
 }
 impl Manager {
-    fn grant(&self, owner: &str) -> policy::Grant {
+    pub fn enabled(&self, owner: &str) -> bool {
         self.listeners
             .get(owner)
-            .and_then(|l| l.source_management.clone())
-            .unwrap_or_default()
+            .is_some_and(|l| l.source_management)
     }
-    pub fn accepts(&self, id: &str) -> bool {
-        self.grant(id).accept_sources
-    }
-    pub fn enabled(&self, id: &str) -> bool {
-        self.grant(id).enabled
+    pub fn accepts(&self, owner: &str) -> bool {
+        self.enabled(owner)
     }
     fn targets(&self, owner: &str, c: &Candidate) -> Result<Vec<String>> {
+        ensure!(self.enabled(owner), "source_management_disabled");
         ensure!(
-            !self.listeners.values().any(|l| l.sources.contains(&c.name)),
+            c.visibility == Visibility::Server && c.targets.is_empty(),
+            "source_scope_must_be_endpoint_local"
+        );
+        ensure!(
+            c.lifetime != Lifetime::Persistent || self.policy.registry_file.is_some(),
+            "persistent_registry_missing"
+        );
+        ensure!(
+            !self.listeners[owner].sources.contains(&c.name),
             "source_name_reserved"
         );
-        let g = self.grant(owner);
-        ensure!(g.enabled, "source_management_disabled");
+        Ok(vec![owner.into()])
+    }
+    pub fn tool_reference(&self, owner: &str, bound: &BoundTool) -> String {
+        hash(
+            &serde_json::to_vec(&(
+                self.catalog.instance(),
+                owner,
+                &bound.tool.name,
+                &bound.source,
+            ))
+            .expect("serializable tool reference"),
+        )
+    }
+    pub fn find_reference(&self, owner: &str, reference: &str) -> Result<BoundTool> {
+        ensure!(self.enabled(owner), "source_management_disabled");
+        self.catalog
+            .read()
+            .views
+            .get(owner)
+            .into_iter()
+            .flatten()
+            .find(|b| self.tool_reference(owner, b) == reference)
+            .cloned()
+            .context("tool_reference_stale_or_unknown: search tools again")
+    }
+    pub fn directory(&self, owner: &str) -> Result<BoundTool> {
+        ensure!(self.enabled(owner), "source_management_disabled");
+        let snapshot = self.catalog.read();
+        let bound = crate::catalog_state::find(&snapshot, owner, &self.policy.directory_tool)?;
         ensure!(
-            c.lifetime != Lifetime::Persistent
-                || (g.allow_persistence && self.policy.registry_file.is_some()),
-            "persistence_not_authorized"
+            bound.source.is_none() && bound.tool.method == "GET" && bound.tool.help_url.is_none(),
+            "directory_tool must be a visible static GET API tool"
         );
-        let mut targets = match c.visibility {
-            Visibility::Server => {
-                ensure!(c.targets.is_empty(), "server visibility takes no targets");
-                vec![owner.into()]
-            }
-            Visibility::Servers => {
-                ensure!(!c.targets.is_empty(), "targets required");
-                c.targets.clone()
-            }
-            Visibility::Process => {
-                ensure!(
-                    g.allow_process_scope && c.targets.is_empty(),
-                    "process_scope_not_authorized"
-                );
-                self.listeners
-                    .keys()
-                    .filter(|id| self.accepts(id))
-                    .cloned()
-                    .collect()
-            }
-        };
-        let allowed = g.allowed_targets.unwrap_or_else(|| vec![owner.into()]);
-        ensure!(
-            targets
-                .iter()
-                .all(|t| allowed.contains(t) && self.accepts(t)),
-            "target_not_authorized"
-        );
-        targets.sort();
-        targets.dedup();
-        ensure!(!targets.is_empty(), "no eligible targets");
-        Ok(targets)
+        Ok(bound.clone())
     }
     pub async fn new(
         policy: policy::Policy,
@@ -236,7 +197,6 @@ impl Manager {
             base: (*catalog.read()).clone(),
             catalog,
             inner: Mutex::new(Inner { state, store }),
-            previews: Mutex::new(BTreeMap::new()),
             fetches: Mutex::new(BTreeMap::new()),
             global_import: Arc::new(Semaphore::new(4)),
             owner_import,
@@ -250,16 +210,18 @@ impl Manager {
         let mut inner = self.inner.lock().unwrap();
         let mut state = inner.state.clone();
         for record in state.records.values_mut().filter(|r| !r.removed) {
-            let mut c = record.candidate.clone();
-            c.visibility = Visibility::Servers;
-            c.targets = record.targets.clone();
+            let c = record.candidate.clone();
             record.disabled = if record.format != FORMAT {
                 Some("catalog_format_changed: explicit refresh required".into())
             } else if !self.listeners.contains_key(&record.owner) {
                 Some("owner_removed".into())
             } else {
                 self.targets(&record.owner, &c)
-                    .and_then(|_| {
+                    .and_then(|targets| {
+                        ensure!(
+                            targets == record.targets,
+                            "saved source scope is not endpoint-local"
+                        );
                         import::build(
                             &self.policy,
                             &record.candidate,
@@ -293,13 +255,6 @@ impl Manager {
                 live.len() <= self.policy.max_sources,
                 "source_quota_exceeded"
             );
-            for owner in self.listeners.keys() {
-                ensure!(
-                    live.iter().filter(|r| r.owner == *owner).count()
-                        <= self.grant(owner).max_owned_sources,
-                    "owner_source_quota_exceeded"
-                );
-            }
         }
         ensure!(
             live.iter().map(|r| r.document.len()).sum::<usize>() <= 128 * 1024 * 1024,
@@ -318,8 +273,7 @@ impl Manager {
             let ops = crate::catalog::operations(&doc, None)?;
             for target in &record.targets {
                 let cfg = self.listeners.get(target).context("target_missing")?;
-                let g = self.grant(target);
-                let wallet = policy::wallet(&self.policy, &g);
+                let wallet = policy::wallet(&self.policy, cfg);
                 let payer = self
                     .payers
                     .get(wallet)
@@ -372,12 +326,13 @@ impl Manager {
             .collect();
         let wallets: BTreeMap<_, _> = targets
             .iter()
-            .map(|t| {
-                let g = self.grant(t);
-                (t.clone(), policy::wallet(&self.policy, &g).to_owned())
+            .filter_map(|t| {
+                self.listeners
+                    .get(t)
+                    .map(|listener| (t.clone(), policy::wallet(&self.policy, listener).to_owned()))
             })
             .collect();
-        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":state.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"can_manage":r.owner==caller&&self.enabled(caller),"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use treazury_tools_search and treazury_tool_call, or explicitly refresh your client's tool list."})
+        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":state.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use x402_treazury_tools_search and x402_treazury_tool_call, or explicitly refresh your client's tool list."})
     }
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
@@ -440,154 +395,57 @@ impl Manager {
             "source_management_disabled"
         );
         match name {
-            "treazury_sources_list" => self.list_sources(owner, name, args),
-            "treazury_source_preview" => self.preview_source(owner, args).await,
-            "treazury_source_add" => self.add_source(owner, name, args).await,
-            "treazury_source_update" => self.update_source(owner, name, args).await,
-            "treazury_source_remove" => self.remove_source(owner, name, args).await,
-            "treazury_tools_search" => self.search_tools(owner, name, args),
+            "x402_treazury_source_add" => self.add_source(owner, args).await,
+            "x402_treazury_tools_search" => self.search_tools(owner, name, args),
             _ => anyhow::bail!("unknown management tool"),
         }
     }
-
-    fn list_sources(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
-        let q: Query = serde_json::from_value(args)?;
-        let inner = self.inner.lock().unwrap();
-        let values = inner
-            .state
-            .records
-            .values()
-            .filter(|r| !r.removed && (r.owner == owner || r.targets.iter().any(|t| t == owner)))
-            .filter(|r| q.source_id.as_ref().is_none_or(|id| id == &r.id))
-            .filter(|r| {
-                q.query
-                    .as_ref()
-                    .is_none_or(|q| r.candidate.name.to_lowercase().contains(&q.to_lowercase()))
-            })
-            .map(|r| self.result(r, &inner.state, owner, &self.catalog.read()))
-            .collect();
-        page(
-            values,
-            &q,
-            inner.state.generation,
-            &format!(
-                "{}:{owner}:{name}:{:?}:{:?}",
-                self.catalog.instance(),
-                q.source_id,
-                q.query
-            ),
-        )
-    }
-
-    async fn preview_source(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
-        let request: PreviewRequest = serde_json::from_value(args)?;
-        let preview_id = if let Some(id) = request.preview_id {
-            ensure!(request.candidate.is_none(), "preview_id excludes candidate");
-            id
-        } else {
-            ensure!(request.cursor.is_none(), "cursor requires preview_id");
-            let candidate = request.candidate.context("candidate required")?;
-            self.targets(owner, &candidate)?;
-            let document = self.document(owner, &candidate.spec_url, false).await?;
-            let id = Uuid::new_v4().to_string();
-            import::build(&self.policy, &candidate, &id, &document)?;
-            let preview_id = Uuid::new_v4().to_string();
-            let mut cache = self.previews.lock().unwrap();
-            cache.retain(|_, p| p.created.elapsed() < Duration::from_secs(300));
-            while cache.len() >= 8
-                || cache.values().map(|p| p.document.len()).sum::<usize>() + document.len()
-                    > 128 * 1024 * 1024
-            {
-                let key = cache.keys().next().cloned().context("preview_too_large")?;
-                cache.remove(&key);
-            }
-            cache.insert(
-                preview_id.clone(),
-                Preview {
-                    owner: owner.into(),
-                    candidate,
-                    document,
-                    created: Instant::now(),
-                    id,
-                },
-            );
-            preview_id
-        };
-        let cache = self.previews.lock().unwrap();
-        let p = cache.get(&preview_id).context("preview_expired")?;
-        ensure!(
-            p.owner == owner && p.created.elapsed() < Duration::from_secs(300),
-            "preview_expired"
-        );
-        let targets = self.targets(owner, &p.candidate)?;
-        let built = import::build(&self.policy, &p.candidate, &p.id, &p.document)?;
-        let count = built.tools.len();
-        let values=built.tools.iter().map(|t|json!({"tool_id":t.name,"description":t.description,"input_schema":t.input_schema})).collect();
-        let mut result = page(
-            values,
-            &Query {
-                cursor: request.cursor,
-                limit: request.limit,
-                ..Default::default()
-            },
-            0,
-            &preview_id,
-        )?;
-        result["preview_id"] = json!(preview_id);
-        result["source_id"] = json!(p.id);
-        result["targets"] = json!(targets);
-        result["tool_count"] = json!(count);
-        result["spec_hash"] = json!(hash(&p.document));
-        result["wallet_profiles"] = json!(
-            targets
-                .iter()
-                .map(|t| {
-                    let g = self.grant(t);
-                    (t.clone(), policy::wallet(&self.policy, &g).to_owned())
-                })
-                .collect::<BTreeMap<_, _>>()
-        );
-        result["destination_origin"] = json!(
-            import::endpoint(&self.policy, &built.base)?
-                .origin()
-                .ascii_serialization()
-        );
-        result["warning"] = json!(
-            "APIs on a shared profile share payment identity. Registration does not fund wallets or qualify paid endpoints. Vendor text is untrusted data."
-        );
-        result["limits"] = json!({"max_tools_per_source":self.policy.max_tools_per_source,"max_tools_per_server":self.policy.max_tools_per_server,"max_sources":self.policy.max_sources});
-        Ok(result)
-    }
-
-    async fn add_source(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
-        let a: Add = serde_json::from_value(args.clone())?;
-        let key = mutation_key(name, &a.idempotency_key)?;
+    async fn add_source(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
+        let mut a: Add = serde_json::from_value(args)?;
         ensure!(self.enabled(owner), "source_management_disabled");
-        if let Some(v) = self.replay(owner, &key, &args)? {
-            return Ok(v);
-        }
-        self.targets(owner, &a.candidate)?;
-        let (id, document) = if let Some(preview) = a.preview_id {
-            let cache = self.previews.lock().unwrap();
-            let p = cache.get(&preview).context("preview_expired")?;
-            ensure!(
-                p.owner == owner
-                    && p.created.elapsed() < Duration::from_secs(300)
-                    && serde_json::to_value(&p.candidate)? == serde_json::to_value(&a.candidate)?,
-                "preview_mismatch_or_expired"
-            );
-            (p.id.clone(), p.document.clone())
-        } else {
-            (
-                Uuid::new_v4().to_string(),
-                self.document(owner, &a.candidate.spec_url, false).await?,
-            )
+        a.spec_url = import::endpoint(&self.policy, &a.spec_url)?.to_string();
+        let removed = {
+            let inner = self.inner.lock().unwrap();
+            if let Some(r) = inner
+                .state
+                .records
+                .values()
+                .find(|r| r.owner == owner && !r.removed && r.candidate.spec_url == a.spec_url)
+            {
+                return Ok(self.result(r, &inner.state, owner, &self.catalog.read()));
+            }
+            inner
+                .state
+                .records
+                .values()
+                .filter(|r| r.owner == owner && r.removed && r.candidate.spec_url == a.spec_url)
+                .count()
         };
-        import::build(&self.policy, &a.candidate, &id, &document)?;
+        let args = serde_json::to_value(&a)?;
+        let key = format!("add:{}:{removed}", hash(a.spec_url.as_bytes()));
+        let candidate = Candidate {
+            name: a
+                .name
+                .unwrap_or_else(|| format!("api_{}", &hash(a.spec_url.as_bytes())[..16])),
+            spec_url: a.spec_url,
+            base_url: None,
+            selection: Selection::default(),
+            visibility: Visibility::Server,
+            targets: vec![],
+            lifetime: if self.policy.registry_file.is_some() {
+                Lifetime::Persistent
+            } else {
+                Lifetime::Process
+            },
+        };
+        self.targets(owner, &candidate)?;
+        let document = self.document(owner, &candidate.spec_url, false).await?;
+        let id = Uuid::new_v4().to_string();
+        import::build(&self.policy, &candidate, &id, &document)?;
         let record = Record {
             id,
             owner: owner.into(),
-            candidate: a.candidate,
+            candidate,
             targets: vec![],
             revision: 1,
             document: String::from_utf8((*document).clone())?,
@@ -598,89 +456,13 @@ impl Manager {
             removed: false,
             disabled: None,
         };
-        self.commit(owner.to_owned(), key, args, Change::Add(record))
-            .await
-    }
-
-    async fn update_source(
-        self: &Arc<Self>,
-        owner: &str,
-        name: &str,
-        args: Value,
-    ) -> Result<Value> {
-        let a: Update = serde_json::from_value(args.clone())?;
-        let key = mutation_key(name, &a.idempotency_key)?;
-        ensure!(self.enabled(owner), "source_management_disabled");
-        if let Some(v) = self.replay(owner, &key, &args)? {
-            return Ok(v);
-        }
-        let mut record = self.owned(owner, &a.source_id, a.expected_revision)?;
-        if let Some(v) = a.name {
-            record.candidate.name = v;
-        }
-        if let Some(v) = a.selection {
-            record.candidate.selection = v;
-        }
-        if let Some(v) = a.visibility {
-            record.candidate.visibility = v;
-        }
-        if let Some(v) = a.targets {
-            record.candidate.targets = v;
-        }
-        if let Some(v) = a.lifetime {
-            record.candidate.lifetime = v;
-        }
-        // Existing resolved process targets are stable until visibility/targets explicitly change.
-        let mut authorized = record.candidate.clone();
-        if args.get("visibility").is_none() && args.get("targets").is_none() {
-            authorized.visibility = Visibility::Servers;
-            authorized.targets = record.targets.clone();
-        }
-        self.targets(owner, &authorized)?;
-        if a.refresh_spec {
-            let doc = self
-                .document(owner, &record.candidate.spec_url, true)
-                .await?;
-            record.document = String::from_utf8((*doc).clone())?;
-            record.hash = hash(&doc);
-            record.format = FORMAT;
-        }
-        ensure!(
-            record.format == FORMAT,
-            "catalog_format_changed: refresh required"
-        );
-        record.disabled = None;
-        self.commit(
-            owner.into(),
-            key,
-            args,
-            Change::Update(record, a.expected_revision),
-        )
-        .await
-    }
-
-    async fn remove_source(
-        self: &Arc<Self>,
-        owner: &str,
-        name: &str,
-        args: Value,
-    ) -> Result<Value> {
-        let a: Remove = serde_json::from_value(args.clone())?;
-        let key = mutation_key(name, &a.idempotency_key)?;
-        ensure!(self.enabled(owner), "source_management_disabled");
-        self.commit(
-            owner.into(),
-            key,
-            args,
-            Change::Remove(a.source_id, a.expected_revision),
-        )
-        .await
+        self.commit(owner.to_owned(), key, args, record).await
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
         let q: Query = serde_json::from_value(args)?;
         let snapshot = self.catalog.read();
-        let values=snapshot.views.get(owner).into_iter().flatten().filter(|t|q.source_id.as_ref().is_none_or(|id|t.source.as_ref().is_some_and(|s|&s.0==id))).filter(|t|q.query.as_ref().is_none_or(|q|format!("{} {}",t.tool.name,t.tool.description).to_lowercase().contains(&q.to_lowercase()))).map(|t|json!({"tool_id":t.tool.name,"source_id":t.source.as_ref().map(|s|&s.0),"revision":t.source.as_ref().map_or(0,|s|s.1),"description":t.tool.description,"input_schema":t.tool.input_schema})).collect();
+        let values=snapshot.views.get(owner).into_iter().flatten().filter(|t|q.source_id.as_ref().is_none_or(|id|t.source.as_ref().is_some_and(|s|&s.0==id))).filter(|t|q.query.as_ref().is_none_or(|q|format!("{} {}",t.tool.name,t.tool.description).to_lowercase().contains(&q.to_lowercase()))).map(|t|json!({"tool_ref":self.tool_reference(owner,t),"tool_id":t.tool.name,"source_id":t.source.as_ref().map(|s|&s.0),"revision":t.source.as_ref().map_or(0,|s|s.1),"description":t.tool.description,"input_schema":t.tool.input_schema})).collect();
         page(
             values,
             &q,
@@ -694,20 +476,12 @@ impl Manager {
         )
     }
 
-    fn owned(&self, owner: &str, id: &str, revision: u64) -> Result<Record> {
-        let inner = self.inner.lock().unwrap();
-        owned(&inner.state, owner, id, revision).cloned()
-    }
-    fn replay(&self, owner: &str, key: &str, args: &Value) -> Result<Option<Value>> {
-        let inner = self.inner.lock().unwrap();
-        replay(&inner.state, owner, key, args)
-    }
     async fn commit(
         self: &Arc<Self>,
         owner: String,
         key: String,
         args: Value,
-        change: Change,
+        mut record: Record,
     ) -> Result<Value> {
         #[cfg(test)]
         {
@@ -727,60 +501,23 @@ impl Manager {
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let mut inner = this.inner.lock().unwrap();
-            if let Some(v) = replay(&inner.state, &owner, &key, &args)? {
-                return Ok(v);
+            // Recheck duplicate URLs under the publication lock, including racing adds.
+            if let Some(r) = inner.state.records.values().find(|r| {
+                !r.removed && r.owner == owner && r.candidate.spec_url == record.candidate.spec_url
+            }) {
+                return Ok(this.result(r, &inner.state, &owner, &this.catalog.read()));
             }
             let mut state = inner.state.clone();
-            let (id, persistent) = match change {
-                Change::Add(mut r) => {
-                    ensure!(
-                        !state
-                            .records
-                            .values()
-                            .any(|v| v.owner == owner && v.candidate.name == r.candidate.name),
-                        "source_name_reserved"
-                    );
-                    r.targets = this.targets(&owner, &r.candidate)?;
-                    let id = r.id.clone();
-                    let persistent = r.candidate.lifetime == Lifetime::Persistent;
-                    state.records.insert(id.clone(), r);
-                    (id, persistent)
-                }
-                Change::Update(mut r, revision) => {
-                    ensure!(
-                        !state.records.values().any(|v| v.id != r.id
-                            && v.owner == owner
-                            && v.candidate.name == r.candidate.name),
-                        "source_name_reserved"
-                    );
-                    let old = owned(&state, &owner, &r.id, revision)?;
-                    let persistent = old.candidate.lifetime == Lifetime::Persistent
-                        || r.candidate.lifetime == Lifetime::Persistent;
-                    if args.get("visibility").is_some() || args.get("targets").is_some() {
-                        r.targets = this.targets(&owner, &r.candidate)?;
-                    } else {
-                        let mut c = r.candidate.clone();
-                        c.visibility = Visibility::Servers;
-                        c.targets = r.targets.clone();
-                        this.targets(&owner, &c)?;
-                    }
-                    r.updated_at = epoch();
-                    r.revision = revision.checked_add(1).context("revision exhausted")?;
-                    let id = r.id.clone();
-                    state.records.insert(id.clone(), r);
-                    (id, persistent)
-                }
-                Change::Remove(id, revision) => {
-                    let r = owned(&state, &owner, &id, revision)?;
-                    let persistent = r.candidate.lifetime == Lifetime::Persistent;
-                    let r = state.records.get_mut(&id).unwrap();
-                    r.removed = true;
-                    r.document.clear();
-                    r.updated_at = epoch();
-                    r.revision = revision.checked_add(1).context("revision exhausted")?;
-                    (id, persistent)
-                }
-            };
+            ensure!(
+                !state.records.values().any(|r| !r.removed
+                    && r.owner == owner
+                    && r.candidate.name == record.candidate.name),
+                "source_name_reserved"
+            );
+            record.targets = this.targets(&owner, &record.candidate)?;
+            let id = record.id.clone();
+            let persistent = record.candidate.lifetime == Lifetime::Persistent;
+            state.records.insert(id.clone(), record);
             state.generation = state
                 .generation
                 .checked_add(1)
@@ -801,23 +538,6 @@ impl Manager {
                 saved
                     .records
                     .retain(|_, r| r.candidate.lifetime == Lifetime::Persistent);
-                // Persistent-to-process withdrawal must retain its UUID/name tombstone, not active access.
-                for r in state
-                    .records
-                    .values()
-                    .filter(|r| r.candidate.lifetime == Lifetime::Process)
-                {
-                    if state
-                        .receipts
-                        .values()
-                        .any(|v| v.persistent && v.result["source_id"] == r.id)
-                    {
-                        let mut tombstone = r.clone();
-                        tombstone.removed = true;
-                        tombstone.document.clear();
-                        saved.records.insert(r.id.clone(), tombstone);
-                    }
-                }
                 saved.receipts.retain(|_, r| r.persistent);
                 store.save(&saved)?;
             }
@@ -842,32 +562,11 @@ impl Manager {
         .await?
     }
 }
-enum Change {
-    Add(Record),
-    Update(Record, u64),
-    Remove(String, u64),
-}
-fn owned<'a>(state: &'a State, owner: &str, id: &str, revision: u64) -> Result<&'a Record> {
-    let r = state
-        .records
-        .get(id)
-        .filter(|r| r.owner == owner && !r.removed)
-        .context("source_not_manageable")?;
-    ensure!(r.revision == revision, "source_revision_conflict");
-    Ok(r)
-}
 fn epoch() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-fn mutation_key(operation: &str, key: &str) -> Result<String> {
-    ensure!(
-        !key.is_empty() && key.len() <= 128,
-        "invalid idempotency key"
-    );
-    Ok(format!("{operation}:{key}"))
 }
 fn receipt_key(owner: &str, key: &str) -> Result<String> {
     ensure!(
@@ -875,16 +574,6 @@ fn receipt_key(owner: &str, key: &str) -> Result<String> {
         "invalid idempotency key"
     );
     Ok(format!("{}:{owner}{key}", owner.len()))
-}
-fn replay(state: &State, owner: &str, key: &str, args: &Value) -> Result<Option<Value>> {
-    if let Some(r) = state.receipts.get(&receipt_key(owner, key)?) {
-        ensure!(
-            r.hash == hash(&serde_json::to_vec(args)?),
-            "idempotency_conflict"
-        );
-        return Ok(Some(r.result.clone()));
-    }
-    Ok(None)
 }
 fn page(values: Vec<Value>, query: &Query, generation: u64, scope: &str) -> Result<Value> {
     let limit = query.limit.unwrap_or(20);
@@ -916,6 +605,110 @@ pub async fn inspect_cli(meta_config: &std::path::Path) -> Result<()> {
         .context("persistent registry not configured")?;
     let value = tokio::task::spawn_blocking(move || store::inspect(&path)).await??;
     println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
+/// Operator-only registry maintenance. Exclusive ownership requires serving to be stopped.
+pub async fn maintain_cli(
+    path: &std::path::Path,
+    owner: &str,
+    source_id: &str,
+    refresh: bool,
+) -> Result<()> {
+    crate::deployment::Deployment::show_config(path).await?;
+    let mut cfg: crate::deployment::MetaConfig = toml::from_str(&std::fs::read_to_string(path)?)?;
+    if let Some(t) = &mut cfg.treasury {
+        t.resolve(path);
+    }
+    let mut policy = cfg
+        .source_management
+        .clone()
+        .context("source management not configured")?;
+    policy.resolve(path);
+    let file = policy
+        .registry_file
+        .as_ref()
+        .context("persistent registry not configured")?;
+    ensure!(file.is_file(), "source registry does not exist");
+    let mut store = store::Store::open(file, &policy::protected_paths(&cfg, path))?;
+    let mut state = store.load()?;
+    let record = state
+        .records
+        .get_mut(source_id)
+        .filter(|r| !r.removed && r.owner == owner)
+        .context("source_not_manageable")?;
+    if refresh {
+        ensure!(
+            cfg.servers.get(owner).is_some_and(|s| s.source_management),
+            "source_management_disabled"
+        );
+        ensure!(
+            record.targets == [owner] && record.candidate.visibility == Visibility::Server,
+            "source_scope_must_be_endpoint_local"
+        );
+        crate::network::install(cfg.network.clone())?;
+        let bytes = import::fetch(&policy, &record.candidate.spec_url).await?;
+        import::build(&policy, &record.candidate, &record.id, &bytes)?;
+        record.hash = hash(&bytes);
+        record.document = String::from_utf8(bytes)?;
+        record.format = FORMAT;
+        record.disabled = None;
+    } else {
+        record.removed = true;
+        record.document.clear();
+    }
+    record.revision = record
+        .revision
+        .checked_add(1)
+        .context("revision exhausted")?;
+    record.updated_at = epoch();
+    let result = json!({"source_id":record.id,"server":owner,"revision":record.revision,"removed":record.removed});
+    ensure!(
+        state
+            .records
+            .values()
+            .map(|r| r.document.len())
+            .sum::<usize>()
+            <= 128 * 1024 * 1024,
+        "registry_document_limit"
+    );
+    if refresh {
+        let listener = &cfg.servers[owner];
+        let mut tools = 0;
+        for r in state
+            .records
+            .values()
+            .filter(|r| !r.removed && r.disabled.is_none() && r.owner == owner)
+        {
+            let built = import::build(&policy, &r.candidate, &r.id, r.document.as_bytes())?;
+            let document: Value = serde_json::from_str(&r.document)?;
+            let operations = crate::catalog::operations(&document, None)?;
+            for tool in &built.tools {
+                if crate::catalog::matches_operation_tags(
+                    &operations,
+                    tool,
+                    &listener.tags,
+                    &listener.exclude_tags,
+                ) && import::matches(
+                    &tool.name,
+                    &listener.include_tools,
+                    &listener.exclude_tools,
+                )? {
+                    tools += 1;
+                }
+            }
+        }
+        ensure!(
+            tools <= policy.max_tools_per_server,
+            "server_tool_quota_exceeded"
+        );
+    }
+    state.generation = state
+        .generation
+        .checked_add(1)
+        .context("generation exhausted")?;
+    store.save(&state)?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 

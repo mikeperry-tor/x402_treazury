@@ -61,7 +61,7 @@ remain distinct from ordinary HTTP cache entries. See
 its route, output policy and payer binding so a concurrent catalog replacement
 cannot redirect an in-flight call. Listener filters constrain invocation as well
 as listing. Agent-added sources use the same execution path; see
-[agent source management](agent-sources.md) for grants, persistence and refresh.
+[agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
 Independent background startup of static sources is still
 [deferred](plans/deferred/independent_provider_startup.md).
 
