@@ -264,6 +264,7 @@ impl Source {
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        cfg.discovery_source = Some(id.to_owned());
         cfg.discovery_relay = downloads.relay.get(id).cloned();
         cfg.http_cache_directory = downloads.cache_directory.clone();
         cfg.http_cache_direct_warm_target = downloads.direct_warm_target.clone();

@@ -797,9 +797,12 @@ extend lifetimes. A failed multi-source warm can leave completed disposable entr
 #### Paid discovery relay
 
 A deployment can opt into Curl HTTP Request as a fallback for catalog and pricing
-GETs that fail with a connection error, timeout, or HTTP 403. Other HTTP statuses,
-invalid catalogs and local-file failures do not trigger a paid fallback. This does
-not diagnose Tor blocking; the same policy applies on a direct deployment.
+GETs that fail, including HTTP errors, timeouts, connection resets, body/parse errors,
+and missing or unusable pricing headers. These discovery requests do not immediately
+retry the origin: each failure gets one configured relay fallback. Local-file failures
+remain local. This does not diagnose Tor blocking; the same policy applies on a direct
+deployment. Warnings identify the source, catalog/pricing stage, fixed failure category
+and HTTP status when available, without logging request URLs or upstream error text.
 
 ```toml
 [discovery_relay]
@@ -857,9 +860,13 @@ the relay and remains unsigned. Ordinary `config check`, catalog inspection and
 Qualification rejects paid relay startup.
 
 Paid relay calls are serialized across wallets. Successful results are shared within
-the same wallet/relay scope for each target URL;
-any payment, transport, envelope, origin-status or parse failure disables further
-relay calls across all wallets for that run. Cancellation also disables further calls, including after
+the same wallet/relay scope for each target URL. A valid, correctly attributed Curl
+response reporting an origin HTTP error, connection failure, unusable catalog or
+pricing response ends fallback for that target. Its failure is retained so aliases
+cannot retry it, while other targets can still use Curl. No upstream error text is logged.
+Payment failures, transport failures reaching Curl, or invalid/unattributable relay
+envelopes disable further relay calls across all wallets for that run.
+Cancellation also disables further calls, including after
 a signed submission. Queued targets cannot spin on the wallet; there is no automatic
 retry, alternate relay, or replay of an uncertain payment. A new explicit command or
 process restart starts a new run and can spend again. Catalog failure still aborts

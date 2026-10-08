@@ -105,7 +105,29 @@ pub(crate) async fn build(
 struct State {
     stopped: bool,
     responses: BTreeMap<(String, String), Arc<Response>>,
+    failures: BTreeMap<(String, String), TargetFailure>,
 }
+/// A completed Curl response reporting failure for this target, not the relay service.
+#[derive(Clone, Copy, Debug)]
+struct TargetFailure {
+    reason: &'static str,
+    status: Option<u16>,
+    limit: Option<(&'static str, usize)>,
+}
+impl std::fmt::Display for TargetFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Curl target failed: {}; no retry for this target",
+            self.reason
+        )?;
+        if let Some((setting, limit)) = self.limit {
+            write!(f, "; relayed discovery body exceeds {setting}={limit}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for TargetFailure {}
 pub struct Relay {
     client: PaidClient,
     endpoint: String,
@@ -199,10 +221,6 @@ impl Relay {
     pub fn allows(&self, source: &str) -> bool {
         self.sources.is_empty() || self.sources.iter().any(|s| s == source)
     }
-    pub async fn stop(&self) {
-        self.state.lock().await.stopped = true;
-        tracing::warn!("Discovery relay disabled for this run after failure; no paid retry");
-    }
     pub async fn fetch(
         &self,
         url: &str,
@@ -219,13 +237,14 @@ impl Relay {
         );
         let mut state = self.state.lock().await;
         let key = (self.key.clone(), url.to_owned());
+        if let Some(failure) = state.failures.get(&key) {
+            return Err((*failure).into());
+        }
         if let Some(response) = state.responses.get(&key).cloned() {
             if response.status != expected {
-                state.stopped = true;
-                anyhow::bail!("discovery relay origin status mismatch; disabled for this run");
+                anyhow::bail!("cached discovery relay origin status mismatch; no new fetch");
             }
             if response.body.len() > limit {
-                state.stopped = true;
                 return Err(crate::limits::exceeded(
                     "relayed discovery body",
                     setting,
@@ -272,6 +291,19 @@ impl Relay {
                 state.stopped = false;
                 Ok(response)
             }
+            Err(error) if error.downcast_ref::<TargetFailure>().is_some() => {
+                let failure = *error
+                    .downcast_ref::<TargetFailure>()
+                    .expect("typed target failure");
+                state.failures.insert(key, failure);
+                state.stopped = false;
+                tracing::warn!(
+                    reason = failure.reason,
+                    http_status = failure.status,
+                    "Curl target fetch failed; no retry for this target, other targets remain enabled"
+                );
+                Err(error)
+            }
             Err(error) => {
                 tracing::warn!("Discovery relay failed; disabled for this run, no paid retry");
                 Err(error.context("discovery relay disabled for this run; no paid retry"))
@@ -288,35 +320,58 @@ fn decode(
     delay: std::time::Duration,
 ) -> Result<Response> {
     let value: serde_json::Value = serde_json::from_slice(bytes).context("invalid relay JSON")?;
-    ensure!(
-        value["error"].is_null() || value["error"] == "",
-        "relay reported failure"
-    );
     ensure!(value["url"].as_str() == Some(url), "relay target mismatch");
     ensure!(value["method"] == "GET", "relay method mismatch");
+    // Validate attribution and envelope shape before treating a failure as target-local.
     ensure!(
-        value["statusCode"].as_u64() == Some(u64::from(expected)),
-        "relay origin status mismatch"
+        value["error"].is_null() || value["error"].is_string(),
+        "invalid relay error field"
     );
+    let status = value["statusCode"]
+        .as_u64()
+        .and_then(|s| u16::try_from(s).ok())
+        .context("invalid relay origin status")?;
     ensure!(
-        value["redirectChain"].as_array().is_some_and(Vec::is_empty),
-        "discovery relay redirects are unsupported"
+        value["headers"].is_object()
+            && value["body"].is_string()
+            && value["redirectChain"].is_array(),
+        "invalid relay response envelope"
     );
-    ensure!(
-        value.get("truncated").is_none_or(|v| v == false),
-        "relay returned truncated body"
-    );
+    let target_failure = |reason| TargetFailure {
+        reason,
+        status: (status != 0).then_some(status),
+        limit: None,
+    };
+    if value["error"].as_str().is_some_and(|s| !s.is_empty()) {
+        return Err(target_failure("origin_request").into());
+    }
+    if status != expected {
+        return Err(target_failure("http_status").into());
+    }
+    if !value["redirectChain"]
+        .as_array()
+        .expect("validated array")
+        .is_empty()
+    {
+        return Err(target_failure("redirect").into());
+    }
+    if !value.get("truncated").is_none_or(|v| v == false) {
+        return Err(target_failure("truncated_body").into());
+    }
     let body = value["body"]
         .as_str()
         .context("relay body must be text")?
         .as_bytes()
         .to_vec();
     if body.len() > limit {
-        return Err(crate::limits::exceeded(
-            "relayed discovery body",
-            setting,
-            limit,
-        ));
+        return Err(
+            crate::limits::exceeded("relayed discovery body", setting, limit).context(
+                TargetFailure {
+                    limit: Some((setting, limit)),
+                    ..target_failure("body_limit")
+                },
+            ),
+        );
     }
     let mut headers = reqwest::header::HeaderMap::new();
     for (name, value) in value["headers"]
@@ -332,13 +387,13 @@ fn decode(
     }
     if expected == 200 {
         let _: serde_json::Value =
-            serde_json::from_slice(&body).context("relay catalog is not complete JSON")?;
+            serde_json::from_slice(&body).context(target_failure("catalog_parse"))?;
     } else if expected == 402 {
         ensure!(
             crate::pricing::price_headers(&headers, Some(402), None)
                 .0
                 .is_some(),
-            "relay pricing response lacks a usable payment header"
+            target_failure("unusable_pricing")
         );
     }
     Ok(Response {
@@ -349,13 +404,32 @@ fn decode(
         received: Instant::now(),
     })
 }
-pub fn eligible(error: &anyhow::Error) -> bool {
-    error
-        .chain()
-        .filter_map(|e| e.downcast_ref::<reqwest::Error>())
-        .any(|e| {
-            e.is_connect() || e.is_timeout() || e.status() == Some(reqwest::StatusCode::FORBIDDEN)
-        })
+pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status: Option<u16>) {
+    tracing::warn!(
+        source = cfg
+            .discovery_source
+            .as_deref()
+            .or(cfg.prefix.as_deref())
+            .unwrap_or("standalone"),
+        stage,
+        reason,
+        http_status,
+        "Discovery fetch failed; trying configured paid Curl relay once"
+    );
+}
+pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
+    let failure = error.downcast_ref::<TargetFailure>();
+    tracing::warn!(
+        source = cfg
+            .discovery_source
+            .as_deref()
+            .or(cfg.prefix.as_deref())
+            .unwrap_or("standalone"),
+        stage,
+        reason = failure.map(|f| f.reason).unwrap_or("relay_unavailable"),
+        http_status = failure.and_then(|f| f.status),
+        "Curl relay fallback failed or unavailable; discovery fetch failed, no retry"
+    );
 }
 pub(crate) fn slot(
     cfg: &Config,
@@ -642,7 +716,7 @@ pub(crate) mod tests {
         task.abort();
     }
     #[tokio::test]
-    async fn aliases_share_paid_success_and_invalid_catalog_trips_breaker() {
+    async fn aliases_share_paid_success_and_invalid_catalog_is_not_retried() {
         let (relay, f, task) = fixture(envelope(TARGET), false, false).await;
         let (a, b) = tokio::join!(
             relay.fetch(TARGET, 200, 4096, "max_spec_bytes"),
@@ -662,12 +736,66 @@ pub(crate) mod tests {
         );
         assert!(
             relay
-                .fetch("https://example.com/another", 200, 4096, "max_spec_bytes")
+                .fetch(TARGET, 200, 4096, "max_spec_bytes")
                 .await
                 .is_err()
         );
         assert_eq!(f.signed.load(Ordering::SeqCst), 1);
         task.abort();
+    }
+    #[tokio::test]
+    async fn target_failures_are_not_retried_and_do_not_disable_other_providers() {
+        for expected in [200, 402] {
+            for failure in [
+                "403",
+                "429",
+                "503",
+                "reset",
+                "invalid_content",
+                "wrong_target",
+            ] {
+                let mut body = envelope(TARGET);
+                body["statusCode"] = json!(expected);
+                match failure {
+                    "reset" => {
+                        body["statusCode"] = json!(0);
+                        body["error"] = json!("connection reset: private upstream details");
+                    }
+                    "invalid_content" => {
+                        body["body"] = json!("invalid JSON");
+                    }
+                    "wrong_target" => {
+                        body["url"] = json!("https://wrong.example/");
+                    }
+                    code => {
+                        body["statusCode"] = json!(code.parse::<u16>().unwrap());
+                    }
+                }
+                let (relay, fixture, task) = fixture(body, false, false).await;
+                let results = futures_util::future::join_all(
+                    (0..4).map(|_| relay.fetch(TARGET, expected, 4096, "max_spec_bytes")),
+                )
+                .await;
+                assert!(results.iter().all(Result::is_err));
+                assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+                let other_url = "https://other.example/spec";
+                // Two local handlers model Curl's different responses per target;
+                // both relay clients use the same wallet key and shared failure state.
+                let (mut other, other_fixture, other_task) =
+                    self::fixture(envelope(other_url), false, false).await;
+                Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
+                let result = other.fetch(other_url, 200, 4096, "max_spec_bytes").await;
+                if failure == "wrong_target" {
+                    assert!(result.is_err());
+                    assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 0);
+                } else {
+                    assert!(result.is_ok(), "{expected}/{failure}");
+                    assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 1);
+                }
+                task.abort();
+                other_task.abort();
+            }
+        }
     }
     #[tokio::test]
     async fn cancellation_after_signed_submission_disables_relay() {
@@ -791,73 +919,93 @@ pub(crate) mod tests {
     }
     #[tokio::test]
     async fn blocked_catalog_falls_back_once_and_only_relay_cache_reuses_result() {
-        let origin_calls = Arc::new(AtomicUsize::new(0));
-        let count = origin_calls.clone();
-        let app = Router::new().route(
-            "/spec",
-            axum::routing::get(move || {
-                let count = count.clone();
-                async move {
-                    count.fetch_add(1, Ordering::SeqCst);
-                    StatusCode::FORBIDDEN
-                }
-            }),
-        );
-        let (address, origin) = crate::test_tls::serve(app).await;
-        let url = "https://api.example.com/spec".to_owned();
-        let _socks = crate::test_socks::Socks::start(
-            BTreeMap::from([("api.example.com".into(), address)]),
-            crate::test_socks::Fault::None,
-        )
-        .await;
-        let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
-            mode: crate::network::Mode::Tor,
-            socks_endpoint: Some(_socks.address),
-            ..Default::default()
-        })
-        .unwrap()
-        .with_test_root(crate::test_tls::CA);
-        let http = context
-            .http(
-                &crate::network::IsolationId::discovery(&url).unwrap(),
-                &url,
-                std::time::Duration::from_secs(5),
+        for status in [403, 429, 503, 500, 404, 200] {
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            let _guard = tracing::subscriber::set_default(subscriber);
+            let origin_calls = Arc::new(AtomicUsize::new(0));
+            let count = origin_calls.clone();
+            let app = Router::new().route(
+                "/spec",
+                axum::routing::get(move || {
+                    let count = count.clone();
+                    async move {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        // 200 deliberately returns invalid catalog text.
+                        (StatusCode::from_u16(status).unwrap(), "invalid catalog")
+                    }
+                }),
+            );
+            let (address, origin) = crate::test_tls::serve(app).await;
+            let url = "https://api.example.com/spec".to_owned();
+            let _socks = crate::test_socks::Socks::start(
+                BTreeMap::from([("api.example.com".into(), address)]),
+                crate::test_socks::Fault::None,
             )
-            .unwrap();
-        let (relay, f, task) = fixture(envelope(&url), false, false).await;
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = Config {
-            spec: url.clone(),
-            discovery_relay: Some(relay),
-            http_cache_directory: Some(dir.path().join("http-cache")),
-            ..Default::default()
-        };
-        crate::catalog::load_json_discovery(&cfg, &http)
-            .await
-            .unwrap();
-        crate::catalog::load_json_discovery(&cfg, &http)
-            .await
-            .unwrap();
-        assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-        assert!(
-            crate::http_cache::Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes)
-                .unwrap()
-                .read()
+            .await;
+            let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+                mode: crate::network::Mode::Tor,
+                socks_endpoint: Some(_socks.address),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_test_root(crate::test_tls::CA);
+            let http = context
+                .http(
+                    &crate::network::IsolationId::discovery(&url).unwrap(),
+                    &url,
+                    std::time::Duration::from_secs(5),
+                )
+                .unwrap();
+            let (relay, f, task) = fixture(envelope(&url), false, false).await;
+            let dir = tempfile::tempdir().unwrap();
+            let cfg = Config {
+                spec: url.clone(),
+                discovery_source: Some("test_provider".into()),
+                discovery_relay: Some(relay),
+                http_cache_directory: Some(dir.path().join("http-cache")),
+                ..Default::default()
+            };
+            crate::catalog::load_json_discovery(&cfg, &http)
                 .await
-                .is_none()
-        );
-        let without = Config {
-            discovery_relay: None,
-            ..cfg
-        };
-        assert!(
-            crate::catalog::load_json_discovery(&without, &http)
+                .unwrap();
+            crate::catalog::load_json_discovery(&cfg, &http)
                 .await
-                .is_err()
-        );
-        assert_eq!(origin_calls.load(Ordering::SeqCst), 2);
-        task.abort();
-        origin.abort();
+                .unwrap();
+            assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+            assert!(
+                crate::http_cache::Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes)
+                    .unwrap()
+                    .read()
+                    .await
+                    .is_none()
+            );
+            let without = Config {
+                discovery_relay: None,
+                ..cfg
+            };
+            assert!(
+                crate::catalog::load_json_discovery(&without, &http)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(origin_calls.load(Ordering::SeqCst), 2);
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert!(logs.contains("source=\"test_provider\""), "{logs}");
+            assert!(logs.contains("stage=\"catalog\""), "{logs}");
+            if status != 200 {
+                assert!(logs.contains(&format!("http_status={status}")), "{logs}");
+            } else {
+                assert!(logs.contains("reason=\"parse\""), "{logs}");
+            }
+            assert!(!logs.contains(&url), "{logs}");
+            task.abort();
+            origin.abort();
+        }
     }
 }

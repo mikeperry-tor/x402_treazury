@@ -288,9 +288,20 @@ async fn probe_request(
     }
     let mut result = probe_network(http, url, slot.is_some()).await;
     let mut write_slot = slot;
-    if (matches!(result.1, Outcome::HttpConnect | Outcome::HttpTimeout) || result.2 == Some(403))
+    if result.1 != Outcome::Discovered
         && let Some(relay) = &cfg.discovery_relay
     {
+        let reason = match result.1 {
+            Outcome::HttpTimeout => "timeout",
+            Outcome::HttpConnect => "connection",
+            Outcome::HttpTransport => "transport",
+            Outcome::UnexpectedHttpStatus => "http_status",
+            Outcome::MissingHeader => "missing_payment_header",
+            Outcome::MalformedChallenge => "malformed_payment_challenge",
+            Outcome::UnusableOffer => "unusable_payment_offer",
+            Outcome::Discovered => unreachable!("successful probes do not use fallback"),
+        };
+        crate::discovery_relay::log_fallback(cfg, "pricing", reason, result.2);
         match relay.fetch(url, 402, 64 * 1024, "max_response_bytes").await {
             Ok(response) => {
                 let metadata = crate::http_cache::Metadata::from_headers(
@@ -299,13 +310,10 @@ async fn probe_request(
                     None,
                 );
                 result = price_headers(&response.headers, Some(402), metadata);
-                if result.0.is_none() {
-                    relay.stop().await;
-                }
                 write_slot = relay_slot;
             }
-            Err(_) => {
-                tracing::warn!("Pricing relay unavailable; estimate remains unknown, no retry")
+            Err(error) => {
+                crate::discovery_relay::log_failure(cfg, "pricing", &error);
             }
         }
     }
@@ -526,5 +534,106 @@ mod relay_tests {
         );
         task.abort();
         origin.abort();
+    }
+
+    #[tokio::test]
+    async fn every_failed_probe_uses_one_relay_and_failed_relay_stops() {
+        for status in [0, 403, 429, 503, 500, 200, 402] {
+            for reject in [false, true] {
+                let log = tempfile::NamedTempFile::new().unwrap();
+                let subscriber = tracing_subscriber::fmt()
+                    .without_time()
+                    .with_ansi(false)
+                    .with_writer(log.reopen().unwrap())
+                    .finish();
+                let _guard = tracing::subscriber::set_default(subscriber);
+                let calls = Arc::new(AtomicUsize::new(0));
+                let count = calls.clone();
+                let app = axum::Router::new().route(
+                    "/price",
+                    axum::routing::get(move || {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        async move { axum::http::StatusCode::from_u16(status).unwrap() }
+                    }),
+                );
+                let (address, origin) = crate::test_tls::serve(app).await;
+                let socks = crate::test_socks::Socks::start(
+                    BTreeMap::from([("api.example.com".into(), address)]),
+                    if status == 0 {
+                        crate::test_socks::Fault::Refuse
+                    } else {
+                        crate::test_socks::Fault::None
+                    },
+                )
+                .await;
+                let url = "https://api.example.com/price";
+                let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+                    mode: crate::network::Mode::Tor,
+                    socks_endpoint: Some(socks.address),
+                    ..Default::default()
+                })
+                .unwrap()
+                .with_test_root(crate::test_tls::CA);
+                let http = context
+                    .http(
+                        &crate::network::IsolationId::discovery(url).unwrap(),
+                        url,
+                        Duration::from_secs(5),
+                    )
+                    .unwrap();
+                let challenge = STANDARD.encode(
+                    serde_json::to_vec(&serde_json::json!({
+                        "accepts": [{"amount":"1000", "asset":"USDC", "network":"eip155:8453"}]
+                    }))
+                    .unwrap(),
+                );
+                let envelope = serde_json::json!({"url":url,"method":"GET","statusCode":402,
+                    "headers":{"payment-required":challenge},"body":"","redirectChain":[],"error":null});
+                let (relay, fixture, task) =
+                    crate::discovery_relay::tests::fixture(envelope, reject, false).await;
+                let cfg = Config {
+                    discovery_source: Some("pricing_provider".into()),
+                    discovery_relay: Some(relay),
+                    ..Default::default()
+                };
+                let result = probe_request(&http, url, None, 60.0, &cfg).await;
+                assert_eq!(calls.load(Ordering::SeqCst), usize::from(status != 0));
+                assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+                if reject {
+                    assert!(result.line.is_none());
+                    assert_ne!(result.outcome, Outcome::Discovered);
+                    // Even another caller cannot restart paid fallback after failure.
+                    assert!(
+                        cfg.discovery_relay
+                            .as_ref()
+                            .unwrap()
+                            .fetch(url, 402, 65536, "max_response_bytes")
+                            .await
+                            .is_err()
+                    );
+                    assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+                } else {
+                    assert!(result.line.is_some());
+                    assert_eq!(result.outcome, Outcome::Discovered);
+                }
+                let logs = std::fs::read_to_string(log.path()).unwrap();
+                assert!(logs.contains("source=\"pricing_provider\""), "{logs}");
+                assert!(logs.contains("stage=\"pricing\""), "{logs}");
+                if status == 0 {
+                    assert!(logs.contains("connection"), "{logs}");
+                } else {
+                    assert!(logs.contains(&format!("http_status={status}")), "{logs}");
+                }
+                if status == 402 {
+                    assert!(logs.contains("missing_payment_header"), "{logs}");
+                }
+                if reject {
+                    assert!(logs.contains("discovery fetch failed, no retry"), "{logs}");
+                }
+                assert!(!logs.contains(url), "{logs}");
+                task.abort();
+                origin.abort();
+            }
+        }
     }
 }

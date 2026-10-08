@@ -37,8 +37,9 @@ Curl HTTP Request fallback; an explicit wallet can override this. Shared sources
 choose one assigned profile deterministically. Its paid connection follows the immutable deployment
 network policy and resolved payer identity; it never falls back to direct egress. Curl
 fetches the target using its own network and supplies the response envelope.
-Origin TLS and response integrity are consequently trusted to the relay. Failures
-or cancellation disable further relay calls across all wallets for the run. See
+Origin TLS and response integrity are consequently trusted to the relay. Target failures
+do not disable other targets. Relay-service failures or cancellation disable further
+relay calls across all wallets for the run. See
 [configuration and cache provenance](configuration.md#paid-discovery-relay).
 
 ## Explicit direct discovery warming

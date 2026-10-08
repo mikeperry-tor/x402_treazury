@@ -282,10 +282,14 @@ and [the runtime architecture](docs/architecture.md).
   selection; config show exposes discovery_wallets. Keep the discovery-wallet-v1
   selection domain stable. Shared sources do not multiply paid discovery across
   listeners; different wallet scopes cannot coalesce relay requests or relay cache data.
-  Failure/cancellation disables the shared relay across all wallets. Target discovery stays
+  Relay-service failure/cancellation disables the shared relay across all wallets.
+  Attributed target failures are cached without disabling other targets. Target discovery stays
   unsigned GET-only; only relay payment uses PaidClient. Reuse existing wallet caps
   and byte/time limits. Serialize calls, coalesce successful targets, and disable
-  the relay for the run on failure or cancellation before any retry can spend.
+  the relay for the run on relay-service failure or cancellation before any retry can spend.
+  Every failed remote catalog fetch or unsuccessful pricing probe can use the
+  configured relay once; no origin-error allowlist. Log source, discovery stage,
+  fixed failure category and available HTTP status without URLs or upstream prose.
   Relay cache entries retain separate provenance and explicit origin freshness;
   never revalidate through Curl, use outer relay headers or persist challenges.
   Serving initializes wallets before relay catalog I/O; warming denies funding and

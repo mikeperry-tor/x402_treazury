@@ -67,6 +67,9 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Deployment source identity for discovery diagnostics, independent of tool prefixes.
+    #[serde(skip)]
+    pub discovery_source: Option<String>,
     #[serde(skip)]
     pub discovery_relay: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
     pub http_cache_enabled: bool,
@@ -136,6 +139,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            discovery_source: None,
             discovery_relay: None,
             http_cache_enabled: true,
             http_cache_directory: None,
@@ -334,19 +338,40 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
     let Some(relay) = &cfg.discovery_relay else {
         return Err(error);
     };
-    if !crate::discovery_relay::eligible(&error) {
+    if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {
         return Err(error);
     }
+    let http_error = error.downcast_ref::<reqwest::Error>();
+    let reason = if http_error.is_some_and(reqwest::Error::is_timeout) {
+        "timeout"
+    } else if http_error.is_some_and(reqwest::Error::is_connect) {
+        "connection"
+    } else if http_error.and_then(reqwest::Error::status).is_some() {
+        "http_status"
+    } else if http_error.is_some() {
+        "transport"
+    } else {
+        error
+            .downcast_ref::<LoadStage>()
+            .map(|s| s.label())
+            .unwrap_or("fetch")
+    };
+    crate::discovery_relay::log_fallback(
+        cfg,
+        "catalog",
+        reason,
+        http_error
+            .and_then(reqwest::Error::status)
+            .map(|s| s.as_u16()),
+    );
     let response = relay
         .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
-        .await?;
-    let document = match parse_document(&response.body) {
-        Ok(doc) => doc,
-        Err(error) => {
-            relay.stop().await;
-            return Err(error);
-        }
-    };
+        .await
+        .inspect_err(|error| {
+            crate::discovery_relay::log_failure(cfg, "catalog", error);
+        })?;
+    // The relay has already validated complete JSON before caching the response.
+    let document = parse_document(&response.body)?;
     if let Some(slot) = relay_slot {
         let metadata = crate::http_cache::Metadata::from_headers(
             &response.headers,
