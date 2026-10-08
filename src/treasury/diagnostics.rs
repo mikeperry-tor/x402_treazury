@@ -32,6 +32,35 @@ impl std::fmt::Display for SyncDiagnostic {
 }
 impl std::error::Error for SyncDiagnostic {}
 
+pub(crate) fn tip_failure(status: tonic::Status, operation: &'static str) -> anyhow::Error {
+    SyncDiagnostic {
+        category: "indexer_tip_failed",
+        reason: "indexer_request_failed",
+        pool: None,
+        operation: Some(operation),
+        grpc_code: Some(status.code()),
+    }
+    .into()
+}
+
+#[derive(Debug)]
+pub(crate) struct SyncProgress {
+    pub phase: &'static str,
+    pub elapsed_ms: u64,
+    pub target_height: u64,
+    pub scanned_blocks: u64,
+}
+impl std::fmt::Display for SyncProgress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "sync phase {} elapsed_ms={} target_height={} scanned_blocks={}",
+            self.phase, self.elapsed_ms, self.target_height, self.scanned_blocks
+        )
+    }
+}
+impl std::error::Error for SyncProgress {}
+
 pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::Error {
     let mut diagnostic = SyncDiagnostic {
         category: if launch {
@@ -194,7 +223,12 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
 /// Both background owner loops share the same bounded, credential-free fields.
 pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
     let diagnostic = error.downcast_ref::<SyncDiagnostic>();
+    let progress = error.downcast_ref::<SyncProgress>();
     tracing::warn!(
+        phase = progress.map(|p| p.phase),
+        elapsed_ms = progress.map(|p| p.elapsed_ms),
+        target_height = progress.map(|p| p.target_height),
+        scanned_blocks = progress.map(|p| p.scanned_blocks),
         category = sync_failure(error),
         reason = diagnostic.map(|d| d.reason),
         pool = diagnostic.and_then(|d| d.pool),
@@ -257,6 +291,48 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 mod tests {
     use super::*;
 
+    #[test]
+    fn tip_status_and_scan_progress_are_preserved_without_upstream_prose() {
+        let mut status = tonic::Status::cancelled("private upstream details");
+        status
+            .metadata_mut()
+            .insert("authorization", "private-token".parse().unwrap());
+        let error = tip_failure(status, "final_tip").context(SyncProgress {
+            phase: "scan",
+            elapsed_ms: 120000,
+            target_height: 100,
+            scanned_blocks: 42,
+        });
+        assert_eq!(sync_failure(&error), "indexer_tip_failed");
+        let diagnostic = error.downcast_ref::<SyncDiagnostic>().unwrap();
+        assert_eq!(diagnostic.grpc_code, Some(tonic::Code::Cancelled));
+        assert_eq!(diagnostic.operation, Some("final_tip"));
+        assert_eq!(
+            error.downcast_ref::<SyncProgress>().unwrap().scanned_blocks,
+            42
+        );
+        assert!(!format!("{error:#}").contains("private"));
+        assert_eq!(error.chain().count(), 2);
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error));
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        for field in [
+            "elapsed_ms=120000",
+            "target_height=100",
+            "scanned_blocks=42",
+            "grpc_code=1",
+            "Cancelled",
+            "final_tip",
+        ] {
+            assert!(logs.contains(field), "missing {field}: {logs}");
+        }
+        assert!(!logs.contains("private"));
+    }
     #[test]
     fn shard_context_is_preserved_in_errors_and_logs() {
         use pepper_sync::error::{ShardTreeOperation, SyncRecoveryObservables};

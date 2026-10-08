@@ -167,7 +167,9 @@ async fn attempt(
     url: &reqwest::Url,
     method: &'static str,
     payload: &Value,
+    phase: &std::sync::atomic::AtomicU8,
 ) -> std::result::Result<Value, AttemptFailure> {
+    phase.store(0, std::sync::atomic::Ordering::Relaxed);
     let response = http
         .post(url.clone())
         .json(payload)
@@ -178,6 +180,7 @@ async fn attempt(
     if !response.status().is_success() {
         return Err(RpcFailure::new(method, "HTTP rejection", "headers", Some(status)).into());
     }
+    phase.store(1, std::sync::atomic::Ordering::Relaxed);
     // Read separately so an interrupted body is distinguishable from malformed JSON.
     let body = response
         .bytes()
@@ -218,11 +221,19 @@ pub(super) async fn rpc(
     let started = Instant::now();
     let deadline = started + budget;
     for number in 1..=2 {
-        let result = timeout_at(deadline, attempt(http, url, method, &payload)).await;
+        let phase = std::sync::atomic::AtomicU8::new(0);
+        let result = timeout_at(deadline, attempt(http, url, method, &payload, &phase)).await;
         let failure = match result {
             Ok(Ok(value)) => return Ok(value),
             Ok(Err(failure)) => failure,
-            Err(_) => return Err(RpcFailure::new(method, "timeout", "total budget", None).into()),
+            Err(_) => {
+                let phase = if phase.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+                    "total budget awaiting headers"
+                } else {
+                    "total budget reading body"
+                };
+                return Err(RpcFailure::new(method, "timeout", phase, None).into());
+            }
         };
         let retry = number == 1
             && failure.retryable

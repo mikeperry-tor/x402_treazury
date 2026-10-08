@@ -19,6 +19,18 @@ pub(super) fn validate(
     let lag = tip.checked_sub(scanned).ok_or_else(|| anyhow::anyhow!(
         "treasury indexer tip regressed below scanned height (scanned={scanned}, tip={tip}); another sync required"
     ))?;
+    if lag > MAX_LAG_BLOCKS {
+        tracing::warn!(
+            target_height = target,
+            scanned_height = scanned,
+            observed_tip_height = tip,
+            lag_blocks = lag,
+            max_lag_blocks = MAX_LAG_BLOCKS,
+            elapsed_ms = elapsed.as_millis() as u64,
+            max_age_seconds,
+            "Treasury scan completed beyond allowed tip lag; freshness evidence rejected"
+        );
+    }
     ensure!(
         lag <= MAX_LAG_BLOCKS,
         "treasury sync tip lag exceeds {MAX_LAG_BLOCKS}-block limit (scanned={scanned}, tip={tip}, lag={lag}); another sync required"

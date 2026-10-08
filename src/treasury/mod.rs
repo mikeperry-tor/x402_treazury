@@ -496,7 +496,7 @@ impl SyncSession {
         )
         .await
         .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
-        .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
+        .map_err(|status| diagnostics::tip_failure(status, "starting_tip"))?;
         ensure!(
             info.chain_name == self.network.rpc_name(),
             "indexer is not on mainnet"
@@ -519,7 +519,14 @@ impl SyncSession {
             .map_err(|error| diagnostics::client_failure(error, true))?;
         let result = loop {
             tokio::select! {
-                result = self.client.await_sync() => break result.map_err(|error| diagnostics::client_failure(error, false))?,
+                result = self.client.await_sync() => break result.map_err(|error| {
+                    diagnostics::client_failure(error, false).context(diagnostics::SyncProgress {
+                        phase: "scan",
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                        target_height,
+                        scanned_blocks: self.client.latest_sync_status().map_or(0, |p| u64::from(p.total_blocks_scanned)),
+                    })
+                })?,
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {
                     if let Some(progress) = self.client.latest_sync_status() {
                         observation.scanned_blocks = progress.total_blocks_scanned;
@@ -543,7 +550,7 @@ impl SyncSession {
         )
         .await
         .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
-        .map_err(|_| anyhow::anyhow!("indexer tip check failed"))?;
+        .map_err(|status| diagnostics::tip_failure(status, "final_tip"))?;
         let height = u64::from(u32::from(result.sync_end_height));
         ensure!(
             info.chain_name == self.network.rpc_name(),

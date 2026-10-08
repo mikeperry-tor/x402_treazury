@@ -549,6 +549,23 @@ public defaults below. An explicit `--rpc-url` selects only that endpoint unless
 up to two `--fallback-rpc-url` flags are supplied; it never silently appends defaults
 to an explicit diagnostic list.
 
+For slow-connection diagnosis, a process-local `view_sequence` correlates
+overlapping fallback attempts without identifying wallets. Failed views log `verification_stage`,
+`stage_elapsed_ms`, `completed_rpc_calls`, `expected_rpc_calls`, `wallet_count`
+and `pending_count`. Counts are logical RPC calls, not transport retry attempts.
+Few completed calls and a long current stage indicate a slow individual check;
+many completed calls and a short current stage suggest accumulated latency
+exhausted the shared view budget. These are observations, not proof of an endpoint
+or local-network fault. A per-RPC deadline additionally distinguishes awaiting
+headers (including connection setup) from reading the body. Fallback success logs
+elapsed time and completed calls. No endpoint URL, wallet address or nonce is logged.
+
+Treasury tip-check failures retain sanitized gRPC codes and identify `starting_tip`
+or `final_tip`. Scan failures include elapsed observation time and scanned block
+count. Rejected tip lag logs target, scanned and observed heights plus the allowed
+lag and observation age limit. `Cancelled` alone does not identify who cancelled
+the RPC. These diagnostics do not relax freshness checks or release reservations.
+
 Default public endpoints, in order (availability and Tor acceptance vary):
 
 | Operator | HTTPS endpoint | Documentation |

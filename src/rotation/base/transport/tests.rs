@@ -185,7 +185,7 @@ async fn attempts_share_one_deadline_and_cancellation_does_not_retry() {
     )
     .await
     .unwrap_err();
-    assert!(error.to_string().contains("total budget"));
+    assert!(error.to_string().contains("total budget awaiting headers"));
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_eq!(captured.lock().unwrap().len(), 2);
     task.abort();
@@ -269,5 +269,37 @@ async fn untrusted_tls_is_reported_without_retry_or_verification_bypass() {
     assert!(error.to_string().contains("TLS"), "{error}");
     assert!(!error.to_string().contains("secret"));
     assert_eq!(connections.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
+#[tokio::test]
+async fn stalled_body_deadline_reports_body_not_headers() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut headers = Vec::new();
+        while !headers.ends_with(b"\r\n\r\n") {
+            headers.push(socket.read_u8().await.unwrap());
+        }
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{")
+            .await
+            .unwrap();
+        std::future::pending::<()>().await;
+    });
+    let error = rpc(
+        &client(),
+        &url,
+        "eth_chainId",
+        json!([]),
+        Duration::from_millis(200),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("total budget reading body"));
+    assert!(!error.to_string().contains("http://"));
     task.abort();
 }

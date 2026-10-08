@@ -60,6 +60,38 @@ fn safe_reason(error: &anyhow::Error) -> String {
     "Base chain verification failed; unclassified validation error".into()
 }
 
+/// Per-attempt, content-free progress survives cancellation of the view future.
+struct ViewProgress(std::sync::Mutex<(&'static str, std::time::Instant, usize)>);
+impl ViewProgress {
+    fn new() -> Self {
+        Self(std::sync::Mutex::new((
+            "not_started",
+            std::time::Instant::now(),
+            0,
+        )))
+    }
+    async fn step<T>(
+        &self,
+        stage: &'static str,
+        work: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        {
+            let mut state = self.0.lock().expect("view progress");
+            state.0 = stage;
+            state.1 = std::time::Instant::now();
+        }
+        let result = work.await;
+        if result.is_ok() {
+            self.0.lock().expect("view progress").2 += 1;
+        }
+        result
+    }
+    fn snapshot(&self) -> (&'static str, u64, usize) {
+        let state = self.0.lock().expect("view progress");
+        (state.0, state.1.elapsed().as_millis() as u64, state.2)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Anchor {
     pub height: u64,
@@ -208,20 +240,34 @@ impl BaseRpc {
         Ok(U256::from_str_radix(&s[2..], 16)?)
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
+        // Process-local correlation only; never derived from wallet/pool identities.
+        static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let view_sequence = NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let budget = crate::network::global().operation_timeout(Duration::from_secs(15));
         let count = self.fallbacks.len() + 1;
+        let wallet_count = query.wallets.len();
+        let pending_count = query.pending.len();
+        let expected_rpc_calls = 5usize
+            .saturating_add(usize::from(query.anchor.is_some()))
+            .saturating_add(wallet_count.saturating_mul(2))
+            .saturating_add(pending_count);
         for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
             let started = std::time::Instant::now();
-            let result = tokio::time::timeout(budget, endpoint.view_inner(query.clone()))
-                .await
-                .unwrap_or_else(|_| Err(transport::RpcFailure::view_timeout().into()));
+            let progress = ViewProgress::new();
+            let result =
+                tokio::time::timeout(budget, endpoint.view_inner(query.clone(), &progress))
+                    .await
+                    .unwrap_or_else(|_| Err(transport::RpcFailure::view_timeout().into()));
             match result {
                 Ok(view) => {
                     if index > 0 {
                         tracing::warn!(
+                            view_sequence,
                             provider_index = index + 1,
                             provider_count = count,
-                            "Base verification succeeded on configured fallback; complete view reverified; Tor policy unchanged"
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            completed_rpc_calls = progress.snapshot().2,
+                            "Base verification succeeded on configured fallback; complete view reverified; network policy unchanged"
                         );
                     }
                     return Ok(view);
@@ -231,7 +277,10 @@ impl BaseRpc {
                         && error
                             .downcast_ref::<RpcFailure>()
                             .is_some_and(RpcFailure::can_failover);
-                    tracing::warn!(category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
+                    let (verification_stage, stage_elapsed_ms, completed_rpc_calls) =
+                        progress.snapshot();
+                    tracing::warn!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
+                        wallet_count, pending_count, category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
                         failover, view_budget_seconds = budget.as_secs(), elapsed_ms = started.elapsed().as_millis() as u64,
                         "Base credit/payment chain verification failed; partial view discarded; only configured read-only fallback permitted");
                     if !failover {
@@ -242,20 +291,29 @@ impl BaseRpc {
         }
         unreachable!("primary Base RPC endpoint always exists")
     }
-    async fn view_inner(&self, query: ChainQuery) -> Result<ChainView> {
+    async fn view_inner(&self, query: ChainQuery, progress: &ViewProgress) -> Result<ChainView> {
         ensure!(
-            quantity(&self.rpc("eth_chainId", json!([])).await?)? == 8453,
+            quantity(
+                &progress
+                    .step("chain_id", self.rpc("eth_chainId", json!([])))
+                    .await?
+            )? == 8453,
             "wrong Base chain"
         );
         if let Some(previous) = &query.anchor {
-            let (canonical, _) = self.block(&format!("0x{:x}", previous.height)).await?;
+            let (canonical, _) = progress
+                .step(
+                    "previous_anchor",
+                    self.block(&format!("0x{:x}", previous.height)),
+                )
+                .await?;
             ensure!(
                 canonical.height == previous.height && canonical.hash == previous.hash,
                 AdmissionError::ChainRecoveryRequired("confirmed anchor changed")
             );
         }
-        let (latest, timestamp) = self
-            .block("latest")
+        let (latest, timestamp) = progress
+            .step("latest_block", self.block("latest"))
             .await
             .context(VerificationStage("latest block"))?;
         let clock = now()?;
@@ -264,8 +322,8 @@ impl BaseRpc {
             .height
             .checked_sub(self.confirmations)
             .context("insufficient Base confirmations")?;
-        let (confirmed, confirmed_time) = self
-            .block(&format!("0x{height:x}"))
+        let (confirmed, confirmed_time) = progress
+            .step("confirmed_block", self.block(&format!("0x{height:x}")))
             .await
             .context(VerificationStage("confirmed block"))?;
         ensure!(
@@ -279,12 +337,12 @@ impl BaseRpc {
             let address: Address = address.parse()?;
             let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
             let scoped = self.for_address(&address.to_string())?;
-            let stable = scoped
-                .call(data.clone(), &confirmed)
+            let stable = progress
+                .step("confirmed_balance", scoped.call(data.clone(), &confirmed))
                 .await
                 .context(VerificationStage("confirmed balance"))?;
-            let current = scoped
-                .call(data, &latest)
+            let current = progress
+                .step("latest_balance", scoped.call(data, &latest))
                 .await
                 .context(VerificationStage("latest balance"))?;
             balances.insert(id, stable.min(current));
@@ -301,9 +359,9 @@ impl BaseRpc {
                 format!("{payer:x}"),
                 alloy_primitives::hex::encode(nonce)
             );
-            let used = self
-                .for_address(&auth.payer)?
-                .call(data, &confirmed)
+            let scoped = self.for_address(&auth.payer)?;
+            let used = progress
+                .step("authorization_nonce", scoped.call(data, &confirmed))
                 .await
                 .context(VerificationStage("authorization nonce"))?;
             ensure!(used <= U256::from(1), "invalid authorizationState result");
@@ -323,7 +381,12 @@ impl BaseRpc {
             }
         }
         for anchor in [&confirmed, &latest] {
-            let (end, _) = self.block(&format!("0x{:x}", anchor.height)).await?;
+            let (end, _) = progress
+                .step(
+                    "anchor_recheck",
+                    self.block(&format!("0x{:x}", anchor.height)),
+                )
+                .await?;
             ensure!(
                 end.height == anchor.height && end.hash == anchor.hash,
                 "Base view changed during reconciliation"
@@ -368,6 +431,22 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+    #[tokio::test]
+    async fn view_progress_retains_active_stage_after_deadline_cancellation() {
+        use super::*;
+        let progress = ViewProgress::new();
+        progress.step("chain_id", async { Ok(()) }).await.unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_millis(20),
+            progress.step("latest_block", std::future::pending::<Result<()>>()),
+        )
+        .await;
+        assert!(result.is_err());
+        let (stage, elapsed, completed) = progress.snapshot();
+        assert_eq!(stage, "latest_block");
+        assert!(elapsed >= 20);
+        assert_eq!(completed, 1);
     }
     #[tokio::test]
     async fn rpc_failures_report_codes_without_upstream_secrets_in_errors_or_logs() {
