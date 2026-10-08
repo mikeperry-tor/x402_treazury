@@ -89,22 +89,80 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
         if pool.bootstrapped {
             continue;
         }
+        let blocked: Vec<_> = status
+            .funding_jobs
+            .iter()
+            .filter(|job| {
+                job.pool_id == pool.id
+                    && (job.timed_out
+                        || matches!(
+                            job.phase,
+                            FundingPhase::RecoveryRequired | FundingPhase::RefundPending
+                        ))
+            })
+            .collect();
+        if !blocked.is_empty() {
+            let details = blocked
+                .into_iter()
+                .map(|job| blocked_job(status, job))
+                .collect::<Vec<_>>()
+                .join("\n");
+            bail!("wallet {name}: bootstrap blocked; completed funding is retained\n{details}");
+        }
         ensure!(
             !pool.funding_degraded,
-            "wallet {name}: funding is degraded; inspect wallet status before retrying bootstrap"
-        );
-        ensure!(
-            !status.funding_jobs.iter().any(|job| job.pool_id == pool.id
-                && (job.timed_out
-                    || matches!(
-                        job.phase,
-                        FundingPhase::RecoveryRequired | FundingPhase::RefundPending
-                    ))),
-            "wallet {name}: funding requires recovery; inspect wallet status before retrying bootstrap"
+            "wallet {name}: funding is degraded with no recovery job identified; inspect wallet status --config FILE; completed funding is retained"
         );
         ready = false;
     }
     Ok(ready)
+}
+
+fn blocked_job(status: &Status, job: &crate::rotation::store::funding::FundingJob) -> String {
+    let operation = status
+        .treasury_operations
+        .iter()
+        .find(|op| op.operation_id == job.operation_id);
+    let phase = serde_json::to_value(&job.phase).expect("funding phase serializes");
+    let phase = phase.as_str().expect("funding phase is a string");
+    let source = operation
+        .map(|op| format!("{} (submission attempts={})", op.submission, op.attempts))
+        .unwrap_or_else(|| {
+            "not recorded; this alone does not prove preparation never started".into()
+        });
+    let next = if job.phase == FundingPhase::RecoveryRequired && operation.is_none() {
+        format!(
+            "To explicitly retry an unprepared job, run wallet recover-unprepared --config FILE --job-id {}; this resets only an eligible unprepared job and refuses signed bytes or consumed budget. After successful recovery, rerun bootstrap.",
+            job.id
+        )
+    } else if job.phase == FundingPhase::RecoveryRequired
+        && operation.is_some_and(|op| op.submission == "PREPARED" && op.attempts == 0)
+    {
+        format!(
+            "Prepared bytes exist with no recorded submission. After transaction expiry, run wallet recover-expired --config FILE --operation-id {}; it verifies canonical absence and unspent inputs before resetting this job. Then rerun bootstrap. Quote deadline and transaction expiry are different; do not use recover-unprepared or rebroadcast.",
+            job.operation_id
+        )
+    } else if operation.is_some_and(|op| op.submission != "CONFIRMED" && op.submission != "EXPIRED")
+    {
+        format!(
+            "Run wallet reconcile --config FILE --operation-id {} to observe the existing deposit without rebroadcasting. Reconciliation alone may not clear the funding recovery state; do not create a replacement deposit.",
+            job.operation_id
+        )
+    } else {
+        "Inspect wallet status --config FILE and the swap/refund outcome; source confirmation alone does not establish destination credit or authorize a replacement deposit.".into()
+    };
+    format!(
+        "  job={} phase={} timed_out={} quote_attempts={}\n  last_error={}\n  source_operation={}\n  {}",
+        job.id,
+        phase,
+        job.timed_out,
+        job.attempts,
+        job.last_error
+            .as_deref()
+            .unwrap_or("not recorded; the original cause cannot be inferred from this phase"),
+        source,
+        next
+    )
 }
 
 async fn supervise(
@@ -293,6 +351,68 @@ mod tests {
         assert!(complete(&store.status().unwrap(), &names).unwrap());
         store.ensure_pool("web", "2").unwrap();
         assert_eq!(store.funding_jobs().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn recovery_diagnostic_names_job_before_generic_degraded_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::rotation::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        store.ensure_pool("web", "2").unwrap();
+        let job = store.funding_jobs().unwrap().remove(0);
+        store
+            .advance_funding(
+                &job.id,
+                FundingPhase::Allocated,
+                FundingPhase::RecoveryRequired,
+            )
+            .unwrap();
+        let mut status = store.status().unwrap();
+        status.pools[0].funding_degraded = true;
+        let names = BTreeSet::from(["web".to_owned()]);
+        let error = complete(&status, &names).unwrap_err().to_string();
+        assert!(error.contains(&job.id));
+        assert!(error.contains("RECOVERY_REQUIRED"));
+        assert!(error.contains("last_error=not recorded"));
+        assert!(error.contains("wallet recover-unprepared --config FILE --job-id"));
+        assert!(!error.contains(&job.recipient));
+        status
+            .treasury_operations
+            .push(crate::rotation::transaction::OperationStatus {
+                operation_id: job.operation_id.clone(),
+                facts: crate::rotation::transaction::TransactionFacts {
+                    txid: "private-txid".into(),
+                    expiry_height: 100,
+                    amount_zatoshis: 1,
+                    fee_zatoshis: 1,
+                    deadline: 100,
+                },
+                submission: "UNKNOWN".into(),
+                attempts: 1,
+            });
+        let error = complete(&status, &names).unwrap_err().to_string();
+        assert!(error.contains("source_operation=UNKNOWN (submission attempts=1)"));
+        assert!(error.contains("wallet reconcile --config FILE --operation-id"));
+        assert!(!error.contains("recover-unprepared"));
+        assert!(!error.contains("private-txid"));
+        assert!(!error.contains("--rebroadcast"));
+        status.treasury_operations[0].submission = "PREPARED".into();
+        status.treasury_operations[0].attempts = 0;
+        let error = complete(&status, &names).unwrap_err().to_string();
+        assert!(error.contains("wallet recover-expired --config FILE --operation-id"));
+        assert!(!error.contains("Run wallet reconcile"));
+        status.funding_jobs[0].last_error = Some("quote_refresh_exhausted".into());
+        assert!(
+            complete(&status, &names)
+                .unwrap_err()
+                .to_string()
+                .contains("quote_refresh_exhausted")
+        );
     }
 
     #[tokio::test]

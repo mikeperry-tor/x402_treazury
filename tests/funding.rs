@@ -511,6 +511,17 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
                 FundingPhase::RecoveryRequired
             }
         );
+        if remaining < 300 {
+            assert!(
+                status.funding_jobs[0]
+                    .last_error
+                    .as_deref()
+                    .unwrap()
+                    .starts_with("prepared_quote_window_exhausted;")
+            );
+            assert_eq!(status.treasury_operations[0].submission, "PREPARED");
+            assert_eq!(status.treasury_operations[0].attempts, 0);
+        }
         assert_eq!(worker.backend.sends, usize::from(remaining == 300));
         assert_eq!(status.treasury_operations.len(), 1);
         drop(worker);

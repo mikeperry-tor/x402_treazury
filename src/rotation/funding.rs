@@ -202,7 +202,8 @@ impl<B: FundingBackend> FundingWorker<B> {
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
                 if operation.attempts == 0 {
                     if operation.facts.deadline.saturating_sub(instant) < 300 {
-                        return self.transition(job, RecoveryRequired).await;
+                        self.transition(job, RecoveryRequired).await?;
+                        anyhow::bail!("prepared_quote_window_exhausted");
                     }
                     self.backend.submit(job).await?;
                 }
@@ -674,6 +675,9 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
             }
             "treasury_insufficient_spendable_funds" => {
                 return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
+            }
+            "prepared_quote_window_exhausted" => {
+                return "prepared_quote_window_exhausted; fewer than 300 seconds remained before the swap quote deadline; no submission attempted; signed bytes retained; use wallet recover-expired after transaction expiry, then retry bootstrap";
             }
             "quote_refresh_exhausted" => {
                 return "quote_refresh_exhausted; review deadlines and recover-unprepared explicitly";
