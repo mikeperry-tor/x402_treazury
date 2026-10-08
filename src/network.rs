@@ -37,8 +37,9 @@ pub struct NetworkPolicy {
     pub isolation_namespace: Option<String>,
     pub socks_auth: Option<SocksAuth>,
     pub connect_timeout_seconds: Option<u64>,
-    /// Tor-only floor for a complete request, including connection and body.
-    pub request_timeout_seconds: Option<u64>,
+    /// Maximum HTTP read inactivity, identically in direct and Tor mode.
+    #[serde(alias = "request_timeout_seconds")]
+    pub read_timeout_seconds: Option<u64>,
 }
 impl NetworkPolicy {
     pub fn cover_enabled(&self) -> bool {
@@ -51,9 +52,7 @@ impl NetworkPolicy {
             ensure!(
                 self.socks_endpoint.is_none()
                     && self.isolation_namespace.is_none()
-                    && self.socks_auth.is_none()
-                    && self.connect_timeout_seconds.is_none()
-                    && self.request_timeout_seconds.is_none(),
+                    && self.socks_auth.is_none(),
                 "Tor settings require network.mode = tor"
             );
         } else {
@@ -73,16 +72,15 @@ impl NetworkPolicy {
                         .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
                 "invalid isolation namespace (1..128 ASCII letters, digits, underscores or hyphens)"
             );
-            ensure!(
-                (1..=300).contains(&self.connect_timeout_seconds.unwrap_or(120)),
-                "network connect timeout must be 1..300 seconds"
-            );
-            ensure!(
-                (1..=86400).contains(&self.request_timeout_seconds.unwrap_or(240))
-                    && self.request_timeout_seconds.unwrap_or(240) >= self.timeout().as_secs(),
-                "network request timeout must be 1..86400 seconds and at least the connect timeout"
-            );
         }
+        ensure!(
+            (1..=300).contains(&self.timeout().as_secs()),
+            "network connect timeout must be 1..300 seconds"
+        );
+        ensure!(
+            (1..=86400).contains(&self.read_timeout_seconds.unwrap_or(60)),
+            "network read timeout must be 1..86400 seconds"
+        );
         Ok(())
     }
     fn namespace(&self) -> &str {
@@ -97,7 +95,7 @@ impl NetworkPolicy {
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"request_timeout_seconds":self.request_timeout_seconds.or((self.mode == Mode::Tor).then_some(240)),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
@@ -219,20 +217,25 @@ impl NetworkContext {
             grpc: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
-    /// Preserve direct-mode budgets; Tor needs room for circuit/stream setup.
-    /// Callers may request longer deadlines, but not shorten the Tor policy floor.
-    pub fn request_timeout(&self, requested: Duration) -> Duration {
+    /// HTTP inactivity has one policy in both transports. Explicit caller
+    /// overrides replace the network default; there is no Tor floor.
+    pub fn read_timeout(&self, requested: impl Into<Option<Duration>>) -> Duration {
+        requested
+            .into()
+            .unwrap_or_else(|| Duration::from_secs(self.policy.read_timeout_seconds.unwrap_or(60)))
+    }
+    /// Financial/RPC operation deadlines are independent of HTTP read progress.
+    /// Preserve the existing Tor allowance for multi-step chain operations.
+    pub fn operation_timeout(&self, requested: Duration) -> Duration {
         if self.policy.mode == Mode::Tor {
-            requested.max(Duration::from_secs(
-                self.policy.request_timeout_seconds.unwrap_or(240),
-            ))
+            requested.max(Duration::from_secs(240))
         } else {
             requested
         }
     }
     /// For outer connection guards; do not undercut the connector's Tor budget.
     pub fn connection_timeout(&self, direct: Duration) -> Duration {
-        if self.policy.mode == Mode::Tor {
+        if self.policy.mode == Mode::Tor || self.policy.connect_timeout_seconds.is_some() {
             self.policy.timeout()
         } else {
             direct
@@ -258,14 +261,19 @@ impl NetworkContext {
         self.test_root = Some(root);
         self
     }
-    pub fn http(&self, id: &IsolationId, url: &str, timeout: Duration) -> Result<reqwest::Client> {
+    pub fn http(
+        &self,
+        id: &IsolationId,
+        url: &str,
+        timeout: impl Into<Option<Duration>>,
+    ) -> Result<reqwest::Client> {
         self.http_policy(id, url, timeout, false, HttpPolicy::COMPATIBLE)
     }
     pub fn http_public(
         &self,
         id: &IsolationId,
         url: &str,
-        timeout: Duration,
+        timeout: impl Into<Option<Duration>>,
     ) -> Result<reqwest::Client> {
         public_url(url)?;
         self.http_policy(id, url, timeout, true, HttpPolicy::COMPATIBLE)
@@ -274,14 +282,14 @@ impl NetworkContext {
         &self,
         id: &IsolationId,
         url: &str,
-        timeout: Duration,
+        timeout: impl Into<Option<Duration>>,
         public_only: bool,
         transport: HttpPolicy,
     ) -> Result<reqwest::Client> {
         if public_only {
             public_url(url)?;
         }
-        let timeout = self.request_timeout(timeout);
+        let timeout = self.read_timeout(timeout);
         let parsed = reqwest::Url::parse(url).context("invalid network URL")?;
         ensure!(
             matches!(parsed.scheme(), "http" | "https"),
@@ -302,7 +310,7 @@ impl NetworkContext {
         let mut builder = reqwest::Client::builder()
             .no_proxy()
             .retry(reqwest::retry::never())
-            .timeout(timeout)
+            .read_timeout(timeout)
             .connect_timeout(self.policy.timeout())
             .redirect(reqwest::redirect::Policy::none());
         if parsed.scheme() == "https" {
@@ -342,7 +350,11 @@ impl NetworkContext {
         clients.insert(key, client.clone());
         Ok(client)
     }
-    pub fn discovery(&self, url: &str, timeout: Duration) -> Result<reqwest::Client> {
+    pub fn discovery(
+        &self,
+        url: &str,
+        timeout: impl Into<Option<Duration>>,
+    ) -> Result<reqwest::Client> {
         self.http(&IsolationId::discovery(url)?, url, timeout)
     }
 }
@@ -371,12 +383,12 @@ pub(crate) fn install_test_context(context: NetworkContext) {
 }
 pub fn provider_discovery(
     url: &str,
-    timeout: Duration,
+    timeout: impl Into<Option<Duration>>,
     policy: HttpPolicy,
 ) -> Result<reqwest::Client> {
     global().http_policy(&IsolationId::discovery(url)?, url, timeout, false, policy)
 }
-pub fn discovery(url: &str, timeout: Duration) -> Result<reqwest::Client> {
+pub fn discovery(url: &str, timeout: impl Into<Option<Duration>>) -> Result<reqwest::Client> {
     global().discovery(url, timeout)
 }
 

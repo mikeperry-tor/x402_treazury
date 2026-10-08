@@ -3,7 +3,6 @@
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::time::Duration;
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
 const ZEC: &str = "nep141:zec.omft.near";
 pub(crate) const USDC: &str = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
@@ -93,7 +92,7 @@ impl NearClient {
         crate::network::global().http(
             &crate::network::IsolationId::evm(address)?,
             &self.origin,
-            Duration::from_secs(30),
+            None,
         )
     }
     async fn response(&self, request: reqwest::RequestBuilder) -> Result<Value> {
@@ -151,7 +150,7 @@ impl NearClient {
         validate_assets(
             &self
                 .response(
-                    crate::network::discovery(&self.origin, Duration::from_secs(30))?
+                    crate::network::discovery(&self.origin, None)?
                         .get(format!("{}/v0/tokens", self.origin))
                         .headers(self.headers.clone()),
                 )

@@ -7,7 +7,7 @@ include = [""]
 include_operations = ["POST /search", "POST /contents"]
 pricing_key = "x-payment-info"
 probe_pricing = false
-timeout = 90
+read_timeout_seconds = 90
 help_url = "https://exa.ai/docs/integrations/payments/x402/quickstart.md"
 instructions_text = "Exa web search and page retrieval, paid via x402 USDC on Base without an Exa API key. Use exa_search to discover URLs and exa_contents when URLs are already known. exa_help describes both endpoints and x402 pricing; its generic API-key/SDK setup is unnecessary here. Prices depend on requested options and result/page counts; the payment challenge is authoritative, not the spec's advertised range. Prefer small result sets and highlights for concise context. For contents supply exactly one of urls or ids. Keep search stream false or omitted: these tools return completed responses, not streamed events. Account, monitor, batch, agent, Websets and deprecated findSimilar APIs are excluded."
 

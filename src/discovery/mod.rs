@@ -159,7 +159,7 @@ impl Manager {
             .get(wallet)
             .context("directory wallet unavailable")?
             .clone()
-            .with_timeout(Duration::from_secs(self.policy.fetch_timeout_seconds))
+            .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
             .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes);
         let base = directory::BASE.to_owned();
         #[cfg(test)]
@@ -319,7 +319,7 @@ impl Manager {
                     .get(wallet)
                     .context("dynamic wallet unavailable")?
                     .clone()
-                    .with_timeout(Duration::from_secs(self.policy.fetch_timeout_seconds))
+                    .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
                     .with_download_limits(
                         self.policy.max_response_bytes,
                         self.policy.max_help_bytes,

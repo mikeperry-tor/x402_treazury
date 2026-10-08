@@ -5,12 +5,12 @@ version = 1
 # on a source to disable it. Results and failures are shared for the process lifetime.
 [sources.pdl]
 extends = "../../providers/pdl.toml"
-timeout = 30
+read_timeout_seconds = 30
 # wallet = "default" # Optional source override, shared across listeners using pdl.
 
 [sources.lonestar]
 extends = "../../providers/lonestar.toml"
-timeout = 90
+read_timeout_seconds = 90
 
 [wallets.default]
 mode = "static"

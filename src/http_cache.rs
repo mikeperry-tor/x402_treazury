@@ -222,8 +222,7 @@ impl Slot {
                     network,
                     cfg.allow_http1,
                     cfg.allow_tls12,
-                    cfg.timeout.to_bits(),
-                    cfg.probe_timeout.to_bits(),
+                    cfg.read_timeout_seconds.map(f64::to_bits),
                     cfg.probe_ttl_seconds.to_bits(),
                     limit
                 ))

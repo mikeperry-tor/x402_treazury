@@ -70,7 +70,7 @@ impl ManagedPool {
             base,
             target: positive_usdc(deposit)?,
             policy,
-            wait: crate::network::global().request_timeout(Duration::from_secs(wait_seconds)),
+            wait: crate::network::global().operation_timeout(Duration::from_secs(wait_seconds)),
             gate: Mutex::new(()),
         })
     }

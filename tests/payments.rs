@@ -663,3 +663,72 @@ async fn unsigned_client_never_signs_valid_v1_v2_or_zero_amount_challenges() {
         task.abort();
     }
 }
+
+#[tokio::test]
+async fn signed_api_body_uses_idle_timeout_without_replay() {
+    use axum::body::Body;
+    use std::time::Duration;
+    for stalled in [false, true] {
+        let counts = Arc::new(AtomicUsize::new(0));
+        let seen = counts.clone();
+        let app = Router::new().route(
+            "/pay",
+            get(move |headers: HeaderMap| {
+                let seen = seen.clone();
+                async move {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    if !headers.contains_key("payment-signature") {
+                        return (
+                            StatusCode::PAYMENT_REQUIRED,
+                            [(
+                                "payment-required",
+                                STANDARD.encode(
+                                    serde_json::to_vec(&challenge("exact", "10000")).unwrap(),
+                                ),
+                            )],
+                        )
+                            .into_response();
+                    }
+                    Response::new(Body::from_stream(futures_util::stream::unfold(
+                        0,
+                        move |n| async move {
+                            if n == 8 {
+                                return None;
+                            }
+                            if stalled && n == 1 {
+                                std::future::pending::<()>().await;
+                            }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            Some((Ok::<_, std::io::Error>("x"), n + 1))
+                        },
+                    )))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/pay", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let started = std::time::Instant::now();
+        let result = client("1")
+            .with_timeout(Duration::from_millis(500))
+            .execute_response(route(url))
+            .await;
+        if stalled {
+            assert!(result.unwrap_err().chain().any(|e| {
+                e.downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout)
+            }));
+        } else {
+            let output = result.unwrap();
+            assert_eq!(output.bytes, b"xxxxxxxx");
+            assert!(output.paid_submission);
+            assert!(started.elapsed() > Duration::from_millis(500));
+        }
+        assert_eq!(
+            counts.load(Ordering::SeqCst),
+            2,
+            "one challenge and one signed request, never replay"
+        );
+        server.abort();
+    }
+}

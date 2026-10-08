@@ -468,55 +468,65 @@ fn live_tor_inbound_listeners() {
 }
 
 #[test]
-fn tor_budgets_preserve_longer_requests_and_direct_deadlines() {
-    let direct = NetworkContext::new(NetworkPolicy::default()).unwrap();
-    assert_eq!(
-        direct.request_timeout(Duration::from_millis(50)),
-        Duration::from_millis(50)
-    );
-    assert_eq!(
-        direct.connection_timeout(Duration::from_secs(30)),
-        Duration::from_secs(30)
-    );
-    let tor = NetworkPolicy {
-        mode: Mode::Tor,
-        socks_endpoint: Some("127.0.0.1:9150".parse().unwrap()),
-        ..Default::default()
-    };
-    let ctx = NetworkContext::new(tor.clone()).unwrap();
-    assert_eq!(
-        ctx.connection_timeout(Duration::from_secs(15)),
-        Duration::from_secs(120)
-    );
-    assert_eq!(
-        ctx.request_timeout(Duration::from_secs(5)),
-        Duration::from_secs(240)
-    );
-    assert_eq!(
-        ctx.request_timeout(Duration::from_secs(600)),
-        Duration::from_secs(600)
-    );
-    assert_eq!(tor.inspection()["request_timeout_seconds"], 240);
-    for value in [0, 119, 86401] {
-        assert!(
-            NetworkContext::new(NetworkPolicy {
-                request_timeout_seconds: Some(value),
-                ..tor.clone()
+fn direct_and_tor_share_read_timeout_defaults_and_overrides() {
+    for policy in [
+        NetworkPolicy::default(),
+        NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some("127.0.0.1:9150".parse().unwrap()),
+            ..Default::default()
+        },
+    ] {
+        let ctx = NetworkContext::new(policy.clone()).unwrap();
+        let configured_connection = NetworkContext::new(NetworkPolicy {
+            connect_timeout_seconds: Some(7),
+            ..policy.clone()
+        })
+        .unwrap();
+        assert_eq!(
+            configured_connection.connection_timeout(Duration::from_secs(30)),
+            Duration::from_secs(7)
+        );
+        assert_eq!(ctx.read_timeout(None), Duration::from_secs(60));
+        assert_eq!(
+            ctx.read_timeout(Duration::from_millis(50)),
+            Duration::from_millis(50)
+        );
+        assert_eq!(policy.inspection()["read_timeout_seconds"], 60);
+        assert!(policy.inspection().get("request_timeout_seconds").is_none());
+        for value in [1, 60, 600] {
+            let ctx = NetworkContext::new(NetworkPolicy {
+                read_timeout_seconds: Some(value),
+                ..policy.clone()
             })
-            .is_err()
+            .unwrap();
+            assert_eq!(ctx.read_timeout(None), Duration::from_secs(value));
+        }
+        for value in [0, 86401] {
+            assert!(
+                NetworkContext::new(NetworkPolicy {
+                    read_timeout_seconds: Some(value),
+                    ..policy.clone()
+                })
+                .is_err()
+            );
+        }
+        // Existing financial operation budgets are independent of HTTP settings.
+        assert_eq!(
+            ctx.operation_timeout(Duration::from_secs(15)),
+            Duration::from_secs(if policy.mode == Mode::Tor { 240 } else { 15 })
         );
     }
+    let old: NetworkPolicy = toml::from_str("request_timeout_seconds = 240").unwrap();
+    assert_eq!(old.read_timeout_seconds, Some(240));
     assert!(
-        NetworkContext::new(NetworkPolicy {
-            request_timeout_seconds: Some(240),
-            ..Default::default()
-        })
-        .is_err()
+        toml::from_str::<NetworkPolicy>("request_timeout_seconds = 240\nread_timeout_seconds = 60")
+            .is_err()
     );
 }
 
 #[tokio::test]
-async fn tor_request_floor_covers_headers_and_body_but_still_bounds_downloads() {
+async fn tor_read_inactivity_covers_headers_and_body() {
     use axum::{body::Body, response::Response, routing::get};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -538,6 +548,21 @@ async fn tor_request_floor_covers_headers_and_body_but_still_bounds_downloads() 
             }),
         )
         .route(
+            "/stream",
+            get(|| async {
+                Response::new(Body::from_stream(futures_util::stream::unfold(
+                    0,
+                    |n| async move {
+                        if n == 6 {
+                            return None;
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        Some((Ok::<_, std::io::Error>("x"), n + 1))
+                    },
+                )))
+            }),
+        )
+        .route(
             "/stalled",
             get(|| async {
                 Response::new(Body::from_stream(futures_util::stream::pending::<
@@ -552,13 +577,11 @@ async fn tor_request_floor_covers_headers_and_body_but_still_bounds_downloads() 
     )
     .await;
     let ctx = NetworkContext::new(NetworkPolicy {
-        request_timeout_seconds: Some(1),
+        read_timeout_seconds: Some(1),
         ..policy(&proxy)
     })
     .unwrap();
-    let http = ctx
-        .discovery("http://budgets.invalid", Duration::from_millis(20))
-        .unwrap();
+    let http = ctx.discovery("http://budgets.invalid", None).unwrap();
     for path in ["headers", "body"] {
         let body = http
             .get(format!("http://budgets.invalid/{path}"))
@@ -570,6 +593,18 @@ async fn tor_request_floor_covers_headers_and_body_but_still_bounds_downloads() 
             .unwrap();
         assert_eq!(body, "ok");
     }
+    let started = std::time::Instant::now();
+    assert_eq!(
+        http.get("http://budgets.invalid/stream")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "xxxxxx"
+    );
+    assert!(started.elapsed() > Duration::from_secs(1));
     let response = http
         .get("http://budgets.invalid/stalled")
         .send()

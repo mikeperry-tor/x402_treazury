@@ -490,7 +490,7 @@ include_operations = [
 ]
 pricing_key = "x-payment-info"
 probe_pricing = false
-timeout = 90
+read_timeout_seconds = 90
 help_url = "https://agent402.tools/llms.txt"
 instructions_text = "Agent402 paid tools using x402 USDC on Base. This provider defaults to web tools; operators can select other reviewed subsets with exact lowercase tags such as data, crypto, network, text, math or llm. agent402_help loads the full vendor guide only when called; it also describes excluded wallet-keyed memory/account tools, delegated workflows and PDF/audio/video output. Supported PNG/JPEG/WebP results are returned as MCP image attachments, with explicit byte/count limits; no asset URLs are automatically downloaded. PoW, MPP, cards, credits and the vendor MCP connector are separate client options, not Treazury setup steps. Use completed JSON responses: omit stream or set false. For model gateways set a small output-token budget; quoted ceilings and actual-usage billing differ. Managed wallets support exact EIP-3009 payments; upto is not enabled by selecting a tag. Vendor price estimates never override the payment cap or live challenge. Some reports exceed the default cap or need a longer configured timeout. Preserve vendor truncated/partial markers. Missing receipts after a timeout do not prove that nothing was charged; do not blindly repeat paid requests."
 

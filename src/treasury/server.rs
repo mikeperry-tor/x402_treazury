@@ -20,7 +20,7 @@ pub(crate) async fn check(
                 height,
                 hash: vec![],
             },
-            crate::network::global().request_timeout(Duration::from_secs(15)),
+            crate::network::global().operation_timeout(Duration::from_secs(15)),
         )
         .await
         .map_err(|_| anyhow::anyhow!("indexer Ironwood capability check failed"))?;
@@ -45,7 +45,7 @@ pub(crate) async fn check_endpoint(
         return Ok(());
     }
     tokio::time::timeout(
-        crate::network::global().request_timeout(Duration::from_secs(30)),
+        crate::network::global().operation_timeout(Duration::from_secs(30)),
         async {
             let mut client = tokio::time::timeout(
                 crate::network::global().connection_timeout(Duration::from_secs(15)),

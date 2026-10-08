@@ -11,7 +11,7 @@ pub const BIRTHDAY_REWIND: u32 = 100;
 pub async fn discover(endpoint: &str) -> Result<u32> {
     crate::rotation::base::secure_endpoint(endpoint)?;
     tokio::time::timeout(
-        crate::network::global().request_timeout(Duration::from_secs(30)),
+        crate::network::global().operation_timeout(Duration::from_secs(30)),
         async {
             let mut client = tokio::time::timeout(
                 crate::network::global().connection_timeout(Duration::from_secs(15)),
@@ -21,7 +21,9 @@ pub async fn discover(endpoint: &str) -> Result<u32> {
             .map_err(|_| anyhow::anyhow!("birthday indexer connection timed out"))?
             .map_err(|_| anyhow::anyhow!("birthday indexer connection failed"))?;
             let info = client
-                .get_lightd_info(crate::network::global().request_timeout(Duration::from_secs(15)))
+                .get_lightd_info(
+                    crate::network::global().operation_timeout(Duration::from_secs(15)),
+                )
                 .await
                 .map_err(|_| anyhow::anyhow!("birthday network check failed"))?;
             ensure!(
@@ -29,7 +31,9 @@ pub async fn discover(endpoint: &str) -> Result<u32> {
                 "birthday indexer is not on mainnet"
             );
             let tip = client
-                .get_latest_block(crate::network::global().request_timeout(Duration::from_secs(15)))
+                .get_latest_block(
+                    crate::network::global().operation_timeout(Duration::from_secs(15)),
+                )
                 .await
                 .map_err(|_| anyhow::anyhow!("birthday tip query failed"))?;
             ensure!(

@@ -431,7 +431,12 @@ impl Deployment {
                         reqwest::Url::parse(&route)?.origin().ascii_serialization(),
                         source.config.transport(),
                         crate::network::global()
-                            .request_timeout(Duration::from_secs_f64(source.config.timeout))
+                            .read_timeout(
+                                source
+                                    .config
+                                    .read_timeout_seconds
+                                    .map(Duration::from_secs_f64),
+                            )
                             .as_millis(),
                     );
                     if let Some(previous) = cover_owners.insert(key, cover) {
@@ -766,7 +771,12 @@ impl Deployment {
                                     source: id.clone(),
                                 },
                             )
-                            .with_timeout(Duration::from_secs_f64(source.config.timeout))
+                            .with_timeout(
+                                source
+                                    .config
+                                    .read_timeout_seconds
+                                    .map(Duration::from_secs_f64),
+                            )
                             .with_download_limits(
                                 source.config.max_response_bytes,
                                 source.config.max_help_bytes,

@@ -62,8 +62,9 @@ pub fn validate(cfg: &Config) -> Result<()> {
         "probe_concurrency must be positive"
     );
     ensure!(
-        cfg.probe_timeout.is_finite() && cfg.probe_timeout > 0.0 && cfg.probe_timeout <= 86400.0,
-        "probe_timeout must be in (0, 86400]"
+        cfg.read_timeout_seconds
+            .is_none_or(|v| v.is_finite() && v > 0.0 && v <= 86400.0),
+        "read_timeout_seconds must be in (0, 86400]"
     );
     ensure!(
         cfg.probe_ttl_seconds.is_finite() && cfg.probe_ttl_seconds > 0.0,
@@ -147,7 +148,7 @@ impl PricingCache {
         let url = tool.route(base, &serde_json::Map::new())?.url;
         let http = crate::network::provider_discovery(
             &url,
-            Duration::from_secs_f64(cfg.probe_timeout),
+            cfg.read_timeout_seconds.map(Duration::from_secs_f64),
             cfg.transport(),
         )?;
         Ok((tool, self.get(url, http, cfg.probe_ttl_seconds, cfg).await))

@@ -175,3 +175,89 @@ async fn compatibility_flags_are_independent_and_cannot_reuse_permissive_connect
         server.abort();
     }
 }
+
+#[tokio::test]
+async fn http_responses_renew_idle_budget_and_share_one_timeout_policy() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(stream.read_u8().await.unwrap());
+                    assert!(request.len() <= 8192);
+                }
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+                for _ in 0..8 {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    if stream.write_all(b"x").await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    let ctx = NetworkContext::new(NetworkPolicy::default()).unwrap();
+    let id = IsolationId::discovery(&url).unwrap();
+    let budget = Duration::from_millis(500);
+    // Scale the idle interval down for this real-socket regression test.
+    let download = ctx
+        .http_policy(&id, &url, budget, false, HttpPolicy::COMPATIBLE)
+        .unwrap();
+    let api = ctx
+        .http_policy(&id, &url, budget, false, HttpPolicy::COMPATIBLE)
+        .unwrap();
+    let (download, api) = tokio::join!(
+        async { download.get(&url).send().await.unwrap().bytes().await },
+        async { api.get(&url).send().await.unwrap().bytes().await },
+    );
+    assert_eq!(download.unwrap().as_ref(), b"xxxxxxxx");
+    assert_eq!(api.unwrap().as_ref(), b"xxxxxxxx");
+    assert_eq!(ctx.http.lock().unwrap().len(), 1);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn http_responses_time_out_on_stalled_headers_or_body() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for headers in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(stream.read_u8().await.unwrap());
+                assert!(request.len() <= 8192);
+            }
+            if headers {
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nx")
+                    .await
+                    .unwrap();
+            }
+            std::future::pending::<()>().await;
+        });
+        let ctx = NetworkContext::new(NetworkPolicy::default()).unwrap();
+        let id = IsolationId::discovery(&url).unwrap();
+        let http = ctx
+            .http_policy(
+                &id,
+                &url,
+                Duration::from_millis(200),
+                false,
+                HttpPolicy::COMPATIBLE,
+            )
+            .unwrap();
+        let result = async { http.get(&url).send().await?.bytes().await }.await;
+        assert!(result.unwrap_err().is_timeout());
+        server.abort();
+        let _ = server.await;
+    }
+}

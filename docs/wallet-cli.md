@@ -539,7 +539,7 @@ submissions are never replayed by this mechanism. Payer SOCKS identities and the
 configured Tor-only network policy remain unchanged.
 
 Each provider gets a complete-view deadline of 15 seconds in direct mode or the
-Tor request floor (240 seconds by default), including its bounded transport retry.
+fixed Tor operation allowance (240 seconds, independent of HTTP read inactivity), including its bounded transport retry.
 At most three providers are visited once per view; earlier caller/admission
 deadlines still apply. Logs identify provider indices, failure categories,
 deadlines and fallback success without logging URLs or credentials. Each new view

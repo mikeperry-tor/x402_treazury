@@ -64,22 +64,38 @@ See [cache warming](configuration.md#warming-a-selected-source-including-directl
 
 ## Timeout budgets and concurrency
 
-Tor defaults to `connect_timeout_seconds = 120` and
-`request_timeout_seconds = 240`. The latter is a floor: the effective complete
-HTTP request deadline is `max(caller timeout, network request timeout)`, covering
-connection, headers and the entire response body rather than restarting per chunk.
-The pool cache keys on this effective timeout. Both settings are Tor-only; direct
-HTTP and gRPC budgets retain their existing values. Network validation requires a
-positive request timeout no greater than 86400 seconds and at least the connection
-budget; connect timeout remains bounded to 1..300 seconds. Inspection reports the
-Tor floor (null in direct mode) alongside the connection budget.
+All outbound HTTP uses `read_timeout_seconds`, defaulting to 60 seconds in both
+direct and Tor mode. Each successful response read renews the inactivity budget;
+there is no total HTTP response deadline. This covers catalogs, lazy help, pricing,
+imports, ordinary paid API responses and Curl relay responses, including large
+binary bodies. Waiting for response headers is also subject to this budget.
+Byte limits remain enforced, and partial documents are never published.
 
-This covers catalogs, lazy help, pricing, agent imports, paid API HTTP requests,
-Base RPC and NEAR requests through the common factory. Import outer deadlines
-and managed admission use the same floor. Application-owned birthday, capability,
-sync-tip, preparation-tip and submission/lookup RPC deadlines also apply it;
-outer connection guards respect the connection budget. Tip checks query the
-injected indexer directly, avoiding `LightClient::info`'s shorter internal deadline.
+A provider/source or source-management `read_timeout_seconds` explicitly overrides
+the network default. Omission inherits it. HTTP pools key on the effective idle
+budget alongside identity, transport and public-destination policy.
+
+Connection establishment remains separate: `connect_timeout_seconds` defaults
+to 15 seconds direct and 120 seconds Tor. Both settings are available in either
+mode. Connection values must be 1..300 seconds, and network read values must be
+1..86400 seconds; the read budget need not exceed the connection budget. Inspection
+reports the effective network values in both modes.
+
+For compatibility, network `request_timeout_seconds` is an alias for
+`read_timeout_seconds`, with its literal value now specifying inactivity. Provider
+`timeout`, legacy pricing `probe_timeout`, import `fetch_timeout_seconds` and CLI
+`--timeout` are accepted as legacy spellings. New configurations use only
+`read_timeout_seconds` / `--read-timeout-seconds`. When old provider settings contain
+both `timeout` and `probe_timeout`, the general `timeout` wins. Authored Tor examples
+now specify 60 seconds; operator-owned files are not rewritten automatically.
+
+Financial operations retain independent overall deadlines: managed admission,
+canonical Base views and application-owned treasury RPC operations retain their
+caller budgets (with the existing fixed 240-second Tor operation allowance).
+HTTP settings do not extend signed authorizations, quote expiry, funding safeguards
+or qualification deadlines. Outer connection guards respect the connection budget.
+Tip checks query the injected indexer directly, avoiding `LightClient::info`'s
+shorter internal deadline.
 Embedded Zingolib/pepper-sync scanning and proving still retain their upstream
 internal RPC/stream deadlines; this does not rewrite upstream retry policies or
 claim to extend every library-internal timeout. Existing injected channels still

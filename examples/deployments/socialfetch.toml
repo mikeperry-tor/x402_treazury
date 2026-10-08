@@ -3,7 +3,7 @@ version = 1
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"
 tags = ["Twitter", "YouTube", "LinkedIn"]
-timeout = 90
+read_timeout_seconds = 90
 
 [wallets.default]
 mode = "static"

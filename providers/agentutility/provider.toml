@@ -538,7 +538,7 @@ include_operations = [
 ]
 pricing_key = "x-payment-info"
 probe_pricing = false
-timeout = 90
+read_timeout_seconds = 90
 help_url = "https://agentutility.ai/llms.txt"
 instructions_text = "AgentUtility pay-per-call tools using x402 USDC on Base. Managed zcash_rotation wallets omit advertised x402 extensions with warnings; providers requiring extension echoes may reject payment. A rejected signed payment remains reserved until chain reconciliation. The default is a curated research subset; operators can select other clusters by tag. Catalog tags combine the OpenAPI and registry because the live OpenAPI omits many tags. Aliases and unsupported stateful/mixed-output/schema workflows are excluded. agentutility_help fetches the large vendor guide only on demand; it describes a broader catalog and other MCP/CLI clients. Treazury owns signing: no separate vendor CLI, wallet creation, API keys or provider environment variables are required by this integration. Hosted image/audio/video/file URLs remain JSON metadata and are not automatically fetched. Satellite image payloads become MCP image attachments with original attribution and metadata retained. Preserve degraded, partial, truncated and component-error markers; search may return a marked news fallback rather than full web coverage. Some routes exceed the default payment cap or 90-second timeout. Prices in the local snapshot are estimates; the live challenge is authoritative. Do not repeat a paid call merely because its response or receipt is missing."
 

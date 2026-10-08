@@ -51,7 +51,7 @@ description = "New"
         deployment.display().to_string()
     );
     assert!(resolved.settings.tags.is_empty());
-    assert_eq!(resolved.settings.timeout, 42.0);
+    assert_eq!(resolved.settings.read_timeout_seconds, Some(42.0));
     assert_eq!(resolved.settings.max_response_bytes, 100);
     assert_eq!(resolved.settings.max_help_bytes, 80);
     assert_eq!(resolved.settings.max_spec_bytes, 200);
@@ -75,7 +75,7 @@ description = "New"
         json!({"stable_new":{"description":"New"}})
     );
     assert_eq!(
-        resolved.origins["timeout"],
+        resolved.origins["read_timeout_seconds"],
         deployment.display().to_string()
     );
     assert!(resolved.origins["spec"].ends_with("provider.toml"));
@@ -222,7 +222,10 @@ fn show_config_is_offline_reports_origins_and_never_resolves_secret_values() {
     assert!(!text.contains("do-not-expose-this"));
     let shown: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(shown["sources"]["shared"]["settings"]["prefix"], "api");
-    assert_eq!(shown["sources"]["shared"]["origins"]["timeout"], "default");
+    assert_eq!(
+        shown["sources"]["shared"]["origins"]["read_timeout_seconds"],
+        "default"
+    );
     assert!(
         shown["sources"]["shared"]["origins"]["spec"]
             .as_str()
@@ -364,4 +367,35 @@ async fn privacy_example_enables_source_wallet_discovery_offline() {
         shown["wallet_bindings"]["company"]["exa"]["wallet"],
         "company"
     );
+}
+
+#[tokio::test]
+async fn read_timeout_migration_preserves_composition_and_historical_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = dir.path().join("provider.toml");
+    std::fs::write(&provider, "spec='api.json'\nread_timeout_seconds=90").unwrap();
+    let resolve = |text: &str| toml::from_str(text).unwrap();
+    let source = dir.path().join("source.toml");
+    let inherited = config::resolve(
+        resolve("extends='provider.toml'\ntimeout=42\nprobe_timeout=5"),
+        &source,
+    )
+    .await
+    .unwrap();
+    assert_eq!(inherited.settings.read_timeout_seconds, Some(42.0));
+    assert!(inherited.origins["read_timeout_seconds"].ends_with("source.toml"));
+    let probe_only = config::resolve(resolve("spec='api.json'\nprobe_timeout=5"), &source)
+        .await
+        .unwrap();
+    assert_eq!(probe_only.settings.read_timeout_seconds, Some(5.0));
+    for text in [
+        "spec='api.json'\ntimeout=42\nread_timeout_seconds=60",
+        "spec='api.json'\ntimeout=42\nprobe_timeout=0",
+    ] {
+        assert!(config::resolve(resolve(text), &source).await.is_err());
+    }
+    let historical: x402_treazury::catalog::Config =
+        serde_json::from_value(json!({"spec":"api.json","timeout":30.0,"probe_timeout":5.0}))
+            .unwrap();
+    assert_eq!(historical.read_timeout_seconds, Some(30.0));
 }

@@ -15,7 +15,7 @@ use zingo_netutils::{
     lightwallet_protocol::{BlockId, RawTransaction, TxFilter},
 };
 fn request_timeout() -> Duration {
-    crate::network::global().request_timeout(Duration::from_secs(15))
+    crate::network::global().operation_timeout(Duration::from_secs(15))
 }
 
 pub struct GrpcSubmission {

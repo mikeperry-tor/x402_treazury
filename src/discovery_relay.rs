@@ -202,13 +202,16 @@ impl Relay {
             &endpoint,
             cfg.allow_http1,
             cfg.allow_tls12,
-            cfg.timeout.to_bits(),
+            cfg.read_timeout_seconds.map(f64::to_bits),
             cfg.max_response_bytes,
         ))?;
         Ok(Arc::new(Self {
             client: client
                 .with_transport(cfg.transport())
-                .with_timeout(std::time::Duration::from_secs_f64(cfg.timeout))
+                .with_timeout(
+                    cfg.read_timeout_seconds
+                        .map(std::time::Duration::from_secs_f64),
+                )
                 .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes)
                 .public_destinations(),
             endpoint,

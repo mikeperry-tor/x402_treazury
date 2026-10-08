@@ -93,7 +93,7 @@ optional wallet templates and an automatic assignment policy:
 
 - `sources`: provider settings written inline or imported with
   `extends = "../providers/pdl.toml"`. Every generic catalog setting is
-  available here, including `spec`, `base_url`, `prefix`, `timeout` (default 30),
+  available here, including `spec`, `base_url`, `prefix`, `read_timeout_seconds` (inherits the network default of 60),
   path/tag filters, `include_tools`, `exclude_tools`, pricing options, overrides
   and guidance. A deployment source
   can also set `wallet` to override the server default; this field is forbidden
@@ -405,7 +405,7 @@ exceeding it returns HTTP 413 with the limit in its message and a stderr warning
   immutable signer lease after challenge validation and durable admission.
 
 The CLI supports `--spec`, `--provider`, `--base-url`, `--prefix`, `--include`,
-`--exclude`, `--tags`, `--exclude-tags`, `--timeout`, `--max-response-chars`,
+`--exclude`, `--tags`, `--exclude-tags`, `--read-timeout-seconds`, `--max-response-chars`,
 `--transport`, `--host`, `--port`, `--bearer-token`, and `--env-file`.
 Filters accept comma-separated values. Supported
 `X402_MCP_GENERIC_*` overrides are `SPEC`, `BASE_URL`, `PREFIX`, `NAME`,
@@ -538,18 +538,27 @@ socks_endpoint = "127.0.0.1:9150"
 isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
 connect_timeout_seconds = 120
-request_timeout_seconds = 240
+read_timeout_seconds = 60
 ```
 
-Tor defaults to 120 seconds for connection establishment and a 240-second floor
-for each complete HTTP request, including its response body. A source `timeout`,
-pricing `probe_timeout`, or import `fetch_timeout_seconds` above this floor still
-wins; smaller values cannot cut short Tor setup. The network request floor also
-applies to application-owned treasury RPC deadlines and managed admission
-`wait_seconds`. Explicit network values override these defaults; request timeout
-must be at least the connection timeout. Direct-mode budgets are unchanged.
-These settings govern our client, not the external Tor daemon. They do not extend
-payment authorization expiry, NEAR quote expiry or experiment deadlines.
+`read_timeout_seconds` defaults to 60 seconds in **both direct and Tor modes**.
+It limits inactivity while waiting for headers or reading the body. Every
+successful read renews the budget; catalogs and API responses have no total HTTP
+download deadline. The same setting on a provider/source or `source_management`
+overrides the network default for that scope, including pricing and help.
+
+`connect_timeout_seconds` is separate, defaulting to 15 seconds direct and 120
+seconds Tor. Both settings work in either mode; there is no Tor read-timeout floor.
+Read timeout accepts 1..86400 seconds at network/source-management level and
+positive fractional seconds at provider level. Connection timeout accepts 1..300.
+Financial operation deadlines and transaction expiry remain independent.
+
+Legacy network `request_timeout_seconds` is accepted as an alias with its literal
+value now meaning read inactivity. Provider `timeout` and `probe_timeout`, import
+`fetch_timeout_seconds`, and CLI `--timeout` remain compatibility spellings. Use
+only `read_timeout_seconds` in new configs. For old provider configs containing
+both timeout fields, `timeout` takes precedence. The bundled privacy example now
+uses 60 seconds; user-owned local configs retain their existing explicit values.
 
 For standalone operations or wallet commands, use the same table in a separate file:
 
@@ -690,8 +699,8 @@ Only tools selected by at least one listener are candidates. Routes with vendor
 pricing, templated paths, help tools and non-GET methods are skipped. Candidates
 are sorted by path/method and capped per source. TOML controls are
 `probe_max_endpoints` (default 200; zero disables requests), `probe_concurrency`
-(default 4), `probe_timeout` (default 5 seconds) and `probe_ttl_seconds` (default
-3600 seconds). `probe_methods` accepts GET only. Process-wide concurrency is
+(default 4) and `probe_ttl_seconds` (default 3600 seconds). Pricing uses the same
+`read_timeout_seconds` as the source's other HTTP requests. `probe_methods` accepts GET only. Process-wide concurrency is
 capped at 16, even when sources request a higher limit. Up to 16 sources discover
 prices concurrently; each source uses rolling slots at its own configured limit.
 Completed slots are reused without waiting for a batch. All pricing completes

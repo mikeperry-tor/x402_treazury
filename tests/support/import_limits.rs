@@ -2,8 +2,8 @@ use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
-async fn streamed_import_limits_partial_chunks_and_total_deadline() {
-    for mode in ["exact", "overflow", "interrupted", "deadline"] {
+async fn streamed_import_limits_partial_chunks_and_slow_download() {
+    for mode in ["exact", "overflow", "interrupted", "slow"] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/spec", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -15,7 +15,17 @@ async fn streamed_import_limits_partial_chunks_and_total_deadline() {
             }
             socket.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n4\r\nabcd\r\n").await.unwrap();
             match mode {
-                "deadline" => tokio::time::sleep(Duration::from_secs(3)).await,
+                "slow" => {
+                    // Exceed the old total deadline with continuous progress.
+                    for byte in b"efgh" {
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        socket
+                            .write_all(&[b'1', b'\r', b'\n', *byte, b'\r', b'\n'])
+                            .await
+                            .unwrap();
+                    }
+                    socket.write_all(b"0\r\n\r\n").await.unwrap();
+                }
                 "interrupted" => {
                     socket.write_all(b"4\r\ne").await.unwrap();
                 }
@@ -30,31 +40,22 @@ async fn streamed_import_limits_partial_chunks_and_total_deadline() {
         });
         let mut p = policy(None);
         p.max_spec_bytes = 8;
-        p.fetch_timeout_seconds = 1;
-        let started = Instant::now();
-        let result = tokio::time::timeout(Duration::from_secs(2), import::fixture_fetch(&p, &url))
+        p.read_timeout_seconds = Some(1);
+        let result = tokio::time::timeout(Duration::from_secs(5), import::fixture_fetch(&p, &url))
             .await
-            .expect("bounded total read");
-        if mode == "exact" {
+            .expect("fixture completes");
+        if mode == "exact" || mode == "slow" {
             assert_eq!(result.unwrap(), b"abcdefgh");
         } else {
             let error = format!("{:#}", result.unwrap_err());
-            if mode == "deadline" {
-                // reqwest's equal deadline may expire before the outer timeout.
-                assert!(started.elapsed() >= Duration::from_millis(900));
-                assert!(
-                    error.contains("source_fetch_timeout") || error.contains("source_read_failed")
-                );
-            } else {
-                assert!(
-                    error.contains(match mode {
-                        "overflow" => "spec_too_large",
-                        "interrupted" => "source_read_failed",
-                        _ => "source_fetch_timeout",
-                    }),
-                    "{mode}: {error}"
-                );
-            }
+            assert!(
+                error.contains(match mode {
+                    "overflow" => "spec_too_large",
+                    "interrupted" => "source_read_failed",
+                    _ => unreachable!(),
+                }),
+                "{mode}: {error}"
+            );
         }
         server.abort();
     }

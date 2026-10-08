@@ -44,8 +44,10 @@ pub async fn read_table(path: &Path) -> Result<toml::Table> {
 pub fn validate(settings: &Config) -> Result<()> {
     ensure!(!settings.spec.trim().is_empty(), "spec is required");
     ensure!(
-        settings.timeout.is_finite() && settings.timeout > 0.0 && settings.timeout <= 86400.0,
-        "timeout must be in (0, 86400]"
+        settings
+            .read_timeout_seconds
+            .is_none_or(|v| v.is_finite() && v > 0.0 && v <= 86400.0),
+        "read_timeout_seconds must be in (0, 86400]"
     );
     ensure!(
         settings.max_description_chars != Some(0),
@@ -91,7 +93,34 @@ pub fn validate(settings: &Config) -> Result<()> {
     }
     crate::pricing::validate(settings)
 }
+// Canonicalize before composition so legacy local overrides still replace
+// newly named provider settings. Historical timeout + probe_timeout pairs use
+// the general timeout now that pricing follows the same HTTP policy.
+fn normalize_timeout(table: &mut toml::Table) -> Result<()> {
+    let legacy = table.remove("timeout");
+    let probe = table.remove("probe_timeout");
+    if let Some(value) = &probe {
+        let seconds = value
+            .as_float()
+            .or_else(|| value.as_integer().map(|v| v as f64));
+        ensure!(
+            seconds.is_some_and(|v| v.is_finite() && v > 0.0 && v <= 86400.0),
+            "legacy probe_timeout must be in (0, 86400]"
+        );
+    }
+    ensure!(
+        legacy.is_none() || !table.contains_key("read_timeout_seconds"),
+        "use only read_timeout_seconds, not both read_timeout_seconds and timeout"
+    );
+    if !table.contains_key("read_timeout_seconds")
+        && let Some(value) = legacy.or(probe)
+    {
+        table.insert("read_timeout_seconds".into(), value);
+    }
+    Ok(())
+}
 pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<ResolvedProvider> {
+    normalize_timeout(&mut local)?;
     let declaring = absolute(declaring)?;
     let mut inherited = toml::Table::new();
     let mut origins = BTreeMap::new();
@@ -101,6 +130,7 @@ pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<Resolve
             .context("extends must be a file path string")?;
         let provider = declaring.parent().unwrap().join(relative);
         inherited = read_table(&provider).await?;
+        normalize_timeout(&mut inherited)?;
         ensure!(
             !inherited.contains_key("extends"),
             "provider {}: nested extends is not allowed",

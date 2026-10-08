@@ -98,7 +98,12 @@ pub struct Config {
     pub cover_traffic_enabled: Option<bool>,
     pub allow_http1: bool,
     pub allow_tls12: bool,
-    pub timeout: f64,
+    #[serde(alias = "timeout")]
+    pub read_timeout_seconds: Option<f64>,
+    /// Read compatibility for historical serialized qualification settings.
+    /// Live TOML composition canonicalizes this into read_timeout_seconds.
+    #[serde(rename = "probe_timeout", skip_serializing)]
+    pub legacy_probe_timeout: Option<f64>,
     pub max_response_bytes: usize,
     pub max_help_bytes: usize,
     pub max_spec_bytes: usize,
@@ -122,7 +127,6 @@ pub struct Config {
     pub probe_pricing: bool,
     pub probe_ttl_seconds: f64,
     pub probe_concurrency: usize,
-    pub probe_timeout: f64,
     pub probe_max_endpoints: usize,
     pub probe_methods: Vec<String>,
     pub overrides: Value,
@@ -157,7 +161,8 @@ impl Default for Config {
             cover_traffic_enabled: None,
             allow_http1: false,
             allow_tls12: false,
-            timeout: 30.0,
+            read_timeout_seconds: None,
+            legacy_probe_timeout: None,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
             max_spec_bytes: crate::limits::SPEC_BYTES,
@@ -177,7 +182,6 @@ impl Default for Config {
             probe_pricing: true,
             probe_ttl_seconds: 3600.0,
             probe_concurrency: 4,
-            probe_timeout: 5.0,
             probe_max_endpoints: 200,
             probe_methods: vec!["GET".into()],
             overrides: json!({}),

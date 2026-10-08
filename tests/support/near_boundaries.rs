@@ -1,3 +1,4 @@
+use std::time::Duration;
 use super::*;
 
 #[test]

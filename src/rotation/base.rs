@@ -124,7 +124,7 @@ impl BaseRpc {
     pub fn new(url: &str, confirmations: u64, max_age: u64) -> Result<Self> {
         ensure!(confirmations > 0 && max_age > 0, "invalid Base RPC limits");
         Ok(Self {
-            http: crate::network::discovery(url, Duration::from_secs(15))?,
+            http: crate::network::discovery(url, None)?,
             url: secure_endpoint(url)?,
             confirmations,
             max_age,
@@ -157,7 +157,7 @@ impl BaseRpc {
             http: crate::network::global().http(
                 &crate::network::IsolationId::evm(address)?,
                 self.url.as_str(),
-                Duration::from_secs(15),
+                None,
             )?,
             url: self.url.clone(),
             confirmations: self.confirmations,
@@ -171,7 +171,7 @@ impl BaseRpc {
             &self.url,
             method,
             params,
-            crate::network::global().request_timeout(Duration::from_secs(15)),
+            crate::network::global().operation_timeout(Duration::from_secs(15)),
         )
         .await
     }
@@ -208,7 +208,7 @@ impl BaseRpc {
         Ok(U256::from_str_radix(&s[2..], 16)?)
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
-        let budget = crate::network::global().request_timeout(Duration::from_secs(15));
+        let budget = crate::network::global().operation_timeout(Duration::from_secs(15));
         let count = self.fallbacks.len() + 1;
         for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
             let started = std::time::Instant::now();

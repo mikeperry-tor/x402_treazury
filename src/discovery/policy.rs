@@ -22,8 +22,12 @@ pub struct Policy {
     pub max_response_bytes: usize,
     #[serde(default = "crate::limits::help_default")]
     pub max_help_bytes: usize,
-    #[serde(default = "timeout")]
-    pub fetch_timeout_seconds: u64,
+    #[serde(
+        default,
+        alias = "fetch_timeout_seconds",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub read_timeout_seconds: Option<u64>,
     #[serde(default)]
     pub allowed_origins: Vec<String>,
 }
@@ -38,9 +42,6 @@ fn per_server() -> usize {
 }
 fn bytes() -> usize {
     33554432
-}
-fn timeout() -> u64 {
-    30
 }
 impl Policy {
     pub fn resolve(&mut self, path: &Path) {
@@ -68,7 +69,8 @@ pub fn validate(config: &MetaConfig) -> Result<()> {
         );
         ensure!(
             (1024..=67108864).contains(&p.max_spec_bytes)
-                && (1..=300).contains(&p.fetch_timeout_seconds),
+                && p.read_timeout_seconds
+                    .is_none_or(|v| (1..=86400).contains(&v)),
             "invalid import limits"
         );
         ensure!(

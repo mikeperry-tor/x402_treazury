@@ -115,7 +115,10 @@ source, 200 dynamic tools per endpoint, 32 MiB per specification and a 30-second
 deadline. These defaults need not appear in ordinary configuration. Advanced overrides
 live in `[source_management]`: `max_sources`, `max_tools_per_source`,
 `max_tools_per_server`, `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
-`fetch_timeout_seconds`, and `allowed_origins`.
+`read_timeout_seconds`, and `allowed_origins`. The optional read-inactivity
+override replaces the network default (60 seconds in either transport). Spec and
+API responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
+legacy alias.
 
 Source counts are bounded to 1024, tool counts to 10,000, specifications to 64 MiB and
 fetch deadlines to 300 seconds. Disabled registrations still occupy quota. Management

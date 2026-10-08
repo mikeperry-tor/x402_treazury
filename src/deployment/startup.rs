@@ -16,7 +16,7 @@ use tracing::Instrument;
 
 type DownloadKey = (
     String,
-    Duration,
+    Option<Duration>,
     usize,
     crate::network::IsolationId,
     crate::network::HttpPolicy,
@@ -66,7 +66,7 @@ impl Downloads {
         // conservative. Never let a permissive alias bypass another alias's policy.
         let key = (
             cfg.spec.clone(),
-            Duration::from_secs_f64(cfg.timeout),
+            cfg.read_timeout_seconds.map(Duration::from_secs_f64),
             cfg.max_spec_bytes,
             crate::network::IsolationId::discovery(&cfg.spec)?,
             cfg.transport(),
@@ -280,7 +280,7 @@ impl Source {
             } else {
                 "https://local.invalid"
             },
-            Duration::from_secs_f64(cfg.timeout),
+            cfg.read_timeout_seconds.map(Duration::from_secs_f64),
             cfg.transport(),
         )?;
         progress.phase = "fetch_parse";

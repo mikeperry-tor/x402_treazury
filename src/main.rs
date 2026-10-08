@@ -36,7 +36,7 @@ struct Args {
     max_response_bytes: Option<usize>,
     max_help_bytes: Option<usize>,
     max_spec_bytes: Option<usize>,
-    timeout: Option<f64>,
+    read_timeout_seconds: Option<f64>,
     transport: String,
     host: String,
     port: u16,
@@ -171,7 +171,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         } else {
             "https://local.invalid"
         },
-        Duration::from_secs_f64(cfg.timeout),
+        cfg.read_timeout_seconds.map(Duration::from_secs_f64),
         cfg.transport(),
     )?;
     let root = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes).await?;
@@ -257,7 +257,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
                     source: "standalone".into(),
                 },
             )
-            .with_timeout(Duration::from_secs_f64(cfg.timeout))
+            .with_timeout(cfg.read_timeout_seconds.map(Duration::from_secs_f64))
             .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes),
         base,
         cfg.instructions_text,
@@ -560,8 +560,8 @@ async fn standalone_config(args: &Args, env: &BTreeMap<String, String>) -> Resul
         cfg.prefix = Some(prefix.clone());
     }
     ensure!(!cfg.spec.is_empty(), "--spec or config spec is required");
-    if let Some(timeout) = args.timeout {
-        cfg.timeout = timeout;
+    if let Some(timeout) = args.read_timeout_seconds {
+        cfg.read_timeout_seconds = Some(timeout);
     }
     if let Some(value) = args.max_response_bytes {
         cfg.max_response_bytes = value;

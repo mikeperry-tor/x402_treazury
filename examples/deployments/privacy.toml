@@ -12,7 +12,7 @@ socks_endpoint = "127.0.0.1:9150"
 isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
 connect_timeout_seconds = 120
-request_timeout_seconds = 240
+read_timeout_seconds = 60
 
 # Paid fallback for blocked catalog/pricing GETs, using each source's assigned
 # wallet. Shared sources choose one assigned profile deterministically; config

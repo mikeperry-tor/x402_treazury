@@ -113,8 +113,9 @@ pub struct Input {
     max_help_bytes: Option<usize>,
     #[arg(long)]
     max_spec_bytes: Option<usize>,
-    #[arg(long)]
-    timeout: Option<f64>,
+    /// Maximum HTTP read inactivity in seconds; overrides the network default.
+    #[arg(long, alias = "timeout")]
+    read_timeout_seconds: Option<f64>,
 }
 
 #[derive(ClapArgs)]
@@ -238,7 +239,7 @@ impl From<Input> for Args {
             max_response_bytes,
             max_help_bytes,
             max_spec_bytes,
-            timeout,
+            read_timeout_seconds,
         } = input;
         Self {
             meta_config,
@@ -255,7 +256,7 @@ impl From<Input> for Args {
             max_response_bytes,
             max_help_bytes,
             max_spec_bytes,
-            timeout,
+            read_timeout_seconds,
             ..Default::default()
         }
     }

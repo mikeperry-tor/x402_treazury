@@ -69,7 +69,7 @@ pub struct PaidClient {
     unsigned_only: bool,
     transport: crate::network::HttpPolicy,
     public_only: bool,
-    timeout: std::time::Duration,
+    timeout: Option<std::time::Duration>,
     max_response_bytes: usize,
     max_help_bytes: usize,
     payer: Option<Arc<RwLock<Arc<Payer>>>>,
@@ -84,7 +84,7 @@ impl PaidClient {
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
-            timeout: std::time::Duration::from_secs(60),
+            timeout: None,
             payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
             managed: None,
         }
@@ -97,7 +97,7 @@ impl PaidClient {
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
-            timeout: std::time::Duration::from_secs(60),
+            timeout: None,
             payer: None,
             managed: Some(pool),
         }
@@ -111,7 +111,7 @@ impl PaidClient {
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
-            timeout: std::time::Duration::from_secs(60),
+            timeout: None,
             payer: None,
             managed: None,
         }
@@ -133,8 +133,9 @@ impl PaidClient {
     pub fn transport(&self) -> crate::network::HttpPolicy {
         self.transport
     }
-    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeout = timeout;
+    /// Override HTTP read inactivity. None inherits the network setting.
+    pub fn with_timeout(mut self, timeout: impl Into<Option<std::time::Duration>>) -> Self {
+        self.timeout = timeout.into();
         self
     }
     pub fn with_download_limits(mut self, response: usize, help: usize) -> Self {
@@ -157,7 +158,7 @@ impl PaidClient {
             _ => false,
         }
     }
-    pub fn timeout(&self) -> std::time::Duration {
+    pub fn timeout(&self) -> Option<std::time::Duration> {
         self.timeout
     }
     pub fn replace_payer(&self, payer: Payer) {
@@ -222,7 +223,7 @@ impl PaidClient {
                     origin: request.url().origin().ascii_serialization(),
                     transport: self.transport,
                     public_only: self.public_only,
-                    timeout_ms: factory.request_timeout(self.timeout).as_millis() as u64,
+                    timeout_ms: factory.read_timeout(self.timeout).as_millis() as u64,
                 };
                 match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
                     Ok(call) => Some(call),

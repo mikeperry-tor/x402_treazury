@@ -231,8 +231,8 @@ async fn scope_child() {
         crate::network::global()
             .credentials(&IsolationId::discovery("https://api.example.com").unwrap()),
     ];
-    // Tor normalizes spec/help/pricing deadlines to the same floor. Public-only
-    // imports still use a separate pool; all discovery keeps the same credential.
+    // Public-only imports retain a separate pool. Help and pricing share the
+    // same idle policy and discovery credential.
     expected.push(expected[0].clone());
     for key in [1, 2] {
         let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
@@ -245,7 +245,7 @@ async fn scope_child() {
     assert_eq!(
         records.len(),
         4,
-        "spec/challenge/retry pools should reuse only within identity"
+        "pools separate identity and public destination policy"
     );
     assert_eq!(
         records

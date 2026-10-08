@@ -15,7 +15,8 @@ to both the operator and the agent; it must never look like a deliberately empty
 inventory.
 
 This work is separate from transport timeouts and payment admission. Tor uses a
-120-second connection budget and a 240-second minimum complete-request budget.
+120-second connection budget; both transports default to a renewable 60-second
+HTTP read-inactivity budget without a total response deadline.
 Managed admission releases its pool gate after durable authorization journaling,
 before awaiting the signed HTTP response. Preserve those boundaries.
 

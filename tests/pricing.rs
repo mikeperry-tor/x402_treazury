@@ -255,7 +255,7 @@ async fn observed_global_and_source_bounds_caps_and_full_url_cache_keys() {
         let cfg = Config {
             probe_concurrency: bound,
             probe_max_endpoints: 3,
-            probe_timeout: 5.0,
+            read_timeout_seconds: Some(5.0),
             ..Default::default()
         };
         let tools = build_tools(&cfg, &root, "t").unwrap();
@@ -349,7 +349,7 @@ async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
     let cache = Arc::new(PricingCache::default());
     let root = json!({"paths":{"/timeout":{"get":{}}}});
     let cfg = Config {
-        probe_timeout: 0.1,
+        read_timeout_seconds: Some(0.1),
         ..Default::default()
     };
     let tools = build_tools(&cfg, &root, "t").unwrap();
@@ -358,7 +358,7 @@ async fn cancelled_initialization_retries_but_completed_timeout_is_cached() {
         let (cache, cfg, root, tools, base) = (
             cache.clone(),
             Config {
-                probe_timeout: 5.0,
+                read_timeout_seconds: Some(5.0),
                 ..cfg.clone()
             },
             root.clone(),
@@ -425,7 +425,7 @@ async fn rolling_probes_pass_stalled_member_and_cancel_without_losing_completed_
     let cache = Arc::new(PricingCache::default());
     let cfg = Config {
         probe_concurrency: 2,
-        probe_timeout: 5.0,
+        read_timeout_seconds: Some(5.0),
         ..Default::default()
     };
     let root = json!({"paths":{"/a":{"get":{}},"/b":{"get":{}},"/c":{"get":{}}}});

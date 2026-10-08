@@ -81,10 +81,10 @@ impl TransactionPreparer for Treasury {
         .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
         client.set_indexer(indexer.clone());
         let info = tokio::time::timeout(
-            crate::network::global().request_timeout(Duration::from_secs(15)),
+            crate::network::global().operation_timeout(Duration::from_secs(15)),
             indexer.get_lightd_info(
                 crate::network::global()
-                    .request_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
+                    .operation_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
             ),
         )
         .await

@@ -26,11 +26,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402.agentfund.net/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "reliability_tags": [
       "upstream_timeout"
     ],
@@ -65,11 +64,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://api.arkm.com/x402/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "reliability_tags": [
       "intermittent_response_body"
     ],
@@ -104,11 +102,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402.botsmith.dev/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/brazilayer.toml": {
     "additional_properties": null,
@@ -202,11 +199,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://api.brazilayer.com/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/concordance/provider.toml": {
     "additional_properties": false,
@@ -251,11 +247,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "providers/concordance/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "reliability_tags": [
       "questionable_result_relevance"
     ],
@@ -288,11 +283,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://stable-deepline.dev/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/genuinegood.toml": {
     "additional_properties": false,
@@ -323,11 +317,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://genuinegood.online/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/glassnode/provider.toml": {
     "additional_properties": null,
@@ -356,11 +349,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "providers/glassnode/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/google-trends.toml": {
     "additional_properties": null,
@@ -387,11 +379,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://google-trends.use.x402atlas.com/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/kronos.toml": {
     "additional_properties": null,
@@ -427,11 +418,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://kronossignals.com/api/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "reliability_tags": [
       "slow_pricing",
       "intermittent_catalog_connection",
@@ -467,11 +457,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "providers/locus/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/lonestar.toml": {
     "additional_properties": false,
@@ -531,11 +520,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://lonestaroracle.xyz/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/otto.toml": {
     "additional_properties": false,
@@ -570,11 +558,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402.ottoai.services/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/pdl.toml": {
     "additional_properties": false,
@@ -628,11 +615,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://stablepeopledata.dev/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/regimeshift.toml": {
     "additional_properties": null,
@@ -696,11 +682,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://regimeshift.xyz/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "reliability_tags": [
       "intermittent_catalog_connection",
       "intermittent_help_connection",
@@ -755,11 +740,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://www.socialfetch.dev/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/straits/provider.toml": {
     "additional_properties": false,
@@ -860,11 +844,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "providers/straits/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/x402stock.toml": {
     "additional_properties": null,
@@ -938,11 +921,10 @@
       "GET"
     ],
     "probe_pricing": true,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402stock.xyz/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   },
   "providers/x402-list.toml": {
     "additional_properties": null,
@@ -975,11 +957,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://x402-list.com/api/v1/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "include_operations": [
       "GET /services",
       "GET /services/{slug}",
@@ -1036,11 +1017,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://api.exa.ai/openapi.json",
     "tags": [],
-    "timeout": 90.0
+    "read_timeout_seconds": 90.0
   },
   "providers/oneshot.toml": {
     "additional_properties": null,
@@ -1079,11 +1059,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://win.oneshotagent.com/openapi.json",
     "tags": [],
-    "timeout": 30.0,
+    "read_timeout_seconds": null,
     "reliability_tags": [
       "catalog_http_403"
     ],
@@ -1164,11 +1143,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://stableenrich.dev/openapi.json",
     "tags": [],
-    "timeout": 90.0
+    "read_timeout_seconds": 90.0
   },
   "providers/agent402.toml": {
     "additional_properties": null,
@@ -1744,7 +1722,6 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "response_mappings": {
       "POST /api/image-crop": {
@@ -1814,7 +1791,7 @@
     "tags": [
       "web"
     ],
-    "timeout": 90.0
+    "read_timeout_seconds": 90.0
   },
   "providers/agentutility/provider.toml": {
     "additional_properties": null,
@@ -2374,7 +2351,6 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "response_mappings": {
       "POST /satellite-address": {
@@ -2423,7 +2399,7 @@
     "tags": [
       "treazury-research"
     ],
-    "timeout": 90.0,
+    "read_timeout_seconds": 90.0,
     "reliability_tags": [
       "upstream_rate_limited"
     ],
@@ -2474,11 +2450,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://blockrun.ai/api/openapi",
     "tags": [],
-    "timeout": 120.0
+    "read_timeout_seconds": 120.0
   },
   "providers/claw402.toml": {
     "additional_properties": null,
@@ -2525,11 +2500,10 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "https://claw402.ai/openapi.json",
     "tags": [],
-    "timeout": 90.0
+    "read_timeout_seconds": 90.0
   },
   "providers/curl/provider.toml": {
     "additional_properties": null,
@@ -2560,10 +2534,9 @@
       "GET"
     ],
     "probe_pricing": false,
-    "probe_timeout": 5.0,
     "probe_ttl_seconds": 3600.0,
     "spec": "providers/curl/openapi.json",
     "tags": [],
-    "timeout": 30.0
+    "read_timeout_seconds": null
   }
 }

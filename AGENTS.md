@@ -422,13 +422,16 @@ Meta-config accepts `[network]`; standalone/wallet/example commands accept
 key file is used. Canonical typed identities produce deterministic SHA-256 tokens;
 see `docs/network-egress.md` and `examples/network/tor.toml`.
 
-Tor defaults to 120-second connection establishment and a 240-second complete
-request floor (`request_timeout_seconds`). Effective HTTP timeout is the maximum
-of the caller budget and this floor, including body download. Outer import,
-application-owned treasury RPC and admission deadlines respect the same policy;
-direct budgets, signed authorization expiry and funding safety deadlines remain
-independent. Network inspection exposes the floor. Embedded sync RPC deadlines
-remain upstream-owned; see `docs/network-egress.md`.
+HTTP uses renewable `read_timeout_seconds` in both direct and Tor modes, default
+60 seconds. Every successful response read resets it; catalogs, help, pricing,
+imports, relay and paid API bodies have no total HTTP download deadline. Optional
+provider/source and source-management overrides use the same name and replace the
+network default. Connection establishment remains separate (15 seconds direct,
+120 seconds Tor by default); both network settings work in either mode. Preserve
+independent admission, chain-view and treasury RPC operation deadlines, including
+the fixed 240-second Tor operation allowance; HTTP inactivity never renews financial
+or qualification authority. Historical timeout spellings remain readable through
+compatibility aliases; authored configs use the canonical read-timeout name.
 
 Provider HTTPS requires HTTP/2 and TLS 1.3. `Config.allow_http1` and
 `allow_tls12` default false and independently permit older versions. Propagate
