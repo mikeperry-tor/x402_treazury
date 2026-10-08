@@ -170,7 +170,7 @@ impl Manager {
                 client
             };
             return Ok(BoundTool {
-                tool: directory::tool().clone(),
+                tool: directory::tool("/services").clone(),
                 client,
                 base,
                 source: None,
@@ -178,12 +178,23 @@ impl Manager {
             });
         }
         Ok(BoundTool {
-            tool: directory::tool().clone(),
+            tool: directory::tool("/services").clone(),
             client: client.public_destinations(),
             base,
             source: None,
             help: Arc::new(OnceCell::new()),
         })
+    }
+    pub async fn invoke_directory(
+        &self,
+        owner: &str,
+        name: &str,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<crate::output::ToolOutput> {
+        let (tool, args) = directory::request(name, args)?;
+        let mut bound = self.directory(owner)?;
+        bound.tool = tool.clone();
+        bound.invoke_output(&args).await
     }
     pub async fn new(
         policy: policy::Policy,

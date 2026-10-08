@@ -589,7 +589,13 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
             .is_err()
     );
     let s = server(&m, "writer");
-    for name in ["sources_search", "source_add", "tools_search", "tool_call"] {
+    for name in [
+        "sources_search",
+        "source_details",
+        "source_add",
+        "tools_search",
+        "tool_call",
+    ] {
         assert!(s.get_tool(&format!("x402_treazury_{name}")).is_some());
     }
     for name in [
@@ -1127,15 +1133,14 @@ fn embedded_directory_matches_reviewed_search_contract() {
     assert_eq!(cfg.base_url.as_deref(), Some(directory::BASE));
     let doc =
         serde_json::from_str(include_str!("../../tests/fixtures/x402_list_openapi.json")).unwrap();
-    let expected = crate::catalog::build_tools(&cfg, &doc, "x402_list")
-        .unwrap()
-        .into_iter()
-        .find(|t| t.name == "x402_list_services")
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(directory::tool()).unwrap(),
-        serde_json::to_value(expected).unwrap()
-    );
+    let expected = crate::catalog::build_tools(&cfg, &doc, "x402_list").unwrap();
+    for path in ["/services", "/best", "/services/{slug}"] {
+        let expected = expected.iter().find(|t| t.path == path).unwrap();
+        assert_eq!(
+            serde_json::to_value(directory::tool(path)).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
     assert!(
         serde_json::from_value::<policy::Policy>(
             json!({"wallet":"shared","directory_tool":"custom"})
@@ -1145,7 +1150,7 @@ fn embedded_directory_matches_reviewed_search_contract() {
 }
 
 #[tokio::test]
-async fn management_only_deployment_starts_and_lists_exactly_four_tools() {
+async fn management_only_deployment_starts_and_lists_exactly_five_tools() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("config.toml");
     std::fs::write(
@@ -1168,7 +1173,7 @@ exclude_tools = ["*"]
     .unwrap();
     let deployment = crate::deployment::Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
-    assert_eq!(inventory[0].management_tools.len(), 4);
+    assert_eq!(inventory[0].management_tools.len(), 5);
     assert!(inventory[0].tools.is_empty());
     let running = deployment
         .bind(&BTreeMap::from([
@@ -1188,7 +1193,7 @@ exclude_tools = ["*"]
     )
     .await;
     let actual = listed["tools"].as_array().unwrap();
-    assert_eq!(actual.len(), 4);
+    assert_eq!(actual.len(), 5);
     for expected in &inventory[0].management_tools {
         assert!(actual.contains(&serde_json::to_value(expected).unwrap()));
     }
@@ -1241,19 +1246,35 @@ async fn directory_payment_fixture() {
     let requests = Arc::new(AtomicUsize::new(0));
     let signatures = Arc::new(Mutex::new(Vec::new()));
     let (count, signed) = (requests.clone(), signatures.clone());
-    let (address, vendor_task) = crate::test_tls::serve(axum::Router::new().route("/api/v1/services", get(move |headers: HeaderMap| {
+    let seller = move |headers: HeaderMap, uri: axum::http::Uri| {
         let (count, signed) = (count.clone(), signed.clone());
         async move {
             count.fetch_add(1, Ordering::SeqCst);
             if let Some(header) = headers.get("payment-signature") {
-                let payload = serde_json::from_slice(&STANDARD.decode(header.as_bytes()).unwrap()).unwrap();
-                signed.lock().unwrap().push(crate::test_signatures::recover_exact(&payload).to_string());
+                let payload =
+                    serde_json::from_slice(&STANDARD.decode(header.as_bytes()).unwrap()).unwrap();
+                signed
+                    .lock()
+                    .unwrap()
+                    .push(crate::test_signatures::recover_exact(&payload).to_string());
                 return axum::Json(json!({"services":[]})).into_response();
             }
-            let challenge = json!({"x402Version":2,"resource":{"url":"https://api.example.com/api/v1/services","description":"search","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
-            (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
+            let challenge = json!({"x402Version":2,"resource":{"url":format!("https://api.example.com{}", uri.path()),"description":"search","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [(
+                    "payment-required",
+                    STANDARD.encode(serde_json::to_vec(&challenge).unwrap()),
+                )],
+            )
+                .into_response()
         }
-    }))).await;
+    };
+    let app = axum::Router::new()
+        .route("/api/v1/services", get(seller.clone()))
+        .route("/api/v1/best", get(seller.clone()))
+        .route("/api/v1/services/{slug}", get(seller));
+    let (address, vendor_task) = crate::test_tls::serve(app).await;
     let proxy = Socks::start(
         BTreeMap::from([("api.example.com".into(), address)]),
         Fault::None,
@@ -1306,28 +1327,40 @@ async fn directory_payment_fixture() {
     // Use the public hostname on the fixture certificate; retain public-destination checks.
     *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
     assert!(manager.directory("hidden").is_err());
-    assert_eq!(tools::definitions(true).len(), 4);
+    assert_eq!(tools::definitions(true).len(), 5);
     assert_eq!(
         requests.load(Ordering::SeqCst),
         0,
         "initialization fetched a catalog or probed prices"
     );
+    let calls = [
+        (directory::SEARCH, json!({})),
+        (
+            directory::SEARCH,
+            json!({"mode":"best","q":"weather","limit":3}),
+        ),
+        (directory::DETAILS, json!({"slug":"weather"})),
+    ];
     for owner in ["writer", "reader"] {
-        let result = server(&manager, owner)
-            .invoke("x402_treazury_sources_search", &Default::default())
-            .await
-            .unwrap();
-        assert!(result.contains("services"));
+        for (name, args) in &calls {
+            let result = server(&manager, owner)
+                .invoke(name, args.as_object().unwrap())
+                .await
+                .unwrap();
+            assert!(result.contains("services"));
+        }
     }
-    assert!(
-        server(&manager, "blocked")
-            .invoke("x402_treazury_sources_search", &Default::default())
-            .await
-            .is_err()
-    );
+    for (name, args) in &calls {
+        assert!(
+            server(&manager, "blocked")
+                .invoke(name, args.as_object().unwrap())
+                .await
+                .is_err()
+        );
+    }
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        5,
+        15,
         "cap failure must not sign or retry"
     );
     let addresses: Vec<_> = (1..=3)
@@ -1337,7 +1370,13 @@ async fn directory_payment_fixture() {
             signer.address().to_string()
         })
         .collect();
-    assert_eq!(*signatures.lock().unwrap(), addresses[..2]);
+    assert_eq!(
+        *signatures.lock().unwrap(),
+        addresses[..2]
+            .iter()
+            .flat_map(|a| [a.clone(), a.clone(), a.clone()])
+            .collect::<Vec<_>>()
+    );
     {
         let records = proxy.records.lock().unwrap();
         assert_eq!(records.len(), 3);
@@ -1349,5 +1388,151 @@ async fn directory_payment_fixture() {
             );
         }
     }
+    vendor_task.abort();
+}
+
+#[tokio::test]
+async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() {
+    use axum::{
+        extract::{Path, Query},
+        routing::get,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let requests = Arc::new(AtomicUsize::new(0));
+    let (browse, best, details) = (requests.clone(), requests.clone(), requests.clone());
+    let app = axum::Router::new()
+        .route(
+            "/services",
+            get(move |Query(args): Query<BTreeMap<String, String>>| {
+                browse.fetch_add(1, Ordering::SeqCst);
+                async move { axum::Json(json!({"route":"browse","args":args})) }
+            }),
+        )
+        .route(
+            "/best",
+            get(move |Query(args): Query<BTreeMap<String, String>>| {
+                best.fetch_add(1, Ordering::SeqCst);
+                async move { axum::Json(json!({"route":"best","args":args,"ranking_version":3})) }
+            }),
+        )
+        .route(
+            "/services/{slug}",
+            get(move |Path(slug): Path<String>| {
+                details.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    axum::Json(
+                        json!({"route":"details","slug":slug,"endpoints":[{"path":"/read"}]}),
+                    )
+                }
+            }),
+        );
+    let (vendor, vendor_task) = listen(app).await;
+    let m = manager(None).await;
+    *m.fixture_directory.lock().unwrap() = Some(vendor);
+    let (base, task) = listen(crate::server::http_app(
+        server(&m, "writer"),
+        "test-token".into(),
+    ))
+    .await;
+    let invoke = |name, args| call(&base, name, args);
+    let result = invoke(
+        directory::SEARCH,
+        json!({"q":"weather","page":2,"per_page":7}),
+    )
+    .await;
+    let parsed: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(parsed["route"], "browse");
+    assert_eq!(
+        parsed["args"],
+        json!({"q":"weather","page":"2","per_page":"7"})
+    );
+    let result = invoke(directory::SEARCH, json!({"mode":"best","q":"weather","network":"BSE","prefer":"cheapest","max_price_usd":0.02,"require_verified":true,"limit":3})).await;
+    let parsed: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(parsed["route"], "best");
+    assert_eq!(parsed["ranking_version"], 3);
+    assert_eq!(
+        parsed["args"],
+        json!({"q":"weather","network":"BSE","prefer":"cheapest","max_price_usd":"0.02","require_verified":"true","limit":"3"})
+    );
+    let result = invoke(
+        directory::DETAILS,
+        json!({"slug":"vendor/weather?region=UK"}),
+    )
+    .await;
+    let parsed: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(parsed["slug"], "vendor/weather?region=UK");
+    assert_eq!(parsed["endpoints"][0]["path"], "/read");
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
+    for (name, args) in [
+        (directory::SEARCH, json!({"mode":"best","page":1})),
+        (
+            directory::SEARCH,
+            json!({"mode":"browse","prefer":"cheapest"}),
+        ),
+        (directory::SEARCH, json!({"max_price_usd":0.01})),
+        (directory::SEARCH, json!({"mode":"best","limit":21})),
+        (directory::SEARCH, json!({"mode":"best","max_price_usd":-1})),
+        (
+            directory::SEARCH,
+            json!({"mode":"best","require_verified":"true"}),
+        ),
+        (directory::SEARCH, json!({"mode":"best","prefer":"invalid"})),
+        (directory::SEARCH, json!({"mode":"invalid"})),
+        (directory::SEARCH, json!({"q":null})),
+        (directory::DETAILS, json!({"slug":""})),
+        (directory::DETAILS, json!({"slug":".."})),
+        (directory::DETAILS, json!({"slug":"."})),
+        (
+            directory::DETAILS,
+            json!({"source_id":"not-a-directory-slug"}),
+        ),
+        (directory::DETAILS, json!({"slug":"weather","mode":"best"})),
+    ] {
+        let result = invoke(name, args.clone()).await;
+        assert_eq!(result["isError"], true, "{name} {args}: {result}");
+    }
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        3,
+        "invalid input made a provider request"
+    );
+    assert!(
+        directory::request(
+            directory::SEARCH,
+            json!({"mode":"browse","q":"x"}).as_object().unwrap()
+        )
+        .unwrap()
+        .1
+        .get("mode")
+        .is_none()
+    );
+    assert!(tools::definitions(false).is_empty());
+    let schema = directory::search_schema();
+    assert_eq!(schema["properties"]["mode"]["default"], "browse");
+    assert_eq!(schema["oneOf"][0]["properties"]["mode"]["const"], "browse");
+    assert!(schema["oneOf"][0]["properties"].get("limit").is_none());
+    assert_eq!(schema["oneOf"][1]["required"], json!(["mode"]));
+    assert!(schema["oneOf"][1]["properties"].get("page").is_none());
+    for path in ["/services", "/best"] {
+        for (name, field) in directory::tool(path).input_schema["properties"]
+            .as_object()
+            .unwrap()
+        {
+            let mut merged = schema["properties"][name].clone();
+            let original_description = field["description"].as_str().unwrap();
+            assert!(
+                merged["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains(original_description)
+            );
+            merged["description"] = field["description"].clone();
+            assert_eq!(merged, *field, "{path} {name}: schema constraint changed");
+        }
+    }
+    task.abort();
     vendor_task.abort();
 }

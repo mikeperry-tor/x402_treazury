@@ -88,9 +88,15 @@ impl Server {
                 self.management_tools().iter().any(|t| t.name == name),
                 "unknown tool"
             );
-            if name == "x402_treazury_sources_search" {
-                let bound = manager.directory(&self.catalog_server)?;
-                return Ok(self.limit(bound.invoke_output(args).await?));
+            if matches!(
+                name,
+                "x402_treazury_sources_search" | "x402_treazury_source_details"
+            ) {
+                return Ok(self.limit(
+                    manager
+                        .invoke_directory(&self.catalog_server, name, args)
+                        .await?,
+                ));
             }
             if name != "x402_treazury_tool_call" {
                 return Ok(crate::output::ToolOutput::text(serde_json::to_string(

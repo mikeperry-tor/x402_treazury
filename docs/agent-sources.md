@@ -45,21 +45,34 @@ not removed by API filters.
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | The built-in x402 List search schema supports `q`, `network`, `page`, `per_page` and other directory filters. |
+| `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `network`, `category`. Browse supports pagination and directory filters; best supports ranking preferences and a result limit. |
+| `x402_treazury_source_details` | Required directory `slug` from search. Returns advertised endpoints, pricing and reliability; this is not a registered `source_id`. |
 | `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
 | `x402_treazury_tools_search` | Optional `query`, `source_id`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Required `tool_ref` and `arguments`. |
 
-Directory search is provided automatically, using an embedded reviewed search schema
+Directory search and service details are provided automatically, using embedded reviewed schemas
 and the live x402 List API. It needs no static source or tool selector, and startup
-does not fetch its catalog or probe its prices. Search uses the endpoint's
+does not fetch its catalog or probe its prices. Both tools use the endpoint's
 source-management wallet (including its explicit listener override), normal response
 handling and payment admission, and the configured direct/Tor network policy. The
 bundled directory can charge after its shared-IP quota. Results are leads, not
 payment/delivery guarantees, and may lack an OpenAPI URL. Verify the vendor's published
 specification rather than inferring schemas from endpoint descriptions.
 
-Source management contributes four definitions; searches return directory leads
+Browse dispatches to `GET /services`, with `page` and `per_page`. Best dispatches
+to `GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, or
+`most_reliable`), `max_price_usd`, `require_verified`, `limit` (1–20), and
+`include_facilitator_context`. For example:
+`{"mode":"best","q":"weather","prefer":"cheapest","limit":3}`.
+The price filter is a directory recommendation filter, not a payment cap.
+The local `mode` selector is never sent upstream; unsupported or mixed-mode arguments
+fail before network I/O. Each call selects exactly one directory operation and preserves
+its response, including ranking information. Details dispatches to
+`GET /services/{slug}`; use `{"slug":"<slug from search>"}` to inspect a candidate
+before obtaining its published specification and adding it.
+
+Source management contributes five definitions; searches return directory leads
 and selected tool signatures on demand. Registered tools, including persisted
 registrations restored at startup, are also advertised by `tools/list`, so clients
 that include their entire tool inventory may expand the prompt. The stable search/call pair also works with clients that cache their initial

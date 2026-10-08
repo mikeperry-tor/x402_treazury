@@ -343,20 +343,21 @@ examples. Existing wallet payment caps apply to directory searches and added API
 adding a source never allocates or funds a wallet. A server's explicit `wallet`
 overrides the shared dynamic wallet. Ordinary server filters still limit added tools.
 
-Enabling source management automatically adds **four tools** to the endpoint.
-Directory search uses bundled x402 List search metadata; no directory provider
+Enabling source management automatically adds **five tools** to the endpoint.
+Directory search and service details use bundled x402 List metadata; no directory provider
 or static source configuration is required. Its schema is available
-offline; a search contacts the live directory through the configured network policy.
+offline; calls contact the live directory through the configured network policy.
 
 | Tool | Why the agent needs it | Arguments |
 | --- | --- | --- |
-| `x402_treazury_sources_search` | Find candidate APIs in x402 List without loading the entire directory into context. Listings are leads, not executable schemas. | `q`, `network`, `page`, `per_page` and other directory filters. |
+| `x402_treazury_sources_search` | Browse candidate APIs or request ranked recommendations from x402 List. | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `network`, `category`; browse has pagination and filters, best has ranking preferences and a result limit. |
+| `x402_treazury_source_details` | Inspect a candidate’s advertised endpoints, pricing and reliability before adding it. | Required directory `slug` from search, not a registered `source_id`. |
 | `x402_treazury_source_add` | Add a chosen public OpenAPI API to this endpoint. The operator controls wallet selection and persistence. | Required `spec_url`; optional `name`. Repeating the same URL returns the existing registration. |
 | `x402_treazury_tools_search` | Retrieve selected tool descriptions, complete argument schemas and opaque `tool_ref` values when needed. This also works when the agent framework retains an older MCP tool list. | Optional `source_id`, `query`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Call a tool discovered through `tools_search`, even if the framework has not refreshed its advertised tools. Uses normal payment admission. | Required `tool_ref` and `arguments`. |
 
-Source management itself contributes four definitions, including the directory's
-search filters. Searches return directory results and selected tool signatures on
+Source management itself contributes five definitions, including the directory's
+search filters and ranking options. Searches return directory results and selected tool signatures on
 demand. Registered APIs also advertise their selected tools through MCP `tools/list`,
 including persisted registrations restored at startup. Frameworks that include the
 full tool list may therefore grow their prompt. The search/call pair supports clients
@@ -364,8 +365,18 @@ that cache their original tool list; it does not control the framework's prompt 
 are automatically advertised. Configure x402-list explicitly only if you also want
 its broader API surface.
 
-For example, search with `{"q":"weather","network":"BSE","per_page":10}`.
-Directory results do not necessarily include an OpenAPI document; verify the vendor's
+For example, browse with `{"q":"weather","network":"BSE","per_page":10}`, or
+request recommendations with
+`{"mode":"best","q":"weather forecasts","network":"BSE","prefer":"cheapest","max_price_usd":0.02,"limit":3}`.
+Best mode calls the directory’s `/best` endpoint; `prefer` accepts `balanced`,
+`cheapest`, `fastest` or `most_reliable`. It also accepts `require_verified` and
+`include_facilitator_context`. Browse uses `page`/`per_page`; best uses `limit`
+(1–20). Arguments from the wrong mode are rejected. `max_price_usd` filters directory
+recommendations; wallet payment caps still govern actual calls.
+
+Inspect a result with `x402_treazury_source_details`:
+`{"slug":"<slug from search>"}`. Listings and details are leads, not executable
+schemas or delivery guarantees. They may lack an OpenAPI URL; verify the vendor's
 published specification URL. Then:
 
 1. Add it with `{"spec_url":"https://api.example.com/openapi.json","name":"weather"}`.

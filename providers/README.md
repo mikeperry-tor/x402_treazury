@@ -165,7 +165,7 @@ integration blocker and unsigned Tor results are documented in
 [provider caveats](CAVEATS.md). A public x402 quote
 is not sufficient evidence that a useful paid call is supported.
 
-Source management automatically supplies x402 List search using the embedded
-`x402-list/search.openapi.json` contract. The `x402-list.toml` provider is only
-needed when exposing the broader directory API separately. The embedded search
+Source management automatically supplies x402 List browsing, ranked recommendations
+and service details using the embedded `x402-list/directory.openapi.json` contract. The `x402-list.toml` provider is only
+needed when exposing the broader directory API separately. The embedded three-operation
 contract is checked against the pinned directory fixture by the discovery tests.

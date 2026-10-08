@@ -174,6 +174,127 @@
           "Services"
         ]
       }
+    },
+    "/best": {
+      "get": {
+        "description": "Ranks the directory and returns the best x402 service(s) for a stated need, in one request (no paging). The ranking is the same two-stage relevance-then-quality scoring the MCP x402_find_best_service tool uses, run server-side. It is scored mostly on per-service reliability (live status, verification, uptime, response time), x402 compliance, and price (USD), filtered by category and network, with a SMALL (about 10%) weight on on-chain traction (settlement volume, transaction count, and unique buyers measured per service over its known payTo via recognized settlers, a conservative undercount). A deterministic danger flag removes a service from this surface entirely (its slug is listed in excluded_danger); a residual warning is penalized but kept. When a free-text q is given, each candidate is also scored on how well the query matches its AI-derived capability tags and summary plus its name/description/category (falling back to a plain substring match). The x402 compliance term is the share of deterministic conformance checks the service passes, capped at 0.6 (the floor of the C band) when at least one of its EVM routes is missing the EIP-712 domain parameters a standard x402 client needs in order to sign a payment. That cap is a statement about the payment envelope, not about the merit of the service, and it is what moved the scoring to generation 2. The generation served today is 3, which also gates the on-chain traction term on an absolute 30-day volume floor, discounts a payout concentrated on one buyer, and scores a service that publishes no payTo as zero instead of renormalizing around it. Scores produced under an earlier generation are not comparable with these; meta.ranking_version on every response says which one produced it. This endpoint is free and metered like every other GET on /api/v1/* (beyond the free daily quota it answers 402; see the metering note). Prices are decimal US dollars.",
+        "operationId": "getBestServices",
+        "parameters": [
+          {
+            "description": "Free-text need description, matched against each service name/description/category plus its AI-derived capability tags and summary.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Desired service category from the closed category set (case-insensitive). A value outside the set returns 400; omit for all.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "enum": [
+                "AI",
+                "Blockchain",
+                "Compute",
+                "Content",
+                "Data",
+                "Finance",
+                "Other",
+                "Verification"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required network name or abbreviation, e.g. \"Base\" or \"BSE\". A value outside the known network set returns 400.",
+            "in": "query",
+            "name": "network",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cap on min_price_usd in US dollars; a service priced cheaper or equal passes (a service with no known price is excluded).",
+            "in": "query",
+            "name": "max_price_usd",
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "If true, only FORTE-tier verified services are eligible (treno D3: a paid delivery-probe settled and delivered, drift-revocable; the payment-ready base tier is NOT included). A hard filter on the eligible pool, not a scoring input, so it does not change ranking_version. A value other than true/false returns 400.",
+            "in": "query",
+            "name": "require_verified",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Tie-breaking emphasis for the ranking weights. A value outside the enum returns 400.",
+            "in": "query",
+            "name": "prefer",
+            "schema": {
+              "default": "balanced",
+              "enum": [
+                "balanced",
+                "cheapest",
+                "fastest",
+                "most_reliable"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many ranked recommendations to return (clamped to 1-20).",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "If true, also return top facilitators by 7d settlement volume as separate ecosystem context (NOT per-service). A value other than true/false returns 400.",
+            "in": "query",
+            "name": "include_facilitator_context",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "summary": "Recommend the best x402 service(s) for a need",
+        "tags": [
+          "Recommender"
+        ]
+      }
+    },
+    "/services/{slug}": {
+      "get": {
+        "description": "Returns full details for a single service including all active endpoints with their current pricing, uptime windows (24h/7d/30d/90d), average response time, and total check count.",
+        "operationId": "getService",
+        "parameters": [
+          {
+            "description": "Service URL slug",
+            "example": "weather-x402",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Get service detail",
+        "tags": [
+          "Services"
+        ]
+      }
     }
   }
 }
