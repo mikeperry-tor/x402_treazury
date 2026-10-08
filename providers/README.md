@@ -18,7 +18,7 @@ tags = ["Twitter", "YouTube"]
 [wallets.default]
 mode = "static"
 private_key_env = "EVM_PRIVATE_KEY"
-max_price_usd = "1.00"
+max_api_payment_usdc = "1.00"
 ```
 
 The `extends` path is relative to the deployment file. A local `spec` path is

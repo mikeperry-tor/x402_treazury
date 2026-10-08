@@ -5,7 +5,7 @@ version = 1
 [wallets.agent_shared]
 mode = "static"
 private_key_env = "EVM_PRIVATE_KEY"
-max_price_usd = "0.05"
+max_api_payment_usdc = "0.05"
 
 [source_management]
 wallet = "agent_shared"

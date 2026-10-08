@@ -20,8 +20,12 @@ x402_treazury wallet backup --config examples/deployments/privacy.local.toml --d
 x402_treazury wallet sync --config examples/deployments/privacy.local.toml
 ```
 
-Only `treasury.state_dir`, `daily_input_zec` and `shield_max_fee_zec` are required
-in the treasury table. The default key is `wallet.key` inside the wallet directory;
+Only `treasury.state_dir` is required in the treasury table. The optional
+`daily_treasury_spend_limit_zec` bounds native treasury withdrawals;
+`max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` each default to
+`"0.0003"` and reject proposals above that fee. See
+[funding limits](wallet-rotation.md#funding-limits-and-fees).
+The default key is `wallet.key` inside the wallet directory;
 set `key_file` for separate storage. Possession of the complete default directory
 is sufficient to decrypt the wallet. Owner-only permissions are not a password or
 OS keychain. Initialization creates missing state parent directories, refuses an
@@ -111,7 +115,7 @@ x402_treazury wallet status --state-dir /private/state/treasury
 # it does not contact NEAR, transfer ZEC, or fund either EVM address.
 x402_treazury wallet pool --state-dir /private/state/treasury \
   --key-file /private/keys/treasury.key \
-  --name research --deposit-size 5.00
+  --name research --funding-amount-usdc 5.00
 
 # Display existing receive addresses without derivation or network access.
 # The treasury UUID is read from state; --treasury-id UUID is an optional check.
@@ -298,7 +302,7 @@ target/debug/x402_treazury wallet shield-refunds \
 
 This calculates and journals one transaction without broadcasting. Submit its
 operation ID with `wallet reconcile --config servers.toml --operation-id UUID
---rebroadcast`. The command enforces `shield_max_fee_zec` and the daily budget;
+--rebroadcast`. The command enforces `max_refund_shielding_fee_zec` and the daily budget;
 only the fee counts as new expense. Each proposal selects one address, never
 combining unrelated swaps. Both calculation and submission use the existing
 restart-safe outgoing journal. Refund principal becomes shielded spendable only
@@ -354,7 +358,7 @@ Quote validation checks assets, request bindings, mainnet transparent deposits,
 exact output and integer cost caps. Timestamp normalization is accepted only for
 the same instant. An extended provider deposit deadline never extends the local
 send deadline. The echoed platform fee is allowed only for the captured 1Click
-collector, with its rate and USD overhead bounded by `max_fee_bps`; requests never
+collector, with its rate and USD overhead bounded by `max_conversion_overhead_percent`; requests never
 add application fees. Unknown collectors are rejected. Public quote fixtures and
 confidential-auth rejection fixtures live in `tests/fixtures/near/`. Redirects are
 disabled; optional credentials remain confined to the NEAR client.
@@ -423,14 +427,15 @@ and key are not interchangeable backups.
 
 Named pools persist two distinct bootstrap candidates and their USDC funding
 floors. New profiles default to a $2 floor. An unsigned NEAR quote can raise a
-candidate's target to the bridge's current minimum; the validated quote and new
+candidate's target to the bridge's current minimum only within an explicit
+`max_funding_amount_usdc` (omission allows no increase). The validated quote and new
 wallet/job target commit atomically before any preparation or transfer. Successful
 quotes freeze that target. Source-input, fee and treasury budget caps still apply;
 an unaffordable minimum leaves funding unavailable rather than raising those caps.
 Minimum hints are accepted only from the specific bridge-minimum error with a
 positive atomic Base USDC amount. Each quote negotiation allows at most three
 requests; other failures do not trigger amount changes or payment retries. Repeating `wallet pool` resumes the existing pool; changing its
-`deposit_size` affects future allocations only. Transactional promotion retires
+`funding_amount_usdc` affects future allocations only. Transactional promotion retires
 one address, promotes the standby, and creates one new key/funding job. Pools
 have independent generation checks and roles. Shared ZEC budget reservations
 carry unresolved exposure across days; confirmed costs are charged conservatively
@@ -577,13 +582,17 @@ if any view fails. Use the same trusted
 RPC policy as the deployment; choosing another provider discloses those addresses
 to that provider.
 
-Managed `mode = "zcash_rotation"` requires `max_input_zec` and `max_fee_bps`.
+Managed `mode = "zcash_rotation"` requires `max_conversion_overhead_percent`
+(an integer percentage from 0 to 100). `max_funding_spend_zec` is an optional
+ceiling on one funding transfer including its network fee. See
+[funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for USDC
+budgets, bridge-minimum headroom, and optional native-ZEC safeguards.
 Small deposits increase refill frequency; validate swap minimums and total fee overhead
 before choosing sub-dollar targets. A payment larger than the configured deposit
 target is refused rather than repeatedly rotating wallets. Explicit sizes in
 existing configurations are unchanged.
 
-`deposit_size` defaults to `"2.00"`, `max_price_usd` to `"1.00"`, `wait_seconds`
+`funding_amount_usdc` defaults to `"2.00"`, `max_api_payment_usdc` to `"1.00"`, `wait_seconds`
 to 30 (range 1–3600), and `max_attempts` to 3. Money fields are decimal strings;
 USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
 settings and all risk limits are validated by `config check`/`config show` without

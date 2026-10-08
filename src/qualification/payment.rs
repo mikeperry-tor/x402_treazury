@@ -82,8 +82,12 @@ pub(super) fn reviewed_wallet(
     )?
     .max_atomic
     .context("qualification requires finite case reservation")?;
+    // Frozen historical evidence remains readable; current TOML rejects old names.
     let cap = crate::payment::SpendPolicy::dollars(
-        profile["max_price_usd"]
+        profile
+            .get("max_api_payment_usdc")
+            .or_else(|| profile.get("max_price_usd"))
+            .unwrap_or(&Value::Null)
             .as_str()
             .context("pinned wallet cap missing")?,
     )?
@@ -238,7 +242,7 @@ mod tests {
             .query_row("SELECT payload FROM pins", [], |r| r.get(0))
             .unwrap();
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
-        pins["resolved_config"] = json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_price_usd":"0.02"}},"wallet_bindings":{"listener":{"api":{"wallet":"pool"}}}});
+        pins["resolved_config"] = json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_api_payment_usdc":"0.02"}},"wallet_bindings":{"listener":{"api":{"wallet":"pool"}}}});
         let raw = pins.to_string();
         binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
         db.execute(

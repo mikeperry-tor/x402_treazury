@@ -104,16 +104,16 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .find(|job| job.id == id))
             })
             .await?;
-        if let Some(current) = current {
-            if current.phase != job.phase {
-                tracing::info!(
-                    job_id = %job.id,
-                    pool_id = %job.pool_id,
-                    from = ?job.phase,
-                    to = ?current.phase,
-                    "funding phase changed"
-                );
-            }
+        if let Some(current) = current
+            && current.phase != job.phase
+        {
+            tracing::info!(
+                job_id = %job.id,
+                pool_id = %job.pool_id,
+                from = ?job.phase,
+                to = ?current.phase,
+                "funding phase changed"
+            );
         }
         Ok(())
     }
@@ -290,12 +290,15 @@ pub struct Backend {
     pub wallets: std::collections::BTreeMap<String, super::config::WalletConfig>,
     pub funding: super::config::FundingConfig,
     pub daily_limit: u64,
+    pub max_network_fee: u64,
 }
 impl Backend {
     fn policy(&self, job: &FundingJob) -> Result<(super::near::Limits, u32)> {
         let super::config::WalletConfig::ZcashRotation {
-            max_input_zec,
-            max_fee_bps,
+            max_funding_spend_zec,
+            funding_amount_usdc,
+            max_funding_amount_usdc,
+            max_conversion_overhead_percent,
             max_attempts,
             ..
         } = self
@@ -305,14 +308,25 @@ impl Backend {
         else {
             anyhow::bail!("funding pool disabled")
         };
-        let max_input = u64::try_from(super::config::zatoshis(max_input_zec)?)?;
+        let max_input = max_funding_spend_zec
+            .as_deref()
+            .map(super::config::zatoshis)
+            .transpose()?
+            .unwrap_or(i64::MAX) as u64;
         // The hard input cap includes source fees. The exact remainder is reserved
         // after quoting, and preparation tightens it to the actual ZIP-317 fee.
         Ok((
             super::near::Limits {
+                max_output: super::config::usdc_amount(
+                    max_funding_amount_usdc
+                        .as_deref()
+                        .unwrap_or(funding_amount_usdc),
+                )?,
                 max_input,
                 max_fee: 0,
-                max_fee_bps: *max_fee_bps,
+                max_fee_bps: max_conversion_overhead_percent
+                    .checked_mul(100)
+                    .context("invalid conversion overhead percent")?,
             },
             *max_attempts,
         ))
@@ -322,14 +336,27 @@ impl FundingBackend for Backend {
     fn swap_timeout_seconds(&self) -> u64 {
         self.funding.swap_timeout_seconds
     }
-    async fn ready(&mut self, job: &FundingJob, _: &Quote) -> Result<()> {
+    async fn ready(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         let (limits, _) = self.policy(job)?;
         let daily = self.daily_limit;
         let job_id = job.id.clone();
+        let operation = job.operation_id.clone();
+        let allocation_limits = self.funding.allocation_limits()?;
+        let reserve = quote
+            .input
+            .checked_add(self.max_network_fee)
+            .context("funding cost overflow")?
+            .min(limits.max_input);
         self.store
             .call(move |s| {
-                s.check_job_permit(&job_id, limits.max_input)?;
-                s.check_funding_capacity(now()?, limits.max_input, daily)
+                s.check_job_permit(&job_id, reserve)?;
+                let instant = now()?;
+                s.check_funding_allocation(
+                    &operation,
+                    u32::try_from(instant / 86400)?,
+                    allocation_limits,
+                )?;
+                s.check_funding_capacity(instant, reserve, daily)
             })
             .await
     }
@@ -375,6 +402,7 @@ impl FundingBackend for Backend {
         );
         self.treasury
             .prepare(super::transaction::PrepareRequest {
+                allocation_limits: Some(self.funding.allocation_limits()?),
                 operation_id: job.operation_id.clone(),
                 pool_id: Some(job.pool_id.clone()),
                 daily_limit_zatoshis: self.daily_limit,
@@ -384,8 +412,13 @@ impl FundingBackend for Backend {
                 max_fee_zatoshis: limits
                     .max_input
                     .checked_sub(checked.input)
-                    .context("input cap exceeded")?,
-                max_input_zatoshis: limits.max_input,
+                    .context("input cap exceeded")?
+                    .min(self.max_network_fee),
+                max_input_zatoshis: checked
+                    .input
+                    .checked_add(self.max_network_fee)
+                    .context("funding cost overflow")?
+                    .min(limits.max_input),
             })
             .await?;
         Ok(())
@@ -562,6 +595,21 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
     }
     for cause in error.chain() {
         match cause.to_string().as_str() {
+            "funding_cost_limit_exceeded" => {
+                return "funding_cost_limit_exceeded; review max_funding_transaction_fee_zec and max_funding_spend_zec; standard network fee was not overridden; inspect unprepared recovery before trying again";
+            }
+            "funding_amount_limit_exceeded" => {
+                return "funding_amount_limit_exceeded; bridge minimum exceeds max_funding_amount_usdc (defaults to funding_amount_usdc); no funds submitted";
+            }
+            "daily_funding_limit_exceeded" => {
+                return "daily_funding_limit_exceeded; new funding paused; review daily_funding_limit_usdc and unresolved funding; existing funded wallets remain usable";
+            }
+            "total_funding_limit_exceeded" => {
+                return "total_funding_limit_exceeded; new funding paused; review total_funding_limit_usdc; allowance does not reset on restart or refund";
+            }
+            "funding_allocation_evidence_missing" | "funding_allocation_evidence_invalid" => {
+                return "funding_allocation_evidence_invalid; new funding paused; retained allocation history must be complete";
+            }
             "near_http_401" | "near_http_403" => {
                 return "near_authentication_required; check selected mode and configured credentials";
             }
@@ -569,11 +617,11 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "near_bridge_minimum_unstable; three unsigned quote attempts exhausted; no funds submitted";
             }
             "quote input limit" => {
-                return "funding_input_cap_exceeded; bridge quote exceeds max_input_zec; no funds submitted";
+                return "funding_input_cap_exceeded; bridge quote exceeds max_funding_spend_zec; no funds submitted";
             }
             "near_http_429" => return "near_rate_limited; backing off",
             "treasury_budget_exceeded" => {
-                return "treasury_budget_exceeded; wait for budget or review daily_input_zec";
+                return "treasury_budget_exceeded; wait for budget or review daily_treasury_spend_limit_zec";
             }
             "treasury_insufficient_spendable_funds" => {
                 return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
@@ -595,7 +643,7 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
             "funding_quote_failed; check route, cost caps and NEAR availability"
         }
         FundingPhase::Quoted => {
-            "funding_prepare_waiting; check treasury sync, source limits and operation status"
+            "funding_prepare_waiting; check treasury sync, funding limits and operation status"
         }
         FundingPhase::Preparing | FundingPhase::Prepared => {
             "funding_submission_unresolved; inspect operation; never issue a replacement deposit"

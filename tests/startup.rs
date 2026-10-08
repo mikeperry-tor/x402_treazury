@@ -92,8 +92,7 @@ fn config(
     if let Some(n) = concurrency {
         value += &format!("[startup]\ncatalog_concurrency={n}\n");
     }
-    value +=
-        "[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_TEST_KEY'\nmax_price_usd='0.01'\n";
+    value += "[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_TEST_KEY'\nmax_api_payment_usdc='0.01'\n";
     for id in 0..count {
         value += &format!("[sources.s{id:02}]\nspec='{origin}/{id}'\nprobe_pricing=false\n");
     }

@@ -138,8 +138,12 @@ pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
     let mut total = U256::ZERO;
     let mut count = 0;
     for wallet in wallets.values() {
-        if let WalletConfig::ZcashRotation { deposit_size, .. } = wallet {
-            let target = positive_usdc(deposit_size)?;
+        if let WalletConfig::ZcashRotation {
+            funding_amount_usdc,
+            ..
+        } = wallet
+        {
+            let target = positive_usdc(funding_amount_usdc)?;
             total = total
                 .checked_add(
                     target

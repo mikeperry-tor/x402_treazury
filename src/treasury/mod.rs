@@ -287,13 +287,13 @@ impl Treasury {
         self.healthy = true;
         Ok(address)
     }
-    pub async fn ensure_pool(&self, name: String, deposit_size: String) -> Result<String> {
+    pub async fn ensure_pool(&self, name: String, funding_amount_usdc: String) -> Result<String> {
         ensure!(
             self.healthy,
             "treasury requires reopen after failed persistence"
         );
         self.store
-            .call(move |s| s.ensure_pool(&name, &deposit_size))
+            .call(move |s| s.ensure_pool(&name, &funding_amount_usdc))
             .await
     }
     pub fn configure_sync(&mut self, settings: SyncSettings) {

@@ -31,10 +31,17 @@ warm = true
 # Treasury commands use this same state directory and its default wallet.key.
 [treasury]
 state_dir = "../../state/privacy"
-daily_input_zec = "0.012"
-shield_max_fee_zec = "0.0003"
+# Optional advanced safeguards on actual ZEC leaving the treasury:
+daily_treasury_spend_limit_zec = "0.012"
+# Standard network fees are calculated by the wallet; these reject high-fee proposals.
+# max_funding_transaction_fee_zec = "0.0003" # default per funding transaction
+# max_refund_shielding_fee_zec = "0.0003"     # default per refund shielding transaction
 
 [funding]
+# Gross USDC allocations, including bootstrap and replacements across all pools.
+# Pending funding remains reserved across UTC days.
+# No lifetime funding cap: available treasury funds bound total funding.
+daily_funding_limit_usdc = "20.00"
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 confidentiality = "public"
 # Leave BASE_RPC_URL unset to use the built-in Base RPC failover list.
@@ -44,29 +51,32 @@ base_rpc_url_env = "BASE_RPC_URL"
 # require at least $12 worth of ZEC before fees; start with about $15 for headroom.
 # Actual deposits may rise with swap minimums. All declared pools initialize, even
 # unused ones: remove unused wallet definitions and update bindings to save funding.
-# max_price_usd caps one payment, not the total research budget.
+# max_api_payment_usdc caps one payment, not the total research budget.
 [wallets.web]
 mode = "zcash_rotation"
-deposit_size = "2.00"
-max_price_usd = "0.05"
-max_input_zec = "0.006"
-max_fee_bps = 500
+funding_amount_usdc = "2.00"
+max_api_payment_usdc = "0.05"
+max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
+max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
+max_conversion_overhead_percent = 5
 
 [wallets.social]
 mode = "zcash_rotation"
-deposit_size = "2.00"
-max_price_usd = "0.05"
-max_input_zec = "0.006"
-max_fee_bps = 500
+funding_amount_usdc = "2.00"
+max_api_payment_usdc = "0.05"
+max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
+max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
+max_conversion_overhead_percent = 5
 
 # Company research has its own active/standby pair and Tor payer identities.
 # $0.10 permits single-company enrichment; larger PDL batches may exceed the cap.
 [wallets.company]
 mode = "zcash_rotation"
-deposit_size = "2.00"
-max_price_usd = "0.10"
-max_input_zec = "0.006"
-max_fee_bps = 500
+funding_amount_usdc = "2.00"
+max_api_payment_usdc = "0.10"
+max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
+max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
+max_conversion_overhead_percent = 5
 
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's

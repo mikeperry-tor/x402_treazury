@@ -97,7 +97,7 @@ spec = "beta.json"
 [wallets.shared]
 mode = "static"
 private_key_env = "TEST_KEY"
-max_price_usd = "0.02"
+max_api_payment_usdc = "0.02"
 [servers.research]
 listen = "127.0.0.1:0"
 bearer_token_env = "RESEARCH_TOKEN"
@@ -356,7 +356,10 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
             "duplicate listener",
         ),
         (
-            configuration().replace("max_price_usd = \"0.02\"", "max_price_usd = \"-1\""),
+            configuration().replace(
+                "max_api_payment_usdc = \"0.02\"",
+                "max_api_payment_usdc = \"-1\"",
+            ),
             "invalid max_price",
         ),
         (

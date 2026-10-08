@@ -3,10 +3,13 @@ version = 1
 
 [treasury]
 state_dir = "../../state/treasury"
-daily_input_zec = "0.10"
-shield_max_fee_zec = "0.001"
+daily_treasury_spend_limit_zec = "0.10"
+max_refund_shielding_fee_zec = "0.001"
 
 [funding]
+# Gross USDC allocated across bootstrap and replacements; not API spending.
+daily_funding_limit_usdc = "40.00"
+total_funding_limit_usdc = "100.00"
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 # near_api_key_env = "NEAR_PARTNER_KEY"
 # near_user_session_env = "NEAR_USER_SESSION"
@@ -17,17 +20,17 @@ confidentiality = "public" # No NEAR signup; public settlement.
 
 [wallets.research]
 mode = "zcash_rotation"
-deposit_size = "5.00"
-max_price_usd = "1.00"
-max_input_zec = "0.02"
-max_fee_bps = 500
+funding_amount_usdc = "5.00"
+max_api_payment_usdc = "1.00"
+max_funding_spend_zec = "0.02"
+max_conversion_overhead_percent = 5
 wait_seconds = 30
 
 [wallets.social]
 mode = "zcash_rotation"
-deposit_size = "10.00"
-max_input_zec = "0.04"
-max_fee_bps = 500
+funding_amount_usdc = "10.00"
+max_funding_spend_zec = "0.04"
+max_conversion_overhead_percent = 5
 
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"

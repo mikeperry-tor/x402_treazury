@@ -22,7 +22,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     let (store, worker) = StoreHandle::spawn(store);
     let (treasury, mut commands) = actor::channel();
     let policy = || {
-        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","deposit_size":"5","max_input_zec":"0.002","max_fee_bps":500})).unwrap()
+        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","funding_amount_usdc":"5","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap()
     };
     let mut backend = Backend {
         treasury,
@@ -31,10 +31,11 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
         wallets: std::collections::BTreeMap::from([("pool".into(), policy())]),
         funding: serde_json::from_value(
-            json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
+            json!({"base_rpc_url_env":"BASE","confidentiality":"public", "daily_funding_limit_usdc":"10", "total_funding_limit_usdc":"15"}),
         )
         .unwrap(),
         daily_limit: 1_000_000,
+        max_network_fee: 30_000,
     };
     let request = super::super::near::request(
         &super::super::near::Assets {
@@ -95,9 +96,12 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert_eq!(prepared.pool_id, Some(job.pool_id.clone()));
     assert_eq!(prepared.recipient, quote.deposit.clone().unwrap());
     assert_eq!(prepared.amount_zatoshis, 100000);
-    assert_eq!(prepared.max_fee_zatoshis, 100000);
-    assert_eq!(prepared.max_input_zatoshis, 200000);
+    assert_eq!(prepared.max_fee_zatoshis, 30000);
+    assert_eq!(prepared.max_input_zatoshis, 130000);
     assert_eq!(prepared.daily_limit_zatoshis, 1_000_000);
+    let allocation = prepared.allocation_limits.unwrap();
+    assert_eq!(allocation.daily, Some(10_000_000));
+    assert_eq!(allocation.total, Some(15_000_000));
     assert_eq!(
         before,
         serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
@@ -137,10 +141,12 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             .contains("funding mode changed")
     );
     backend.funding.confidentiality = "public".into();
-    if let WalletConfig::ZcashRotation { max_input_zec, .. } =
-        backend.wallets.get_mut("pool").unwrap()
+    if let WalletConfig::ZcashRotation {
+        max_funding_spend_zec,
+        ..
+    } = backend.wallets.get_mut("pool").unwrap()
     {
-        *max_input_zec = "0.001".into();
+        *max_funding_spend_zec = Some("0.001".into());
     }
     assert!(
         backend

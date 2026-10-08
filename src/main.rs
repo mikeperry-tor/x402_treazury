@@ -31,7 +31,7 @@ struct Args {
     tags: Option<Vec<String>>,
     exclude_tags: Option<Vec<String>>,
     env_file: Option<String>,
-    max_price_usd: Option<String>,
+    max_api_payment_usdc: Option<String>,
     max_response_chars: Option<usize>,
     max_response_bytes: Option<usize>,
     max_help_bytes: Option<usize>,
@@ -214,7 +214,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         return Ok(());
     }
     let policy = SpendPolicy::dollars(
-        args.max_price_usd
+        args.max_api_payment_usdc
             .as_deref()
             .or_else(|| env.get("X402_MAX_PRICE_USD").map(String::as_str))
             .unwrap_or("1.00"),

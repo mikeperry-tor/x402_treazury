@@ -12,8 +12,8 @@ state_dir = "../../../state/replace_me"
 key_file = "../../../secrets/replace_me.key"
 indexer_url_env = "ZCASH_INDEXER_URL"
 submission_url_env = "ZCASH_SUBMISSION_URL"
-daily_input_zec = "0.02"
-shield_max_fee_zec = "0.0003"
+daily_treasury_spend_limit_zec = "0.02"
+max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
 max_sync_age_seconds = 300
 [funding]
@@ -24,10 +24,10 @@ confidentiality = "public"
 base_confirmations = 12
 [wallets.test_pool]
 mode = "zcash_rotation"
-deposit_size = "2.00"
-max_price_usd = "0.20"
-max_input_zec = "0.002"
-max_fee_bps = 500
+funding_amount_usdc = "2.00"
+max_api_payment_usdc = "0.20"
+max_funding_spend_zec = "0.002"
+max_conversion_overhead_percent = 5
 [sources.shared]
 extends = "../../../providers/socialfetch.toml"
 prefix = "shared"

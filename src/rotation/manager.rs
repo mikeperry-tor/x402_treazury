@@ -419,7 +419,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
         }
     }
     anyhow::bail!(if price_rejected {
-        AdmissionError::PriceLimit("no offer fits cap and deposit_size")
+        AdmissionError::PriceLimit("no offer fits cap and funding_amount_usdc")
     } else {
         AdmissionError::UnsupportedPayment("no compatible EIP-3009 offer")
     })

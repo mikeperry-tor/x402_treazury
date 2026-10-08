@@ -4,7 +4,7 @@ version = 1
 [wallets.demo]
 mode = "static"
 private_key_env = "PUBLIC_DEMO_EVM_PRIVATE_KEY"
-max_price_usd = "0.05"
+max_api_payment_usdc = "0.05"
 
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"

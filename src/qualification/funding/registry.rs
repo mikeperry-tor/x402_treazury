@@ -72,10 +72,14 @@ impl RegistryPermits {
             config["mode"] == "zcash_rotation",
             "qualification funding pool is not managed"
         );
+        // Frozen historical evidence remains readable; current TOML rejects old names.
         let bound = crate::rotation::config::zatoshis(
-            config["max_input_zec"]
+            config
+                .get("max_funding_spend_zec")
+                .or_else(|| config.get("max_input_zec"))
+                .unwrap_or(&Value::Null)
                 .as_str()
-                .context("pinned source cap missing")?,
+                .context("qualification requires explicit max_funding_spend_zec")?,
         )?;
         let bound = u64::try_from(bound)?;
         ensure!(bound > 0, "qualification source cap must be positive");
@@ -267,7 +271,7 @@ mod tests {
             .query_row("SELECT payload FROM pins", [], |r| r.get(0))
             .unwrap();
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
-        pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_input_zec":"0.000001"}}});
+        pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_funding_spend_zec":"0.000001"}}});
         let raw = pins.to_string();
         binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
         db.execute(

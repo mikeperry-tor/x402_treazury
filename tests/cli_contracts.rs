@@ -433,8 +433,8 @@ async fn bootstrap_is_catalog_free_requires_policy_and_resumes_completed_pairs()
     let config = r#"version=1
 [treasury]
 state_dir="state"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 indexer_url="https://127.0.0.1:1"
 [funding]
 auto_fund=false
@@ -442,8 +442,8 @@ base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.web]
 mode="zcash_rotation"
-max_input_zec="0.02"
-max_fee_bps=500
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
 [wallets.static_unused]
 mode="static"
 private_key_env="UNSET_STATIC_KEY"
@@ -524,4 +524,31 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     assert!(!error.contains("bootstrap already complete"), "{error}");
     let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
     assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
+}
+
+#[tokio::test]
+async fn payment_and_wallet_funding_help_use_explicit_usdc_names() {
+    let dir = tempfile::tempdir().unwrap();
+    for (args, current, obsolete) in [
+        (
+            vec!["serve", "--help"],
+            "--max-api-payment-usdc",
+            "--max-price-usd",
+        ),
+        (
+            vec!["wallet", "pool", "--help"],
+            "--funding-amount-usdc",
+            "--deposit-size",
+        ),
+    ] {
+        let output = run(dir.path(), &args, &[]).await;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let help = String::from_utf8(output.stdout).unwrap();
+        assert!(help.contains(current), "{help}");
+        assert!(!help.contains(obsolete), "{help}");
+    }
 }

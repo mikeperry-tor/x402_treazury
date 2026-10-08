@@ -31,8 +31,8 @@ fn one_config_initializes_inspects_and_backs_up_without_ids_keys_endpoints_or_ca
 servers={}
 [treasury]
 state_dir="nested/wallet"
-daily_input_zec="0.01"
-shield_max_fee_zec="0.0003"
+daily_treasury_spend_limit_zec="0.01"
+max_refund_shielding_fee_zec="0.0003"
 [funding]
 confidentiality="public"
 [sources.never_fetch]
@@ -73,7 +73,7 @@ spec="https://unreachable.invalid/openapi.json"
 fn conflicting_wallet_inputs_and_missing_explicit_endpoint_fail_before_creation() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("deployment.toml");
-    std::fs::write(&config, "version=1\nservers={}\n[treasury]\nstate_dir='wallet'\ndaily_input_zec='0.01'\nshield_max_fee_zec='0.001'\nindexer_url_env='TREAZURY_TEST_ABSENT_INDEXER'\n").unwrap();
+    std::fs::write(&config, "version=1\nservers={}\n[treasury]\nstate_dir='wallet'\ndaily_treasury_spend_limit_zec='0.01'\nmax_refund_shielding_fee_zec='0.001'\nindexer_url_env='TREAZURY_TEST_ABSENT_INDEXER'\n").unwrap();
     let failed = wallet(&config, &["init"]);
     assert!(!failed.status.success());
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing or empty"));

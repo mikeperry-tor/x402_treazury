@@ -354,12 +354,12 @@ async fn deployment_uses_existing_state_only_and_qualification_bypasses() {
 version=1
 [treasury]
 state_dir="state"
-daily_input_zec="0.01"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.01"
+max_refund_shielding_fee_zec="0.001"
 [wallets.w]
 mode="static"
 private_key_env="UNUSED_TEST_KEY"
-max_price_usd="0.01"
+max_api_payment_usdc="0.01"
 [sources.api]
 spec="{url}"
 probe_pricing=false

@@ -92,10 +92,9 @@ impl Treasury {
                     }
                 }
                 _ = interval.tick() => {
-                    if let Err(error) = self.sync_once(&stop).await {
-                        if !stop.is_cancelled() {
+                    if let Err(error) = self.sync_once(&stop).await
+                        && !stop.is_cancelled() {
                             tracing::warn!(category = super::diagnostics::sync_failure(&error), "treasury sync unavailable");
-                        }
                     }
                 }
             }
@@ -239,6 +238,7 @@ mod tests {
         let (handle, commands) = channel();
         let stop = CancellationToken::new();
         let request = PrepareRequest {
+            allocation_limits: None,
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
             daily_limit_zatoshis: 200000,

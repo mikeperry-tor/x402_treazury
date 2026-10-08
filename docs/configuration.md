@@ -98,7 +98,7 @@ optional wallet templates and an automatic assignment policy:
   and guidance. A deployment source
   can also set `wallet` to override the server default; this field is forbidden
   in reusable provider files.
-- `wallets`: `mode = "static"`, `private_key_env`, and `max_price_usd`
+- `wallets`: `mode = "static"`, `private_key_env`, and `max_api_payment_usdc`
   (decimal string, default `"1.00"`), or a managed `zcash_rotation` profile
   described below. Bindings referencing the same profile share payer state.
   The cap applies per payment; it is not an aggregate budget.
@@ -228,10 +228,11 @@ automatic assignment policy. A complete deployment is in
 ```toml
 [wallet_templates.small]
 mode = "zcash_rotation"
-deposit_size = "5.00"
-max_price_usd = "1.00"
-max_input_zec = "0.02"
-max_fee_bps = 500
+funding_amount_usdc = "5.00"
+max_funding_amount_usdc = "6.00" # explicitly bound bridge-minimum increases
+max_api_payment_usdc = "1.00"
+max_funding_spend_zec = "0.02"
+max_conversion_overhead_percent = 5
 
 [wallet_assignment]
 scope = "source"
@@ -239,6 +240,8 @@ template = "small"
 ```
 
 Sources and servers can then omit `wallet`; `[wallets]` may also be omitted.
+See [funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for
+treasury-wide USDC budgets and optional ZEC withdrawal safeguards.
 The singleton `[treasury]` and `[funding]` settings are still required when the
 resolved deployment has managed pools. Explicit source/server wallet references
 continue to take priority and must refer to entries in `[wallets]`, not templates.
@@ -270,7 +273,7 @@ template contents. Separate deployments require separate initialized treasuries
 as described in the managed-wallet section.
 
 Template changes update settings for existing generated pools. In particular,
-`deposit_size` changes only future address allocations, preserving existing keys
+`funding_amount_usdc` changes only future address allocations, preserving existing keys
 and their captured targets. Changing scope or renaming a source/server may create
 new pools. Managed startup disables pools absent from the resolved set and keeps
 their keys and history; restoring the previous scope/name resumes them. Static-only
@@ -391,7 +394,7 @@ exceeding it returns HTTP 413 with the limit in its message and a stderr warning
   V2 challenge descriptions are capped at 500 characters for facilitator
   compatibility. The accepted requirements themselves remain intact.
 - Asset/network filtering and an exact decimal per-payment cap before signing.
-  `--max-price-usd` overrides `X402_MAX_PRICE_USD`, default `1.00`.
+  `--max-api-payment-usdc` overrides `X402_MAX_PRICE_USD`, default `1.00`.
   `none`, `off`, or an empty value removes the amount cap **but retains the
   Base USDC restriction**.
 - One signed retry only. A final 402 surfaces its payment error; a paid request
@@ -809,7 +812,7 @@ warm = true    # allow paid fallback during catalog warm; defaults false
 
 The relay provider must have a local bootstrap catalog exposing `POST /curl` and
 an HTTPS `base_url`. The bundled provider pins the vendor schema and advertises
-$0.01 per fetch; the live challenge and the wallet's existing `max_price_usd` are
+$0.01 per fetch; the live challenge and the wallet's existing `max_api_payment_usdc` are
 authoritative. Its existing timeout, transport and `max_response_bytes` settings
 bound the relay call; the target's existing `max_spec_bytes` bounds decoded catalogs.
 No additional spending caps or download settings are introduced.

@@ -101,10 +101,12 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    material. Never run the original and restored copy concurrently.
 4. Provide the printed **shielded** receive address to the operator. Agree on the
    ZEC amount using a fresh quote for two $5 USDC deposits, including source fees.
-   The example permits at most **0.006 ZEC per source operation**, **0.012 ZEC of
-   aggregate daily source exposure**, **500 bps quoted overhead**, and **0.0003 ZEC
-   per shielding fee**. These are ceilings, not a price estimate or a guarantee
-   that a route fits. Do not increase them automatically when a quote fails.
+   The example permits at most **0.006 ZEC per funding transfer including its network fee**, **0.012 ZEC of
+   daily treasury spending (including unresolved reservations)**, **5% quoted conversion overhead**, and **0.0003 ZEC
+   per refund-shielding fee**. These are ceilings, not a price estimate or a guarantee
+   that a route fits. The USDC daily and total allocation budgets are both 10 USDC,
+   enough for the initial pair; replacements require an explicit budget increase.
+   Do not increase limits automatically when a quote fails.
 5. After the operator transfers ZEC, sync and inspect the treasury:
 
    ```sh

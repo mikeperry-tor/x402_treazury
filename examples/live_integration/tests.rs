@@ -14,7 +14,7 @@ pub(super) fn manifest() -> Manifest {
     })).unwrap()
 }
 fn config() -> Value {
-    json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_price_usd":"0.02"},"unused":{"mode":"zcash_rotation","max_price_usd":"0.02"}},"wallet_bindings":{"main":{"api":{"wallet":"pool"}}},"treasury":{"id":"11111111-1111-4111-8111-111111111111"},"funding":{"confidentiality":"public"},"network":{"mode":"direct"}})
+    json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_api_payment_usdc":"0.02"},"unused":{"mode":"zcash_rotation","max_api_payment_usdc":"0.02"}},"wallet_bindings":{"main":{"api":{"wallet":"pool"}}},"treasury":{"id":"11111111-1111-4111-8111-111111111111"},"funding":{"confidentiality":"public"},"network":{"mode":"direct"}})
 }
 #[test]
 fn qualification_rejects_explicitly_unauthenticated_listeners() {
@@ -175,15 +175,15 @@ state_dir="absent_state"
 key_file="absent_key"
 indexer_url_env="UNSET_INDEXER"
 submission_url_env="UNSET_SUBMISSION"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 [funding]
 confidentiality="public"
 [wallets.pool]
 mode="zcash_rotation"
-max_price_usd="0.02"
-max_input_zec="0.02"
-max_fee_bps=500
+max_api_payment_usdc="0.02"
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
 [sources.api]
 spec="https://unreachable.invalid/openapi.json"
 [servers.main]
@@ -234,11 +234,11 @@ fn outage_plan_requires_owned_tor_final_phase_and_warm_dependency() {
     cfg["network"]["mode"] = json!("tor");
     let error = planner::build(&m, &cfg).err().unwrap();
     assert!(error.to_string().contains("no managed wallets"));
-    cfg["resolved_wallets"] = json!({"pool":{"mode":"static","max_price_usd":"0.02"}});
+    cfg["resolved_wallets"] = json!({"pool":{"mode":"static","max_api_payment_usdc":"0.02"}});
     planner::build(&m, &cfg).unwrap();
     let mut bad_config = cfg.clone();
     bad_config["resolved_wallets"]["unused"] =
-        json!({"mode":"zcash_rotation","max_price_usd":"0.02"});
+        json!({"mode":"zcash_rotation","max_api_payment_usdc":"0.02"});
     assert!(planner::build(&m, &bad_config).is_err());
     let mut bad_config = cfg.clone();
     bad_config["funding"]["auto_fund"] = json!(true);

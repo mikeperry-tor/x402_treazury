@@ -9,17 +9,20 @@ template = "small"
 
 [wallet_templates.small]
 mode = "zcash_rotation"
-deposit_size = "5.00"
-max_price_usd = "1.00"
-max_input_zec = "0.02"
-max_fee_bps = 500
+funding_amount_usdc = "5.00"
+max_api_payment_usdc = "1.00"
+max_funding_spend_zec = "0.02"
+max_conversion_overhead_percent = 5
 
 [treasury]
 state_dir = "../../state/treasury"
-daily_input_zec = "0.10"
-shield_max_fee_zec = "0.001"
+daily_treasury_spend_limit_zec = "0.10"
+max_refund_shielding_fee_zec = "0.001"
 
 [funding]
+# Gross USDC allocated across bootstrap and replacements; not API spending.
+daily_funding_limit_usdc = "30.00"
+total_funding_limit_usdc = "100.00"
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 base_rpc_url_env = "BASE_RPC_URL"
 confidentiality = "public" # No NEAR signup; public settlement.

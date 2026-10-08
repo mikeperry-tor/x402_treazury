@@ -82,7 +82,7 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
                 c.id
             );
             let cap = usdc(
-                profile["max_price_usd"]
+                profile.get("max_api_payment_usdc").or_else(|| profile.get("max_price_usd")).unwrap_or(&Value::Null)
                     .as_str()
                     .context("wallet cap missing")?,
             )?;
@@ -307,7 +307,7 @@ fn validate_rounds(
         let price = usdc(&round.expected_price_usdc)?;
         ensure!(price > 0, "rotation expected price must be positive");
         let cap = usdc(
-            config["resolved_wallets"][&round.pool]["max_price_usd"]
+            config["resolved_wallets"][&round.pool].get("max_api_payment_usdc").or_else(|| config["resolved_wallets"][&round.pool].get("max_price_usd")).unwrap_or(&Value::Null)
                 .as_str()
                 .context("rotation pool cap missing")?,
         )?;

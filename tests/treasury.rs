@@ -106,7 +106,7 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
         id,
         "--name",
         "research",
-        "--deposit-size",
+        "--funding-amount-usdc",
         "5",
     ]);
     assert!(

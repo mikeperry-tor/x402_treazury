@@ -57,6 +57,9 @@ impl TransactionPreparer for Treasury {
             .call(move |s| {
                 s.require_spend_ready(instant, reserve as u64)?;
                 let observed = s.status()?;
+                if let Some(limits) = request.allocation_limits {
+                    s.check_funding_allocation(&id, day, limits)?;
+                }
                 s.reserve(&id, pool.as_deref(), day, reserve, limit)?;
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(observed)
@@ -130,10 +133,16 @@ impl TransactionPreparer for Treasury {
             .amount_zatoshis
             .checked_add(fee)
             .context("source cost overflow")?;
-        ensure!(
-            fee <= request.max_fee_zatoshis && total <= request.max_input_zatoshis,
-            "proposal exceeds source cost limits"
-        );
+        if fee > request.max_fee_zatoshis || total > request.max_input_zatoshis {
+            tracing::warn!(
+                fee_zatoshis = fee,
+                fee_limit_zatoshis = request.max_fee_zatoshis,
+                total_zatoshis = total,
+                transfer_limit_zatoshis = request.max_input_zatoshis,
+                "funding proposal exceeds max_funding_transaction_fee_zec or max_funding_spend_zec; standard network fee was not overridden"
+            );
+            anyhow::bail!("funding_cost_limit_exceeded");
+        }
         ensure!(
             zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
             "proposal amount mismatch"
@@ -406,6 +415,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         let request = || PrepareRequest {
+            allocation_limits: None,
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
             daily_limit_zatoshis: 1_000_000,

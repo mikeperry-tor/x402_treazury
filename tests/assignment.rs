@@ -8,17 +8,17 @@ scope="{scope}"
 template="small"
 [wallet_templates.small]
 mode="zcash_rotation"
-deposit_size="5.000001"
-max_input_zec="0.02"
-max_fee_bps=500
+funding_amount_usdc="5.000001"
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
 [treasury]
 id="11111111-1111-4111-8111-111111111111"
 state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMISSION"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 [funding]
 base_rpc_url_env="BASE"
 [sources.a]
@@ -79,7 +79,10 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
             matches!(scope, "deployment" | "source")
         );
         let name = b["one"]["a"]["wallet"].as_str().unwrap();
-        assert_eq!(shown["resolved_wallets"][name]["deposit_size"], "5.000001");
+        assert_eq!(
+            shown["resolved_wallets"][name]["funding_amount_usdc"],
+            "5.000001"
+        );
         assert!(!dir.path().join("state").exists());
         assert!(!dir.path().join("key").exists());
     }
@@ -138,14 +141,14 @@ mode='static'
 private_key_env='SERVER_KEY'
 [wallets.unused_managed]
 mode='zcash_rotation'
-deposit_size='3'
-max_input_zec='0.01'
-max_fee_bps=100
+funding_amount_usdc='3'
+max_funding_spend_zec='0.01'
+max_conversion_overhead_percent=1
 [wallet_templates.unused]
 mode='zcash_rotation'
-deposit_size='100'
-max_input_zec='0.1'
-max_fee_bps=100
+funding_amount_usdc='100'
+max_funding_spend_zec='0.1'
+max_conversion_overhead_percent=1
 "#;
     let shown = show(dir.path(), &text).await;
     assert_eq!(
@@ -216,7 +219,10 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
         config("unknown"),
         config("source").replace("template=\"small\"", "template='missing'"),
         config("source").replace("scope=\"source\"", "scope='source'\nunknown=true"),
-        config("source").replace("max_input_zec=\"0.02\"", "max_input_zec='-1'"),
+        config("source").replace(
+            "max_funding_spend_zec=\"0.02\"",
+            "max_funding_spend_zec='-1'",
+        ),
         config("source").replace(
             "mode=\"zcash_rotation\"",
             "mode='static'\nprivate_key_env='KEY'",
@@ -225,8 +231,8 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
         config("source") + "\n[wallets.auto_v1_source_a]\nmode='static'\nprivate_key_env='KEY'\n",
         config("source").replace("[treasury]", "[not_treasury]"),
         config("source").replace(
-            "deposit_size=\"5.000001\"",
-            &format!("deposit_size='{}'", alloy_primitives::U256::MAX),
+            "funding_amount_usdc=\"5.000001\"",
+            &format!("funding_amount_usdc='{}'", alloy_primitives::U256::MAX),
         ),
     ] {
         std::fs::write(&path, &bad).unwrap();

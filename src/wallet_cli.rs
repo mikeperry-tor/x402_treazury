@@ -52,7 +52,7 @@ enum Action {
         #[arg(long)]
         name: String,
         #[arg(long, default_value = "2.00")]
-        deposit_size: String,
+        funding_amount_usdc: String,
     },
     /// Sync the configured treasury; never starts automatic funding.
     Sync {
@@ -222,12 +222,15 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
             treasury_id,
             destination,
         },
-        Action::Pool { name, deposit_size } => Command::Pool {
+        Action::Pool {
+            name,
+            funding_amount_usdc,
+        } => Command::Pool {
             state_dir,
             key_file,
             treasury_id,
             name,
-            deposit_size,
+            funding_amount_usdc,
         },
         Action::RecoverUnprepared { job_id } => Command::RecoverUnprepared {
             state_dir,
@@ -317,7 +320,7 @@ enum Command {
         key_file: PathBuf,
         treasury_id: String,
         name: String,
-        deposit_size: String,
+        funding_amount_usdc: String,
     },
 }
 pub async fn run(args: WalletArgs) -> Result<()> {
@@ -461,10 +464,10 @@ async fn execute_wallet_command(
             key_file,
             treasury_id,
             name,
-            deposit_size,
+            funding_amount_usdc,
         } => {
             let treasury = Treasury::open(state_dir, key_file, treasury_id).await?;
-            treasury.ensure_pool(name, deposit_size).await?;
+            treasury.ensure_pool(name, funding_amount_usdc).await?;
             treasury
         }
         Command::Bootstrap { .. }
@@ -516,11 +519,14 @@ async fn shield_refunds(
         &stop,
         treasury.shield_refund(
             job_id,
+            settings
+                .daily_treasury_spend_limit_zec
+                .as_deref()
+                .map(crate::rotation::config::zatoshis)
+                .transpose()?
+                .unwrap_or(i64::MAX) as u64,
             u64::try_from(crate::rotation::config::zatoshis(
-                &settings.daily_input_zec,
-            )?)?,
-            u64::try_from(crate::rotation::config::zatoshis(
-                &settings.shield_max_fee_zec,
+                &settings.max_refund_shielding_fee_zec,
             )?)?,
             &stop,
         ),

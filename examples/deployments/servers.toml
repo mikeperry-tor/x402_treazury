@@ -15,7 +15,7 @@ timeout = 90
 [wallets.default]
 mode = "static"
 private_key_env = "EVM_PRIVATE_KEY"
-max_price_usd = "1.00"
+max_api_payment_usdc = "1.00"
 
 [servers.research]
 listen = "127.0.0.1:8000"

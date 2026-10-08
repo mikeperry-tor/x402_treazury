@@ -22,6 +22,9 @@ fn cap() -> String {
 fn deposit() -> String {
     "2.00".into()
 }
+fn network_fee_limit() -> String {
+    "0.0003".into()
+}
 fn wait() -> u64 {
     30
 }
@@ -59,16 +62,19 @@ pub enum WalletConfig {
     Static {
         private_key_env: String,
         #[serde(default = "cap")]
-        max_price_usd: String,
+        max_api_payment_usdc: String,
     },
     #[serde(rename = "zcash_rotation")]
     ZcashRotation {
         #[serde(default = "deposit")]
-        deposit_size: String,
+        funding_amount_usdc: String,
         #[serde(default = "cap")]
-        max_price_usd: String,
-        max_input_zec: String,
-        max_fee_bps: u32,
+        max_api_payment_usdc: String,
+        #[serde(default)]
+        max_funding_amount_usdc: Option<String>,
+        #[serde(default)]
+        max_funding_spend_zec: Option<String>,
+        max_conversion_overhead_percent: u32,
         #[serde(default = "wait")]
         wait_seconds: u64,
         #[serde(default = "attempts")]
@@ -83,27 +89,40 @@ impl WalletConfig {
         match self {
             Self::Static {
                 private_key_env,
-                max_price_usd,
+                max_api_payment_usdc,
             } => {
                 env_name(private_key_env)?;
-                SpendPolicy::dollars(max_price_usd).context("invalid max_price_usd")?;
+                SpendPolicy::dollars(max_api_payment_usdc)
+                    .context("invalid max_api_payment_usdc")?;
             }
             Self::ZcashRotation {
-                deposit_size,
-                max_price_usd,
-                max_input_zec,
-                max_fee_bps,
+                funding_amount_usdc,
+                max_funding_amount_usdc,
+                max_api_payment_usdc,
+                max_funding_spend_zec,
+                max_conversion_overhead_percent,
                 wait_seconds,
                 max_attempts,
             } => {
-                positive_usdc(deposit_size)?;
-                SpendPolicy::dollars(max_price_usd).context("invalid max_price_usd")?;
-                zatoshis(max_input_zec)?;
+                let target =
+                    usdc_amount(funding_amount_usdc).context("invalid funding_amount_usdc")?;
+                if let Some(max) = max_funding_amount_usdc {
+                    ensure!(
+                        usdc_amount(max).context("invalid max_funding_amount_usdc")? >= target,
+                        "max_funding_amount_usdc is below funding_amount_usdc"
+                    );
+                }
+                SpendPolicy::dollars(max_api_payment_usdc)
+                    .context("invalid max_api_payment_usdc")?;
+                if let Some(max) = max_funding_spend_zec {
+                    zatoshis(max).context("invalid max_funding_spend_zec")?;
+                }
                 ensure!(
-                    *max_fee_bps <= 10000
-                        && *wait_seconds > 0
-                        && *wait_seconds <= 3600
-                        && *max_attempts > 0,
+                    *max_conversion_overhead_percent <= 100,
+                    "max_conversion_overhead_percent must be an integer from 0 to 100"
+                );
+                ensure!(
+                    *wait_seconds > 0 && *wait_seconds <= 3600 && *max_attempts > 0,
                     "invalid managed wallet limits"
                 );
             }
@@ -111,11 +130,20 @@ impl WalletConfig {
         Ok(())
     }
 }
+/// Bounded exact micro-USDC amounts, shared by allocation limits and accounting.
+pub fn usdc_amount(s: &str) -> Result<u64> {
+    let amount = positive_usdc(s)?;
+    ensure!(
+        amount <= U256::from(i64::MAX as u64),
+        "USDC amount exceeds accounting limit"
+    );
+    Ok(amount.to::<u64>())
+}
 pub fn positive_usdc(s: &str) -> Result<U256> {
     let n = SpendPolicy::dollars(s)?.max_atomic;
     ensure!(
         n.is_some_and(|n| n > U256::ZERO),
-        "deposit_size must be a positive USDC decimal"
+        "funding_amount_usdc must be a positive USDC decimal"
     );
     Ok(n.unwrap())
 }
@@ -190,8 +218,12 @@ pub struct TreasuryConfig {
     pub submission_url_env: String,
     pub indexer_url: Option<String>,
     pub submission_url: Option<String>,
-    pub daily_input_zec: String,
-    pub shield_max_fee_zec: String,
+    #[serde(default)]
+    pub daily_treasury_spend_limit_zec: Option<String>,
+    #[serde(default = "network_fee_limit")]
+    pub max_funding_transaction_fee_zec: String,
+    #[serde(default = "network_fee_limit")]
+    pub max_refund_shielding_fee_zec: String,
     #[serde(default = "confirmations")]
     pub confirmations: u64,
     #[serde(default = "sync_age")]
@@ -264,8 +296,13 @@ impl TreasuryConfig {
                 super::base::secure_endpoint(url)?;
             }
         }
-        zatoshis(&self.daily_input_zec)?;
-        zatoshis(&self.shield_max_fee_zec)?;
+        if let Some(limit) = &self.daily_treasury_spend_limit_zec {
+            zatoshis(limit).context("invalid daily_treasury_spend_limit_zec")?;
+        }
+        zatoshis(&self.max_funding_transaction_fee_zec)
+            .context("invalid max_funding_transaction_fee_zec")?;
+        zatoshis(&self.max_refund_shielding_fee_zec)
+            .context("invalid max_refund_shielding_fee_zec")?;
         ensure!(
             self.confirmations > 0
                 && self.confirmations <= u32::MAX as u64
@@ -289,6 +326,11 @@ impl TreasuryConfig {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FundingConfig {
+    /// Gross USDC allocated across all pools. Omission leaves this budget uncapped.
+    #[serde(default)]
+    pub daily_funding_limit_usdc: Option<String>,
+    #[serde(default)]
+    pub total_funding_limit_usdc: Option<String>,
     /// Managed serving funds bootstrap and replacement wallets unless disabled.
     #[serde(default = "enabled")]
     pub auto_fund: bool,
@@ -314,6 +356,22 @@ pub struct FundingConfig {
     pub quote_deadline_seconds: u64,
 }
 impl FundingConfig {
+    pub fn allocation_limits(&self) -> Result<FundingBudgetLimits> {
+        Ok(FundingBudgetLimits {
+            daily: self
+                .daily_funding_limit_usdc
+                .as_deref()
+                .map(usdc_amount)
+                .transpose()
+                .context("invalid daily_funding_limit_usdc")?,
+            total: self
+                .total_funding_limit_usdc
+                .as_deref()
+                .map(usdc_amount)
+                .transpose()
+                .context("invalid total_funding_limit_usdc")?,
+        })
+    }
     /// Runtime resolution shared by serving and qualification. Inspection never reads env.
     pub fn base_rpc_urls(
         &self,
@@ -363,6 +421,7 @@ impl FundingConfig {
         })
     }
     pub fn validate(&self) -> Result<()> {
+        self.allocation_limits()?;
         env_name(&self.base_rpc_url_env)?;
         ensure!(
             self.base_rpc_fallback_url_envs
@@ -400,4 +459,10 @@ impl FundingConfig {
         );
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FundingBudgetLimits {
+    pub daily: Option<u64>,
+    pub total: Option<u64>,
 }

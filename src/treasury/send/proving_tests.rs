@@ -121,6 +121,7 @@ async fn qualify_preparation(fail_commit: bool) {
     });
     let operation = uuid::Uuid::new_v4().to_string();
     let request = || PrepareRequest {
+        allocation_limits: None,
         operation_id: operation.clone(),
         pool_id: None,
         daily_limit_zatoshis: 100_000,

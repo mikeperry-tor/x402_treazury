@@ -31,6 +31,89 @@ worker owns SQLite operations. Financial transactions do not hold a database
 transaction across remote calls. Accepted actor/store work survives cancellation
 of its caller. Independent EVM pools share source funds, not payment reservations.
 
+## Funding limits and fees
+
+Ordinary funding settings describe USDC allocations, not the exchange rate of ZEC:
+
+```toml
+[funding]
+daily_funding_limit_usdc = "20.00"
+total_funding_limit_usdc = "50.00"
+
+[wallets.research]
+mode = "zcash_rotation"
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00"
+max_api_payment_usdc = "0.05"
+max_conversion_overhead_percent = 5
+```
+
+| Setting | Meaning |
+| --- | --- |
+| `funding_amount_usdc` | Target for each newly allocated wallet; defaults to 2 USDC. Initial bootstrap needs two wallets per pool. |
+| `max_funding_amount_usdc` | Maximum accepted output when the bridge minimum increases the target. Defaults to the configured funding amount: no automatic increase. |
+| `max_api_payment_usdc` | Cap on one API payment, independently of funding budgets. Defaults to 1 USDC. |
+| `daily_funding_limit_usdc` | Treasury-wide gross USDC allocation allowance per UTC day. Omission leaves this allowance uncapped. |
+| `total_funding_limit_usdc` | Treasury-wide gross allocation allowance across retained history, including retired pools. Omission leaves this allowance uncapped. Raising it explicitly authorizes more future funding. |
+| `max_conversion_overhead_percent` | Integer percentage (0–100) by which the bridge's quoted USD input valuation may exceed the USDC output. This includes quoted conversion overhead, not the separately calculated Zcash transaction fee. |
+
+A managed deployment must configure at least one aggregate budget: daily USDC,
+total USDC, or daily ZEC. Omitting all three is rejected.
+
+The daily and total allowances cover initial wallets and replacements, shared
+across every pool in this treasury state. They reserve the accepted quote's exact
+USDC output before transaction preparation, in the same serialized store operation
+as the ZEC reservation. Merely quoting or allocating an unfunded address does not
+consume an allowance. A typed deferred preparation creates no reservation.
+
+Accounting reuses the durable ZEC journal and authenticated original quotes,
+including archived operation bindings; changing pool names, configuration, or
+restarting cannot reset it. Missing or malformed relevant history blocks new
+funding. The daily bucket follows the source journal's reservation/confirmation UTC
+day. Unresolved source transfers or destination allocations remain counted across
+midnight until canonical source and destination credit/refund evidence resolves
+them. A partial refund retains the pending allocation; fees are not assumed to
+explain missing principal. A provider's success/failure message alone releases nothing.
+
+Refunds do not replenish the total USDC allowance: it measures gross funding,
+not net expenditure. Verified expiry without a spend and guarded recovery of
+unprepared work can release an unused reservation. New budgets never prevent
+reconciling already accepted work. When an allowance is exhausted, funding pauses;
+existing funded wallets can still pay for API calls. This is not a daily or lifetime
+API-consumption budget and excludes transaction fees from its USDC totals.
+
+Advanced safeguards use ZEC because they bound actual native-asset withdrawal:
+
+```toml
+[treasury]
+# Optional across funding transfers and refund-shielding fees:
+daily_treasury_spend_limit_zec = "0.012"
+# Defaults; both are acceptance ceilings, not fee overrides:
+max_funding_transaction_fee_zec = "0.0003"
+max_refund_shielding_fee_zec = "0.0003"
+
+# Within an existing managed wallet profile:
+# max_funding_spend_zec = "0.006" # optional: one transfer plus its network fee
+```
+
+The ZEC daily limit retains unresolved reservations across UTC rollover and credits
+canonically confirmed returned principal. Refund shielding charges only its fee.
+The USDC gross allowance deliberately does not use those refund credits.
+
+Zingolib proposes funding transactions and calculates their standard network fees.
+Refund shielding uses the backend's standard ZIP-317 fee rule. The application
+accepts or rejects the resulting fee; it does not force a lower fee into the
+transaction. Larger transactions can exceed a fee ceiling and require an explicit
+configuration adjustment. All money values are decimal strings; accounting uses
+integer atomic units, never floating-point currency conversion.
+
+The bridge's USD valuation is not an independent exchange-rate oracle. USDC
+allocation and overhead limits do not replace a hard ZEC withdrawal limit when
+one is required. All financial limits still apply alongside qualification permits;
+no configuration value authorizes replay or bypasses a zero-new-funding restriction.
+Positive funded qualification still requires an explicit `max_funding_spend_zec`
+to bound its native-asset permits.
+
 ## Treasury sync freshness
 
 The Zcash treasury is exclusively spent by this application. Direct and Tor sync
@@ -63,7 +146,8 @@ readiness using independently verified credit.
 
 The default future allocation floor is **2.00 USDC**. The funding adapter validates
 an exact-output quote and may raise a new allocation's target to the reported
-bridge minimum, subject to existing source and fee caps. This is a floating route
+bridge minimum only up to `max_funding_amount_usdc`, subject to funding budgets
+and fee caps. Omitting that option permits no increase above `funding_amount_usdc`. This is a floating route
 constraint, not a hard-coded permanent minimum. A quote-bound target cannot be
 resized after acceptance. Changing configuration affects future allocations.
 A double-buffered pool allocates roughly twice its target; allocation is not API

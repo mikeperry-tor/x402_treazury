@@ -332,6 +332,7 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         let before = calls.lock().unwrap().len();
         let error = treasury
             .prepare(PrepareRequest {
+                allocation_limits: None,
                 operation_id: uuid::Uuid::new_v4().to_string(),
                 pool_id: None,
                 daily_limit_zatoshis: 1_000_000,
@@ -395,8 +396,8 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
 socks_endpoint="{proxy_address}"
@@ -635,8 +636,8 @@ servers={{}}
 [treasury]
 state_dir="wallet"
 indexer_url="{endpoint}"
-daily_input_zec="0.01"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.01"
+max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
 socks_endpoint="{}"
@@ -773,6 +774,7 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
     ));
     let error = handle
         .prepare(PrepareRequest {
+            allocation_limits: None,
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
             daily_limit_zatoshis: 1_000_000,
@@ -842,8 +844,8 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 [sources.unloaded]
 spec="nonexistent.json"
 "#

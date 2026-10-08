@@ -180,7 +180,14 @@ impl Treasury {
                 "shielding input mismatch"
             );
             let fee = step.balance().fee_required().into_u64();
-            ensure!(fee > 0 && fee <= max_fee, "shielding fee cap exceeded");
+            if fee == 0 || fee > max_fee {
+                tracing::warn!(
+                    fee_zatoshis = fee,
+                    limit_zatoshis = max_fee,
+                    "refund shielding proposal exceeds max_refund_shielding_fee_zec; standard network fee was not overridden"
+                );
+                anyhow::bail!("refund shielding fee exceeds max_refund_shielding_fee_zec");
+            }
             let input: u64 = step
                 .transparent_inputs()
                 .iter()

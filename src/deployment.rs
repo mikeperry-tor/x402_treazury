@@ -233,14 +233,22 @@ impl MetaConfig {
         }
         let resolution = assignment::resolve(self)?;
         if resolution.wallets.values().any(WalletConfig::managed) {
-            self.treasury
+            let treasury = self
+                .treasury
                 .as_ref()
-                .context("managed profiles require [treasury]")?
-                .validate()?;
-            self.funding
+                .context("managed profiles require [treasury]")?;
+            treasury.validate()?;
+            let funding = self
+                .funding
                 .as_ref()
-                .context("managed profiles require [funding]")?
-                .validate()?;
+                .context("managed profiles require [funding]")?;
+            funding.validate()?;
+            ensure!(
+                funding.daily_funding_limit_usdc.is_some()
+                    || funding.total_funding_limit_usdc.is_some()
+                    || treasury.daily_treasury_spend_limit_zec.is_some(),
+                "managed funding requires daily_funding_limit_usdc, total_funding_limit_usdc or daily_treasury_spend_limit_zec"
+            );
         } else {
             if let Some(t) = &self.treasury {
                 t.validate()?;
@@ -544,12 +552,12 @@ impl Deployment {
         for name in used_wallets {
             if let WalletConfig::Static {
                 private_key_env,
-                max_price_usd,
+                max_api_payment_usdc,
             } = &self.wallet_resolution.wallets[&name]
             {
                 let payer = Payer::new(
                     &secret(private_key_env)?,
-                    SpendPolicy::dollars(max_price_usd)?,
+                    SpendPolicy::dollars(max_api_payment_usdc)?,
                 )
                 .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
                 wallets.insert(name, PaidClient::new(payer));
@@ -638,21 +646,21 @@ impl Deployment {
                         continue;
                     }
                     if let WalletConfig::ZcashRotation {
-                        deposit_size,
-                        max_price_usd,
+                        funding_amount_usdc,
+                        max_api_payment_usdc,
                         wait_seconds,
                         ..
                     } = w
                     {
                         let pool = owner
-                            .ensure_pool(name.clone(), deposit_size.clone())
+                            .ensure_pool(name.clone(), funding_amount_usdc.clone())
                             .await?;
                         let manager = ManagedPool::new(
                             store.clone(),
                             pool,
                             base.clone(),
-                            deposit_size,
-                            SpendPolicy::dollars(max_price_usd)?,
+                            funding_amount_usdc,
+                            SpendPolicy::dollars(max_api_payment_usdc)?,
                             *wait_seconds,
                         )?;
                         let manager = std::sync::Arc::new(manager);
@@ -661,7 +669,7 @@ impl Deployment {
                     }
                 }
                 tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
-                    "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to source limits and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
+                    "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to funding budgets, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
                 if f.auto_fund {
                     let (handle, commands) = crate::treasury::actor::channel();
                     let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
@@ -676,9 +684,15 @@ impl Deployment {
                         base,
                         wallets: self.wallet_resolution.wallets.clone(),
                         funding: f.clone(),
-                        daily_limit: u64::try_from(crate::rotation::config::zatoshis(
-                            &t.daily_input_zec,
-                        )?)?,
+                        daily_limit: t
+                            .daily_treasury_spend_limit_zec
+                            .as_deref()
+                            .map(crate::rotation::config::zatoshis)
+                            .transpose()?
+                            .unwrap_or(i64::MAX) as u64,
+                        max_network_fee: crate::rotation::config::zatoshis(
+                            &t.max_funding_transaction_fee_zec,
+                        )? as u64,
                     };
                     let sender = crate::treasury::submission::GrpcSubmission::new(
                         t.submission_endpoint(|name| env.get(name).cloned())?,
@@ -906,12 +920,12 @@ impl Deployment {
                 if !initialized.wallets.contains_key(&name)
                     && let WalletConfig::Static {
                         private_key_env,
-                        max_price_usd,
+                        max_api_payment_usdc,
                     } = &self.wallet_resolution.wallets[&name]
                 {
                     let payer = Payer::new(
                         &secret(private_key_env)?,
-                        SpendPolicy::dollars(max_price_usd)?,
+                        SpendPolicy::dollars(max_api_payment_usdc)?,
                     )
                     .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
                     initialized.wallets.insert(name, PaidClient::new(payer));

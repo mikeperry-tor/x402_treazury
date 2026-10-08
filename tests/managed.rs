@@ -697,20 +697,20 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=false
 base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.research]
 mode="zcash_rotation"
-max_input_zec="0.02"
-max_fee_bps=500
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
 [wallets.unused]
 mode="zcash_rotation"
-max_input_zec="0.02"
-max_fee_bps=500
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
 [wallets.static_wallet]
 mode="static"
 private_key_env="KEY"
@@ -883,7 +883,7 @@ sources=["api"]
         .unwrap()
         .unwrap();
     let static_config = config.replace(
-        "mode=\"zcash_rotation\"\nmax_input_zec=\"0.02\"\nmax_fee_bps=500",
+        "mode=\"zcash_rotation\"\nmax_funding_spend_zec=\"0.02\"\nmax_conversion_overhead_percent=5",
         "mode=\"static\"\nprivate_key_env=\"KEY\"",
     );
     std::fs::write(&path, static_config).unwrap();
@@ -1518,17 +1518,17 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
-daily_input_zec="0.1"
-shield_max_fee_zec="0.001"
+daily_treasury_spend_limit_zec="0.1"
+max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=true
 base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.research]
 mode="zcash_rotation"
-deposit_size="5"
-max_input_zec="0.02"
-max_fee_bps=500
+funding_amount_usdc="5"
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
 [sources.api]
 spec="spec.json"
 probe_pricing=false

@@ -359,6 +359,7 @@ async fn run() -> Result<()> {
         .await?;
     let prepared = treasury
         .prepare(PrepareRequest {
+            allocation_limits: None,
             operation_id: op.clone(),
             pool_id: None,
             daily_limit_zatoshis: 1_000_000,
@@ -552,6 +553,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
             .await?;
         treasury
             .prepare(PrepareRequest {
+                allocation_limits: None,
                 operation_id: job.operation_id.clone(),
                 pool_id: Some(job.pool_id),
                 daily_limit_zatoshis: 1_000_000,
@@ -607,7 +609,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
             .expect("shielding failure was not injected");
         if !fail_commit {
             assert!(
-                error.to_string().contains("shielding fee cap exceeded"),
+                error.to_string().contains("max_refund_shielding_fee_zec"),
                 "{error}"
             );
         }
@@ -812,6 +814,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
         .await?;
     let prepared = treasury
         .prepare(PrepareRequest {
+            allocation_limits: None,
             operation_id: op.clone(),
             pool_id: None,
             daily_limit_zatoshis: 1_000_000,
@@ -1030,7 +1033,7 @@ impl RecoveryCli {
         std::fs::write(
             directory.join("recovery.toml"),
             format!(
-                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\ndaily_input_zec = '0.01'\nshield_max_fee_zec = '0.0003'\nconfirmations = 2\nmax_sync_age_seconds = 300\n"
+                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\ndaily_treasury_spend_limit_zec = '0.01'\nmax_refund_shielding_fee_zec = '0.0003'\nconfirmations = 2\nmax_sync_age_seconds = 300\n"
             ),
         )?;
         Ok(Self {

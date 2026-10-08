@@ -104,7 +104,7 @@ pub struct Serve {
     #[command(flatten)]
     input: Input,
     #[arg(long)]
-    max_price_usd: Option<String>,
+    max_api_payment_usdc: Option<String>,
     #[arg(long)]
     max_response_chars: Option<usize>,
     #[arg(long, default_value = "stdio", value_parser = ["stdio", "http"])]
@@ -247,7 +247,7 @@ impl From<Serve> for Args {
     fn from(serve: Serve) -> Self {
         let Serve {
             input,
-            max_price_usd,
+            max_api_payment_usdc,
             max_response_chars,
             transport,
             host,
@@ -263,7 +263,7 @@ impl From<Serve> for Args {
             qualification_binding,
         } = serve;
         Self {
-            max_price_usd,
+            max_api_payment_usdc,
             max_response_chars,
             transport,
             host,

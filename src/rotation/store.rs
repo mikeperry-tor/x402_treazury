@@ -1,4 +1,6 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
+#[cfg(feature = "zcash")]
+mod allocation;
 mod backup;
 #[cfg(feature = "zcash")]
 mod expiry;
@@ -563,15 +565,15 @@ impl Store {
         );
         Ok(())
     }
-    pub fn ensure_pool(&mut self, name: &str, deposit_size: &str) -> Result<String> {
+    pub fn ensure_pool(&mut self, name: &str, funding_amount_usdc: &str) -> Result<String> {
         ensure!(
             regex::Regex::new("^[a-z][a-z0-9_]*$")?.is_match(name),
             "invalid pool name"
         );
-        let target = crate::payment::SpendPolicy::dollars(deposit_size)?
+        let target = crate::payment::SpendPolicy::dollars(funding_amount_usdc)?
             .max_atomic
-            .context("deposit_size must be a decimal")?;
-        ensure!(target > U256::ZERO, "deposit_size must be positive");
+            .context("funding_amount_usdc must be a decimal")?;
+        ensure!(target > U256::ZERO, "funding_amount_usdc must be positive");
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1441,7 +1443,7 @@ impl Store {
         ensure!(enabled, AdmissionError::WalletNotReady("pool disabled"));
         ensure!(
             cost <= amount(&target)?,
-            AdmissionError::PriceLimit("payment exceeds deposit_size")
+            AdmissionError::PriceLimit("payment exceeds funding_amount_usdc")
         );
         let depleted = apply_chain_view(&tx, pool, bootstrapped, &view)?;
         // Commit evidence even when not ready; payment failures must not lose reconciliation.

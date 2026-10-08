@@ -20,6 +20,7 @@ impl std::fmt::Display for PreparationDeferred {
 impl std::error::Error for PreparationDeferred {}
 
 pub struct PrepareRequest {
+    pub allocation_limits: Option<super::config::FundingBudgetLimits>,
     pub operation_id: String,
     pub pool_id: Option<String>,
     pub daily_limit_zatoshis: u64,

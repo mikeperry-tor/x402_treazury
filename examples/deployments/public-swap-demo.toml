@@ -6,12 +6,15 @@ version = 1
 state_dir = "../../state/public-demo"
 # wallet.key lives inside state_dir; the treasury ID is read from existing state.
 # Zcash endpoints use the built-in default unless explicitly overridden.
-daily_input_zec = "0.012"
-shield_max_fee_zec = "0.0003"
+daily_treasury_spend_limit_zec = "0.012"
+max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
 max_sync_age_seconds = 300
 
 [funding]
+# Gross USDC allocated across bootstrap and replacements; not API spending.
+daily_funding_limit_usdc = "10.00"
+total_funding_limit_usdc = "10.00"
 auto_fund = false # Change only after explicitly approving the funded test.
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
@@ -24,10 +27,10 @@ quote_deadline_seconds = 1800
 
 [wallets.demo]
 mode = "zcash_rotation"
-deposit_size = "5.00"
-max_price_usd = "0.05"
-max_input_zec = "0.006"
-max_fee_bps = 500
+funding_amount_usdc = "5.00"
+max_api_payment_usdc = "0.05"
+max_funding_spend_zec = "0.006"
+max_conversion_overhead_percent = 5
 max_attempts = 3
 wait_seconds = 30
 

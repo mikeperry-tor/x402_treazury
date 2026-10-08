@@ -139,14 +139,14 @@ Keep the backup secure: it contains spending material.
 
 > **NOTE:**
 >
-> Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchonized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
+> Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchronized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
 
 ### 3. Fund and bootstrap the wallets
 
-Review the wallet bindings, funding targets and limits before sending funds:
+Display the treasury’s receive addresses:
 
 ```sh
-target/release/x402_treazury config show \
+target/release/x402_treazury wallet addresses \
   --config examples/deployments/privacy.local.toml
 ```
 
@@ -168,12 +168,7 @@ or rebind any servers/sources referencing them.
 > (about $4 before fees); sharing it across multiple MCP servers preserves
 > separate toolsets but shares their payment identity and Tor circuit usage.
 
-The example limits individual API payments to **$0.05 for web/social** and
-**$0.10 for company**, each source operation to
-**0.006 ZEC**, daily source exposure to **0.012 ZEC**, quoted overhead to **500 bps**,
-and each refund-shielding fee to **0.0003 ZEC**. These are ceilings, not estimates;
-they may need deliberate adjustment for the current route. Daily limits reset and
-per-payment caps are not lifetime budgets.
+After sending ZEC, sync the treasury and check its confirmed spendable balance:
 
 ```sh
 target/release/x402_treazury wallet sync \
@@ -221,6 +216,24 @@ reference](docs/configuration.md#automatic-discovery-disk-cache) for details.
 
 ### 5. Start serving
 
+Review the wallet bindings and spending settings before starting the server:
+
+```sh
+target/release/x402_treazury config show \
+  --config examples/deployments/privacy.local.toml
+```
+
+The example funds each new wallet with **2 USDC**, allows a bridge minimum up to
+**3 USDC**, and limits new allocations across all pools to **20 USDC per UTC day**.
+There is no lifetime funding cap; available funds in the Zcash treasury bound total
+funding. Individual API payments are capped separately at
+**0.05 USDC for web/social** and **0.10 USDC for company**. Conversion overhead is
+limited to **5%**; standard Zcash network fees are checked separately.
+These are wallet-funding allowances, not API-spending budgets. Pending transfers
+remain reserved across UTC days and restarts.
+See [funding limits](docs/wallet-rotation.md#funding-limits-and-fees) for the exact
+accounting and optional ZEC safeguards.
+
 Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 
 ```sh
@@ -266,10 +279,10 @@ pools from one template, avoiding repeated wallet definitions:
 ```toml
 [wallet_templates.small]
 mode = "zcash_rotation"
-deposit_size = "2.00"
-max_price_usd = "0.05"
-max_input_zec = "0.006"
-max_fee_bps = 500
+funding_amount_usdc = "2.00"
+max_api_payment_usdc = "0.05"
+max_funding_spend_zec = "0.006"
+max_conversion_overhead_percent = 5
 
 [wallet_assignment]
 scope = "source" # deployment, server, source, or binding

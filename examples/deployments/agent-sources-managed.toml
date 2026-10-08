@@ -5,17 +5,20 @@ version = 1
 
 [wallets.agent_shared]
 mode = "zcash_rotation"
-deposit_size = "5.00"
-max_price_usd = "0.05"
-max_input_zec = "0.006"
-max_fee_bps = 500
+funding_amount_usdc = "5.00"
+max_api_payment_usdc = "0.05"
+max_funding_spend_zec = "0.006"
+max_conversion_overhead_percent = 5
 
 [treasury]
 state_dir = "../../state/agent-treasury"
-daily_input_zec = "0.012"
-shield_max_fee_zec = "0.0003"
+daily_treasury_spend_limit_zec = "0.012"
+max_refund_shielding_fee_zec = "0.0003"
 
 [funding]
+# Gross USDC allocated across bootstrap and replacements; not API spending.
+daily_funding_limit_usdc = "20.00"
+total_funding_limit_usdc = "50.00"
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"

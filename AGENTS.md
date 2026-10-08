@@ -128,7 +128,7 @@ existing state on init. Endpoint defaults are shared with birthday lookup; expli
 missing environment references fail, and submission otherwise follows the indexer.
 
 Managed serving completes initial pool bootstrap before discovery and defaults to
-automatic replacement funding, within required source/fee limits. `auto_fund=false` pauses it; build features, inspection,
+automatic replacement funding, within configured USDC budgets and ZEC/fee safeguards. `auto_fund=false` pauses it; build features, inspection,
 wallet initialization and sync never authorize automatic funding. Qualification
 restrictions remain authoritative, and bounded live demos retain explicit opt-outs.
 
@@ -317,6 +317,24 @@ its note must not assert Tor causation. Live performance benchmarks can explicit
 issue tags and must record the exclusions; this does not change runtime selection.
 
 ## Configuration, treasury and financial ownership
+
+Managed profiles use `funding_amount_usdc`, `max_funding_amount_usdc`,
+`max_api_payment_usdc` and integer `max_conversion_overhead_percent`. An omitted
+maximum funding amount permits no increase above the target. Funding-level
+`daily_funding_limit_usdc` and `total_funding_limit_usdc` are optional gross
+allocation budgets across all pools, not API-spending budgets. Managed deployments
+require at least one aggregate budget (daily USDC, total USDC or daily ZEC). Reserve accepted
+quote outputs alongside source reservations in the serialized store worker;
+derive history from original authenticated quotes and source journals, including
+archived operations. Missing relevant history fails closed. Pending allocations
+survive UTC rollover; refunds do not replenish total USDC allowance. Preserve
+canonical expiry/unprepared recovery and never reset budgets on restart or rename.
+Native safeguards are `max_funding_spend_zec` (optional per wallet transfer),
+`daily_treasury_spend_limit_zec` (optional treasury-wide),
+`max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` (both default
+0.0003 ZEC). Network-fee settings reject proposals; they never override standard
+wallet fee calculation. Current TOML rejects obsolete option names; historical
+qualification evidence remains readable without gaining new authority.
 
 See [wallet rotation](docs/wallet-rotation.md), [architecture](docs/architecture.md)
 and README wallet-sharing tables for implementation details. TOML source wallet

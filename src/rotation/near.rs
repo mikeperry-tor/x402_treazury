@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
 const ZEC: &str = "nep141:zec.omft.near";
-const USDC: &str = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
+pub(crate) const USDC: &str = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Assets {
     pub origin: String,
@@ -22,6 +22,7 @@ pub struct Quote {
 }
 #[derive(Clone)]
 pub struct Limits {
+    pub max_output: u64,
     pub max_input: u64,
     pub max_fee: u64,
     pub max_fee_bps: u32,
@@ -181,6 +182,14 @@ impl NearClient {
             "minimum adjustment requires exact-output Base USDC"
         );
         for attempt in 0..3 {
+            ensure!(
+                atomic(
+                    request["amount"]
+                        .as_str()
+                        .context("missing output amount")?
+                )? <= limits.max_output,
+                "funding_amount_limit_exceeded"
+            );
             match self.quote(request.clone(), limits, now).await {
                 Ok(quote) => return Ok(quote),
                 Err(error) => {
@@ -193,6 +202,10 @@ impl NearClient {
                             .context("missing output amount")?,
                     )?;
                     ensure!(minimum.0 > previous, "near_bridge_minimum_not_increasing");
+                    ensure!(
+                        minimum.0 <= limits.max_output,
+                        "funding_amount_limit_exceeded"
+                    );
                     if attempt == 2 {
                         anyhow::bail!(
                             "near_bridge_minimum_unstable: three quote attempts exhausted; no funds submitted"
@@ -388,6 +401,7 @@ pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64
     let q = &response["quote"];
     let input = atomic(q["amountIn"].as_str().context("missing input")?)?;
     let target = atomic(text("amount")?)?;
+    ensure!(target <= limits.max_output, "funding_amount_limit_exceeded");
     ensure!(
         input > 0
             && input
@@ -604,6 +618,7 @@ mod tests {
             request,
             response,
             Limits {
+                max_output: u64::MAX,
                 max_input: 200000,
                 max_fee: 10000,
                 max_fee_bps: 500,
@@ -665,6 +680,7 @@ mod tests {
         .unwrap();
         assert!(req.get("appFees").is_none());
         let limits = Limits {
+            max_output: u64::MAX,
             max_input: 2_000_000,
             max_fee: 100_000,
             max_fee_bps: 500,
@@ -774,6 +790,7 @@ mod tests {
             "lower",
             "malformed",
             "input_cap",
+            "output_cap",
             "fee_cap",
             "binding",
         ] {
@@ -804,7 +821,10 @@ mod tests {
             )
             .unwrap();
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-            let (req, _, limits) = fixture(true);
+            let (req, _, mut limits) = fixture(true);
+            if mode == "output_cap" {
+                limits.max_output = 5_000_000;
+            }
             let result = client.quote_with_minimum(req, &limits, 2_000_000_000).await;
             match mode {
                 "floor" | "raise" | "twice" => assert_eq!(
@@ -820,7 +840,7 @@ mod tests {
             assert_eq!(
                 calls.load(Ordering::SeqCst),
                 match mode {
-                    "floor" | "lower" | "malformed" => 1,
+                    "floor" | "lower" | "malformed" | "output_cap" => 1,
                     "twice" | "unstable" => 3,
                     _ => 2,
                 }
