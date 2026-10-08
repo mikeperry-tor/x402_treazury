@@ -579,11 +579,13 @@ impl Deployment {
                     secret(key)?;
                 }
                 let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
-                tracing::warn!(
-                    provider_count = urls.len(),
-                    default_fallbacks = f.base_rpc_fallback_url_envs.is_none(),
-                    "Base RPC policy active; verification may disclose wallet addresses to fallback providers; see config show base_rpc_policy"
-                );
+                if self.config.network.mode == crate::network::Mode::Direct {
+                    tracing::warn!(
+                        provider_count = urls.len(),
+                        default_fallbacks = f.base_rpc_fallback_url_envs.is_none(),
+                        "Direct Base RPC verification exposes your client IP address and queried wallet addresses to each contacted RPC provider, including fallbacks; see config show base_rpc_policy"
+                    );
+                }
                 let base = BaseRpc::with_fallbacks(
                     &urls,
                     f.base_confirmations,

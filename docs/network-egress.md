@@ -1,5 +1,12 @@
 # Runtime egress inventory
 
+In direct mode, Base RPC providers contacted for verification can associate the
+client's public IP address with queried wallet addresses, including when fallback
+providers are used. Serving emits a warning about this exposure. In Tor mode,
+providers see a Tor exit IP instead of the client's public IP, so this warning is
+suppressed. RPC providers still receive the wallet addresses being queried.
+`config show` lists the configured providers under `base_rpc_policy` in both modes.
+
 `src/network.rs` owns the process's immutable transport policy, canonical isolation
 identities, reqwest pools and tonic channels. Direct and Tor use the same factory,
 callers and payment/funding state machines. Cache keys include identity, endpoint,
