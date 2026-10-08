@@ -90,6 +90,8 @@ impl<B: FundingBackend> FundingWorker<B> {
                 .call(move |s| s.mark_funding_timeout(&id))
                 .await?;
             job.timed_out = true;
+            tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase,
+                "funding exceeded swap timeout; continuing reconciliation without a replacement deposit");
         }
         let result = self.step(&job, instant).await;
         self.finish_step(&job, instant, result).await?;
@@ -118,12 +120,21 @@ impl<B: FundingBackend> FundingWorker<B> {
         Ok(())
     }
     async fn finish_step(&self, job: &FundingJob, instant: u64, result: Result<()>) -> Result<()> {
+        let wait = result
+            .as_ref()
+            .err()
+            .and_then(|error| waiting_reason(error, &job.phase));
+        if let Some(reason) = wait {
+            tracing::debug!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase,
+                reason, "funding awaiting chain confirmation; polling automatically");
+        }
         let error = result
             .as_ref()
             .err()
+            .filter(|_| wait.is_none())
             .map(|error| safe_error(error, &job.phase));
         if let Some(category) = &error {
-            tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase, category, "funding step deferred or failed");
+            tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase, category, "funding check failed; backing off and retaining reservations");
         }
         let streak = if error.is_some() {
             job.error_streak.saturating_add(1)
@@ -197,10 +208,15 @@ impl<B: FundingBackend> FundingWorker<B> {
                 }
                 // Existing attempts, including UNKNOWN/REQUESTED, only reconcile.
                 self.transition(job, DepositPending).await?;
+                tracing::info!(job_id = %job.id, pool_id = %job.pool_id,
+                    "funding deposit awaiting Zcash confirmations; reconciliation continues automatically");
             }
             DepositPending => {
                 if self.backend.reconcile(job).await? {
                     self.transition(job, Swapping).await?;
+                } else {
+                    tracing::debug!(job_id = %job.id, pool_id = %job.pool_id,
+                        "funding awaiting Zcash deposit confirmation; polling automatically");
                 }
             }
             Swapping | VerifyingCredit | RefundPending => self.reconcile_swap(job).await?,
@@ -265,9 +281,15 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .context("base_credit_unverified")?;
             }
             SwapStatus::Refunded | SwapStatus::Failed if job.phase != RefundPending => {
+                tracing::warn!(job_id = %job.id, pool_id = %job.pool_id,
+                    "swap failed or was refunded; awaiting refund reconciliation; retaining reservations");
                 self.transition(job, RefundPending).await?
             }
-            SwapStatus::IncompleteDeposit => self.transition(job, RecoveryRequired).await?,
+            SwapStatus::IncompleteDeposit => {
+                tracing::warn!(job_id = %job.id, pool_id = %job.pool_id,
+                    "swap reports an incomplete deposit; operator recovery required; retaining reservations");
+                self.transition(job, RecoveryRequired).await?;
+            }
             _ => {} // Timeouts, unknown states and refunds cannot release funds.
         }
         Ok(())
@@ -547,6 +569,33 @@ fn near_diagnostic(error: &anyhow::Error) -> String {
     "validation or internal error; response not accepted".into()
 }
 
+// Recognize only explicit local wait conditions, never an entire funding phase:
+// sync, RPC, validation and storage failures must remain warnings.
+fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'static str> {
+    if matches!(
+        phase,
+        FundingPhase::DepositPending | FundingPhase::Complete | FundingPhase::RecoveryRequired
+    ) && error
+        .chain()
+        .any(|cause| cause.to_string() == "treasury_confirmation_pending")
+    {
+        return Some("zcash_confirmations_pending");
+    }
+    if matches!(
+        phase,
+        FundingPhase::Swapping | FundingPhase::VerifyingCredit
+    ) && error
+        .downcast_ref::<super::base::VerificationStage>()
+        .is_some_and(|stage| stage.0 == "funding credit persistence")
+        && error
+            .chain()
+            .any(|cause| cause.to_string() == "insufficient confirmed credit")
+    {
+        return Some("base_credit_pending");
+    }
+    None
+}
+
 /// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
 /// quote addresses or arbitrary error prose into the public journal.
 fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
@@ -649,7 +698,7 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
             "funding_submission_unresolved; inspect operation; never issue a replacement deposit"
         }
         FundingPhase::DepositPending => {
-            "source_confirmation_pending; inspect sync and reconcile the existing operation"
+            "source_reconciliation_failed; automatic reconciliation will retry the existing operation"
         }
         _ => "funding_status_unavailable; continuing bounded reconciliation of the existing swap",
     }

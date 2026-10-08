@@ -263,6 +263,14 @@ cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with
 an obsolete persistence warning; genuine source-reconciliation errors remain visible.
 
+Funding logs distinguish progress from failed checks. Entering deposit confirmation
+emits an informational message; ordinary confirmation-depth and pending Base-credit
+polls log at debug level, clear stale error status and use the normal polling interval.
+They do not release reservations or authorize another deposit. Sync, RPC, validation
+and storage failures remain warnings with error backoff. Swap timeout, failed/refunded
+status and incomplete deposits emit explicit warnings describing continued
+reconciliation or required recovery.
+
 The treasury receives/synchronizes Ironwood with capability checks on the injected
 lightwalletd transport. Network integration uses reviewed vendored channel-injection
 patches; it does not enable SDK-owned direct networking. The

@@ -9,6 +9,7 @@ use x402_treazury::rotation::{
 struct Fake {
     store: StoreHandle,
     sends: usize,
+    reconcile_error: Option<&'static str>,
     chain_credit: bool,
     status_error: bool,
     status_calls: usize,
@@ -84,6 +85,9 @@ impl FundingBackend for Fake {
         anyhow::bail!("ambiguous send")
     }
     async fn reconcile(&mut self, j: &FundingJob) -> Result<bool> {
+        if let Some(error) = self.reconcile_error {
+            anyhow::bail!(error);
+        }
         let id = j.operation_id.clone();
         self.store
             .call(move |s| s.confirm_spend(&id, 60, 1))
@@ -177,6 +181,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
         backend: Fake {
             store: store.clone(),
             sends: 0,
+            reconcile_error: None,
             chain_credit: false,
             status_error: false,
             status_calls: 0,
@@ -267,6 +272,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
         backend: Fake {
             store: store.clone(),
             sends: 0,
+            reconcile_error: None,
             chain_credit: true,
             status_error: false,
             status_calls: 0,
@@ -333,6 +339,7 @@ async fn fixture() -> (
         backend: Fake {
             store: store.clone(),
             sends: 0,
+            reconcile_error: None,
             chain_credit: false,
             status_error: false,
             status_calls: 0,
@@ -974,6 +981,69 @@ async fn qualification_denial_preserves_quote_and_records_actionable_status() {
     assert!(!after.outgoing_pending);
     assert_eq!(worker.backend.sends, 0);
     assert_eq!(worker.backend.quotes, 1);
+    drop(worker);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(std::sync::Mutex::new(log.reopen().unwrap()))
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let (_dir, mut worker, task) = fixture().await;
+    let now = x402_treazury::rotation::base::now().unwrap();
+    for i in 0..4 {
+        worker.tick(now + i * 1000).await.unwrap();
+    }
+    let baseline = std::fs::read_to_string(log.path()).unwrap().len();
+    worker.backend.reconcile_error = Some("treasury_confirmation_pending");
+    for i in 4..7 {
+        worker.tick(now + i * 1000).await.unwrap();
+        let status = worker.store.call(|s| s.status()).await.unwrap();
+        let job = &status.funding_jobs[0];
+        assert_eq!(
+            job.phase,
+            x402_treazury::rotation::store::funding::FundingPhase::DepositPending
+        );
+        assert_eq!(job.error_streak, 0);
+        assert!(job.last_error.is_none());
+        assert_eq!(worker.backend.sends, 1);
+        assert_ne!(status.treasury_operations[0].submission, "CONFIRMED");
+    }
+    let output = std::fs::read_to_string(log.path()).unwrap();
+    let waiting = &output[baseline..];
+    assert!(waiting.contains("zcash_confirmations_pending"));
+    assert!(!waiting.contains("WARN"), "{waiting}");
+    worker.backend.reconcile_error = Some("private upstream error");
+    worker.tick(now + 7000).await.unwrap();
+    let status = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(status.funding_jobs[0].error_streak, 1);
+    assert!(
+        status.funding_jobs[0]
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("source_reconciliation_failed")
+    );
+    let output = std::fs::read_to_string(log.path()).unwrap();
+    let failed = &output[baseline..];
+    assert!(failed.contains("WARN"));
+    assert!(failed.contains("funding check failed"));
+    assert!(!failed.contains("private upstream error"));
+    assert!(!failed.contains("source_confirmation_pending"));
+    worker.backend.reconcile_error = None;
+    worker.tick(now + 8000).await.unwrap();
+    assert_eq!(worker.backend.sends, 1);
+    let status = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(
+        status.funding_jobs[0].phase,
+        x402_treazury::rotation::store::funding::FundingPhase::Swapping
+    );
     drop(worker);
     task.await.unwrap();
 }

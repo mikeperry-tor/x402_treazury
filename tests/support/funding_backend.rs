@@ -364,3 +364,46 @@ fn permit_denial_remains_actionable_without_leaking_registry_errors() {
     assert!(message.contains("inspect qualification registry"));
     assert!(!message.contains("private registry path"));
 }
+
+#[test]
+fn only_expected_confirmation_and_credit_waits_are_classified_as_progress() {
+    let credit = |reason| {
+        anyhow::anyhow!("{}", reason)
+            .context(super::super::base::VerificationStage(
+                "funding credit persistence",
+            ))
+            .context("base_credit_unverified")
+    };
+    assert_eq!(
+        waiting_reason(
+            &credit("insufficient confirmed credit"),
+            &FundingPhase::VerifyingCredit
+        ),
+        Some("base_credit_pending")
+    );
+    for reason in [
+        "disk failure",
+        "candidate role changed",
+        "confirmation disagrees with wallet sync",
+        "treasury_sync_stale",
+    ] {
+        assert_eq!(
+            waiting_reason(&credit(reason), &FundingPhase::VerifyingCredit),
+            None
+        );
+        assert_eq!(
+            waiting_reason(
+                &anyhow::anyhow!("{}", reason),
+                &FundingPhase::DepositPending
+            ),
+            None
+        );
+    }
+    assert_eq!(
+        waiting_reason(
+            &anyhow::anyhow!("insufficient confirmed credit"),
+            &FundingPhase::VerifyingCredit
+        ),
+        None
+    );
+}

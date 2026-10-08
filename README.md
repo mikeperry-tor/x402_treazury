@@ -2,10 +2,10 @@
 
 **Privacy-enhanced x402 payments for AI agents.**
 
-X402 micropayments have a privacy problem. When you reuse your payment wallet
-across multiple agents, your wallet source address lists all their API calls on
+[x402 micropayments](https://x402.org/) have a privacy problem. When you reuse your
+payment wallet across multiple agents, your wallet source address lists all their API calls on
 the public Base blockchain. Connecting directly to API services also exposes your
-network address to these API providers and Coinbase infrastructure.
+network address to these API providers and to Coinbase infrastructure.
 
 **x402_treazury** reduces that linkability with **Zcash-funded rotating wallets** and **Tor isolation tied to each payment identity**. You choose which providers share a wallet and which stay separate.
 
