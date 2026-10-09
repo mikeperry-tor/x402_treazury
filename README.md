@@ -325,6 +325,12 @@ with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage gu
 Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
 entire large catalog to the agent.
 
+For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to
+advertise search/call wrappers instead of every API schema. Agents retrieve full
+descriptions and schemas as needed; filters and payment routing still apply.
+The default remains eager listing. This also works without source management;
+see [on-demand discovery](docs/agent-sources.md).
+
 ### Let agents discover and add APIs
 
 Set `source_management = true` on each HTTP endpoint that should support agent-added

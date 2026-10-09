@@ -1,5 +1,29 @@
 # Agent API discovery and source management
 
+For a smaller initial MCP tool list, set `discover_on_demand = true` in a
+`[servers.NAME]` table. This is independent of `source_management` and defaults to
+`false`. Static listeners advertise just `x402_treazury_tools_search` and
+`x402_treazury_tool_call`; listeners with source management enabled advertise all
+five management tools. API tools, including subsequently registered tools, stay
+out of `tools/list`.
+
+Agents search the listener's catalog with `x402_treazury_tools_search`, receive
+complete descriptions and input schemas, and invoke a result through
+`x402_treazury_tool_call` using its opaque `tool_ref` and `arguments`. On-demand
+search defaults to five results per page; `query`, `limit` (1–100), and `cursor`
+support targeted discovery and pagination. A broad search can still return large
+schemas. Provider instructions remain available in the initialization response.
+
+This setting changes tool advertising, not loading or access: startup still loads
+the complete catalog, filters and wallet bindings still apply, and existing direct
+tool calls remain supported. It grants no source registration permissions and
+requires no source-management wallet or registry for static listeners. References
+are bound to the listener and process, and dynamic references also bind the source
+revision; search again after a restart or stale-reference error. Inspection and
+qualification retain the complete inventory and validate full schemas. Restart the
+server and reconnect clients after changing the setting to refresh cached lists.
+
+
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
 search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.

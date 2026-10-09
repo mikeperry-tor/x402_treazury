@@ -166,6 +166,13 @@ authentication and Host checking is permitted. Malformed/missing Host headers
 and HTTP/2 authority validation still follow the MCP library's protocol rules.
 `config show` exposes each server's settings without starting listeners.
 
+To reduce the initial tool context for a listener, add `discover_on_demand = true`
+to its `[servers.NAME]` table (default: `false`). It advertises only search/call
+wrappers, or all five management wrappers when `source_management = true`.
+Search returns complete tool descriptions and schemas, five results at a time by
+default. Filters, payment routing, source permissions, and startup catalog loading
+are unchanged. See [on-demand discovery](agent-sources.md) for the call workflow.
+
 To disable HTTP authentication for one listener, set `auth = false` and omit
 `bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own
 authentication policy. Standalone HTTP uses `--transport http --no-auth`; this

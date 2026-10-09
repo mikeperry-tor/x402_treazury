@@ -134,28 +134,13 @@ impl Manager {
         Ok(vec![owner.into()])
     }
     pub fn tool_reference(&self, owner: &str, bound: &BoundTool) -> String {
-        hash(
-            &serde_json::to_vec(&(
-                self.catalog.instance(),
-                owner,
-                &bound.tool.name,
-                &bound.source,
-            ))
-            .expect("serializable tool reference"),
-        )
+        catalog_reference(&self.catalog, owner, bound)
     }
     pub fn find_reference(&self, owner: &str, reference: &str) -> Result<BoundTool> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        self.catalog
-            .read()
-            .views
-            .get(owner)
-            .into_iter()
-            .flatten()
-            .find(|b| self.tool_reference(owner, b) == reference)
-            .cloned()
-            .context("tool_reference_stale_or_unknown: search tools again")
+        find_catalog_reference(&self.catalog, owner, reference)
     }
+
     pub fn directory(&self, owner: &str) -> Result<BoundTool> {
         ensure!(self.enabled(owner), "source_management_disabled");
         let wallet = policy::wallet(&self.policy, &self.listeners[owner]);
@@ -527,20 +512,7 @@ impl Manager {
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
-        let q: Query = serde_json::from_value(args)?;
-        let snapshot = self.catalog.read();
-        let values=snapshot.views.get(owner).into_iter().flatten().filter(|t|q.source_id.as_ref().is_none_or(|id|t.source.as_ref().is_some_and(|s|&s.0==id))).filter(|t|q.query.as_ref().is_none_or(|q|format!("{} {}",t.tool.name,t.tool.description).to_lowercase().contains(&q.to_lowercase()))).map(|t|json!({"tool_ref":self.tool_reference(owner,t),"tool_id":t.tool.name,"source_id":t.source.as_ref().map(|s|&s.0),"revision":t.source.as_ref().map_or(0,|s|s.1),"description":t.tool.description,"input_schema":t.tool.input_schema})).collect();
-        page(
-            values,
-            &q,
-            snapshot.generation,
-            &format!(
-                "{}:{owner}:{name}:{:?}:{:?}",
-                self.catalog.instance(),
-                q.source_id,
-                q.query
-            ),
-        )
+        search_catalog(&self.catalog, owner, name, args)
     }
 
     async fn commit(
@@ -628,6 +600,80 @@ impl Manager {
         })
         .await?
     }
+}
+pub(crate) fn catalog_reference(catalog: &CatalogState, owner: &str, bound: &BoundTool) -> String {
+    hash(
+        &serde_json::to_vec(&(catalog.instance(), owner, &bound.tool.name, &bound.source))
+            .expect("serializable tool reference"),
+    )
+}
+pub(crate) fn find_catalog_reference(
+    catalog: &CatalogState,
+    owner: &str,
+    reference: &str,
+) -> Result<BoundTool> {
+    let snapshot = catalog.read();
+    snapshot
+        .views
+        .get(owner)
+        .into_iter()
+        .flatten()
+        .find(|b| catalog_reference(catalog, owner, b) == reference)
+        .cloned()
+        .context("tool_reference_stale_or_unknown: search tools again")
+}
+pub(crate) fn search_catalog(
+    catalog: &CatalogState,
+    owner: &str,
+    name: &str,
+    args: Value,
+) -> Result<Value> {
+    ensure!(
+        serde_json::to_vec(&args)?.len() <= 65536,
+        "management_request_too_large"
+    );
+    let q: Query = serde_json::from_value(args)?;
+    let snapshot = catalog.read();
+    let query = q.query.as_ref().map(|q| q.to_lowercase());
+    let values = snapshot
+        .views
+        .get(owner)
+        .into_iter()
+        .flatten()
+        .filter(|t| {
+            q.source_id
+                .as_ref()
+                .is_none_or(|id| t.source.as_ref().is_some_and(|s| &s.0 == id))
+        })
+        .filter(|t| {
+            query.as_ref().is_none_or(|q| {
+                format!("{} {}", t.tool.name, t.tool.description)
+                    .to_lowercase()
+                    .contains(q)
+            })
+        })
+        .map(|t| {
+            json!({
+                "tool_ref": catalog_reference(catalog, owner, t),
+                "tool_id": t.tool.name,
+                "source_id": t.source.as_ref().map(|s| &s.0),
+                "revision": t.source.as_ref().map_or(0, |s| s.1),
+                "description": t.tool.description,
+                "input_schema": t.tool.input_schema
+            })
+        })
+        .collect();
+    page(
+        values,
+        &q,
+        snapshot.generation,
+        &format!(
+            "{}:{owner}:{name}:{:?}:{:?}",
+            catalog.instance(),
+            q.source_id,
+            q.query
+        ),
+    )
 }
 fn epoch() -> u64 {
     std::time::SystemTime::now()

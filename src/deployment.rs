@@ -82,6 +82,9 @@ pub struct ListenerConfig {
     pub wallet: Option<String>,
     #[serde(default)]
     pub source_management: bool,
+    /// Advertise discovery wrappers instead of every API schema.
+    #[serde(default)]
+    pub discover_on_demand: bool,
     #[serde(default)]
     pub sources: Vec<String>,
     #[serde(default)]
@@ -103,6 +106,7 @@ struct Source {
 }
 #[derive(Serialize)]
 pub struct Inventory {
+    pub discover_on_demand: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unavailable_sources: Vec<String>,
     pub server: String,
@@ -480,6 +484,7 @@ impl Deployment {
             .servers
             .iter()
             .map(|(name, s)| Inventory {
+                discover_on_demand: s.discover_on_demand,
                 unavailable_sources: s
                     .sources
                     .iter()
@@ -490,7 +495,10 @@ impl Deployment {
                 listen: s.listen,
                 default_wallet: s.wallet.clone(),
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
-                management_tools: crate::discovery::tools::definitions(s.source_management),
+                management_tools: crate::discovery::tools::listener_definitions(
+                    s.source_management,
+                    s.discover_on_demand,
+                ),
                 tools: self.selected[name]
                     .iter()
                     .map(|(source, tool)| InventoryTool {
@@ -823,6 +831,7 @@ impl Deployment {
                 cfg.max_response_chars,
             );
             server.name = name.clone();
+            server.discover_on_demand = cfg.discover_on_demand;
             servers.insert(name.clone(), server);
         }
         servers
@@ -963,7 +972,9 @@ impl Deployment {
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
             let tools = server.catalog.read().views["default"].clone();
-            if self.config.source_management.is_some() {
+            if self.config.source_management.is_some()
+                || self.config.servers[name].discover_on_demand
+            {
                 ensure!(
                     tools
                         .iter()

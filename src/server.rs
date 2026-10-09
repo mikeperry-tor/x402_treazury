@@ -23,6 +23,7 @@ pub struct Server {
     pub work: work::Work,
     pub catalog: Arc<CatalogState>,
     pub discovery: Option<Arc<crate::discovery::Manager>>,
+    pub discover_on_demand: bool,
     pub catalog_server: String,
     pub name: String,
     pub host_policy: host::HostPolicy,
@@ -55,6 +56,7 @@ impl Server {
             work: Default::default(),
             host_policy: Default::default(),
             discovery: None,
+            discover_on_demand: false,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
                 generation: 0,
                 views: BTreeMap::from([("default".into(), catalog_state::bind(tools))]),
@@ -84,6 +86,35 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
+        if self.discover_on_demand {
+            match name {
+                "x402_treazury_tools_search" => {
+                    let mut args = args.clone();
+                    args.entry("limit".to_owned())
+                        .or_insert(serde_json::json!(5));
+                    let result = crate::discovery::search_catalog(
+                        &self.catalog,
+                        &self.catalog_server,
+                        name,
+                        serde_json::Value::Object(args),
+                    )?;
+                    return Ok(crate::output::ToolOutput::text(serde_json::to_string(
+                        &result,
+                    )?));
+                }
+                "x402_treazury_tool_call" => {
+                    let call: crate::discovery::Call =
+                        serde_json::from_value(serde_json::Value::Object(args.clone()))?;
+                    let bound = crate::discovery::find_catalog_reference(
+                        &self.catalog,
+                        &self.catalog_server,
+                        &call.tool_ref,
+                    )?;
+                    return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
+                }
+                _ => {}
+            }
+        }
         if let Some(manager) = &self.discovery
             && name.starts_with("x402_treazury_")
         {
@@ -124,11 +155,14 @@ impl Server {
         Ok(self.limit(text))
     }
     fn management_tools(&self) -> Vec<Tool> {
-        self.discovery
-            .as_ref()
-            .map(|m| crate::discovery::tools::definitions(m.enabled(&self.catalog_server)))
-            .unwrap_or_default()
+        crate::discovery::tools::listener_definitions(
+            self.discovery
+                .as_ref()
+                .is_some_and(|m| m.enabled(&self.catalog_server)),
+            self.discover_on_demand,
+        )
     }
+
     fn limit(&self, mut output: crate::output::ToolOutput) -> crate::output::ToolOutput {
         let text = output.text;
         output.text = match self.max_response_chars {
@@ -150,7 +184,11 @@ impl Server {
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
-        info.instructions = Some(pricing_instructions(self.instructions.as_deref()));
+        let mut instructions = pricing_instructions(self.instructions.as_deref());
+        if self.discover_on_demand {
+            instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a small limit (default 5) to read complete descriptions and input schemas, then pass the returned tool_ref and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
+        }
+        info.instructions = Some(instructions);
         info.server_info = Implementation::new(self.name.clone(), env!("CARGO_PKG_VERSION"));
         info
     }
@@ -170,14 +208,16 @@ impl ServerHandler for Server {
     ) -> Result<ListToolsResult, McpError> {
         let snapshot = self.catalog.read();
         let mut tools = self.management_tools();
-        tools.extend(
-            snapshot
-                .views
-                .get(&self.catalog_server)
-                .into_iter()
-                .flatten()
-                .map(|t| Self::definition(&t.tool)),
-        );
+        if !self.discover_on_demand {
+            tools.extend(
+                snapshot
+                    .views
+                    .get(&self.catalog_server)
+                    .into_iter()
+                    .flatten()
+                    .map(|t| Self::definition(&t.tool)),
+            );
+        }
         let dynamic = self
             .discovery
             .as_ref()

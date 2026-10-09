@@ -1725,3 +1725,80 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
     http_task.abort();
     vendor_task.abort();
 }
+
+#[tokio::test]
+async fn on_demand_management_keeps_five_wrappers_and_scoped_dynamic_search() {
+    let m = manager(None).await;
+    add(&m, "demo", "", "").await;
+    let mut writer = server(&m, "writer");
+    writer.discover_on_demand = true;
+    let mut reader = server(&m, "reader");
+    reader.discover_on_demand = true;
+    let (base, task) = listen(crate::server::http_app(writer, "test-token".into())).await;
+    let (other, other_task) = listen(crate::server::http_app(reader, "test-token".into())).await;
+    let listed = rpc(&base, "test-token", "tools/list", json!({})).await;
+    assert_eq!(listed["tools"].as_array().unwrap().len(), 5);
+    assert!(
+        listed["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["name"].as_str().unwrap().starts_with("x402_treazury_"))
+    );
+    let found = call(&base, "x402_treazury_tools_search", json!({})).await;
+    let items = found["structuredContent"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    for item in items {
+        let bound = m
+            .find_reference("writer", item["tool_ref"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(item["input_schema"], bound.tool.input_schema);
+        assert_eq!(item["description"], bound.tool.description);
+    }
+    let empty = call(&other, "x402_treazury_tools_search", json!({})).await;
+    assert!(
+        empty["structuredContent"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let denied = call(
+        &other,
+        "x402_treazury_tool_call",
+        json!({"tool_ref":items[0]["tool_ref"],"arguments":{}}),
+    )
+    .await;
+    assert_eq!(denied["isError"], true);
+    let mut snapshot = (*m.catalog.read()).clone();
+    let template = snapshot.views["writer"][0].clone();
+    snapshot.views.insert(
+        "writer".into(),
+        (0..6)
+            .map(|i| {
+                let mut tool = template.clone();
+                tool.tool.name = format!("fixture_{i}");
+                tool
+            })
+            .collect(),
+    );
+    snapshot.generation += 1;
+    m.catalog.publish(snapshot);
+    let page = call(&base, "x402_treazury_tools_search", json!({})).await;
+    assert_eq!(
+        page["structuredContent"]["items"].as_array().unwrap().len(),
+        5
+    );
+    let next = call(
+        &base,
+        "x402_treazury_tools_search",
+        json!({"cursor":page["structuredContent"]["next_cursor"]}),
+    )
+    .await;
+    assert_eq!(
+        next["structuredContent"]["items"].as_array().unwrap().len(),
+        1
+    );
+    assert!(next["structuredContent"]["next_cursor"].is_null());
+    task.abort();
+    other_task.abort();
+}

@@ -974,3 +974,98 @@ async fn host_policy_is_listener_local_and_visible_in_config() {
     );
     assert!(Deployment::show_config(&path).await.is_err());
 }
+
+#[tokio::test]
+async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() {
+    let (base, state, vendor_task) = vendor("lazy", "/api").await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("alpha.json"), spec(&base).to_string()).unwrap();
+    std::fs::write(dir.path().join("beta.json"), spec(&base).to_string()).unwrap();
+    let text = configuration()
+        .replace("[sources.alpha]", "[sources.alpha]\nprobe_pricing=false")
+        .replace("[sources.beta]", "[sources.beta]\nprobe_pricing=false")
+        .replace(
+            "[servers.research]",
+            "[servers.research]\ndiscover_on_demand=true",
+        );
+    let path = write_config(dir.path(), &text);
+    let deployment = Deployment::load(&path).await.unwrap();
+    let inventory = deployment.inventory();
+    let research = inventory.iter().find(|i| i.server == "research").unwrap();
+    assert!(research.discover_on_demand);
+    assert_eq!(research.management_tools.len(), 2);
+    assert_eq!(research.tools.len(), 3);
+    let running = deployment.bind(&env()).await.unwrap();
+    let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let http = reqwest::Client::new();
+    let lazy = addresses["research"];
+    let ordinary = addresses["beta_only"];
+    let listed = rpc(&http, lazy, "research-secret", "tools/list", json!({})).await;
+    let names: Vec<_> = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["x402_treazury_tools_search", "x402_treazury_tool_call"]
+    );
+    let ordinary_list = rpc(&http, ordinary, "beta-secret", "tools/list", json!({})).await;
+    assert_eq!(ordinary_list["result"]["tools"][0]["name"], "beta_pay");
+    let search = rpc(
+        &http,
+        lazy,
+        "research-secret",
+        "tools/call",
+        json!({"name":"x402_treazury_tools_search","arguments":{"query":"alpha_","limit":1}}),
+    )
+    .await;
+    let first = &search["result"]["structuredContent"];
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    let cursor = first["next_cursor"].clone();
+    assert!(cursor.is_string());
+    let second = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tools_search","arguments":{"query":"alpha_","limit":1,"cursor":cursor}})).await;
+    let items = [
+        first["items"][0].clone(),
+        second["result"]["structuredContent"]["items"][0].clone(),
+    ];
+    for item in &items {
+        let expected = research
+            .tools
+            .iter()
+            .find(|t| t.tool.name == item["tool_id"])
+            .unwrap();
+        assert_eq!(item["description"], expected.tool.description);
+        assert_eq!(item["input_schema"], expected.tool.input_schema);
+        assert_ne!(item["tool_id"], "alpha_hidden");
+    }
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
+    let pay = items.iter().find(|t| t["tool_id"] == "alpha_pay").unwrap();
+    let bad = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_source_add","arguments":{"spec_url":"https://example.com/spec"}})).await;
+    assert_eq!(bad["result"]["isError"], true);
+    let cross = rpc(&http,ordinary,"beta-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":pay["tool_ref"],"arguments":{}}})).await;
+    assert_eq!(cross["result"]["isError"], true);
+    let result = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":pay["tool_ref"],"arguments":{"q":"kept"}}})).await;
+    assert_ne!(result["result"]["isError"], true);
+    let paid: Value =
+        serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let key: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    assert_eq!(
+        paid["payer"].as_str().unwrap().to_lowercase(),
+        key.address().to_string().to_lowercase()
+    );
+    assert_eq!(paid["query"], "q=kept");
+    let expensive = items
+        .iter()
+        .find(|t| t["tool_id"] == "alpha_expensive")
+        .unwrap();
+    let denied = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":expensive["tool_ref"],"arguments":{}}})).await;
+    assert_eq!(denied["result"]["isError"], true);
+    assert_eq!(state.signed.load(Ordering::SeqCst), 1);
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    vendor_task.abort();
+}

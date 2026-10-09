@@ -34,8 +34,12 @@ impl Client {
             !response.headers().contains_key("mcp-session-id"),
             "qualification requires stateless MCP"
         );
-        let content_type = response.headers().get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
         let mut body = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -115,6 +119,51 @@ impl Client {
             complete,
             "MCP inventory exceeds 100-page qualification limit; inventory is incomplete"
         );
+        if expected["discover_on_demand"] == true {
+            let mut cursor = Value::Null;
+            let mut seen = BTreeSet::new();
+            let mut complete = false;
+            for page in 0..100 {
+                let mut arguments = json!({"limit":100});
+                if !cursor.is_null() {
+                    arguments["cursor"] = cursor.clone();
+                }
+                let (_, result) = self
+                    .rpc(
+                        &format!("qualification-discovery-{page}"),
+                        "tools/call",
+                        json!({"name":"x402_treazury_tools_search","arguments":arguments}),
+                        limit,
+                    )
+                    .await?;
+                ensure!(result["isError"] != true, "MCP discovery failed");
+                let page = &result["structuredContent"];
+                for tool in page["items"]
+                    .as_array()
+                    .context("MCP discovery items missing")?
+                {
+                    ensure!(
+                        actual.len() < 10000,
+                        "MCP discovered inventory exceeds 10000 tools"
+                    );
+                    let name = tool["tool_id"]
+                        .as_str()
+                        .context("discovered tool missing name")?;
+                    ensure!(actual.insert(name.to_owned(), json!({"description":tool["description"],"schema":tool["input_schema"]})).is_none(),
+                        "duplicate discovered or eagerly advertised tool");
+                }
+                cursor = page["next_cursor"].clone();
+                if cursor.is_null() {
+                    complete = true;
+                    break;
+                }
+                ensure!(
+                    cursor.is_string() && seen.insert(cursor.as_str().unwrap().to_owned()),
+                    "invalid/repeated discovery cursor"
+                );
+            }
+            ensure!(complete, "MCP discovered inventory exceeds 100-page limit");
+        }
         let mut prepared = BTreeMap::new();
         for tool in expected["tools"]
             .as_array()
@@ -188,16 +237,23 @@ mod tests {
         let api = json!({"name":"api_read","description":"read","inputSchema":{"type":"object","properties":{}}});
         let tools = std::sync::Arc::new(std::sync::Mutex::new(vec![api.clone(), local.clone()]));
         let state = tools.clone();
-        let app =
-            axum::Router::new().route(
-                "/mcp",
-                axum::routing::post(move |axum::Json(v): axum::Json<Value>| {
-                    let tools = state.lock().unwrap().clone();
-                    async move {
-                        axum::Json(json!({"jsonrpc":"2.0","id":v["id"],"result":{"tools":tools}}))
-                    }
-                }),
-            );
+        let discovered = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let discovery_state = discovered.clone();
+        let app = axum::Router::new().route(
+            "/mcp",
+            axum::routing::post(move |axum::Json(v): axum::Json<Value>| {
+                let tools = state.lock().unwrap().clone();
+                let items = discovery_state.lock().unwrap().clone();
+                async move {
+                    let result = if v["method"] == "tools/call" {
+                        json!({"structuredContent":{"items":items,"next_cursor":null}})
+                    } else {
+                        json!({"tools":tools})
+                    };
+                    axum::Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
+                }
+            }),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -227,6 +283,19 @@ mod tests {
             .unwrap()
             .push(json!({"name":"unexpected","description":"extra","inputSchema":{}}));
         assert!(client.check_inventory(&expected, 10000).await.is_err());
+        let mut lazy = expected.clone();
+        lazy["discover_on_demand"] = json!(true);
+        *tools.lock().unwrap() = vec![expected["management_tools"][0].clone()];
+        let item =
+            json!({"tool_id":"api_read","description":"read","input_schema":api["inputSchema"]});
+        *discovered.lock().unwrap() = vec![item.clone()];
+        client.check_inventory(&lazy, 10000).await.unwrap();
+        discovered.lock().unwrap()[0]["input_schema"] = json!({});
+        assert!(client.check_inventory(&lazy, 10000).await.is_err());
+        discovered.lock().unwrap().clear();
+        assert!(client.check_inventory(&lazy, 10000).await.is_err());
+        *discovered.lock().unwrap() = vec![item.clone(), item];
+        assert!(client.check_inventory(&lazy, 10000).await.is_err());
         server.abort();
     }
 }

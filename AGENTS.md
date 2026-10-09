@@ -276,6 +276,12 @@ and [the runtime architecture](docs/architecture.md).
   remove them. Dynamic names contain the full UUID under `dyn_`. Both prefixes are
   reserved in participating deployments. Every direct/fallback call captures one
   snapshot. Fallback validates an opaque endpoint/process/revision-bound tool reference before HTTP.
+- Optional listener `discover_on_demand=true` advertises only search/call wrappers
+  (all five wrappers when source management is enabled), hiding API definitions
+  from tools/list. Search retains full schemas/descriptions and defaults to five
+  results in this mode. It grants no registration permissions and preserves full
+  startup/qualification inventories, filters and bound payment clients. Default
+  eager listing and direct invocation remain supported.
 - HTTP is stateless: expose stable search/call tools, without advertising list-change
   notifications. Standalone stdio has no dynamic management. Cursors bind to process
   catalog instance, generation and caller/query. The five tools are sources_search,

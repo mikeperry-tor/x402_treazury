@@ -93,13 +93,13 @@ max_conversion_overhead_percent = 5
 [sources.social]
 extends = "../../providers/socialfetch.toml"
 instructions_text = "Research people and communities using the selected SocialFetch platforms. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live payment challenge controls the charge. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
-tags = ["Bluesky", "Facebook", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter"]
+tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Yelp"]
 exclude_tools = ["socialfetch_help"]
 
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
 instructions_text = "Research websites, developer communities, business reviews and Reddit using this SocialFetch subset. This source belongs to the web research context; social-platform queries on the social listener use a separate payment wallet. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live challenge controls the charge. Preserve argument casing, lookupStatus, partial-result and provenance fields. Use Exa for broader web discovery and page retrieval."
-tags = ["Web", "Reddit", "Hacker News", "Github", "Yelp"]
+tags = ["Web"]
 exclude_tools = ["socialfetch_help"]
 
 # Exa is reused unchanged across web and company listeners. Its complete
@@ -216,6 +216,7 @@ instructions_text = "US federal grant research: search Grants.gov opportunities,
 # Independent MCP endpoints let an agent choose the appropriate privacy context.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
 [servers.web]
+# discover_on_demand = true # advertise search/call wrappers; fetch schemas as needed
 listen = "127.0.0.1:6337"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "web"

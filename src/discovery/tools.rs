@@ -21,3 +21,17 @@ pub fn definitions(enabled: bool) -> Vec<Tool> {
         ("x402_treazury_tool_call", "Invoke a tool_ref returned by tools_search with its arguments. Uses normal payment admission. Stale references fail before HTTP; search again after an operator refresh or restart.".into(), object(json!({"tool_ref":{"type":"string"},"arguments":{"type":"object","additionalProperties":true}}), &["tool_ref","arguments"])),
     ].into_iter().map(|(name, description, schema)| Tool::new(name,description,Arc::new(schema.as_object().unwrap().clone()))).collect()
 }
+
+/// Listing mode never grants source registration or paid directory permissions.
+pub fn listener_definitions(source_management: bool, discover_on_demand: bool) -> Vec<Tool> {
+    definitions(source_management || discover_on_demand)
+        .into_iter()
+        .filter(|t| {
+            source_management
+                || matches!(
+                    t.name.as_ref(),
+                    "x402_treazury_tools_search" | "x402_treazury_tool_call"
+                )
+        })
+        .collect()
+}
