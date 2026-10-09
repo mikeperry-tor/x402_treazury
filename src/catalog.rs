@@ -389,10 +389,10 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
     // The relay has already validated complete JSON before caching the response.
     let document = parse_document(&response.body)?;
     if let Some(slot) = relay_slot {
-        let metadata = crate::http_cache::Metadata::from_headers(
+        let metadata = crate::http_cache::Metadata::from_relay_headers(
             &response.headers,
             response.cache_delay(),
-            None,
+            true,
         );
         tracing::info!(
             cache = "relay_response",
@@ -450,7 +450,7 @@ pub(crate) async fn load_json_cached(
             return Ok(cached.expect("fresh cached document").1);
         } else {
             let started = std::time::Instant::now();
-            let request = http.get(source);
+            let request = crate::http_cache::discovery_get(http, source);
             let conditional = cached
                 .as_ref()
                 .map(|(entry, _)| entry)
@@ -469,8 +469,10 @@ pub(crate) async fn load_json_cached(
                 conditional = conditional.is_some(),
                 "Catalog fetching origin"
             );
-            let request =
-                conditional.map_or_else(|| http.get(source), |e| e.metadata.conditional(request));
+            let request = conditional.map_or_else(
+                || crate::http_cache::discovery_get(http, source),
+                |e| e.metadata.conditional(request),
+            );
             let response = request
                 .send()
                 .await
@@ -493,7 +495,7 @@ pub(crate) async fn load_json_cached(
                     ))
                     .context(LoadStage::Headers);
                 }
-                let metadata = crate::http_cache::Metadata::from_headers(
+                let metadata = crate::http_cache::Metadata::from_catalog_headers(
                     response.headers(),
                     started.elapsed(),
                     Some(&entry.metadata),
@@ -528,7 +530,7 @@ pub(crate) async fn load_json_cached(
                     .map_err(reqwest::Error::without_url)
                     .context(LoadStage::Headers)?;
                 let metadata = if response.status() == reqwest::StatusCode::OK {
-                    crate::http_cache::Metadata::from_headers(
+                    crate::http_cache::Metadata::from_catalog_headers(
                         response.headers(),
                         started.elapsed(),
                         None,

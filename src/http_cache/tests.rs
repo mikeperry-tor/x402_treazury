@@ -23,18 +23,13 @@ fn headers(values: &[(&str, &str)]) -> HeaderMap {
         .collect()
 }
 #[test]
-fn conservative_http_freshness_and_validators() {
+fn private_http_freshness_and_validators() {
     let m = |h: &[(&str, &str)]| Metadata::from_headers(&headers(h), Duration::ZERO, None);
     assert!(m(&[]).is_none());
     assert!(m(&[("cache-control", "extension=\"foo,max-age=600\"")]).is_none());
     assert!(m(&[("cache-control", "max-age=\"600")]).is_none());
     assert!(m(&[("cache-control", "max-age=\"600\"")]).unwrap().fresh());
-    for directive in [
-        "no-store, max-age=60",
-        "private, max-age=60",
-        "max-age=oops",
-        "max-age=10, max-age=20",
-    ] {
+    for directive in ["no-store, max-age=60", "max-age=oops"] {
         assert!(m(&[("cache-control", directive)]).is_none());
     }
     assert!(!m(&[("etag", "\"v1\"")]).unwrap().fresh());
@@ -57,8 +52,16 @@ fn conservative_http_freshness_and_validators() {
         .fresh()
     );
     assert!(m(&[("cache-control", "max-age=60")]).unwrap().fresh());
-    assert!(m(&[("cache-control", "max-age=60"), ("vary", "accept-encoding")]).is_none());
-    assert!(m(&[("cache-control", "max-age=60"), ("set-cookie", "private")]).is_none());
+    assert!(
+        m(&[("cache-control", "max-age=60"), ("vary", "accept-encoding")])
+            .unwrap()
+            .fresh()
+    );
+    assert!(
+        m(&[("cache-control", "max-age=60"), ("set-cookie", "private")])
+            .unwrap()
+            .fresh()
+    );
     let expires = httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(120));
     assert!(m(&[("expires", &expires)]).unwrap().fresh());
     let mut rollback = m(&[("cache-control", "max-age=60")]).unwrap();
@@ -126,6 +129,29 @@ async fn handler(State(state): State<Arc<Mutex<Origin>>>, request: Request) -> R
             )
                 .into_response()
         }
+        9 => (axum::http::StatusCode::OK, "{\"value\":9}").into_response(),
+        10 => (
+            axum::http::StatusCode::OK,
+            [
+                ("cache-control", "private, max-age=600"),
+                ("vary", "Accept-Encoding, Cookie, User-Agent"),
+                ("set-cookie", "private-cookie=secret"),
+            ],
+            "{\"value\":10}",
+        )
+            .into_response(),
+        11 => (
+            axum::http::StatusCode::OK,
+            [("cache-control", "no-cache"), ("etag", "\"one\"")],
+            "{\"value\":11}",
+        )
+            .into_response(),
+        12 => (
+            axum::http::StatusCode::OK,
+            [("cache-control", "max-age=600"), ("vary", "*")],
+            "{\"value\":12}",
+        )
+            .into_response(),
         _ => (
             axum::http::StatusCode::OK,
             [("cache-control", "max-age=600")],
@@ -557,9 +583,7 @@ async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_
 fn cache_policy_labels_explain_conservative_rejections() {
     for (values, expected) in [
         (vec![], "no_cache_headers"),
-        (vec![("vary", "secret-header")], "vary_unsupported"),
-        (vec![("set-cookie", "private-cookie")], "set_cookie"),
-        (vec![("cache-control", "private")], "private"),
+        (vec![("vary", "*")], "vary_star"),
         (vec![("cache-control", "no-store")], "no_store"),
         (
             vec![("cache-control", "max-age=bad")],
@@ -580,4 +604,130 @@ fn cache_policy_labels_explain_conservative_rejections() {
             expected
         );
     }
+}
+
+#[test]
+fn catalog_fallback_is_24_hours_and_never_overrides_explicit_policy() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        for values in [
+            vec![],
+            vec![("etag", "\"one\"")],
+            vec![("cache-control", "private")],
+            vec![("last-modified", "Sun, 06 Nov 1994 08:49:37 GMT")],
+        ] {
+            let h = headers(&values);
+            let m = Metadata::from_catalog_headers(&h, Duration::ZERO, None).unwrap();
+            assert!(m.heuristic && m.fresh());
+            assert_eq!(m.expires - m.stored, 86399);
+            assert_eq!(Metadata::policy_label(&h, Some(&m)), "heuristic_fresh");
+        }
+    });
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(logs.contains("INFO") && logs.contains("fallback_ttl_seconds=86400"));
+    for values in [
+        vec![("cache-control", "max-age=0, must-revalidate")],
+        vec![("cache-control", "no-cache")],
+        vec![("expires", "0")],
+    ] {
+        let m = Metadata::from_catalog_headers(&headers(&values), Duration::ZERO, None).unwrap();
+        assert!(!m.heuristic && !m.fresh());
+    }
+    assert!(
+        Metadata::from_catalog_headers(
+            &headers(&[("cache-control", "no-store")]),
+            Duration::ZERO,
+            None
+        )
+        .is_none()
+    );
+    assert!(
+        Metadata::from_headers(&HeaderMap::new(), Duration::ZERO, None).is_none(),
+        "pricing has no heuristic lifetime"
+    );
+}
+
+#[tokio::test]
+async fn headerless_and_private_vary_catalogs_reuse_disk_without_cookies() {
+    for mode in [9, 10, 12] {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, origin, task) = fixture().await;
+        origin.lock().unwrap().mode = mode;
+        let mut cfg = config(dir.path());
+        cfg.spec = url.clone();
+        for _ in 0..2 {
+            // New client and load: exercise persisted reuse, not a process cache.
+            assert_eq!(
+                catalog::load_json_discovery(&cfg, &client(&url))
+                    .await
+                    .unwrap()["value"],
+                mode
+            );
+        }
+        {
+            let origin = origin.lock().unwrap();
+            assert_eq!(origin.calls.len(), if mode == 12 { 2 } else { 1 });
+            for h in &origin.calls {
+                assert_eq!(h["accept-encoding"], "identity");
+                assert_eq!(h["accept"], "*/*");
+                assert!(!h.contains_key("cookie") && !h.contains_key("authorization"));
+            }
+        }
+        let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+        let saved = slot.read().await;
+        if mode == 12 {
+            assert!(saved.is_none());
+        } else {
+            let saved = saved.unwrap();
+            assert!(
+                !serde_json::to_string(&saved.metadata)
+                    .unwrap()
+                    .contains("private-cookie")
+            );
+        }
+        task.abort();
+    }
+}
+
+#[test]
+fn lists_extensions_private_variants_and_304_refresh_are_supported() {
+    let mut h = headers(&[
+        ("cache-control", "private, extension=\"ignored,max-age=0\""),
+        ("vary", "Accept-Encoding"),
+        ("set-cookie", "not-persisted"),
+    ]);
+    h.append("cache-control", "max-age=600".parse().unwrap());
+    h.append("vary", "Cookie".parse().unwrap());
+    let mut m = Metadata::from_catalog_headers(&h, Duration::ZERO, None).unwrap();
+    assert!(m.fresh());
+    assert!(!m.headers.contains_key("set-cookie"));
+    m.expires = 0;
+    let validation = headers(&[("vary", "Accept-Encoding, Cookie")]);
+    assert!(m.matches_validation(&validation));
+    let refreshed = Metadata::from_catalog_headers(&validation, Duration::ZERO, Some(&m)).unwrap();
+    assert!(refreshed.fresh() && !refreshed.heuristic);
+    let restrictive = Metadata::from_catalog_headers(
+        &headers(&[("cache-control", "max-age=60, max-age=0")]),
+        Duration::ZERO,
+        None,
+    )
+    .unwrap();
+    assert!(!restrictive.fresh());
+    assert!(
+        Metadata::from_catalog_headers(
+            &headers(&[("vary", "if-none-match")]),
+            Duration::ZERO,
+            None
+        )
+        .is_none()
+    );
+    assert!(
+        Metadata::from_relay_headers(&h, Duration::ZERO, true).is_none(),
+        "relay target request headers are unknown"
+    );
 }

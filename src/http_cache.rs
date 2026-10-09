@@ -19,6 +19,8 @@ pub(crate) struct Metadata {
     headers: std::collections::BTreeMap<String, String>,
     pub stored: u64,
     pub expires: u64,
+    #[serde(default)]
+    heuristic: bool,
     // Ephemeral provenance: never written back as authority to revalidate.
     #[serde(skip)]
     direct_reuse: bool,
@@ -41,29 +43,99 @@ fn date(value: &str) -> Option<u64> {
         .ok()
         .map(|d| d.as_secs())
 }
+/// RFC list splitting: commas inside quoted extension values are not directives.
+fn cache_directives(value: &str) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    let (mut quoted, mut escaped, mut start) = (false, false, 0);
+    for (i, ch) in value.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            ',' if !quoted => {
+                parts.push(&value[start..i]);
+                start = i + 1;
+            }
+            _ => (),
+        }
+    }
+    if quoted || escaped {
+        return None;
+    }
+    parts.push(&value[start..]);
+    Some(parts)
+}
+
+/// All cached direct/Tor GETs use one explicit, cookie-free header profile.
+/// The profile version is in the cache key. URL includes Host; no agent-supplied
+/// headers, cookies or authorization are attached. Other Vary fields are absent.
+pub(crate) fn discovery_get(http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    http.get(url)
+        .header("accept", "*/*")
+        .header("accept-encoding", "identity")
+}
+
 impl Metadata {
     pub fn from_headers(headers: &HeaderMap, delay: Duration, old: Option<&Self>) -> Option<Self> {
-        // Conservatively decline all variants and cookie-bearing responses. We do not
-        // persist request headers, cookies, challenges or arbitrary response headers.
-        if headers.contains_key("vary") || headers.contains_key("set-cookie") {
+        Self::parse(headers, delay, old, false)
+    }
+    pub fn from_catalog_headers(
+        headers: &HeaderMap,
+        delay: Duration,
+        old: Option<&Self>,
+    ) -> Option<Self> {
+        Self::parse(headers, delay, old, true)
+    }
+    /// Curl does not expose its effective target request headers. Do not infer
+    /// variant equivalence from its outer paid request or cache those variants.
+    pub fn from_relay_headers(headers: &HeaderMap, delay: Duration, catalog: bool) -> Option<Self> {
+        if headers.contains_key("vary") {
             return None;
         }
+        Self::parse(headers, delay, None, catalog)
+    }
+    fn parse(
+        headers: &HeaderMap,
+        delay: Duration,
+        old: Option<&Self>,
+        catalog: bool,
+    ) -> Option<Self> {
         let mut selected = old.map(|m| m.headers.clone()).unwrap_or_default();
+        // A validation response supplies a new age observation, not the age of
+        // the previous download. Synthesize its receipt Date if omitted.
+        if old.is_some() {
+            selected.remove("age");
+            selected.insert("date".into(), httpdate::fmt_http_date(SystemTime::now()));
+        }
         for name in [
             "cache-control",
+            "vary",
             "date",
             "age",
             "expires",
             "etag",
             "last-modified",
         ] {
-            let values = headers.get_all(name).iter().collect::<Vec<_>>();
-            if values.len() > 1 {
-                return None;
+            let values = headers
+                .get_all(name)
+                .iter()
+                .map(|v| v.to_str().ok())
+                .collect::<Option<Vec<_>>>()?;
+            if values.is_empty() {
+                continue;
             }
-            if let Some(value) = values.first() {
-                selected.insert(name.into(), value.to_str().ok()?.to_owned());
-            }
+            let value = if matches!(name, "cache-control" | "vary") {
+                values.join(", ")
+            } else {
+                if values.iter().any(|v| *v != values[0]) {
+                    return None;
+                }
+                values[0].to_owned()
+            };
+            selected.insert(name.into(), value);
         }
         if selected.values().map(String::len).sum::<usize>() > METADATA_LIMIT {
             tracing::warn!(
@@ -72,14 +144,26 @@ impl Metadata {
             );
             return None;
         }
+        if let Some(vary) = selected.get("vary") {
+            for name in vary.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                if name == "*" {
+                    return None;
+                }
+                let name = reqwest::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
+                // Conditional fields vary between a full GET and validation.
+                if name.as_str().starts_with("if-") {
+                    return None;
+                }
+            }
+        }
         let mut max_age = None;
         let mut validate = false;
-        for directive in selected
-            .get("cache-control")
-            .map(String::as_str)
-            .unwrap_or("")
-            .split(',')
-        {
+        for directive in cache_directives(
+            selected
+                .get("cache-control")
+                .map(String::as_str)
+                .unwrap_or(""),
+        )? {
             let (name, value) = directive
                 .trim()
                 .split_once('=')
@@ -87,24 +171,23 @@ impl Metadata {
                     (n.trim(), Some(v.trim()))
                 });
             match name.to_ascii_lowercase().as_str() {
-                "no-store" | "private" => return None,
+                "no-store" => return None,
                 "no-cache" => validate = true,
                 "max-age" => {
-                    if max_age.is_some() {
-                        return None;
-                    }
                     let value = value?;
-                    let value = if let Some(quoted) = value.strip_prefix('"') {
-                        quoted.strip_suffix('"')?
+                    let value = if let Some(value) = value.strip_prefix('"') {
+                        value.strip_suffix('"')?
                     } else {
                         value
                     };
-                    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                    if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
                         return None;
                     }
-                    max_age = Some(value.parse::<u64>().ok()?);
+                    let seconds = value.parse::<u64>().unwrap_or(u64::MAX);
+                    max_age = Some(max_age.map_or(seconds, |old: u64| old.min(seconds)));
                 }
-                _ if value.is_some_and(|v| v.contains('"')) => return None,
+                // This is a private cache; private and s-maxage do not forbid
+                // storage. Unknown extensions do not override known directives.
                 _ => (),
             }
         }
@@ -115,17 +198,27 @@ impl Metadata {
             .map(|v| v.parse::<u64>().ok())
             .transpose_option()?
             .unwrap_or(0);
-        let lifetime = max_age.or_else(|| {
-            selected
-                .get("expires")
-                .and_then(|v| date(v))
-                .map(|v| v.saturating_sub(response_date.unwrap_or(stored)))
+        let explicit = max_age.or_else(|| {
+            selected.get("expires").map(|v| {
+                date(v)
+                    .unwrap_or(0)
+                    .saturating_sub(response_date.unwrap_or(stored))
+            })
         });
+        let heuristic = catalog && explicit.is_none() && !validate;
+        let lifetime = explicit.or(heuristic.then_some(86400));
+        if heuristic {
+            tracing::info!(
+                cache_policy = "heuristic",
+                fallback_ttl_seconds = 86400,
+                "Catalog has no explicit freshness; applying 24-hour cache lifetime"
+            );
+        }
         let apparent = stored.saturating_sub(response_date.unwrap_or(stored));
         let corrected = age
             .saturating_add(delay.as_secs().saturating_add(1))
             .max(apparent);
-        let expires = if validate || (old.is_some() && !headers.contains_key("date")) {
+        let expires = if validate {
             0
         } else {
             stored.saturating_add(lifetime.unwrap_or(0).saturating_sub(corrected))
@@ -133,6 +226,7 @@ impl Metadata {
         if lifetime.is_none()
             && !selected.contains_key("etag")
             && !selected.contains_key("last-modified")
+            && !catalog
         {
             return None;
         }
@@ -140,6 +234,7 @@ impl Metadata {
             headers: selected,
             stored,
             expires,
+            heuristic,
             direct_reuse: false,
         })
     }
@@ -147,18 +242,25 @@ impl Metadata {
     pub fn policy_label(headers: &HeaderMap, metadata: Option<&Self>) -> &'static str {
         if let Some(metadata) = metadata {
             return if metadata.fresh() {
-                "fresh"
+                if metadata.heuristic {
+                    "heuristic_fresh"
+                } else {
+                    "fresh"
+                }
             } else if metadata.has_validator() {
                 "requires_revalidation"
             } else {
                 "expired_without_validator"
             };
         }
-        if headers.contains_key("vary") {
-            return "vary_unsupported";
-        }
-        if headers.contains_key("set-cookie") {
-            return "set_cookie";
+        if headers
+            .get_all("vary")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .any(|v| v.trim() == "*")
+        {
+            return "vary_star";
         }
         let controls = headers.get_all("cache-control");
         for value in controls.iter().filter_map(|v| v.to_str().ok()) {
@@ -166,9 +268,6 @@ impl Metadata {
                 let name = directive.trim().split('=').next().unwrap_or("").trim();
                 if name.eq_ignore_ascii_case("no-store") {
                     return "no_store";
-                }
-                if name.eq_ignore_ascii_case("private") {
-                    return "private";
                 }
             }
         }
@@ -206,7 +305,7 @@ impl Metadata {
                 return false;
             }
         }
-        !headers.contains_key("vary")
+        true
     }
     pub fn has_validator(&self) -> bool {
         !self.direct_reuse
@@ -266,7 +365,7 @@ impl Slot {
             "{:x}",
             Sha256::digest(
                 serde_json::to_vec(&(
-                    1,
+                    "discovery-get-identity-v2",
                     kind,
                     url,
                     network,

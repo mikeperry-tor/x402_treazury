@@ -334,10 +334,10 @@ async fn probe_request(
         crate::discovery_relay::log_fallback(cfg, "pricing", reason, result.2);
         match relay.fetch(url, 402, 64 * 1024, "max_response_bytes").await {
             Ok(response) => {
-                let metadata = crate::http_cache::Metadata::from_headers(
+                let metadata = crate::http_cache::Metadata::from_relay_headers(
                     &response.headers,
                     response.cache_delay(),
-                    None,
+                    false,
                 );
                 result = price_headers(&response.headers, Some(402), metadata);
                 write_slot = relay_slot;
@@ -382,7 +382,7 @@ async fn probe_network(
     Option<crate::http_cache::Metadata>,
 ) {
     let started = Instant::now();
-    let response = match http.get(url).send().await {
+    let response = match crate::http_cache::discovery_get(http, url).send().await {
         Ok(response) => response,
         Err(e) => {
             return (

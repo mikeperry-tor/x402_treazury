@@ -729,15 +729,28 @@ behavior. `config show` remains offline. A provider or source can opt out with
 `http_cache_enabled = false`; this also prevents sharing a disk-enabled alias's
 catalog load or pricing initialization.
 
-Support is detected from ordinary unsigned GET response headers; there are no
-extra HEAD probes. Catalogs use explicit `Cache-Control: max-age` or `Expires`
-freshness, accounting for `Date`, `Age` and request duration. Stale catalogs with
-`ETag` or `Last-Modified` use one conditional GET, accepting a matching 304 or
-replacing the complete document with a new response. `no-cache` requires
-revalidation. Failed requests never fall back to stale documents. Unsupported
-responses continue through normal downloads. This conservative cache declines
-`no-store`, `private`, all `Vary` variants, cookie-bearing responses and URLs with
-embedded credentials; it does not invent heuristic lifetimes.
+Caching uses the normal unsigned GET; there are no extra HEAD probes. Catalogs
+honor `Cache-Control: max-age` or `Expires`, accounting for `Date`, `Age` and
+request duration. **Without an explicit freshness lifetime, catalogs default to
+24 hours**, including validator-only responses. An INFO message records
+`fallback_ttl_seconds=86400` whenever that policy is applied. `no-cache` still
+requires revalidation and `max-age=0` remains immediately stale. Stale catalogs
+with `ETag` or `Last-Modified` use one conditional GET; a matching 304 reuses the
+body and refreshes metadata. Failed requests never fall back to stale documents.
+
+This owner-only private cache permits `private` responses and responses carrying
+`Set-Cookie`; cookies are neither saved nor sent. Ordinary `Vary` is supported by
+pinning the complete unsigned discovery request profile (`Accept: */*`,
+`Accept-Encoding: identity`, no cookies, credentials or custom request headers).
+The profile version and URL are part of the cache key; named absent headers stay
+absent on subsequent requests. `Vary: *`, conditional-header variants, `no-store`,
+malformed policies and credential-bearing URLs remain excluded. Repeated list
+headers and quoted cache-control extensions are supported. Conflicting valid
+max-age directives use the shortest lifetime. Curl's effective target request
+headers are unknown, so relay responses with `Vary` are not persisted.
+
+The new request-profile cache key intentionally causes one initial miss for
+entries written by older versions; those disposable entries are left for eviction.
 
 Pricing persists only the derived display estimate from a usable HTTP 402 with
 explicit, positive freshness, capped by `probe_ttl_seconds`. Payment challenges,
@@ -764,7 +777,7 @@ loads report source-specific cache decisions on stderr at info level: catalog
 `miss`, `disk_hit`, `revalidate`, `revalidated`, `shared_load`, and successful
 `stored` events. Configuration logs distinguish disabled caching from a missing
 cache directory. Response policy labels explain `requires_revalidation`,
-`no_cache_headers`, `no_store`, `private`, `vary_unsupported`, or `set_cookie`
+`heuristic_fresh`, `no_store`, `vary_star`, or invalid/unsupported policies
 without exposing raw headers or validators. A fresh policy is eligibility;
 `stored` confirms a successful disk write. Relay cache reuse and directly warmed
 cache provenance remain explicit.
@@ -814,7 +827,8 @@ continues to bypass all disk caches and cannot invoke this warm path.
 The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
 `fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`; `fresh_pricing_entries`
 counts persistent, fresh estimates. Fetching successfully does not imply caching
-is supported: validator-only catalogs still require revalidation, and entries
+is supported: catalogs with explicit zero freshness or `no-cache` still require
+revalidation, and entries
 without explicit freshness cannot bypass a Tor-blocked origin. Normal HTTP storage
 restrictions and limits still apply; `--direct` does not force persistence or
 extend lifetimes. A failed multi-source warm can leave completed disposable entries.
