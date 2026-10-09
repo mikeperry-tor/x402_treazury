@@ -16,6 +16,7 @@ use std::{
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+use x402_treazury::mcp_wire::McpResponse;
 use x402_treazury::{deployment::Deployment, payment::USDC};
 
 #[derive(Clone)]
@@ -142,7 +143,7 @@ async fn rpc(
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    response.json().await.unwrap()
+    response.mcp_json().await.unwrap()
 }
 #[tokio::test]
 async fn listeners_filter_authenticate_route_pay_and_drain_together() {

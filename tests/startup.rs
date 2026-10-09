@@ -1,4 +1,5 @@
 //! Production deployment loading against controlled, unsigned catalogs.
+use x402_treazury::mcp_wire::McpResponse;
 #[path = "support/socks.rs"]
 mod socks;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -712,7 +713,7 @@ async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
     let response: serde_json::Value = reqwest::Client::new().post(format!("http://{address}/mcp"))
         .bearer_auth("test-token").header("accept", "application/json, text/event-stream")
         .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}))
-        .send().await.unwrap().json().await.unwrap();
+        .send().await.unwrap().mcp_json().await.unwrap();
     assert!(
         response["result"]["instructions"]
             .as_str()

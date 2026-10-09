@@ -199,7 +199,7 @@ async fn scope_child() {
                 .send()
                 .await
                 .unwrap()
-                .json()
+                .mcp_json()
                 .await
                 .unwrap();
             assert_ne!(response["result"]["isError"], true, "{response}");

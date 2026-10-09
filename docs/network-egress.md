@@ -136,6 +136,12 @@ work with periodic stage/elapsed diagnostics instead of aborting after ten secon
 or reporting an aborted worker as successful. Explicit owner cancellation remains
 separate; the mempool's bounded drain policy is unchanged.
 
+Stateless MCP HTTP responses use SSE framing with keepalive comments every two
+seconds while awaiting the tool result. These keep the client response connection
+active, not the remote provider's progress timer or payment authority. Client
+whole-tool deadlines remain independent. The qualification reader bounds the
+complete wire body and extracts the terminal JSON response for saved evidence.
+
 The pinned rmcp service has a response drain of two seconds after cancellation or
 five seconds after transport closure. Its `timed out draining in-flight responses`
 warning is emitted during teardown, not as a deadline on an active stateless HTTP
@@ -334,6 +340,7 @@ financial or qualification authority.
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the vendor API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
 | Startup/drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. Sync launch uses an owned acknowledgement; scan retirement drains without a cutoff. |
+| MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Base block age and treasury observation age/lag | Evidence freshness for new authority; slow historical reconciliation and scans acquire new admission/catch-up evidence. Base balance acquisition runs once and retains canonical evidence; the serialized store rejects stale admission without restarting the sweep. Old observations are never relabeled. |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours; the separate 300-second margin remains pending the provider contract. |

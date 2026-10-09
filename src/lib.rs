@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod catalog_state;
 pub mod config;
 pub mod deployment;
+pub mod mcp_wire;
 pub mod network;
 pub mod payment;
 pub mod pricing;

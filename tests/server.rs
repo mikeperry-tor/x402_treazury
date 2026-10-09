@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use x402_treazury::mcp_wire::McpResponse;
 use x402_treazury::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -118,7 +119,7 @@ async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result
         .send()
         .await
         .unwrap()
-        .json()
+        .mcp_json()
         .await
         .unwrap();
     assert_ne!(result["result"]["isError"], true, "{result}");
@@ -204,7 +205,7 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
         "protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert!(response.headers().get("mcp-session-id").is_none());
-    let initialized: Value = response.json().await.unwrap();
+    let initialized: Value = response.mcp_json().await.unwrap();
     let instructions = initialized["result"]["instructions"].as_str().unwrap();
     assert!(instructions.starts_with("Read help first\n\n"));
     assert_eq!(
@@ -232,7 +233,7 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
         .send()
         .await
         .unwrap()
-        .json()
+        .mcp_json()
         .await
         .unwrap();
     assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 2);
@@ -242,11 +243,11 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
         ("test_help", "vendor documentation"),
         ("test_help", "vendor documentation"),
     ] {
-        let result: Value = request(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":name,"arguments":{}}})).send().await.unwrap().json().await.unwrap();
+        let result: Value = request(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":name,"arguments":{}}})).send().await.unwrap().mcp_json().await.unwrap();
         assert_eq!(result["result"]["content"][0]["text"], expected, "{result}");
     }
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    let error: Value = request(json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"missing","arguments":{}}})).send().await.unwrap().json().await.unwrap();
+    let error: Value = request(json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"missing","arguments":{}}})).send().await.unwrap().mcp_json().await.unwrap();
     assert_eq!(error["result"]["isError"], true);
     task.abort();
     vendor_task.abort();

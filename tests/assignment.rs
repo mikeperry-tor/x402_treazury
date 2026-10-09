@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use x402_treazury::deployment::Deployment;
+use x402_treazury::mcp_wire::McpResponse;
 fn config(scope: &str) -> String {
     format!(
         r#"version=1
@@ -450,7 +451,7 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         for (server, address) in ports {
             for source in ["a", "b"] {
-                let response:Value=client.post(format!("http://{address}/mcp")).bearer_auth("scope-token").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":format!("{source}_pay"),"arguments":{}}})).send().await.unwrap().json().await.unwrap();
+                let response:Value=client.post(format!("http://{address}/mcp")).bearer_auth("scope-token").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":format!("{source}_pay"),"arguments":{}}})).send().await.unwrap().mcp_json().await.unwrap();
                 assert_ne!(
                     response["result"]["isError"], true,
                     "{scope} {server}/{source}: {response}"

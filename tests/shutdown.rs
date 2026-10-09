@@ -20,6 +20,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     sync::Notify,
 };
+use x402_treazury::mcp_wire::McpResponse;
 
 #[derive(Clone, Default)]
 struct Vendor {
@@ -156,7 +157,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
     let request = http.post(format!("http://{}/mcp", addresses[0])).bearer_auth("fixture-token")
         .header("accept", "application/json, text/event-stream")
         .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"test_pay","arguments":{}}}));
-    let mut pending = tokio::spawn(async move { request.send().await });
+    let mut pending = tokio::spawn(async move { request.send().await?.mcp_json::<Value>().await });
     tokio::time::timeout(Duration::from_secs(10), vendor.arrived.notified())
         .await
         .expect("signed request must arrive");
@@ -196,7 +197,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
     if finish {
         vendor.release.notify_one();
         if !disconnect {
-            let response: Value = (&mut pending).await.unwrap().unwrap().json().await.unwrap();
+            let response: Value = (&mut pending).await.unwrap().unwrap();
             assert_eq!(
                 response["result"]["content"][0]["text"],
                 "completed payment"

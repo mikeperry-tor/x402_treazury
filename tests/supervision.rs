@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Notify;
+use x402_treazury::mcp_wire::McpResponse;
 
 const TOKEN: &str = "local-supervisor-test-token";
 #[derive(Clone, Default)]
@@ -196,9 +197,17 @@ async fn unsigned_child_enforces_auth_refuses_payment_and_drains_on_parent_eof()
     let pipe = child.stdin.take().unwrap();
     let url = endpoint(&wait_log(dir.path(), "MCP listening").await);
     assert_eq!(call(&url, "test_free", "bad").await.status(), 401);
-    let free: Value = call(&url, "test_free", TOKEN).await.json().await.unwrap();
+    let free: Value = call(&url, "test_free", TOKEN)
+        .await
+        .mcp_json()
+        .await
+        .unwrap();
     assert_eq!(free["result"]["isError"], false, "{free}");
-    let denied: Value = call(&url, "test_paid", TOKEN).await.json().await.unwrap();
+    let denied: Value = call(&url, "test_paid", TOKEN)
+        .await
+        .mcp_json()
+        .await
+        .unwrap();
     assert_eq!(denied["result"]["isError"], true, "{denied}");
     assert!(
         denied.to_string().contains("qualification_payment_denied"),
@@ -209,7 +218,7 @@ async fn unsigned_child_enforces_auth_refuses_payment_and_drains_on_parent_eof()
     let task = tokio::spawn(async move {
         call(&url, "test_slow", TOKEN)
             .await
-            .json::<Value>()
+            .mcp_json::<Value>()
             .await
             .unwrap()
     });
@@ -426,7 +435,11 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
         let mut child = spawn(dir.path(), true);
         let pipe = child.stdin.take().unwrap();
         let url = endpoint(&wait_log(dir.path(), "MCP listening").await);
-        let result: Value = call(&url, "test_paid", TOKEN).await.json().await.unwrap();
+        let result: Value = call(&url, "test_paid", TOKEN)
+            .await
+            .mcp_json()
+            .await
+            .unwrap();
         assert_eq!(result["result"]["isError"], true);
         let expected = usize::from(matches!(fault, socks::Fault::None));
         assert_eq!(v.calls.load(Ordering::SeqCst), expected);

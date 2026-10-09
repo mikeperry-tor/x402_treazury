@@ -386,7 +386,9 @@ and [the runtime architecture](docs/architecture.md).
   auto_fund bootstraps initial pairs before discovery via the same supervised path
   as `wallet bootstrap`; qualification restrictions preserve their existing lifecycle.
   Ordinary inspection remains unsigned; qualification cannot invoke paid relays.
-- HTTP MCP is stateless and JSON-response based, with bearer auth enabled by default.
+- HTTP MCP is stateless and uses SSE responses with two-second keepalive comments,
+  with bearer auth enabled by default. Keepalives report connection liveness only;
+  they never renew provider progress or payment authority.
   Disabling the gate requires the explicit configured or standalone opt-out.
 - Typed results flow through `PaidClient::execute_response`, `BoundTool::invoke_output`
   and `Server::invoke_output`, including dynamic fallback. PNG/JPEG/WebP bytes and

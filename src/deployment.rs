@@ -1,4 +1,6 @@
 //! Resolve catalogs (optionally through a paid relay), then bind authenticated listeners.
+#[cfg(test)]
+use crate::mcp_wire::McpResponse;
 use crate::{
     catalog::{self, Config, ToolSpec},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -1455,7 +1457,7 @@ bearer_token_env="TOKEN"
                 .send()
                 .await
                 .unwrap()
-                .json()
+                .mcp_json()
                 .await
                 .unwrap();
             assert!(!response["result"]["tools"].as_array().unwrap().is_empty());

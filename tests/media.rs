@@ -1,5 +1,6 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+use x402_treazury::mcp_wire::McpResponse;
 use x402_treazury::output::{HttpOutput, ImageLimits, ResponseMapping};
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
@@ -255,7 +256,7 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
     for name in ["media_raw", "media_json", "media_bad", "media_unknown"] {
         let result:Value=http.post(format!("{base}/mcp")).bearer_auth("fixture").header("accept","application/json, text/event-stream")
             .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":{}}}))
-            .send().await.unwrap().json().await.unwrap();
+            .send().await.unwrap().mcp_json().await.unwrap();
         if name == "media_bad" || name == "media_unknown" {
             assert_eq!(result["result"]["isError"], true);
             continue;

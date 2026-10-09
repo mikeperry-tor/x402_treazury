@@ -34,6 +34,8 @@ impl Client {
             !response.headers().contains_key("mcp-session-id"),
             "qualification requires stateless MCP"
         );
+        let content_type = response.headers().get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
         let mut body = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -46,6 +48,7 @@ impl Client {
             );
             body.extend_from_slice(&chunk);
         }
+        let body = x402_treazury::mcp_wire::response_json(&body, &content_type)?;
         let response: Value = serde_json::from_slice(&body).context("MCP response is not JSON")?;
         ensure!(
             response["jsonrpc"] == "2.0" && response["id"] == id && response.get("error").is_none(),

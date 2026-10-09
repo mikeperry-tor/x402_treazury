@@ -89,7 +89,7 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
                 .post(url).bearer_auth(format!("token-{endpoint}"))
                 .header("accept", "application/json, text/event-stream")
                 .json(&json!({"jsonrpc":"2.0","id":i,"method":"tools/call","params":{"name":name,"arguments":{}}}))
-                .send().await.unwrap().json().await.unwrap();
+                .send().await.unwrap().mcp_json().await.unwrap();
             assert_eq!(v["id"], i);
             (usize::from(endpoint == 2), v["result"].clone())
         });
@@ -133,7 +133,7 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
         reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap()
             .post(url).bearer_auth("token-0").header("accept", "application/json, text/event-stream")
             .json(&json!({"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":name,"arguments":{}}}))
-            .send().await.unwrap().json::<Value>().await.unwrap()
+            .send().await.unwrap().mcp_json::<Value>().await.unwrap()
     });
     bounded(h.f.arrived.notified()).await;
     stop.cancel();

@@ -348,7 +348,8 @@ pub fn http_app_with_auth(server: Server, token: Option<String>) -> axum::Router
     let auth = token.map(|token| Arc::new(auth::Gate::new(token, server.catalog_server.clone())));
     let config = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
-        .with_json_response(true)
+        .with_json_response(false)
+        .with_sse_keep_alive(Some(std::time::Duration::from_secs(2)))
         .with_max_request_body_bytes(crate::limits::MCP_REQUEST_BYTES);
     let config = server.host_policy.apply(config, &server.catalog_server);
     let service = StreamableHttpService::new(

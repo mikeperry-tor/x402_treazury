@@ -1,5 +1,6 @@
 //! Opt-in, deterministic localhost MCP comparison matrix; no live provider traffic.
 use super::*;
+use crate::mcp_wire::McpResponse;
 use crate::{
     network::{IsolationId, Mode, NetworkContext, NetworkPolicy},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -181,7 +182,7 @@ async fn run() {
                         )
                         .unwrap();
                     let start = tokio::time::Instant::now();
-                    let result:serde_json::Value=http.post(&endpoint).bearer_auth("fixture").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":index,"method":"tools/call","params":{"name":"read","arguments":{}}})).send().await.unwrap().json().await.unwrap();
+                    let result:serde_json::Value=http.post(&endpoint).bearer_auth("fixture").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":index,"method":"tools/call","params":{"name":"read","arguments":{}}})).send().await.unwrap().mcp_json().await.unwrap();
                     let elapsed = start.elapsed().as_micros();
                     assert_eq!(result["result"]["isError"], false, "{result}");
                     assert_eq!(

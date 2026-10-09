@@ -11,6 +11,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use x402_treazury::mcp_wire::McpResponse;
 use x402_treazury::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -41,7 +42,7 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
 async fn call(http: &reqwest::Client, url: &str, name: &str) -> Value {
     http.post(format!("{url}/mcp")).bearer_auth("fixture").header("accept","application/json, text/event-stream")
         .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":{}}}))
-        .send().await.unwrap().json::<Value>().await.unwrap()["result"].clone()
+        .send().await.unwrap().mcp_json::<Value>().await.unwrap()["result"].clone()
 }
 #[tokio::test]
 async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_success() {
