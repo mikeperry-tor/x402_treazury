@@ -143,6 +143,44 @@ impl Metadata {
             direct_reuse: false,
         })
     }
+    /// Fixed labels only: never expose validator values or upstream header prose.
+    pub fn policy_label(headers: &HeaderMap, metadata: Option<&Self>) -> &'static str {
+        if let Some(metadata) = metadata {
+            return if metadata.fresh() {
+                "fresh"
+            } else if metadata.has_validator() {
+                "requires_revalidation"
+            } else {
+                "expired_without_validator"
+            };
+        }
+        if headers.contains_key("vary") {
+            return "vary_unsupported";
+        }
+        if headers.contains_key("set-cookie") {
+            return "set_cookie";
+        }
+        let controls = headers.get_all("cache-control");
+        for value in controls.iter().filter_map(|v| v.to_str().ok()) {
+            for directive in value.split(',') {
+                let name = directive.trim().split('=').next().unwrap_or("").trim();
+                if name.eq_ignore_ascii_case("no-store") {
+                    return "no_store";
+                }
+                if name.eq_ignore_ascii_case("private") {
+                    return "private";
+                }
+            }
+        }
+        if !["cache-control", "expires", "etag", "last-modified"]
+            .iter()
+            .any(|name| headers.contains_key(*name))
+        {
+            "no_cache_headers"
+        } else {
+            "unsupported_or_incomplete_cache_headers"
+        }
+    }
     pub fn fresh(&self) -> bool {
         let now = now();
         now >= self.stored && now < self.expires
@@ -194,9 +232,21 @@ pub(crate) struct Slot {
     key: String,
     direct_key: Option<String>,
     resource: String,
+    source: String,
     limit: usize,
 }
 impl Slot {
+    pub fn availability(cfg: &crate::catalog::Config) -> &'static str {
+        if !cfg.http_cache_enabled {
+            "disabled_by_config"
+        } else if crate::qualification::active() {
+            "disabled_for_qualification"
+        } else if cfg.http_cache_directory.is_none() {
+            "no_cache_directory"
+        } else {
+            "enabled"
+        }
+    }
     pub fn new(cfg: &crate::catalog::Config, url: &str, kind: &str, limit: usize) -> Option<Self> {
         if !cfg.http_cache_enabled || crate::qualification::active() {
             return None;
@@ -248,6 +298,10 @@ impl Slot {
             key,
             direct_key,
             resource: kind.to_owned(),
+            source: cfg
+                .discovery_source
+                .clone()
+                .unwrap_or_else(|| "standalone".into()),
             limit,
         })
     }
@@ -276,7 +330,9 @@ impl Slot {
                 .filter(|entry| entry.metadata.fresh())
             {
                 tracing::warn!(
+                    source = self.source,
                     resource = self.resource,
+                    cache = "direct_warm_hit",
                     "Using explicitly directly warmed discovery cache; content was fetched with direct egress"
                 );
                 entry.metadata.direct_reuse = true;
@@ -330,6 +386,8 @@ impl Slot {
             Ok(Ok(value)) => value,
             _ => {
                 tracing::warn!(
+                    source = self.source,
+                    resource = self.resource,
                     limit_database_bytes = DATABASE_LIMIT,
                     "HTTP cache read failed; fetching origin without cached data"
                 );
@@ -339,10 +397,11 @@ impl Slot {
     }
     pub async fn write(&self, entry: Option<Entry>) {
         let slot = self.clone();
-        let result = blocking(move || -> Result<()> {
+        let result = blocking(move || -> Result<bool> {
+            let mut stored = false;
             // Never create a treasury state directory, including after concurrent removal.
             ensure!(slot.directory.parent().is_some_and(Path::is_dir), "cache parent missing");
-            if entry.is_none() && !slot.directory.exists() { return Ok(()); }
+            if entry.is_none() && !slot.directory.exists() { return Ok(false); }
             let mut db = open(&slot.directory)?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
@@ -359,13 +418,33 @@ impl Slot {
                         tracing::info!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
                     }
                     tx.execute("INSERT INTO entries VALUES(?1,?2,?3,?4)", params![slot.key, metadata, entry.data, i64::try_from(entry.metadata.stored)?])?;
+                    stored = true;
                 }
             }
             tx.commit()?;
-            Ok(())
+            Ok(stored)
         }).await;
-        if !matches!(result, Ok(Ok(()))) {
+        if matches!(result, Ok(Ok(true))) {
+            if self.resource == "catalog" {
+                tracing::info!(
+                    source = self.source,
+                    resource = self.resource,
+                    cache = "stored",
+                    "HTTP disk cache entry stored"
+                );
+            } else {
+                tracing::debug!(
+                    source = self.source,
+                    resource = self.resource,
+                    cache = "stored",
+                    "HTTP disk cache entry stored"
+                );
+            }
+        }
+        if !matches!(result, Ok(Ok(_))) {
             tracing::warn!(
+                source = self.source,
+                resource = self.resource,
                 limit_database_bytes = DATABASE_LIMIT,
                 "HTTP cache update failed; response remains usable without persistence"
             );

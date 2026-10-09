@@ -280,7 +280,11 @@ async fn probe_request(
     for slot in [&slot, &relay_slot].into_iter().flatten() {
         if let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) {
             if let Ok(line) = String::from_utf8(entry.data) {
-                tracing::info!("Pricing estimate loaded from fresh HTTP disk cache");
+                tracing::debug!(
+                    source = cfg.discovery_source.as_deref().unwrap_or("standalone"),
+                    cache = "disk_hit",
+                    "Pricing estimate loaded from fresh HTTP disk cache"
+                );
                 if cfg.discovery_relay.is_some() {
                     tracing::warn!(
                         "Discovery relay enabled: pricing cache may contain relay-supplied estimates"

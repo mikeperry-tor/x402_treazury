@@ -77,7 +77,7 @@ impl Downloads {
         let cell = {
             let mut entries = self.entries.lock().expect("catalog download map poisoned");
             if entries.contains_key(&key) {
-                tracing::debug!(target: "x402_treazury::startup", source = id,
+                tracing::info!(target: "x402_treazury::startup", source = id, cache = "shared_load",
                     "Sharing compatible catalog download or parsed document");
             }
             entries.entry(key).or_default().clone()
@@ -348,8 +348,18 @@ pub(super) async fn price_source<'a>(
             Err(error)=>crate::qualification::PricingStage::Failed{failure:crate::qualification::failure_category(error)},
         };
         crate::qualification::record_pricing(id,stage).await?;
-        let prices=discovery?.prices;
+        let discovery = discovery?;
+        let counts = &discovery.evidence.cache;
+        let cache_count = |path| counts.get(&path).copied().unwrap_or(0);
+        let disk_hits = cache_count(crate::pricing::CachePath::Disk);
+        let process_hits = cache_count(crate::pricing::CachePath::Hit);
+        let shared = cache_count(crate::pricing::CachePath::Shared);
+        let network_initializations = cache_count(crate::pricing::CachePath::Initialized);
+        let prices=discovery.prices;
         tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing, prices = prices.len(),
+            disk_hits, process_hits, shared, network_initializations,
+            disk_cache = crate::http_cache::Slot::availability(&source.config),
+            skipped_embedded = discovery.evidence.skipped_embedded,
             elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
         if prices.is_empty() {
             tracing::debug!(target: "x402_treazury::startup", source = id,

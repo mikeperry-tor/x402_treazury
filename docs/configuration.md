@@ -760,7 +760,23 @@ clear it, stop the application and remove only `http-cache/`.
 
 Live qualification and captured qualification catalog loads bypass disk caching,
 so a historical cache hit cannot qualify a fresh network observation. Ordinary
-loads report fresh/revalidated catalog hits and pricing estimate hits on stderr.
+loads report source-specific cache decisions on stderr at info level: catalog
+`miss`, `disk_hit`, `revalidate`, `revalidated`, `shared_load`, and successful
+`stored` events. Configuration logs distinguish disabled caching from a missing
+cache directory. Response policy labels explain `requires_revalidation`,
+`no_cache_headers`, `no_store`, `private`, `vary_unsupported`, or `set_cookie`
+without exposing raw headers or validators. A fresh policy is eligibility;
+`stored` confirms a successful disk write. Relay cache reuse and directly warmed
+cache provenance remain explicit.
+
+Startup pricing summaries report `disk_hits`, `process_hits`, `shared`, and
+`network_initializations` per source, including disabled discovery. These count
+probe initializations, not individual HTTP requests or advertised prices embedded
+in a catalog. Cache support is response-dependent, not a provider allowlist.
+`max-age=0, must-revalidate` with an ETag still needs a network request each load;
+a 304 reuses the saved body. Missing entries alone do not prove a provider forbids
+caching: expiration, eviction, network/timeout policy changes, and failed writes
+also affect reuse.
 
 #### Warming a selected source, including directly for a Tor deployment
 

@@ -321,13 +321,19 @@ pub async fn load_json_with_limit(
 ) -> Result<Value> {
     load_json_cached(source, http, limit, None).await
 }
+#[tracing::instrument(name = "catalog", skip_all, fields(source = cfg.discovery_source.as_deref().unwrap_or("standalone")))]
 pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) -> Result<Value> {
+    tracing::info!(
+        cache = crate::http_cache::Slot::availability(cfg),
+        "Catalog disk cache configuration"
+    );
     let relay_slot = crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
     if let Some(slot) = &relay_slot
         && let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh())
     {
         if let Ok(document) = parse_document(&entry.data) {
             tracing::warn!(
+                cache = "relay_disk_hit",
                 "Catalog loaded from fresh relay cache; content supplied by configured relay"
             );
             return Ok(document);
@@ -388,6 +394,13 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
             response.cache_delay(),
             None,
         );
+        tracing::info!(
+            cache = "relay_response",
+            cache_policy =
+                crate::http_cache::Metadata::policy_label(&response.headers, metadata.as_ref()),
+            persist = metadata.as_ref().is_some_and(|m| m.fresh()),
+            "Catalog relay response cache policy"
+        );
         slot.write(
             metadata
                 .filter(|m| m.fresh())
@@ -430,7 +443,10 @@ pub(crate) async fn load_json_cached(
             .as_ref()
             .is_some_and(|(entry, _)| entry.metadata.fresh())
         {
-            tracing::info!("Catalog loaded from fresh HTTP disk cache");
+            tracing::info!(
+                cache = "disk_hit",
+                "Catalog loaded from fresh HTTP disk cache"
+            );
             return Ok(cached.expect("fresh cached document").1);
         } else {
             let started = std::time::Instant::now();
@@ -439,6 +455,20 @@ pub(crate) async fn load_json_cached(
                 .as_ref()
                 .map(|(entry, _)| entry)
                 .filter(|e| e.metadata.has_validator());
+            let cache = if slot.is_none() {
+                "unavailable"
+            } else if conditional.is_some() {
+                "revalidate"
+            } else if cached.is_some() {
+                "expired"
+            } else {
+                "miss"
+            };
+            tracing::info!(
+                cache,
+                conditional = conditional.is_some(),
+                "Catalog fetching origin"
+            );
             let request =
                 conditional.map_or_else(|| http.get(source), |e| e.metadata.conditional(request));
             let response = request
@@ -468,6 +498,13 @@ pub(crate) async fn load_json_cached(
                     started.elapsed(),
                     Some(&entry.metadata),
                 );
+                tracing::info!(
+                    cache_policy = crate::http_cache::Metadata::policy_label(
+                        response.headers(),
+                        metadata.as_ref()
+                    ),
+                    "Catalog revalidation response cache policy"
+                );
                 if let Some(slot) = &slot {
                     slot.write(metadata.map(|metadata| crate::http_cache::Entry {
                         metadata,
@@ -475,7 +512,11 @@ pub(crate) async fn load_json_cached(
                     }))
                     .await;
                 }
-                tracing::info!("Catalog HTTP disk cache revalidated by origin");
+                tracing::info!(
+                    cache = "revalidated",
+                    http_status = 304,
+                    "Catalog HTTP disk cache revalidated by origin"
+                );
                 return Ok(cached.expect("validated cached document").1);
             } else {
                 // Invalidate before status/body/parse errors; never fall back to stale data.
@@ -486,7 +527,7 @@ pub(crate) async fn load_json_cached(
                     .error_for_status()
                     .map_err(reqwest::Error::without_url)
                     .context(LoadStage::Headers)?;
-                let metadata = if slot.is_some() && response.status() == reqwest::StatusCode::OK {
+                let metadata = if response.status() == reqwest::StatusCode::OK {
                     crate::http_cache::Metadata::from_headers(
                         response.headers(),
                         started.elapsed(),
@@ -495,6 +536,19 @@ pub(crate) async fn load_json_cached(
                 } else {
                     None
                 };
+                tracing::info!(
+                    cache = if slot.is_some() {
+                        "enabled"
+                    } else {
+                        "unavailable"
+                    },
+                    cache_policy = crate::http_cache::Metadata::policy_label(
+                        response.headers(),
+                        metadata.as_ref()
+                    ),
+                    http_status = response.status().as_u16(),
+                    "Catalog origin response cache policy"
+                );
                 let body_started = std::time::Instant::now();
                 let bytes =
                     crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
@@ -516,6 +570,7 @@ pub(crate) async fn load_json_cached(
             }
         }
     } else {
+        tracing::info!(cache = "local_file", "Catalog loading local file");
         tokio::fs::read(source)
             .await
             .context(LoadStage::LocalRead)?

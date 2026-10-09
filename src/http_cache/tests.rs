@@ -501,3 +501,83 @@ async fn explicit_direct_entries_have_separate_provenance_and_require_freshness(
     assert!(direct.read().await.unwrap().metadata.has_validator());
     assert!(normal.read().await.is_none());
 }
+
+#[tokio::test]
+async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_urls() {
+    use tracing::instrument::WithSubscriber;
+    let dir = tempfile::tempdir().unwrap();
+    let (url, origin, task) = fixture().await;
+    let mut cfg = config(dir.path());
+    cfg.spec = format!("{url}?token=private-token");
+    cfg.discovery_source = Some("fixture_source".into());
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    async {
+        let http = client(&cfg.spec);
+        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+        let mut entry = slot.read().await.unwrap();
+        entry.metadata.expires = 0;
+        slot.write(Some(entry)).await;
+        origin.lock().unwrap().mode = 1;
+        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        let mut entry = slot.read().await.unwrap();
+        entry.metadata.expires = 0;
+        slot.write(Some(entry)).await;
+        origin.lock().unwrap().mode = 2;
+        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        assert!(slot.read().await.is_none());
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    for field in [
+        "fixture_source",
+        "cache=\"miss\"",
+        "cache=\"stored\"",
+        "cache=\"disk_hit\"",
+        "cache=\"revalidate\"",
+        "cache=\"revalidated\"",
+        "cache_policy=\"no_store\"",
+    ] {
+        assert!(logs.contains(field), "missing {field}: {logs}");
+    }
+    assert!(!logs.contains(&url));
+    assert!(!logs.contains("private-token"));
+    assert_eq!(origin.lock().unwrap().calls.len(), 3);
+    task.abort();
+}
+
+#[test]
+fn cache_policy_labels_explain_conservative_rejections() {
+    for (values, expected) in [
+        (vec![], "no_cache_headers"),
+        (vec![("vary", "secret-header")], "vary_unsupported"),
+        (vec![("set-cookie", "private-cookie")], "set_cookie"),
+        (vec![("cache-control", "private")], "private"),
+        (vec![("cache-control", "no-store")], "no_store"),
+        (
+            vec![("cache-control", "max-age=bad")],
+            "unsupported_or_incomplete_cache_headers",
+        ),
+        (
+            vec![
+                ("cache-control", "max-age=0, must-revalidate"),
+                ("etag", "private-validator"),
+            ],
+            "requires_revalidation",
+        ),
+    ] {
+        let headers = headers(&values);
+        let metadata = Metadata::from_headers(&headers, Duration::ZERO, None);
+        assert_eq!(
+            Metadata::policy_label(&headers, metadata.as_ref()),
+            expected
+        );
+    }
+}
