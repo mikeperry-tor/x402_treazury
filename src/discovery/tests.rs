@@ -1626,3 +1626,101 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     assert_eq!(calls.load(Ordering::SeqCst), before + 1);
     task.abort();
 }
+
+#[tokio::test]
+async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
+    use axum::routing::get;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let arrived = Arc::new(tokio::sync::Semaphore::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (seen, gate, count) = (arrived.clone(), release.clone(), calls.clone());
+    let app = axum::Router::new().route(
+        "/services",
+        get(move || {
+            let (seen, gate, count) = (seen.clone(), gate.clone(), count.clone());
+            async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                seen.add_permits(1);
+                gate.acquire().await.unwrap().forget();
+                axum::Json(json!({"services":[]}))
+            }
+        }),
+    );
+    let (vendor, vendor_task) = listen(app).await;
+    let m = manager(None).await;
+    *m.fixture_directory.lock().unwrap() = Some(vendor);
+    let server = server(&m, "writer");
+    let work = server.work.clone();
+    let (base, http_task) = listen(crate::server::http_app(server, "test-token".into())).await;
+    for disconnect in [false, true] {
+        let base = base.clone();
+        let request = tokio::spawn(async move {
+            reqwest::Client::new().post(format!("{base}/mcp"))
+                .bearer_auth("test-token")
+                .header("accept", "application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":directory::SEARCH,"arguments":{"q":"fixture"}}}))
+                .send().await.unwrap().json::<Value>().await.unwrap()["result"].clone()
+        });
+        tokio::time::timeout(Duration::from_secs(5), arrived.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        if disconnect {
+            request.abort();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if std::fs::read_to_string(log.path())
+                        .unwrap()
+                        .contains("mcp_response_cancelled")
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        // Exceed both rmcp drain allowances. These are not live request deadlines.
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        if !disconnect {
+            assert!(!request.is_finished());
+        }
+        release.add_permits(1);
+        if !disconnect {
+            let result = tokio::time::timeout(Duration::from_secs(5), request)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(result["isError"], true);
+            assert_eq!(result["structuredContent"]["services"], json!([]));
+            assert!(
+                !std::fs::read_to_string(log.path())
+                    .unwrap()
+                    .contains("timed out draining")
+            );
+        } else {
+            tokio::time::timeout(Duration::from_secs(5), work.drain())
+                .await
+                .unwrap();
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert!(
+                logs.contains("timed out draining in-flight responses"),
+                "{logs}"
+            );
+            // The application task survives the caller and rmcp's drain timeout.
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+        }
+    }
+    http_task.abort();
+    vendor_task.abort();
+}

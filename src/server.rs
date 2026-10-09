@@ -222,10 +222,27 @@ impl ServerHandler for Server {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let server = self.clone();
-        self.work
-            .run(async move { server.call_tool_owned(request, context.id).await })
-            .await
-            .map_err(|error| McpError::internal_error(error.to_string(), None))?
+        let started = std::time::Instant::now();
+        let work = self
+            .work
+            .run(async move { server.call_tool_owned(request, context.id).await });
+        tokio::pin!(work);
+        let result = tokio::select! {
+            result = &mut work => result,
+            _ = context.ct.cancelled() => {
+                tracing::warn!(listener = %self.catalog_server,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    category = "mcp_response_cancelled",
+                    "MCP request cancelled or response channel closed; accepted tool work continues; do not retry uncertain paid work");
+                let result = work.await;
+                tracing::info!(listener = %self.catalog_server,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    category = "mcp_work_finished_after_cancellation",
+                    "Accepted tool work finished after response cancellation; result delivery is not confirmed");
+                result
+            }
+        };
+        result.map_err(|error| McpError::internal_error(error.to_string(), None))?
     }
 }
 

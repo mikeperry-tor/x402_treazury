@@ -136,6 +136,15 @@ work with periodic stage/elapsed diagnostics instead of aborting after ten secon
 or reporting an aborted worker as successful. Explicit owner cancellation remains
 separate; the mempool's bounded drain policy is unchanged.
 
+The pinned rmcp service has a response drain of two seconds after cancellation or
+five seconds after transport closure. Its `timed out draining in-flight responses`
+warning is emitted during teardown, not as a deadline on an active stateless HTTP
+call. Accepted application work survives that drain, including directory calls.
+`mcp_response_cancelled` reports cancellation while work is outstanding;
+`mcp_work_finished_after_cancellation` reports its eventual completion without
+claiming successful response delivery. These warnings do not establish why the
+caller disconnected or authorize replay of uncertain paid work.
+
 An x402 challenge and its single signed attempt are separate requests, each
 subject to connection and read-inactivity limits. There is no whole-tool-call
 timeout imposed by payment admission. Quote/authorization expiry and funded-test
