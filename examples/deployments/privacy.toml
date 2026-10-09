@@ -92,7 +92,7 @@ max_conversion_overhead_percent = 5
 # isolated from the webinfo queries.
 [sources.social]
 extends = "../../providers/socialfetch.toml"
-instructions_text = "Research people and communities using the selected SocialFetch platforms. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live payment challenge controls the charge. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
+instructions_text = "Research people and communities using SocialFetch tools for Bluesky, Facebook, Instagram, LinkedIn, Reddit, Telegram, Threads, TikTok, Truth Social, Twitter (X), and Yelp. This listener uses on-demand tool discovery: search x402_treazury_tools_search for the platform name (use Twitter for X) and inspect the returned descriptions and schemas, then invoke the selected tool_ref with x402_treazury_tool_call. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live payment challenge controls the charge. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
 tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Yelp"]
 exclude_tools = ["socialfetch_help"]
 
@@ -223,6 +223,8 @@ wallet = "web"
 sources = ["exa", "webinfo", "googletrends"]
 
 [servers.social]
+# Keep this large catalog out of the initial tool list; discover schemas as needed.
+discover_on_demand = true
 listen = "127.0.0.1:6338"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "social"

@@ -74,6 +74,13 @@ SocialFetch's overlapping Reddit tools use different wallets on the web and soci
 endpoints; Exa likewise uses separate wallets on web and company. Company tools
 are explicitly selected by name to keep the agent's context focused.
 
+The social endpoint enables `discover_on_demand = true` because of its large
+number of tools. This [on-demand discovery mode](docs/agent-sources.md)
+initially advertises search/call wrapper tools; agents retrieve full tool
+descriptions and schemas as needed. The server's `instructions_text` mentions
+the available networks and explains the discovery workflow to help the agent
+find the tools without loading every definition into context.
+
 ### 1. Build and start Tor
 
 Run these commands from the repository checkout directory:
