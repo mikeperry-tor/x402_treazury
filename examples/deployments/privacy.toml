@@ -124,6 +124,41 @@ extends = "../../providers/pdl.toml"
 instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1: the catalog lists $0.10 per result, matching this example's company payment cap; larger batches may be refused. Paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
 include_tools = ["pdl_company_search"]
 
+# StableEnrich subsets retain the provider's reviewed synchronous operation
+# allowlist and omit its broad help. Each source inherits its listener's wallet.
+# Social estimates are $0.01-$0.05 per call. FullEnrich ($0.15), StableEnrich
+# PDL ($0.28), Whitepages ($0.22) and Lens ($0.20) exceed this context's cap.
+[sources.social_stableenrich]
+extends = "../../providers/stableenrich.toml"
+include_tools = [
+  "stableenrich_reddit_search",
+  "stableenrich_reddit_post_comments",
+  "stableenrich_minerva_resolve",
+  "stableenrich_minerva_enrich",
+  "stableenrich_minerva_validate_emails",
+  "stableenrich_serper_people_image_search",
+]
+instructions_text = "Social research through StableEnrich: search Reddit and retrieve post comments, resolve people with Minerva, enrich known profiles, check email database records and search for public headshots. Use small batches and preserve identity confidence, provenance and timestamps. An email database match is not proof of current deliverability; disambiguate names with known profile/company information before combining results or attributing images. Request content can identify people despite separate payment wallets. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Vendor prices are estimates; the live challenge and $0.05 social cap govern payment. Do not repeat a paid submission to retrieve pending results."
+
+# Company estimates are $0.0126-$0.08 per call, within the $0.10 cap.
+# FullEnrich company search ($0.15) is omitted. Keep person/contact enrichment
+# on the social listener; Exa already supplies this listener's general web search.
+[sources.company_stableenrich]
+extends = "../../providers/stableenrich.toml"
+include_tools = [
+  "stableenrich_companyenrich_org_enrich",
+  "stableenrich_companyenrich_properties_enrich",
+  "stableenrich_google_maps_text_search_partial",
+  "stableenrich_google_maps_text_search_full",
+  "stableenrich_google_maps_nearby_search_partial",
+  "stableenrich_google_maps_nearby_search_full",
+  "stableenrich_google_maps_place_details_partial",
+  "stableenrich_google_maps_place_details_full",
+  "stableenrich_serper_news",
+  "stableenrich_firecrawl_scrape",
+]
+instructions_text = "Company research through StableEnrich: enrich organizations by domain or name/social URL, discover local businesses with Google Maps, retrieve place details, search company news and scrape company pages with Firecrawl. Verify returned domains and company identity before combining results; CompanyEnrich employees/revenue are ranges and funding totals may lag individual rounds. Prefer partial Maps results when sufficient; full results cost more. For Maps text-search pagination repeat the original search body with its pageToken. Check news dates and source provenance. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Use small batches; vendor prices are estimates and the live challenge and $0.10 company cap govern payment. Do not repeat a paid submission to retrieve pending results."
+
 # Tool-name allowlists keep the company toolset small as upstream catalogs grow.
 # Broad vendor help tools are omitted to avoid suggesting unselected operations.
 # Cheap, focused public-company financial statements and news.
@@ -190,7 +225,7 @@ sources = ["exa", "webinfo", "googletrends"]
 listen = "127.0.0.1:6338"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "social"
-sources = ["social", "pdl_people"]
+sources = ["social", "pdl_people", "social_stableenrich"]
 
 # Note: Exa is the same source used by web, but this listener pays from the
 # "company" wallet, and connections to Exa travel down a separate Tor circuit,
@@ -200,4 +235,4 @@ sources = ["social", "pdl_people"]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock"]
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich"]
