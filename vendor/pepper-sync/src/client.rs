@@ -32,18 +32,12 @@ pub(crate) mod fetch;
 
 const MAX_RETRIES: u8 = 3;
 
-use zingo_netutils::time::STREAM_MSG_TIMEOUT;
-
 async fn next_stream_item<T>(
     stream: &mut tonic::Streaming<T>,
-    what: &'static str,
+    _what: &'static str,
 ) -> Result<Option<T>, tonic::Status> {
-    match tokio::time::timeout(STREAM_MSG_TIMEOUT, stream.message()).await {
-        Ok(res) => res,
-        Err(_) => Err(tonic::Status::deadline_exceeded(format!(
-            "{what} stream message timeout"
-        ))),
-    }
+    // Injected transport bounds inactivity below protobuf message assembly.
+    stream.message().await
 }
 
 /// Fetch requests are created and sent to the [`crate::client::fetch::fetch`] task when a connection to the server is required.

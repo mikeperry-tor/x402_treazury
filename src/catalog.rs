@@ -35,6 +35,22 @@ impl std::fmt::Display for LoadStage {
 }
 impl std::error::Error for LoadStage {}
 
+/// Authored selection/configuration errors cannot be suppressed as an optional
+/// remote outage. Keep the detailed cause for the operator without classifying
+/// failures by their human-readable text.
+#[derive(Debug)]
+pub(crate) struct ToolConfigurationError(anyhow::Error);
+impl std::fmt::Display for ToolConfigurationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid provider tool configuration: {}", self.0)
+    }
+}
+impl std::error::Error for ToolConfigurationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+
 const DEFAULT_PRICE: &str = "Cost: unknown.";
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ')
@@ -868,7 +884,7 @@ pub fn build_tools_with_prices(
     prices: &BTreeMap<(String, String), String>,
 ) -> Result<Vec<ToolSpec>> {
     if let Some(credits) = &cfg.credit_pricing {
-        credits.validate()?;
+        credits.validate().map_err(ToolConfigurationError)?;
     }
     let selected = selected_operations(cfg, root, prefix)?;
     let mut tools = selected
@@ -889,7 +905,7 @@ pub fn build_tools_with_prices(
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
-    filter_tool_names(cfg, &mut tools)?;
+    filter_tool_names(cfg, &mut tools).map_err(ToolConfigurationError)?;
     Ok(tools)
 }
 
@@ -943,6 +959,7 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
     });
     let mut selected = Vec::new();
     let mut counts = BTreeMap::<String, usize>::new();
+    let had_operations = !ops.is_empty();
     for op in ops {
         let path = op["path"].as_str().unwrap();
         let operation = format!(
@@ -979,7 +996,14 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
         *counts.entry(base.clone()).or_default() += 1;
         selected.push((op, base));
     }
-    ensure!(!selected.is_empty(), "no operations matched");
+    if selected.is_empty() {
+        let error = anyhow::anyhow!("no operations matched");
+        return Err(if had_operations {
+            ToolConfigurationError(error).into()
+        } else {
+            error
+        });
+    }
     let mut seen = BTreeMap::<String, usize>::new();
     let mut named = Vec::new();
     for (op, base) in selected {

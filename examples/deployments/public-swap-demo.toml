@@ -32,7 +32,6 @@ max_api_payment_usdc = "0.05"
 max_funding_spend_zec = "0.006"
 max_conversion_overhead_percent = 5
 max_attempts = 3
-wait_seconds = 30
 
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"

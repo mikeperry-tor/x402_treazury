@@ -1,0 +1,353 @@
+diff --git a/vendor/pepper-sync/src/client.rs b/vendor/pepper-sync/src/client.rs
+index bb4a9f6..54882e8 100644
+--- a/vendor/pepper-sync/src/client.rs
++++ b/vendor/pepper-sync/src/client.rs
+@@ -32,18 +32,12 @@ pub(crate) mod fetch;
+ 
+ const MAX_RETRIES: u8 = 3;
+ 
+-use zingo_netutils::time::STREAM_MSG_TIMEOUT;
+-
+ async fn next_stream_item<T>(
+     stream: &mut tonic::Streaming<T>,
+-    what: &'static str,
++    _what: &'static str,
+ ) -> Result<Option<T>, tonic::Status> {
+-    match tokio::time::timeout(STREAM_MSG_TIMEOUT, stream.message()).await {
+-        Ok(res) => res,
+-        Err(_) => Err(tonic::Status::deadline_exceeded(format!(
+-            "{what} stream message timeout"
+-        ))),
+-    }
++    // Injected transport bounds inactivity below protobuf message assembly.
++    stream.message().await
+ }
+ 
+ /// Fetch requests are created and sent to the [`crate::client::fetch::fetch`] task when a connection to the server is required.
+diff --git a/vendor/pepper-sync/src/scan/task.rs b/vendor/pepper-sync/src/scan/task.rs
+index be9f34e..737ac60 100644
+--- a/vendor/pepper-sync/src/scan/task.rs
++++ b/vendor/pepper-sync/src/scan/task.rs
+@@ -39,7 +39,6 @@ use super::{ScanResults, scan};
+ const MAX_WORKER_POOLSIZE: usize = 2;
+ const MAX_LOAD_NULLIFIERS: usize = 2usize.pow(14);
+ 
+-use zingo_netutils::time::{SCANNER_SHUTDOWN_TIMEOUT, STREAM_MSG_TIMEOUT};
+ 
+ pub(crate) enum ScannerState {
+     Verification,
+@@ -132,12 +131,11 @@ where
+     }
+ 
+     async fn shutdown_loader(&mut self) -> Result<(), ServerError> {
+-        let loader = self.loader.take();
+-        if let Some(mut loader) = loader {
+-            loader.shutdown().await
+-        } else {
+-            Ok(())
++        if let Some(loader) = self.loader.as_mut() {
++            loader.shutdown().await?;
++            self.loader = None;
+         }
++        Ok(())
+     }
+ 
+     /// Spawns a worker.
+@@ -184,8 +182,8 @@ where
+             .position(|worker| worker.id == worker_id)
+             .expect("worker should exist");
+ 
+-        let mut worker = self.workers.swap_remove(worker_index);
+-        worker.shutdown().await.expect("worker task panicked");
++        self.workers[worker_index].shutdown().await.expect("worker task panicked");
++        self.workers.swap_remove(worker_index);
+     }
+ 
+     /// Updates the scanner.
+@@ -381,13 +379,7 @@ where
+ 
+                 loop {
+                     let msg_res: Result<Option<CompactBlock>, tonic::Status> =
+-                        match tokio::time::timeout(STREAM_MSG_TIMEOUT, block_stream.message()).await
+-                        {
+-                            Ok(res) => res,
+-                            Err(_) => {
+-                                Err(tonic::Status::deadline_exceeded("stream message timeout"))
+-                            }
+-                        };
++                        block_stream.message().await;
+ 
+                     let maybe_block = match msg_res {
+                         Ok(b) => b,
+@@ -414,17 +406,7 @@ where
+                             };
+ 
+                             let first_msg_res: Result<Option<CompactBlock>, tonic::Status> =
+-                                match tokio::time::timeout(
+-                                    STREAM_MSG_TIMEOUT,
+-                                    block_stream.message(),
+-                                )
+-                                .await
+-                                {
+-                                    Ok(res) => res,
+-                                    Err(_) => Err(tonic::Status::deadline_exceeded(
+-                                        "stream message timeout after retry",
+-                                    )),
+-                                };
++                                block_stream.message().await;
+ 
+                             match first_msg_res {
+                                 Ok(b) => b,
+@@ -606,17 +588,18 @@ where
+             drop(receiver);
+         }
+ 
+-        let mut handle = self
++        let handle = self
+             .handle
+-            .take()
++            .as_mut()
+             .expect("loader should always have a handle to take!");
+ 
+-        match tokio::time::timeout(SCANNER_SHUTDOWN_TIMEOUT, &mut handle).await {
+-            Ok(join_res) => join_res.expect("task panicked")?,
+-            Err(_) => {
+-                handle.abort();
+-                let _ = handle.await;
+-                return Err(tonic::Status::deadline_exceeded("loader shutdown timeout").into());
++        let started = std::time::Instant::now();
++        loop {
++            tokio::select! {
++                result = &mut *handle => { result.expect("task panicked")?; break; }
++                _ = tokio::time::sleep(Duration::from_secs(10)) => {
++                    tracing::info!(stage = "loader", elapsed_seconds = started.elapsed().as_secs(), "Waiting for sync work to drain");
++                }
+             }
+         }
+ 
+@@ -716,17 +699,18 @@ where
+             drop(sender);
+         }
+ 
+-        let mut handle = self
++        let handle = self
+             .handle
+-            .take()
++            .as_mut()
+             .expect("worker should always have a handle to take!");
+ 
+-        match tokio::time::timeout(SCANNER_SHUTDOWN_TIMEOUT, &mut handle).await {
+-            Ok(res) => res,
+-            Err(_) => {
+-                handle.abort();
+-                let _ = handle.await; // ignore join error after abort
+-                Ok(())
++        let started = std::time::Instant::now();
++        loop {
++            tokio::select! {
++                result = &mut *handle => return result,
++                _ = tokio::time::sleep(Duration::from_secs(10)) => {
++                    tracing::info!(stage = "scanner", elapsed_seconds = started.elapsed().as_secs(), "Waiting for sync work to drain");
++                }
+             }
+         }
+     }
+diff --git a/vendor/zingo-netutils/Cargo.toml b/vendor/zingo-netutils/Cargo.toml
+index 0d919e0..5b4017b 100644
+--- a/vendor/zingo-netutils/Cargo.toml
++++ b/vendor/zingo-netutils/Cargo.toml
+@@ -29,7 +29,7 @@ bin = [{"name" = "nym-proxy", "required-features" = ["nym"]}, {"name" = "live-in
+ "tokio-socks" = {"version" = "0.5", "optional" = true}
+ "reqwest" = {"version" = "0.12.15", "default-features" = false, "optional" = true, "features" = ["rustls-tls-webpki-roots-no-provider", "socks"]}
+ "hyper-util" = {"version" = "0.1.20", "optional" = true}
+-"tower" = {"version" = "0.5", "optional" = true}
++"tower" = {"version" = "0.5", "features" = ["util"]}
+ "tokio" = {"version" = "1", "optional" = true, "features" = ["time", "rt-multi-thread", "macros", "signal", "io-std", "io-util"]}
+ "zingo-net-diag" = {"version" = "0.1.0", "path" = "../zingo-net-diag", "optional" = true}
+ "rand" = "0.8"
+@@ -39,7 +39,7 @@ bin = [{"name" = "nym-proxy", "required-features" = ["nym"]}, {"name" = "live-in
+ "globally-public-transparent" = ["dep:tokio-stream"]
+ "ping-very-insecure" = []
+ "testutils" = []
+-"socks5-transmit" = ["dep:tokio-socks", "dep:hyper-util", "dep:tower", "dep:tokio", "dep:zingo-net-diag"]
++"socks5-transmit" = ["dep:tokio-socks", "dep:hyper-util", "dep:tokio", "dep:zingo-net-diag"]
+ "socks5-fetch" = ["dep:reqwest", "dep:zingo-net-diag"]
+ "nym" = ["dep:nym-sdk", "dep:nym-http-api-client", "dep:nym-validator-client", "dep:tokio-socks", "dep:tokio", "socks5-transmit", "dep:zingo-net-diag"]
+ 
+diff --git a/vendor/zingo-netutils/src/lib.rs b/vendor/zingo-netutils/src/lib.rs
+index 4fefb3b..2187da0 100644
+--- a/vendor/zingo-netutils/src/lib.rs
++++ b/vendor/zingo-netutils/src/lib.rs
+@@ -288,17 +288,30 @@ pub trait Indexer {
+     ) -> impl Future<Output = Result<PingResponse, tonic::Status>> + Send;
+ }
+ 
++/// Application-injectable transport retained by every cloned RPC client.
++pub type IndexerTransport = tower::util::BoxCloneSyncService<
++    http::Request<tonic::body::Body>,
++    http::Response<tonic::body::Body>,
++    tonic::Status,
++>;
++
+ /// gRPC-backed [`Indexer`] that connects to a Zcash chain indexer (server).
+ #[derive(Debug, Clone)]
+ pub struct GrpcIndexer {
+     uri: http::Uri,
+-    clear_net_client: CompactTxStreamerClient<Channel>,
++    clear_net_client: CompactTxStreamerClient<IndexerTransport>,
+ }
+ 
+ impl GrpcIndexer {
+     /// Use an application-owned channel; all RPCs and clones retain its connector.
+     pub fn from_channel(uri: http::Uri, channel: Channel) -> Self {
+-        Self { uri, clear_net_client: CompactTxStreamerClient::new(channel) }
++        use tower::ServiceExt;
++        Self::from_transport(uri, IndexerTransport::new(channel.map_err(|e| tonic::Status::from_error(Box::new(e)))))
++    }
++
++    /// Install a reviewed application transport, including per-response progress handling.
++    pub fn from_transport(uri: http::Uri, transport: IndexerTransport) -> Self {
++        Self { uri, clear_net_client: CompactTxStreamerClient::new(transport) }
+     }
+ 
+     pub async fn new(uri: http::Uri) -> Result<Self, GetClientError> {
+@@ -321,7 +334,8 @@ impl GrpcIndexer {
+             endpoint
+         };
+         let channel = endpoint.connect().await?;
+-        let clear_net_client = CompactTxStreamerClient::new(channel);
++        use tower::ServiceExt;
++        let clear_net_client = CompactTxStreamerClient::new(IndexerTransport::new(channel.map_err(|e| tonic::Status::from_error(Box::new(e)))));
+ 
+         Ok(Self {
+             uri,
+@@ -352,7 +366,8 @@ impl GrpcIndexer {
+             endpoint
+         };
+         let channel = endpoint.connect_lazy();
+-        let clear_net_client = CompactTxStreamerClient::new(channel);
++        use tower::ServiceExt;
++        let clear_net_client = CompactTxStreamerClient::new(IndexerTransport::new(channel.map_err(|e| tonic::Status::from_error(Box::new(e)))));
+ 
+         Ok(Self {
+             uri,
+@@ -366,7 +381,7 @@ impl GrpcIndexer {
+     }
+ 
+     /// Returns the "surface net" gRPC client where the IP address is not obfuscated.
+-    pub async fn get_clear_net_client(&self) -> CompactTxStreamerClient<Channel> {
++    pub async fn get_clear_net_client(&self) -> CompactTxStreamerClient<IndexerTransport> {
+         self.clear_net_client.clone()
+     }
+ }
+diff --git a/vendor/zingolib/src/lightclient/sync.rs b/vendor/zingolib/src/lightclient/sync.rs
+index 285bd44..6991b52 100644
+--- a/vendor/zingolib/src/lightclient/sync.rs
++++ b/vendor/zingolib/src/lightclient/sync.rs
+@@ -8,9 +8,6 @@ use std::time::Duration;
+ use futures::FutureExt;
+ use pepper_sync::error::{SyncError, SyncModeError, SyncRecoveryObservables};
+ use pepper_sync::wallet::SyncMode;
+-use tokio::time::MissedTickBehavior;
+-use tokio::time::interval;
+-use tokio::time::timeout;
+ 
+ use crate::data::PollReport;
+ use crate::wallet::error::WalletError;
+@@ -19,7 +16,6 @@ use super::LightClient;
+ use super::SyncResult;
+ use super::error::LightClientError;
+ 
+-use zingo_netutils::time::SYNC_START_TIMEOUT;
+ 
+ /// Minted log marker opening the sync engine's span.
+ pub const SYNC_SPAN_OPEN: &str = "SYNC_SPAN=open";
+@@ -32,7 +28,7 @@ impl LightClient {
+     /// `sync_handle` field.
+     // TODO: add realtime sync updates to zingo-cli when it can handle printing during user input
+     pub async fn sync(&mut self) -> Result<(), LightClientError> {
+-        if self.sync_mode() != SyncMode::NotRunning {
++        if self.sync_handle.is_some() || self.sync_mode() != SyncMode::NotRunning {
+             return Err(LightClientError::SyncModeError(
+                 SyncModeError::SyncAlreadyRunning,
+             ));
+@@ -51,21 +47,33 @@ impl LightClient {
+         let sync_mode = self.sync_mode.clone();
+         let (progress_sender, progress_receiver) = tokio::sync::watch::channel(None);
+         self.sync_progress = progress_receiver;
++        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+         let sync_handle = tokio::spawn(async move {
+             // The engine times its own span, so a measurement reads one
+             // clock inside the task that does the work rather than polling
+             // a status or watching a prompt redraw.
+             let started = std::time::Instant::now();
+             tracing::info!("{SYNC_SPAN_OPEN}");
+-            let outcome = pepper_sync::sync(
++            let engine = pepper_sync::sync(
+                 client,
+                 &chain_type,
+                 wallet,
+                 sync_mode,
+                 progress_sender,
+                 sync_config,
+-            )
+-            .await;
++            );
++            tokio::pin!(engine);
++            let mut started_sender = Some(started_sender);
++            let outcome = futures::future::poll_fn(|cx| {
++                // Engine entry establishes mode before its first suspension.
++                // A slow scheduler is not a network failure. Completion remains
++                // owned by sync_handle, even if the start waiter is cancelled.
++                let result = engine.as_mut().poll(cx);
++                if let Some(sender) = started_sender.take() {
++                    let _ = sender.send(());
++                }
++                result
++            }).await;
+             tracing::info!(
+                 "{SYNC_SPAN_CLOSE} {}ms {}",
+                 started.elapsed().as_millis(),
+@@ -75,41 +83,7 @@ impl LightClient {
+         });
+         self.sync_handle = Some(sync_handle);
+ 
+-        if timeout(SYNC_START_TIMEOUT, async {
+-            let mut interval = interval(Duration::from_millis(50));
+-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+-            interval.tick().await;
+-            while self.sync_mode() == SyncMode::NotRunning {
+-                interval.tick().await;
+-            }
+-        })
+-        .await
+-        .is_err()
+-        {
+-            match self.poll_sync() {
+-                PollReport::Ready(sync_result) => {
+-                    // sync can only return an error in this context so ignore success and return errror.
+-                    let _ignore_sync_success = sync_result?;
+-                }
+-                PollReport::NotReady => {
+-                    // this error should never be reached.
+-                    // timeout only occurs when sync has returned an error so handle will always be ready.
+-                    // cleans up sync handle and sets sync mode back to 'not running'.
+-                    if let Some(sync_handle) = self.sync_handle.take() {
+-                        sync_handle.abort();
+-                        let _ignore_cancelled = sync_handle.await;
+-                    }
+-                    self.sync_mode
+-                        .store(SyncMode::NotRunning as u8, atomic::Ordering::Release);
+-                    return Err(LightClientError::SyncLaunchError);
+-                }
+-                PollReport::NoHandle => {
+-                    // this error should never be reached.
+-                    // sync handle must exist in this scope.
+-                    return Err(LightClientError::SyncLaunchError);
+-                }
+-            }
+-        }
++        started_receiver.await.map_err(|_| LightClientError::SyncLaunchError)?;
+ 
+         Ok(())
+     }

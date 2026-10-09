@@ -60,7 +60,12 @@ struct Inner {
     state: State,
     store: Option<store::Store>,
 }
-type FetchCell = Arc<OnceCell<std::result::Result<Arc<Vec<u8>>, String>>>;
+#[derive(Debug)]
+struct Fetched {
+    completed: Instant,
+    result: std::result::Result<Arc<Vec<u8>>, &'static str>,
+}
+type FetchCell = Arc<OnceCell<Fetched>>;
 pub struct Manager {
     #[cfg(test)]
     commit_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
@@ -78,7 +83,7 @@ pub struct Manager {
     catalog: Arc<CatalogState>,
     base: CatalogSnapshot,
     inner: Mutex<Inner>,
-    fetches: Mutex<BTreeMap<String, (Instant, FetchCell)>>,
+    fetches: Mutex<BTreeMap<String, FetchCell>>,
     global_import: Arc<Semaphore>,
     owner_import: BTreeMap<String, Arc<Semaphore>>,
     mutations: Arc<Semaphore>,
@@ -377,44 +382,66 @@ impl Manager {
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
         let url = canonical.as_str();
-        let _owner = self
-            .owner_import
-            .get(owner)
-            .context("unknown owner")?
-            .clone()
-            .try_acquire_owned()
-            .context("owner_import_busy")?;
-        let _global = self
-            .global_import
-            .clone()
-            .try_acquire_owned()
-            .context("imports_busy")?;
         let cell = {
             let mut cache = self.fetches.lock().unwrap();
-            cache.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
-            if refresh && cache.get(url).is_some_and(|(_, cell)| cell.get().is_some()) {
+            cache.retain(|_, cell| {
+                if cell.get().is_none() {
+                    return Arc::strong_count(cell) > 1;
+                }
+                cell.get().is_none_or(|done| {
+                    let retention = if done.result.is_ok() { 300 } else { 1 };
+                    done.completed.elapsed() < Duration::from_secs(retention)
+                })
+            });
+            if refresh && cache.get(url).is_some_and(|cell| cell.get().is_some()) {
                 cache.remove(url);
             }
             let max = (128 * 1024 * 1024 / self.policy.max_spec_bytes).min(8);
             if !cache.contains_key(url) && cache.len() >= max {
-                cache.clear();
+                // Never evict active work. Completed retention is optional;
+                // capacity churn must not cause duplicate in-flight fetches.
+                let oldest = cache
+                    .iter()
+                    .filter_map(|(key, cell)| cell.get().map(|done| (key.clone(), done.completed)))
+                    .min_by_key(|(_, time)| *time)
+                    .map(|(key, _)| key);
+                if let Some(key) = oldest {
+                    cache.remove(&key);
+                } else {
+                    anyhow::bail!("imports_busy");
+                }
             }
             cache
                 .entry(url.into())
-                .or_insert_with(|| (Instant::now(), Arc::new(OnceCell::new())))
-                .1
+                .or_insert_with(|| Arc::new(OnceCell::new()))
                 .clone()
         };
-        cell.get_or_init(|| async {
-            self.fetch_document(url)
-                .await
-                .map(Arc::new)
-                .map_err(|_| "source_fetch_failed_or_rejected".into())
-        })
-        .await
-        .clone()
-        .map_err(anyhow::Error::msg)
+        let done = cell
+            .get_or_init(|| async {
+                // Only the initializer consumes import capacity; aliases merely
+                // waiting for its result cannot starve independent imports.
+                let result = async {
+                    let owner = self.owner_import.get(owner).ok_or("unknown_owner")?;
+                    let _owner = owner.try_acquire().map_err(|_| "owner_import_busy")?;
+                    let _global = self
+                        .global_import
+                        .try_acquire()
+                        .map_err(|_| "imports_busy")?;
+                    self.fetch_document(url)
+                        .await
+                        .map(Arc::new)
+                        .map_err(|_| "source_fetch_failed_or_rejected")
+                }
+                .await;
+                Fetched {
+                    completed: Instant::now(),
+                    result,
+                }
+            })
+            .await;
+        done.result.clone().map_err(anyhow::Error::msg)
     }
+
     async fn fetch_document(&self, url: &str) -> Result<Vec<u8>> {
         #[cfg(test)]
         {

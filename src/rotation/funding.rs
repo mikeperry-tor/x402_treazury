@@ -43,6 +43,18 @@ pub trait FundingBackend {
     fn credit(&mut self, job: &FundingJob) -> impl Future<Output = Result<()>> + Send;
     fn max_attempts(&self, job: &FundingJob) -> u32;
 }
+// Scheduling tests supply an epoch; elapsed work advances that same clock.
+// Every authority decision reads it again after awaited work.
+struct TickClock {
+    epoch: u64,
+    started: std::time::Instant,
+}
+impl TickClock {
+    fn now(&self) -> u64 {
+        self.epoch.saturating_add(self.started.elapsed().as_secs())
+    }
+}
+
 pub struct FundingWorker<B> {
     pub store: StoreHandle,
     pub backend: B,
@@ -59,6 +71,10 @@ impl<B: FundingBackend> FundingWorker<B> {
         Ok(())
     }
     pub async fn tick(&mut self, instant: u64) -> Result<()> {
+        let clock = TickClock {
+            epoch: instant,
+            started: std::time::Instant::now(),
+        };
         // Base credit can arrive before Zcash reaches its configured depth.
         // Completed/quarantined jobs must still settle their source outbox, even
         // though the ordinary funding scheduler no longer selects them.
@@ -78,7 +94,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .await
                     .map(|_| ())
                     .context("source_reconciliation_failed");
-                self.finish_step(job, instant, result).await?;
+                self.finish_step(job, clock.now(), result).await?;
             }
         }
         if let Some(job) = status
@@ -115,7 +131,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                 Err(error) => Err(error),
             };
             if handled {
-                self.finish_step(job, instant, result).await?;
+                self.finish_step(job, clock.now(), result).await?;
             }
         }
         let Some(mut job) = self
@@ -135,10 +151,10 @@ impl<B: FundingBackend> FundingWorker<B> {
                 .await?;
             job.timed_out = true;
             tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase,
-                "funding exceeded swap timeout; continuing reconciliation without a replacement deposit");
+                "funding exceeded swap delay warning threshold; reconciliation continues with at least 60 seconds between polls and no replacement deposit");
         }
-        let result = self.step(&job, instant).await;
-        self.finish_step(&job, instant, result).await?;
+        let result = self.step(&job, &clock).await;
+        self.finish_step(&job, clock.now(), result).await?;
         // Read committed state: backend credit/preparation can advance phases too.
         let id = job.id.clone();
         let current = self
@@ -193,24 +209,15 @@ impl<B: FundingBackend> FundingWorker<B> {
         let jitter =
             job.id.bytes().map(u64::from).sum::<u64>() % self.poll_seconds.saturating_add(1).max(1);
         let next = instant.saturating_add(delay).saturating_add(jitter);
-        let quote_attempt = error.is_some() && job.phase == FundingPhase::Allocated;
-        let exhausted =
-            quote_attempt && job.attempts.saturating_add(1) >= self.backend.max_attempts(job);
+        // Allocated failures cannot represent transaction preparation or a send.
+        // One quote read per pass plus capped exponential backoff bounds outages
+        // without consuming durable preparation/recovery authority.
         let id = job.id.clone();
         self.store
-            .call(move |s| {
-                if exhausted {
-                    s.advance_funding(
-                        &id,
-                        FundingPhase::Allocated,
-                        FundingPhase::RecoveryRequired,
-                    )?;
-                }
-                s.defer_funding(&id, next, error.as_deref(), quote_attempt)?;
-                Ok(())
-            })
+            .call(move |s| s.defer_funding(&id, next, error.as_deref(), false))
             .await
     }
+
     async fn transition(&self, job: &FundingJob, next: FundingPhase) -> Result<()> {
         let id = job.id.clone();
         let expected = job.phase.clone();
@@ -218,7 +225,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             .call(move |s| s.advance_funding(&id, expected, next))
             .await
     }
-    async fn step(&mut self, job: &FundingJob, instant: u64) -> Result<()> {
+    async fn step(&mut self, job: &FundingJob, clock: &TickClock) -> Result<()> {
         use FundingPhase::*;
         match job.phase {
             Allocated => {
@@ -234,7 +241,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .call(move |s| s.save_funding_quote_with_target(&id, &bytes, &target))
                     .await?;
             }
-            Quoted => self.prepare_quoted(job, instant).await?,
+            Quoted => self.prepare_quoted(job, clock).await?,
             Preparing => {
                 let id = job.operation_id.clone();
                 let prepared = self.store.call(move |s| s.operation_pending(&id)).await?;
@@ -245,7 +252,9 @@ impl<B: FundingBackend> FundingWorker<B> {
                 let id = job.operation_id.clone();
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
                 if operation.attempts == 0 {
-                    if operation.facts.deadline.saturating_sub(instant) < 300 {
+                    if operation.facts.deadline.saturating_sub(clock.now())
+                        < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
+                    {
                         self.transition(job, RecoveryRequired).await?;
                         anyhow::bail!("prepared_quote_window_exhausted");
                     }
@@ -271,7 +280,7 @@ impl<B: FundingBackend> FundingWorker<B> {
     }
     // Readiness and quote refresh precede PREPARING; once that phase commits,
     // only saved-byte recovery may proceed after an interrupted preparation.
-    async fn prepare_quoted(&mut self, job: &FundingJob, instant: u64) -> Result<()> {
+    async fn prepare_quoted(&mut self, job: &FundingJob, clock: &TickClock) -> Result<()> {
         use FundingPhase::*;
         let status = self.store.call(|s| s.status()).await?;
         if status.outgoing_pending || !status.sync_fresh {
@@ -279,11 +288,9 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
         let quote = self.quote(job).await?;
         self.backend.ready(job, &quote).await?;
-        if quote.deadline.saturating_sub(instant) < 300 {
-            if job.attempts.saturating_add(1) >= self.backend.max_attempts(job) {
-                self.transition(job, RecoveryRequired).await?;
-                anyhow::bail!("quote_refresh_exhausted");
-            }
+        if quote.deadline.saturating_sub(clock.now())
+            < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
+        {
             let id = job.id.clone();
             return self
                 .store
@@ -428,11 +435,9 @@ impl FundingBackend for Backend {
         let job_id = job.id.clone();
         let operation = job.operation_id.clone();
         let allocation_limits = self.funding.allocation_limits()?;
-        let reserve = quote
-            .input
-            .checked_add(self.max_network_fee)
-            .context("funding cost overflow")?
-            .min(limits.max_input);
+        // The exact fee is checked and reserved by the serialized owner before signing.
+        let reserve = quote.input;
+        ensure!(reserve < limits.max_input, "funding_cost_limit_exceeded");
         self.store
             .call(move |s| {
                 s.check_job_permit(&job_id, reserve)?;
@@ -479,7 +484,16 @@ impl FundingBackend for Backend {
             quote.response.clone(),
             &limits,
             now()?,
-        )?;
+        )
+        .map_err(|error| {
+            // The scheduler may have committed PREPARING while this quote crossed
+            // its delivery boundary. No treasury command has been sent here.
+            if error.is::<super::near::QuoteWindowExpired>() {
+                error.context(super::transaction::PreparationDeferred)
+            } else {
+                error
+            }
+        })?;
         ensure!(
             checked.request["recipient"] == job.recipient
                 && checked.request["amount"] == job.target

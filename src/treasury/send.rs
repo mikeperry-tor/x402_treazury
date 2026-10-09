@@ -10,7 +10,6 @@ use crate::rotation::{
     },
 };
 use anyhow::{Context, Result, ensure};
-use std::time::Duration;
 use zcash_keys::address::Address;
 use zcash_protocol::value::Zatoshis;
 use zingo_netutils::Indexer;
@@ -38,69 +37,58 @@ impl TransactionPreparer for Treasury {
             .sync_settings
             .clone()
             .context("sync endpoint not configured")?;
-        let instant = now()?;
-        ensure!(
-            request
-                .deadline
-                .checked_sub(instant)
-                .is_some_and(|remaining| remaining
-                    >= crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS),
-            "funding_deadline_too_close"
-        );
-        let day = u32::try_from(instant / 86400)?;
         let id = request.operation_id.clone();
-        let pool = request.pool_id.clone();
-        let limit = i64::try_from(request.daily_limit_zatoshis)?;
-        let reserve = i64::try_from(request.max_input_zatoshis)?;
+        let principal = request.amount_zatoshis;
         let observed = self
             .store
             .call(move |s| {
-                s.require_spend_ready(instant, reserve as u64)?;
-                let observed = s.status()?;
-                if let Some(limits) = request.allocation_limits {
-                    s.check_funding_allocation(&id, day, limits)?;
-                }
-                s.reserve(&id, pool.as_deref(), day, reserve, limit)?;
-                s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
-                Ok(observed)
+                s.require_unstarted_preparation(&id)?;
+                // An obviously unaffordable principal needs no proposal mutation.
+                // Do not add the fee ceiling here: the proposal determines cost.
+                s.require_spend_ready(now()?, principal)
+                    .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
+                s.status()
             })
             .await?;
-        // Any cancellation/error from here poisons the owner. No bytes can be sent
-        // before prepare_with_facts commits; reopen to recover durable state.
+        let identity = crate::network::IsolationId::treasury(&observed.treasury_id);
+        // Read-only checks precede any reservation, library mutation or poisoning.
+        let preflight: Result<_> = async {
+            let mut indexer = crate::network::global()
+                .grpc(&identity, &settings.endpoint)
+                .await?;
+            let info = indexer
+                .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
+                .await
+                .map_err(|status| super::diagnostics::tip_failure(status, "preparation_tip"))?;
+            ensure!(
+                info.chain_name == self.network.rpc_name(),
+                "indexer is not on mainnet"
+            );
+            let instant = now()?;
+            super::freshness::spending_ready(&observed, info.block_height, instant)?;
+            ensure!(
+                request
+                    .deadline
+                    .checked_sub(instant)
+                    .is_some_and(|remaining| remaining
+                        >= crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS),
+                "funding_deadline_too_close"
+            );
+            ensure!(self.client.is_some(), "treasury client unavailable");
+            Ok(indexer)
+        }
+        .await;
+        let indexer =
+            preflight.map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
+        // Calculate-only proposal creation mutates library memory. Cancellation
+        // still poisons this owner, but no bytes exist and no ceiling-sized
+        // budget reservation is needed before its actual fee is known.
         self.healthy = false;
         let client = self
             .client
             .as_mut()
             .context("treasury client unavailable")?;
-        let identity = crate::network::IsolationId::treasury(&observed.treasury_id);
-        let mut indexer = tokio::time::timeout(
-            crate::network::global().connection_timeout(Duration::from_secs(30)),
-            crate::network::global().grpc(&identity, &settings.endpoint),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("indexer connection timed out"))??;
-        client.set_indexer(indexer.clone());
-        let info = tokio::time::timeout(
-            crate::network::global().operation_timeout(Duration::from_secs(15)),
-            indexer.get_lightd_info(
-                crate::network::global()
-                    .operation_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
-            ),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("indexer network check timed out"))?
-        .map_err(|_| anyhow::anyhow!("indexer network check failed"))?;
-        ensure!(
-            info.chain_name == self.network.rpc_name(),
-            "indexer is not on mainnet"
-        );
-
-        ensure!(
-            observed.sync.as_ref().is_some_and(|o| o
-                .fresh(now().unwrap_or(u64::MAX), observed.snapshot_revision)
-                && o.height == Some(info.block_height)),
-            "treasury requires a fresh sync before calculation"
-        );
+        client.set_indexer(indexer);
         let _pause = client
             .pause_sync_scoped()
             .map_err(|_| anyhow::anyhow!("cannot pause treasury sync"))?;
@@ -147,6 +135,32 @@ impl TransactionPreparer for Treasury {
             zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
             "proposal amount mismatch"
         );
+        let id = request.operation_id.clone();
+        let pool = request.pool_id.clone();
+        let limit = i64::try_from(request.daily_limit_zatoshis)?;
+        let reserve = i64::try_from(total)?;
+        self.store
+            .call(move |s| {
+                let instant = now()?;
+                s.require_unstarted_preparation(&id)?;
+                s.require_spend_ready(instant, reserve as u64)?;
+                ensure!(
+                    request
+                        .deadline
+                        .checked_sub(instant)
+                        .is_some_and(|remaining| remaining
+                            >= crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS),
+                    "funding_deadline_too_close"
+                );
+                let day = u32::try_from(instant / 86400)?;
+                if let Some(limits) = request.allocation_limits {
+                    s.check_funding_allocation(&id, day, limits)?;
+                }
+                s.reserve(&id, pool.as_deref(), day, reserve, limit)?;
+                s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
+                Ok(())
+            })
+            .await?;
         let ids = client
             .calculate_stored_proposal()
             .await
@@ -240,13 +254,24 @@ impl Treasury {
             "treasury_sync_stale"
         );
         let height = observation.height.context("missing sync height")?;
-        let instant = now()?;
+        let operation = id.clone();
+        let durable = self
+            .store
+            .call(move |s| PreparedTransaction::load(s, &operation))
+            .await?;
+        tokio::select! {
+            biased;
+            _ = stop.cancelled() => anyhow::bail!("treasury stopping before submission intent"),
+            result = sender.preflight(&durable, rebroadcast) => result?,
+        }
+        // Re-read time after awaited preflight. Only the store mints authority;
+        // cancellation after that commit remains an unknown outcome.
         let operation = id.clone();
         let (prepared, attempt) = self
             .store
             .call(move |s| {
                 let prepared =
-                    BroadcastTransaction::request(s, &operation, instant, height, rebroadcast)?;
+                    BroadcastTransaction::request(s, &operation, now()?, height, rebroadcast)?;
                 let attempt = prepared.attempt();
                 Ok((prepared, attempt))
             })
@@ -354,7 +379,7 @@ mod tests {
         let id = treasury.status().await.unwrap().treasury_id;
         let addresses = treasury.addresses().await.unwrap();
         // Deliberately optimistic cached funds: the real empty zingolib wallet
-        // must reject the proposal even after journal admission succeeds.
+        // must reject the proposal without producing bytes or a budget reservation.
         let bytes = snapshot(treasury.client.as_ref().unwrap()).await.unwrap();
         treasury.revision = treasury
             .store
@@ -370,7 +395,7 @@ mod tests {
                         checkpoint_at: 0,
                         scanned_blocks: 1,
                         target_height: Some(2_000_000),
-                        observed_tip_height: None,
+                        observed_tip_height: Some(2_000_000),
                         height: Some(2_000_000),
                         confirmations: 3,
                         max_age_seconds: 300,
@@ -384,12 +409,26 @@ mod tests {
             .unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let count = calls.clone();
+        let advancement = Arc::new(AtomicUsize::new(4));
+        let tip = advancement.clone();
         let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
             let count = count.clone();
+            let tip = tip.clone();
             async move {
                 assert!(uri.path().ends_with("GetLightdInfo"));
                 count.fetch_add(1, Ordering::SeqCst);
-                let message = vec![0x22, 4, b'm', b'a', b'i', b'n', 0x38, 0x80, 0x89, 0x7a];
+                let message = vec![
+                    0x22,
+                    4,
+                    b'm',
+                    b'a',
+                    b'i',
+                    b'n',
+                    0x38,
+                    0x80 + tip.load(Ordering::SeqCst) as u8,
+                    0x89,
+                    0x7a,
+                ];
                 let body = [
                     vec![0],
                     (message.len() as u32).to_be_bytes().to_vec(),
@@ -425,6 +464,20 @@ mod tests {
             max_fee_zatoshis: 20_000,
             max_input_zatoshis: 70_000,
         };
+        let deferred = request();
+        let deferred_id = deferred.operation_id.clone();
+        let error = treasury.prepare(deferred).await.err().unwrap();
+        assert!(error.is::<crate::rotation::transaction::PreparationDeferred>());
+        assert!(
+            treasury.healthy,
+            "read-only readiness failures do not poison the owner"
+        );
+        treasury
+            .store
+            .call(move |s| s.require_unstarted_preparation(&deferred_id))
+            .await
+            .unwrap();
+        advancement.store(3, Ordering::SeqCst);
         let attempt = request();
         let operation = attempt.operation_id.clone();
         let error = treasury.prepare(attempt).await.err().unwrap();
@@ -432,7 +485,7 @@ mod tests {
         assert!(!treasury.healthy);
         assert_eq!(
             treasury.status().await.unwrap().sync.unwrap().phase,
-            SyncPhase::Preparing
+            SyncPhase::Ready
         );
         assert_eq!(treasury.status().await.unwrap().snapshot_revision, 2);
         assert!(!treasury.status().await.unwrap().outgoing_pending);
@@ -445,7 +498,7 @@ mod tests {
                 .to_string()
                 .contains("reopen")
         );
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
         treasury.close().await.unwrap();
         let restored = Treasury::open(state, key, id).await.unwrap();
         assert_eq!(restored.addresses().await.unwrap(), addresses);

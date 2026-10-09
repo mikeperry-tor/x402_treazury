@@ -101,6 +101,7 @@ struct Mock {
     ironwood: &'static [u8],
     calls: Arc<Mutex<Vec<String>>>,
     stall_blocks: Arc<AtomicBool>,
+    delay_first: Arc<AtomicBool>,
 }
 async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse {
     let method = uri.path().rsplit('/').next().unwrap().to_owned();
@@ -133,6 +134,9 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
         "GetLatestBlock" => vec![number(1, mock.tip)],
         "GetBlock" => vec![block(height(request))],
         "GetBlockRange" => {
+            if mock.delay_first.swap(false, Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+            }
             if mock.stall_blocks.load(Ordering::SeqCst) {
                 std::future::pending::<()>().await;
             }
@@ -229,6 +233,20 @@ async fn mock_with_tip_change(
     tokio::task::JoinHandle<()>,
     Arc<AtomicBool>,
 ) {
+    mock_with_delay(chain, tip, ironwood, final_tip, false).await
+}
+async fn mock_with_delay(
+    chain: &'static str,
+    tip: u64,
+    ironwood: &'static [u8],
+    final_tip: Option<u64>,
+    delay: bool,
+) -> (
+    String,
+    Arc<Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+    Arc<AtomicBool>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let calls = Arc::new(Mutex::new(vec![]));
@@ -240,6 +258,7 @@ async fn mock_with_tip_change(
         ironwood,
         calls: calls.clone(),
         stall_blocks: stall_blocks.clone(),
+        delay_first: Arc::new(AtomicBool::new(delay)),
     });
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -346,7 +365,7 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
             .err()
             .expect("empty wallet prepared a deposit");
         assert!(
-            error.to_string().contains("insufficient_spendable"),
+            format!("{error:#}").contains("insufficient_spendable"),
             "{error}"
         );
         assert_eq!(calls.lock().unwrap().len(), before);
@@ -788,7 +807,7 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
         .err()
         .unwrap();
     assert!(
-        error.to_string().contains("insufficient_spendable"),
+        format!("{error:#}").contains("insufficient_spendable"),
         "{error}"
     );
     assert!(
@@ -946,7 +965,10 @@ async fn moving_tip_accepts_bounded_lag_and_rejects_excess_or_regression() {
         assert_eq!(status.sync_fresh, accepted);
         let observation = status.sync.unwrap();
         assert_eq!(observation.observed_tip_height, Some(tip));
-        assert_eq!(observation.target_height, Some(TIP));
+        assert_eq!(
+            observation.target_height,
+            Some(if delta > 3 { tip } else { TIP })
+        );
         if accepted {
             assert_eq!(observation.height, Some(TIP));
             assert_eq!(observation.confirmations, 7);
@@ -967,4 +989,61 @@ async fn moving_tip_accepts_bounded_lag_and_rejects_excess_or_regression() {
         treasury.close().await.unwrap();
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn birthday_uses_older_observation_when_tip_moves_between_reads() {
+    for (info_height, tip_height) in [(TIP, TIP + 4), (TIP + 4, TIP)] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let app = axum::Router::new().fallback(move |uri: Uri| async move {
+            let message = if uri.path().ends_with("GetLightdInfo") {
+                [bytes(4, b"main"), number(7, info_height)].concat()
+            } else {
+                assert!(uri.path().ends_with("GetLatestBlock"));
+                number(1, tip_height)
+            };
+            (
+                [("content-type", "application/grpc"), ("grpc-status", "0")],
+                framed(message),
+            )
+        });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        assert_eq!(
+            x402_treazury::treasury::birthday::discover(&endpoint)
+                .await
+                .unwrap(),
+            TIP as u32 - x402_treazury::treasury::birthday::BIRTHDAY_REWIND
+        );
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn slow_initial_scan_retains_work_and_acquires_new_freshness() {
+    let dir = tempfile::tempdir().unwrap();
+    let (endpoint, calls, server, _) = mock_with_delay("main", TIP, b"000000", None, true).await;
+    let mut treasury = wallet(dir.path()).await;
+    treasury.configure_sync(SyncSettings::new(endpoint, 7, 5).unwrap());
+    let before = x402_treazury::rotation::base::now().unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        treasury.sync_once(&CancellationToken::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let status = treasury.status().await.unwrap();
+    assert!(status.sync_fresh);
+    let observation = status.sync.unwrap();
+    assert_eq!(observation.height, Some(TIP));
+    assert!(
+        observation.checked_at.unwrap() >= before + 5,
+        "freshness must come from a new observation"
+    );
+    let requests = calls.lock().unwrap().clone();
+    assert!(requests.iter().filter(|m| *m == "GetLightdInfo").count() >= 4);
+    assert!(!requests.iter().any(|m| m == "SendTransaction"));
+    treasury.close().await.unwrap();
+    server.abort();
 }

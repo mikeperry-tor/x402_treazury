@@ -8,9 +8,6 @@ use std::time::Duration;
 use futures::FutureExt;
 use pepper_sync::error::{SyncError, SyncModeError, SyncRecoveryObservables};
 use pepper_sync::wallet::SyncMode;
-use tokio::time::MissedTickBehavior;
-use tokio::time::interval;
-use tokio::time::timeout;
 
 use crate::data::PollReport;
 use crate::wallet::error::WalletError;
@@ -19,7 +16,6 @@ use super::LightClient;
 use super::SyncResult;
 use super::error::LightClientError;
 
-use zingo_netutils::time::SYNC_START_TIMEOUT;
 
 /// Minted log marker opening the sync engine's span.
 pub const SYNC_SPAN_OPEN: &str = "SYNC_SPAN=open";
@@ -32,7 +28,7 @@ impl LightClient {
     /// `sync_handle` field.
     // TODO: add realtime sync updates to zingo-cli when it can handle printing during user input
     pub async fn sync(&mut self) -> Result<(), LightClientError> {
-        if self.sync_mode() != SyncMode::NotRunning {
+        if self.sync_handle.is_some() || self.sync_mode() != SyncMode::NotRunning {
             return Err(LightClientError::SyncModeError(
                 SyncModeError::SyncAlreadyRunning,
             ));
@@ -51,21 +47,33 @@ impl LightClient {
         let sync_mode = self.sync_mode.clone();
         let (progress_sender, progress_receiver) = tokio::sync::watch::channel(None);
         self.sync_progress = progress_receiver;
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
         let sync_handle = tokio::spawn(async move {
             // The engine times its own span, so a measurement reads one
             // clock inside the task that does the work rather than polling
             // a status or watching a prompt redraw.
             let started = std::time::Instant::now();
             tracing::info!("{SYNC_SPAN_OPEN}");
-            let outcome = pepper_sync::sync(
+            let engine = pepper_sync::sync(
                 client,
                 &chain_type,
                 wallet,
                 sync_mode,
                 progress_sender,
                 sync_config,
-            )
-            .await;
+            );
+            tokio::pin!(engine);
+            let mut started_sender = Some(started_sender);
+            let outcome = futures::future::poll_fn(|cx| {
+                // Engine entry establishes mode before its first suspension.
+                // A slow scheduler is not a network failure. Completion remains
+                // owned by sync_handle, even if the start waiter is cancelled.
+                let result = engine.as_mut().poll(cx);
+                if let Some(sender) = started_sender.take() {
+                    let _ = sender.send(());
+                }
+                result
+            }).await;
             tracing::info!(
                 "{SYNC_SPAN_CLOSE} {}ms {}",
                 started.elapsed().as_millis(),
@@ -75,41 +83,7 @@ impl LightClient {
         });
         self.sync_handle = Some(sync_handle);
 
-        if timeout(SYNC_START_TIMEOUT, async {
-            let mut interval = interval(Duration::from_millis(50));
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            interval.tick().await;
-            while self.sync_mode() == SyncMode::NotRunning {
-                interval.tick().await;
-            }
-        })
-        .await
-        .is_err()
-        {
-            match self.poll_sync() {
-                PollReport::Ready(sync_result) => {
-                    // sync can only return an error in this context so ignore success and return errror.
-                    let _ignore_sync_success = sync_result?;
-                }
-                PollReport::NotReady => {
-                    // this error should never be reached.
-                    // timeout only occurs when sync has returned an error so handle will always be ready.
-                    // cleans up sync handle and sets sync mode back to 'not running'.
-                    if let Some(sync_handle) = self.sync_handle.take() {
-                        sync_handle.abort();
-                        let _ignore_cancelled = sync_handle.await;
-                    }
-                    self.sync_mode
-                        .store(SyncMode::NotRunning as u8, atomic::Ordering::Release);
-                    return Err(LightClientError::SyncLaunchError);
-                }
-                PollReport::NoHandle => {
-                    // this error should never be reached.
-                    // sync handle must exist in this scope.
-                    return Err(LightClientError::SyncLaunchError);
-                }
-            }
-        }
+        started_receiver.await.map_err(|_| LightClientError::SyncLaunchError)?;
 
         Ok(())
     }

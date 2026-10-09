@@ -11,7 +11,7 @@ use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use x402_chain_eip155::V2Eip155ExactClient;
 use x402_reqwest::X402Client;
@@ -29,9 +29,8 @@ pub struct ManagedPool {
     store: StoreHandle,
     pool: String,
     base: BaseRpc,
-    target: U256,
+    payment_limit: U256,
     policy: SpendPolicy,
-    wait: Duration,
     gate: Mutex<()>,
 }
 struct Offer {
@@ -58,21 +57,22 @@ impl ManagedPool {
         base: BaseRpc,
         deposit: &str,
         policy: SpendPolicy,
-        wait_seconds: u64,
     ) -> Result<Self> {
-        ensure!(
-            wait_seconds > 0 && wait_seconds <= 3600,
-            "invalid admission deadline"
-        );
         Ok(Self {
             store,
             pool,
             base,
-            target: positive_usdc(deposit)?,
+            payment_limit: positive_usdc(deposit)?.min(policy.max_atomic.unwrap_or(U256::MAX)),
             policy,
-            wait: crate::network::global().operation_timeout(Duration::from_secs(wait_seconds)),
             gate: Mutex::new(()),
         })
+    }
+    /// Explicit operator opt-out of the historical funding-target payment ceiling.
+    pub fn with_funding_target_limit(mut self, enabled: bool) -> Self {
+        if !enabled {
+            self.payment_limit = self.policy.max_atomic.unwrap_or(U256::MAX);
+        }
+        self
     }
     pub async fn reconcile(&self) -> Result<()> {
         let _gate = self.gate.lock().await;
@@ -125,9 +125,28 @@ impl ManagedPool {
         &self,
         http: &reqwest::Client,
         expected: PaymentCandidateHandle,
+        retry: reqwest::Request,
+        response: reqwest::Response,
+        cover: Option<&crate::cover::runtime::Call>,
+    ) -> Result<(reqwest::Response, bool)> {
+        self.pay_with_cover_observed(
+            http,
+            expected,
+            retry,
+            response,
+            cover,
+            &crate::payment::SubmissionProgress::default(),
+        )
+        .await
+    }
+    pub(crate) async fn pay_with_cover_observed(
+        &self,
+        http: &reqwest::Client,
+        expected: PaymentCandidateHandle,
         mut retry: reqwest::Request,
         mut response: reqwest::Response,
         cover: Option<&crate::cover::runtime::Call>,
+        progress: &crate::payment::SubmissionProgress,
     ) -> Result<(reqwest::Response, bool)> {
         let header = response
             .headers()
@@ -135,7 +154,7 @@ impl ManagedPool {
             .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
         let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
         let omitted = strip_extensions(&mut challenge)?;
-        let offer = select_offer(&challenge, &self.policy, self.target)?;
+        let offer = select_offer(&challenge, &self.policy, self.payment_limit)?;
         challenge["accepts"] = serde_json::json!([offer.raw.clone()]);
         if let Some(desc) = challenge.pointer_mut("/resource/description")
             && let Some(text) = desc.as_str()
@@ -160,18 +179,29 @@ impl ManagedPool {
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
         let qualification = crate::qualification::payment_context()?;
         let admission_context = qualification.clone();
-        let (headers, attempt_id) = tokio::time::timeout(self.wait, async {
+        let (headers, attempt_id) = {
             let _guard = self.gate.lock().await;
             let pool = self.pool.clone();
-            let query = self.store.call(move |s| s.chain_query(&pool)).await?;
-            let view = self.base.view(query).await?;
+            let query = self
+                .store
+                .call(move |s| s.payment_chain_query(&pool))
+                .await?;
+            let view = self.base.payment_view(query).await?;
             let pool = self.pool.clone();
             let hash = requirements_hash.clone();
             let amount = offer.amount;
+            let payment_limit = self.payment_limit;
             let lease = self
                 .store
                 .call(move |s| {
-                    let lease = s.admit_for(&pool, amount, &hash, view, Some(&expected))?;
+                    let lease = s.admit_for_limit(
+                        &pool,
+                        amount,
+                        &hash,
+                        view,
+                        Some(&expected),
+                        payment_limit,
+                    )?;
                     if let Some(context) = admission_context {
                         context.record(&s.qualification_payment(&lease.id)?)?;
                     }
@@ -217,20 +247,15 @@ impl ManagedPool {
             let hash = requirements_hash;
             // Cancellation here retains the row, even if the accepted store operation
             // commits after its caller disappears. Signed bytes never leave before this.
+            progress.mark_possible();
             self.store
                 .call(move |s| s.journal_authorization(&id, &wallet, generation, &hash, auth))
                 .await?;
             // The journal now reserves exposure across cancellation, concurrent
             // admission, reconciliation and rotation. Do not hold the pool gate
             // while the seller establishes a connection or returns its response.
-            Ok::<_, anyhow::Error>((headers, attempt_id))
-        })
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(AdmissionError::WalletNotReady(
-                "admission deadline exceeded"
-            ))
-        })??;
+            (headers, attempt_id)
+        };
         retry.headers_mut().extend(headers);
         let mut padding = cover.and_then(|c| c.pad(&mut retry, true));
         if let Some(p) = &mut padding {
@@ -305,30 +330,14 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
         .context(AdmissionError::UnsupportedPayment("missing offers"))?
     {
         let parsed = (|| -> Result<Offer> {
-            ensure!(
-                raw.as_object().is_some_and(|m| m.keys().all(|k| matches!(
-                    k.as_str(),
-                    "scheme"
-                        | "network"
-                        | "asset"
-                        | "amount"
-                        | "payTo"
-                        | "maxTimeoutSeconds"
-                        | "outputSchema"
-                        | "extra"
-                        | "assetTransferMethod"
-                        | "flow"
-                        | "extensions"
-                ))),
-                "unknown offer metadata"
-            );
-            // Descriptive JSON Schema only: preserve it, but never resolve references,
-            // evaluate it, or use its contents as payment terms.
+            ensure!(raw.is_object(), "malformed offer");
             ensure!(
                 raw.get("outputSchema")
                     .is_none_or(|v| v.is_object() || v.is_boolean()),
                 "malformed output schema metadata"
             );
+            // Bounded opaque annotations are preserved in the accepted payload.
+            // Only authority-bearing fields below determine compatibility.
             ensure!(
                 raw["scheme"] == "exact"
                     && raw["network"] == "eip155:8453"
@@ -355,38 +364,29 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
                     "unsupported extensions"
                 );
             }
+            ensure!(
+                ["permit2", "permit2Authorization", "spender", "approval"]
+                    .iter()
+                    .all(|key| raw.get(*key).is_none()),
+                "unsupported transfer mechanism"
+            );
             let extra = raw["extra"].as_object().context("missing USDC domain")?;
             ensure!(
-                extra.keys().all(|k| matches!(
-                    k.as_str(),
-                    "name"
-                        | "version"
-                        | "assetTransferMethod"
-                        | "flow"
-                        | "facilitatorAddress"
-                        | "breakdown"
-                        | "totalUsd"
-                        | "acceptId"
-                        | "merchant"
-                        | "tier"
-                )),
-                "unknown payment metadata"
-            );
-            // Reviewed vendor annotations are echoed unchanged, never used to select a
-            // signing mechanism or compute the reservation. Atomic `amount` is authoritative.
-            ensure!(
-                ["acceptId", "merchant", "tier"]
-                    .iter()
-                    .all(|key| extra.get(*key).is_none_or(Value::is_string))
-                    && extra
-                        .get("totalUsd")
-                        .is_none_or(|v| v.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0))
-                    && extra
-                        .get("breakdown")
-                        .is_none_or(|v| v.as_object().is_some_and(|m| m
-                            .values()
-                            .all(|v| v.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)))),
-                "malformed informational payment metadata"
+                [
+                    "scheme",
+                    "network",
+                    "asset",
+                    "amount",
+                    "payTo",
+                    "maxTimeoutSeconds",
+                    "permit2",
+                    "permit2Authorization",
+                    "spender",
+                    "approval"
+                ]
+                .iter()
+                .all(|key| !extra.contains_key(*key)),
+                "conflicting payment authority metadata"
             );
             ensure!(
                 extra.get("name").is_some_and(|v| v == "USD Coin")
@@ -419,7 +419,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
         }
     }
     anyhow::bail!(if price_rejected {
-        AdmissionError::PriceLimit("no offer fits cap and funding_amount_usdc")
+        AdmissionError::PriceLimit("no offer fits configured API payment ceiling")
     } else {
         AdmissionError::UnsupportedPayment("no compatible EIP-3009 offer")
     })

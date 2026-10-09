@@ -106,6 +106,44 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         before,
         serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
     );
+    // Model a quote crossing its margin after the scheduler commits PREPARING.
+    // The concrete adapter must prove no treasury command was dispatched, so the
+    // store can defer and refresh without charging a transaction recovery attempt.
+    let other = store
+        .call(|s| Ok(s.funding_jobs()?.remove(1)))
+        .await
+        .unwrap();
+    let mut expired = quote.clone();
+    expired.request["recipient"] = json!(other.recipient);
+    expired.response["quoteRequest"] = expired.request.clone();
+    expired.deadline = now().unwrap() + 299;
+    expired.response["quote"]["deadline"] = json!(
+        chrono::DateTime::from_timestamp(expired.deadline as i64, 0)
+            .unwrap()
+            .to_rfc3339()
+    );
+    let j = other.clone();
+    let encoded = serde_json::to_vec(&expired).unwrap();
+    store
+        .call(move |s| {
+            s.save_funding_quote(&j.id, &encoded)?;
+            s.advance_funding(&j.id, FundingPhase::Quoted, FundingPhase::Preparing)
+        })
+        .await
+        .unwrap();
+    let error = backend.prepare(&other, &expired).await.unwrap_err();
+    assert!(error.is::<crate::rotation::transaction::PreparationDeferred>());
+    assert!(commands.test_is_empty());
+    store
+        .call(move |s| {
+            s.require_unstarted_preparation(&other.operation_id)?;
+            s.defer_unstarted_preparation(&other.id)?;
+            s.refresh_unprepared_quote(&other.id)?;
+            assert_eq!(s.funding_recovery_count(&other.id)?, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
     let j = job.clone();
     let bytes = serde_json::to_vec(&quote).unwrap();
     store

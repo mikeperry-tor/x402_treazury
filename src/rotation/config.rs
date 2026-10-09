@@ -25,9 +25,6 @@ fn deposit() -> String {
 fn network_fee_limit() -> String {
     "0.0003".into()
 }
-fn wait() -> u64 {
-    30
-}
 fn attempts() -> u32 {
     3
 }
@@ -55,6 +52,9 @@ fn poll() -> u64 {
 fn deadline() -> u64 {
     1800
 }
+fn quote_window() -> u64 {
+    7200
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "mode", deny_unknown_fields)]
 pub enum WalletConfig {
@@ -70,13 +70,17 @@ pub enum WalletConfig {
         funding_amount_usdc: String,
         #[serde(default = "cap")]
         max_api_payment_usdc: String,
+        /// Compatibility default; false opts into the explicit API cap and available balance.
+        #[serde(default = "enabled")]
+        limit_payments_to_funding_target: bool,
         #[serde(default)]
         max_funding_amount_usdc: Option<String>,
         #[serde(default)]
         max_funding_spend_zec: Option<String>,
         max_conversion_overhead_percent: u32,
-        #[serde(default = "wait")]
-        wait_seconds: u64,
+        /// Compatibility only: admission no longer has an elapsed-time deadline.
+        #[serde(default, skip_serializing)]
+        wait_seconds: Option<u64>,
         #[serde(default = "attempts")]
         max_attempts: u32,
     },
@@ -103,6 +107,7 @@ impl WalletConfig {
                 max_conversion_overhead_percent,
                 wait_seconds,
                 max_attempts,
+                ..
             } => {
                 let target =
                     usdc_amount(funding_amount_usdc).context("invalid funding_amount_usdc")?;
@@ -121,10 +126,13 @@ impl WalletConfig {
                     *max_conversion_overhead_percent <= 100,
                     "max_conversion_overhead_percent must be an integer from 0 to 100"
                 );
-                ensure!(
-                    *wait_seconds > 0 && *wait_seconds <= 3600 && *max_attempts > 0,
-                    "invalid managed wallet limits"
-                );
+                if wait_seconds.is_some() {
+                    tracing::warn!(
+                        setting = "wait_seconds",
+                        "Obsolete wallet setting ignored; payment admission has no total timeout"
+                    );
+                }
+                ensure!(*max_attempts > 0, "invalid managed wallet limits");
             }
         }
         Ok(())
@@ -350,9 +358,10 @@ pub struct FundingConfig {
     pub slippage_bps: u32,
     #[serde(default = "poll")]
     pub poll_seconds: u64,
+    /// Health warning only: reconciliation continues with a 60-second polling floor.
     #[serde(default = "deadline")]
     pub swap_timeout_seconds: u64,
-    #[serde(default = "deadline")]
+    #[serde(default = "quote_window")]
     pub quote_deadline_seconds: u64,
 }
 impl FundingConfig {
@@ -454,7 +463,7 @@ impl FundingConfig {
                 && self.poll_seconds > 0
                 && self.poll_seconds <= 60
                 && self.swap_timeout_seconds > 0
-                && self.quote_deadline_seconds >= 300,
+                && self.quote_deadline_seconds >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
             "invalid funding limits"
         );
         Ok(())

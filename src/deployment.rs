@@ -53,6 +53,8 @@ pub struct MetaConfig {
 }
 #[derive(Deserialize, Serialize)]
 pub struct SourceConfig {
+    #[serde(default)]
+    pub optional_startup: bool,
     pub wallet: Option<String>,
     #[serde(flatten)]
     pub provider: toml::Table,
@@ -99,6 +101,8 @@ struct Source {
 }
 #[derive(Serialize)]
 pub struct Inventory {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unavailable_sources: Vec<String>,
     pub server: String,
     pub listen: SocketAddr,
     pub default_wallet: Option<String>,
@@ -114,6 +118,7 @@ pub struct InventoryTool {
     pub tool: ToolSpec,
 }
 pub struct Deployment {
+    unavailable_sources: BTreeSet<String>,
     initialized: Option<InitializedWallets>,
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
@@ -292,6 +297,7 @@ impl Deployment {
                     .insert("prefix".into(), "source identifier".into());
             }
             let mut resolved_source = serde_json::to_value(provider)?;
+            resolved_source["optional_startup"] = serde_json::json!(source.optional_startup);
             resolved_source["wallet"] = serde_json::to_value(&source.wallet)?;
             resolved.insert(id, resolved_source);
         }
@@ -338,6 +344,7 @@ impl Deployment {
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut deployment = Self {
+            unavailable_sources: BTreeSet::new(),
             initialized: None,
             config,
             wallet_resolution,
@@ -405,10 +412,10 @@ impl Deployment {
         };
         let config = &deployment.config;
         let wallet_resolution = &deployment.wallet_resolution;
-        let sources = startup::load(config, path, warn, relay).await?;
+        let (sources, unavailable_sources) = startup::load(config, path, warn, relay).await?;
         let mut selected = BTreeMap::new();
         for (name, server) in &config.servers {
-            let tools = select_listener_tools(name, server, &sources)?;
+            let tools = select_listener_tools(name, server, &sources, &unavailable_sources)?;
             selected.insert(name.clone(), tools);
         }
         let mut cover_owners = BTreeMap::new();
@@ -448,6 +455,7 @@ impl Deployment {
                 }
             }
         }
+        deployment.unavailable_sources = unavailable_sources.into_keys().collect();
         deployment.sources = sources;
         deployment.selected = selected;
         Ok(deployment)
@@ -470,6 +478,12 @@ impl Deployment {
             .servers
             .iter()
             .map(|(name, s)| Inventory {
+                unavailable_sources: s
+                    .sources
+                    .iter()
+                    .filter(|id| self.unavailable_sources.contains(*id))
+                    .cloned()
+                    .collect(),
                 server: name.clone(),
                 listen: s.listen,
                 default_wallet: s.wallet.clone(),
@@ -641,7 +655,7 @@ impl Deployment {
                     if let WalletConfig::ZcashRotation {
                         funding_amount_usdc,
                         max_api_payment_usdc,
-                        wait_seconds,
+                        limit_payments_to_funding_target,
                         ..
                     } = w
                     {
@@ -654,8 +668,8 @@ impl Deployment {
                             base.clone(),
                             funding_amount_usdc,
                             SpendPolicy::dollars(max_api_payment_usdc)?,
-                            *wait_seconds,
-                        )?;
+                        )?
+                        .with_funding_target_limit(*limit_payments_to_funding_target);
                         let manager = std::sync::Arc::new(manager);
                         managed_pools.push(manager.clone());
                         wallets.insert(name.clone(), PaidClient::managed(manager));
@@ -786,7 +800,7 @@ impl Deployment {
                 })
                 .collect();
             let used: BTreeSet<_> = selected.iter().map(|(id, _)| id).collect();
-            let instructions = used
+            let mut instructions = used
                 .into_iter()
                 .filter_map(|id| {
                     self.sources[id]
@@ -796,6 +810,11 @@ impl Deployment {
                 })
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            for id in &cfg.sources {
+                if self.unavailable_sources.contains(id) {
+                    instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (remote catalog failed at startup). Its tools are unavailable, not intentionally empty. Restart to retry; no automatic retry is scheduled."));
+                }
+            }
             let mut server = Server::from_bindings(
                 bindings,
                 (!instructions.is_empty()).then_some(instructions),
@@ -970,6 +989,7 @@ impl Deployment {
             None
         };
         let mut listeners = Vec::new();
+        let mut accepted_work = Vec::new();
         for (name, cfg) in &self.config.servers {
             let mut server = servers.remove(name).unwrap();
             server.catalog = catalog.clone();
@@ -991,6 +1011,7 @@ impl Deployment {
             let listener = TcpListener::bind(cfg.listen)
                 .await
                 .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
+            accepted_work.push(server.work.clone());
             listeners.push((
                 name.clone(),
                 listener,
@@ -999,8 +1020,11 @@ impl Deployment {
         }
         Ok(RunningDeployment {
             listeners,
+            accepted_work,
             #[cfg(test)]
             listener_failure: None,
+            #[cfg(test)]
+            funding_failure: None,
             #[cfg(feature = "zcash")]
             treasury,
             #[cfg(feature = "zcash")]
@@ -1015,9 +1039,14 @@ fn select_listener_tools(
     name: &str,
     server: &ListenerConfig,
     sources: &BTreeMap<String, Source>,
+    unavailable: &BTreeMap<String, String>,
 ) -> Result<Vec<(String, ToolSpec)>> {
     let mut available = BTreeMap::new();
+    let incomplete = server.sources.iter().any(|id| unavailable.contains_key(id));
     for source in &server.sources {
+        if unavailable.contains_key(source) {
+            continue;
+        }
         let operations = catalog::operations(&sources[source].document, None)?;
         for tool in &sources[source].tools {
             if !catalog::matches_operation_tags(
@@ -1050,6 +1079,8 @@ fn select_listener_tools(
                             selector = text,
                             "Tool pattern matches nothing"
                         );
+                    } else if selector_has_unavailable_owner(text, server, sources, unavailable) {
+                        tracing::warn!(server = name, selector = text, "Tool selector belongs to an unavailable optional source; validate after restart");
                     } else {
                         bail!("server {name}: unknown tool selector {text}");
                     }
@@ -1069,10 +1100,37 @@ fn select_listener_tools(
         .map(|(_, t)| t)
         .collect();
     ensure!(
-        !tools.is_empty() || server.source_management,
+        !tools.is_empty() || server.source_management || incomplete,
         "server {name}: no tools selected"
     );
     Ok(tools)
+}
+
+fn selector_has_unavailable_owner(
+    selector: &str,
+    server: &ListenerConfig,
+    sources: &BTreeMap<String, Source>,
+    unavailable: &BTreeMap<String, String>,
+) -> bool {
+    // Prefixes come from the resolved provider (including inherited/custom
+    // prefixes), not the source ID. Overlapping namespaces cannot establish
+    // ownership: do not hide a required source's typo behind an optional outage.
+    let owners: Vec<_> = server
+        .sources
+        .iter()
+        .filter(|id| {
+            let prefix = unavailable
+                .get(*id)
+                .map(String::as_str)
+                .or_else(|| sources.get(*id).and_then(|s| s.config.prefix.as_deref()));
+            prefix.is_some_and(|prefix| {
+                selector
+                    .strip_prefix(prefix)
+                    .is_some_and(|rest| rest.starts_with('_'))
+            })
+        })
+        .collect();
+    !owners.is_empty() && owners.iter().all(|id| unavailable.contains_key(*id))
 }
 
 fn required_secret(env: &BTreeMap<String, String>, key: &str) -> Result<String> {
@@ -1098,8 +1156,11 @@ type FundingRuntime = (
     crate::rotation::funding::FundingWorker<crate::rotation::funding::Backend>,
 );
 pub struct RunningDeployment {
+    accepted_work: Vec<crate::server::work::Work>,
     #[cfg(test)]
     listener_failure: Option<(String, tokio::sync::oneshot::Receiver<()>)>,
+    #[cfg(test)]
+    funding_failure: Option<tokio::sync::oneshot::Receiver<()>>,
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
@@ -1118,31 +1179,52 @@ impl RunningDeployment {
     pub async fn serve(self, shutdown: CancellationToken) -> Result<()> {
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
+        let reconciliation_stop = CancellationToken::new();
+        let _reconciliation_on_drop = reconciliation_stop.clone().drop_guard();
+        #[cfg(test)]
+        if let Some(failure) = self.funding_failure {
+            let stopped = stop.clone();
+            tokio::spawn(async move {
+                if failure.await.is_ok() {
+                    stopped.cancel();
+                }
+            });
+        }
         #[cfg(feature = "zcash")]
         let (treasury_task, funding_task) = match (self.treasury, self.funding_runtime) {
             (Some(owner), Some((commands, sender, worker))) => (
-                Some(tokio::spawn(owner.run_commands(
-                    commands,
-                    sender,
-                    stop.clone(),
-                ))),
                 Some(tokio::spawn({
                     let stopped = stop.clone();
                     async move {
-                        let result = worker.run(stopped.clone()).await;
-                        stopped.cancel();
-                        result
+                        let _stop_on_exit = stopped.clone().drop_guard();
+                        owner.run_commands(commands, sender, stopped).await
+                    }
+                })),
+                Some(tokio::spawn({
+                    let stopped = stop.clone();
+                    async move {
+                        let _stop_on_exit = stopped.clone().drop_guard();
+                        worker.run(stopped).await
                     }
                 })),
             ),
-            (Some(owner), None) => (Some(tokio::spawn(owner.run_sync(stop.clone()))), None),
+            (Some(owner), None) => (
+                Some(tokio::spawn({
+                    let stopped = stop.clone();
+                    async move {
+                        let _stop_on_exit = stopped.clone().drop_guard();
+                        owner.run_sync(stopped).await
+                    }
+                })),
+                None,
+            ),
             (None, _) => (None, None),
         };
         #[cfg(feature = "zcash")]
         let mut reconciliation = JoinSet::new();
         #[cfg(feature = "zcash")]
         for pool in self.managed_pools {
-            let stopped = stop.clone();
+            let stopped = reconciliation_stop.clone();
             reconciliation.spawn(async move {
                 let mut failures = 0u32;
                 loop {
@@ -1159,11 +1241,13 @@ impl RunningDeployment {
                 }
             });
         }
+        let listener_stop = CancellationToken::new();
+        let _listeners_on_drop = listener_stop.clone().drop_guard();
         let mut tasks = JoinSet::new();
         #[cfg(test)]
         let mut listener_failure = self.listener_failure;
         for (name, listener, app) in self.listeners {
-            let stopped = stop.clone();
+            let stopped = listener_stop.clone();
             #[cfg(test)]
             let failure = if listener_failure.as_ref().is_some_and(|(id, _)| id == &name) {
                 listener_failure.take().map(|(_, signal)| signal)
@@ -1188,40 +1272,60 @@ impl RunningDeployment {
                     .with_context(|| format!("server {name} stopped unexpectedly"))
             });
         }
-        let mut result = tokio::select! {
-            _ = shutdown.cancelled() => Ok(()),
-            _ = stop.cancelled() => Err(anyhow::anyhow!("treasury or funding worker stopped")),
-            ended = tasks.join_next() => match ended {
-                Some(Ok(Err(e))) => Err(e),
-                Some(Err(e)) => Err(e.into()),
-                _ => Err(anyhow::anyhow!("MCP listener exited unexpectedly")),
+        let mut funding_stopped = false;
+        let result = loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break Ok(()),
+                _ = stop.cancelled(), if !funding_stopped => {
+                    funding_stopped = true;
+                    tracing::error!(category = "treasury_funding_stopped",
+                        "Treasury/funding stopped; restart required for funding. Listeners and Base reconciliation remain available; payments still require confirmed capacity and retain all liabilities");
+                },
+                ended = tasks.join_next() => break match ended {
+                    Some(Ok(Err(e))) => Err(e),
+                    Some(Err(e)) => Err(e.into()),
+                    _ => Err(anyhow::anyhow!("MCP listener exited unexpectedly")),
+                }
             }
         };
         crate::server::log_http_shutdown();
+        for work in &self.accepted_work {
+            work.close();
+        }
+        listener_stop.cancel();
         if let Some(engine) = &crate::network::global().cover {
             engine.stop_ranges().await;
         }
+        // Funding/treasury/reconciliation remain available to already accepted
+        // calls. Closing admission prevents a new call from extending this drain.
+        tokio::join!(
+            crate::server::wait_with_progress("http_listeners", async {
+                while tasks.join_next().await.is_some() {}
+            }),
+            async {
+                for work in &self.accepted_work {
+                    work.drain().await;
+                }
+            }
+        );
         stop.cancel();
-        if tokio::time::timeout(crate::server::SHUTDOWN_TIMEOUT, async {
-            while tasks.join_next().await.is_some() {}
-        })
-        .await
-        .is_err()
-        {
-            tasks.abort_all();
-            while tasks.join_next().await.is_some() {}
-            result = Err(anyhow::anyhow!(crate::server::SHUTDOWN_TIMEOUT_MESSAGE));
-        }
+        reconciliation_stop.cancel();
         #[cfg(feature = "zcash")]
         while reconciliation.join_next().await.is_some() {}
         #[cfg(feature = "zcash")]
-        if let Some(task) = funding_task {
-            // Drop the worker's StoreHandle before waiting for treasury close.
-            task.await.context("funding worker failed")??;
-        }
-        #[cfg(feature = "zcash")]
-        if let Some(task) = treasury_task {
-            task.await.context("treasury worker failed")??;
+        {
+            // Drop the funding worker's store handle before joining the owner;
+            // a stopped owner retains the shared store until serving releases it.
+            let funding_result = match funding_task {
+                Some(task) => task.await.context("funding worker failed").and_then(|r| r),
+                None => Ok(()),
+            };
+            let treasury_result = match treasury_task {
+                Some(task) => task.await.context("treasury worker failed").and_then(|r| r),
+                None => Ok(()),
+            };
+            funding_result?;
+            treasury_result?;
         }
         if let Some(engine) = &crate::network::global().cover {
             engine.emit_summary();
@@ -1233,6 +1337,148 @@ impl RunningDeployment {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[cfg(feature = "zcash")]
+    #[tokio::test]
+    async fn funding_failure_keeps_listeners_and_base_reconciliation_available() {
+        use axum::{Json, routing::post};
+        use serde_json::{Value, json};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"paths":{"/test":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let path = dir.path().join("servers.toml");
+        std::fs::write(
+            &path,
+            r#"
+version=1
+[sources.test]
+spec="spec.json"
+base_url="https://example.com"
+probe_pricing=false
+[wallets.shared]
+mode="static"
+private_key_env="KEY"
+[servers.one]
+listen="127.0.0.1:0"
+sources=["test"]
+wallet="shared"
+bearer_token_env="TOKEN"
+[servers.two]
+listen="127.0.0.1:0"
+sources=["test"]
+wallet="shared"
+bearer_token_env="TOKEN"
+"#,
+        )
+        .unwrap();
+        let env = BTreeMap::from([
+            ("KEY".into(), format!("{:064x}", 1)),
+            ("TOKEN".into(), "fixture".into()),
+        ]);
+        let mut running = Deployment::load(&path)
+            .await
+            .unwrap()
+            .bind(&env)
+            .await
+            .unwrap();
+        let addresses = running.addresses();
+        let reads = Arc::new(tokio::sync::Semaphore::new(0));
+        let seen = reads.clone();
+        let rpc = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rpc_url = format!("http://{}", rpc.local_addr().unwrap());
+        let rpc_task = tokio::spawn(async move {
+            let app = axum::Router::new().route("/",post(move |Json(v):Json<Value>| {
+                let seen = seen.clone();
+                async move {
+                    let result = match v["method"].as_str().unwrap() {
+                        "eth_chainId" => { seen.add_permits(1); json!("0x2105") },
+                        "eth_getBlockByNumber" => {
+                            let height = if v["params"][0] == "latest" {100} else {
+                                u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()
+                            };
+                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                        },
+                        "eth_call" => json!(format!("0x{:064x}",5_000_000)),
+                        _ => panic!("unexpected RPC"),
+                    };
+                    Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
+                }
+            }));
+            axum::serve(rpc, app).await.unwrap();
+        });
+        let mut store = crate::rotation::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture snapshot",
+        )
+        .unwrap();
+        let pool = store.ensure_pool("test", "5").unwrap();
+        let (store, store_task) = crate::rotation::store::StoreHandle::spawn(store);
+        running.managed_pools.push(Arc::new(
+            crate::rotation::manager::ManagedPool::new(
+                store.clone(),
+                pool,
+                crate::rotation::base::BaseRpc::new(&rpc_url, 12, 120).unwrap(),
+                "5",
+                crate::payment::SpendPolicy::dollars("5").unwrap(),
+            )
+            .unwrap(),
+        ));
+        let (failure, signal) = tokio::sync::oneshot::channel();
+        running.funding_failure = Some(signal);
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(running.serve(stop.clone()));
+        tokio::time::timeout(Duration::from_secs(5), reads.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        failure.send(()).unwrap();
+        // A second complete sweep must start after the funding stop. Cancelling
+        // reconciliation along with funding would strand this wait.
+        tokio::time::timeout(Duration::from_secs(10), reads.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        let http = reqwest::Client::new();
+        for (_, address) in addresses {
+            let response: Value = http
+                .post(format!("http://{address}/mcp"))
+                .bearer_auth("fixture")
+                .header("accept", "application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(!response["result"]["tools"].as_array().unwrap().is_empty());
+        }
+        assert!(!task.is_finished());
+        assert_eq!(
+            store
+                .call(|s| Ok(s.status()?.funding_jobs.len()))
+                .await
+                .unwrap(),
+            2
+        );
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(store);
+        store_task.await.unwrap();
+        rpc_task.abort();
+    }
+
     #[tokio::test]
     async fn failed_listener_stops_siblings_and_releases_registry_ownership() {
         let dir = tempfile::tempdir().unwrap();

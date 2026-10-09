@@ -70,15 +70,9 @@ async fn interrupted_reads_retry_identical_canonical_payload_once() {
         .await;
         let params = json!([{"data":"secret-wallet-data"}, {"blockHash":"pinned-hash","requireCanonical":true}]);
         assert_eq!(
-            rpc(
-                &client(),
-                &url,
-                "eth_call",
-                params.clone(),
-                Duration::from_secs(2)
-            )
-            .await
-            .unwrap(),
+            rpc(&client(), &url, "eth_call", params.clone())
+                .await
+                .unwrap(),
             "0x01"
         );
         task.await.unwrap();
@@ -100,16 +94,10 @@ async fn persistent_transport_failure_is_bounded_and_redacted() {
         .finish();
 
     let (url, captured, task) = fixture(vec![(Duration::ZERO, String::new()); 2]).await;
-    let error = rpc(
-        &client(),
-        &url,
-        "eth_chainId",
-        json!(["secret-params"]),
-        Duration::from_secs(2),
-    )
-    .with_subscriber(subscriber)
-    .await
-    .unwrap_err();
+    let error = rpc(&client(), &url, "eth_chainId", json!(["secret-params"]))
+        .with_subscriber(subscriber)
+        .await
+        .unwrap_err();
     task.await.unwrap();
     assert_eq!(captured.lock().unwrap().len(), 2);
     let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
@@ -140,67 +128,26 @@ async fn rejected_invalid_and_write_requests_never_retry() {
         response(200, r#"{"jsonrpc":"2.0","id":1,"result":null}"#),
     ] {
         let (url, captured, task) = fixture(vec![(Duration::ZERO, raw)]).await;
-        let error = rpc(
-            &client(),
-            &url,
-            "eth_chainId",
-            json!([]),
-            Duration::from_secs(2),
-        )
-        .await
-        .unwrap_err();
+        let error = rpc(&client(), &url, "eth_chainId", json!([]))
+            .await
+            .unwrap_err();
         task.await.unwrap();
         assert_eq!(captured.lock().unwrap().len(), 1);
         assert!(!error.to_string().contains("secret"));
     }
     let (url, captured, task) = fixture(vec![(Duration::ZERO, String::new())]).await;
     assert!(
-        rpc(
-            &client(),
-            &url,
-            "eth_sendRawTransaction",
-            json!(["secret"]),
-            Duration::from_secs(2)
-        )
-        .await
-        .is_err()
+        rpc(&client(), &url, "eth_sendRawTransaction", json!(["secret"]))
+            .await
+            .is_err()
     );
     assert!(captured.lock().unwrap().is_empty());
     task.abort();
 }
 #[tokio::test]
-async fn attempts_share_one_deadline_and_cancellation_does_not_retry() {
-    let (url, captured, task) = fixture(vec![
-        (Duration::ZERO, String::new()),
-        (Duration::from_secs(5), String::new()),
-    ])
-    .await;
-    let started = Instant::now();
-    let error = rpc(
-        &client(),
-        &url,
-        "eth_chainId",
-        json!([]),
-        Duration::from_millis(400),
-    )
-    .await
-    .unwrap_err();
-    assert!(error.to_string().contains("total budget awaiting headers"));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(captured.lock().unwrap().len(), 2);
-    task.abort();
-
+async fn cancellation_does_not_retry() {
     let (url, captured, task) = fixture(vec![(Duration::from_secs(5), String::new())]).await;
-    let call = tokio::spawn(async move {
-        rpc(
-            &client(),
-            &url,
-            "eth_chainId",
-            json!([]),
-            Duration::from_secs(2),
-        )
-        .await
-    });
+    let call = tokio::spawn(async move { rpc(&client(), &url, "eth_chainId", json!([])).await });
     tokio::time::timeout(Duration::from_secs(1), async {
         while captured.lock().unwrap().is_empty() {
             tokio::task::yield_now().await;
@@ -257,15 +204,9 @@ async fn untrusted_tls_is_reported_without_retry_or_verification_bypass() {
             assert!(acceptor.accept(socket).await.is_err());
         }
     });
-    let error = rpc(
-        &client(),
-        &url,
-        "eth_chainId",
-        json!([]),
-        Duration::from_secs(2),
-    )
-    .await
-    .unwrap_err();
+    let error = rpc(&client(), &url, "eth_chainId", json!([]))
+        .await
+        .unwrap_err();
     assert!(error.to_string().contains("TLS"), "{error}");
     assert!(!error.to_string().contains("secret"));
     assert_eq!(connections.load(Ordering::SeqCst), 1);
@@ -273,7 +214,44 @@ async fn untrusted_tls_is_reported_without_retry_or_verification_bypass() {
 }
 
 #[tokio::test]
-async fn stalled_body_deadline_reports_body_not_headers() {
+async fn stalled_body_inactivity_reports_body_not_headers() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let task = tokio::spawn(async move {
+        let mut held = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(socket.read_u8().await.unwrap());
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{")
+                .await
+                .unwrap();
+            held.push(socket);
+        }
+        std::future::pending::<()>().await;
+        drop(held);
+    });
+    let error = rpc(
+        &crate::network::discovery("https://rpc-test.invalid", Duration::from_millis(100)).unwrap(),
+        &url,
+        "eth_chainId",
+        json!([]),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("timeout"));
+    assert!(error.to_string().contains("phase body"));
+    assert!(!error.to_string().contains("http://"));
+    task.abort();
+}
+
+#[tokio::test]
+async fn progressing_rpc_body_survives_former_total_deadline() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap())
         .parse()
@@ -284,22 +262,33 @@ async fn stalled_body_deadline_reports_body_not_headers() {
         while !headers.ends_with(b"\r\n\r\n") {
             headers.push(socket.read_u8().await.unwrap());
         }
+        let body = br#"{"jsonrpc":"2.0","id":1,"result":"0x2105"}"#;
         socket
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{")
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            )
             .await
             .unwrap();
-        std::future::pending::<()>().await;
+        for chunk in body.chunks(body.len().div_ceil(4)) {
+            tokio::time::sleep(Duration::from_secs(4)).await;
+            socket.write_all(chunk).await.unwrap();
+        }
     });
-    let error = rpc(
-        &client(),
-        &url,
-        "eth_chainId",
-        json!([]),
-        Duration::from_millis(200),
+    let http =
+        crate::network::discovery("https://rpc-test.invalid", Duration::from_secs(6)).unwrap();
+    let started = Instant::now();
+    let value = tokio::time::timeout(
+        Duration::from_secs(30),
+        rpc(&http, &url, "eth_chainId", json!([])),
     )
     .await
-    .unwrap_err();
-    assert!(error.to_string().contains("total budget reading body"));
-    assert!(!error.to_string().contains("http://"));
-    task.abort();
+    .unwrap()
+    .unwrap();
+    assert_eq!(value, "0x2105");
+    assert!(started.elapsed() > Duration::from_secs(15));
+    task.await.unwrap();
 }

@@ -151,7 +151,10 @@ Standalone new-wallet initialization queries `ZCASH_INDEXER_URL` when set, other
 `https://zec.rocks:443`, and records the mainnet tip minus 100 blocks as its
 birthday. `--indexer-url-env NAME` selects another environment variable. Lookup
 must succeed before any seed, key or state is created; it checks the network and
-tip consistency and has a 30-second deadline. `--birthday HEIGHT` skips lookup
+uses the older of the information/tip observations, minus 100 blocks. Ordinary
+chain advancement between reads only increases the scan overlap. Lookup uses the
+network connection, dispatch-readiness and response-inactivity policies, without
+a whole-operation deadline. `--birthday HEIGHT` skips lookup
 and keeps initialization offline. Importing with `--mnemonic-file` requires an
 explicit birthday at or before the wallet's first use, so older funds are scanned.
 
@@ -273,7 +276,9 @@ wallet. Changed canonical anchors remain blocked for explicit recovery.
 
 Each sync cycle owns a separate Tokio runtime because pinned upstream sync can
 leave helper tasks alive on early exit. Teardown stops those tasks and joins
-blocking work before the final snapshot; shutdown must await that cleanup.
+blocking work before the final snapshot; ordinary shutdown awaits that cleanup.
+During wallet or bootstrap drains, a second operator signal forces a nonzero
+process exit with unfinished liabilities retained for recovery.
 The treasury exposes a bounded, serialized command queue in `treasury/actor.rs`
 for sync, preparation, saved-byte submission and reconciliation. Accepted commands
 finish even when a reply receiver is dropped. `rotation/store/funding.rs` journals
@@ -290,12 +295,15 @@ Tokens stay in environment variables and are sent only to the fixed NEAR origin.
 Session issuance/refresh and authenticated access still require qualification.
 
 The coordinator persists a unique transparent refund address and wallet derivation
-range before obtaining a quote. Quote retries and expired unprepared-quote refreshes
-share `max_attempts`; every refresh archives its old bindings and allocates a fresh
-operation/refund identity. Signed operations never refresh. Insufficient shielded
+range before obtaining a quote. Unsigned quote failures use per-pass backoff,
+without consuming `max_attempts` for transaction recovery. A quote refresh must
+prove no outgoing or budget record exists; it archives its old bindings, records
+a durable refresh marker and allocates a fresh operation/refund identity.
+Historical unclassified recovery records still count. Signed operations never refresh. Insufficient shielded
 funds or budget leave the job unprepared and retryable.
 
-`swap_timeout_seconds` starts at the first durable broadcast intent. On timeout,
+`swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
+the first durable broadcast intent, not an abort deadline. When exceeded,
 status shows `timed_out` and pool `funding_degraded`; reconciliation continues at
 least 60 seconds apart. This never releases funds or stops a funded active wallet.
 Status failures have their own persisted exponential backoff (up to 300 seconds,
@@ -338,15 +346,24 @@ calculate-only API. It accepts one mainnet transparent recipient, uses account 0
 shielded inputs, rejects multi-step transactions, and verifies the resulting
 recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
 operation UUID, source/fee limits, aggregate daily limit and quote deadline.
-Preparation and the first submission require at least 300 seconds of quote validity.
+`funding.quote_deadline_seconds` requests a 7,200-second window by default;
+the returned quote can be shorter and remains authoritative. Preparation and the
+first submission still require at least 300 seconds of quote validity, consolidated
+in one policy constant. Its removal awaits the chain-specific 1Click deadline
+and route contract; broadcast alone does not establish timely delivery. Authority
+checks use a fresh clock reading after awaited work.
 The funding worker supplies these from validated configuration/quotes,
 never from MCP tool arguments.
 
-Preparation reserves the maximum source cost, marks readiness `preparing`, then
-atomically commits the encrypted post-calculation wallet and signed bytes with
-transaction ID, expiry, amount and fee. The reservation shrinks to actual cost.
-An error/cancellation after reservation poisons the in-memory owner; close and
-reopen it before further preparation. Unprepared reservations remain conservative
+Preparation first performs read-only readiness checks, then calculates a proposal,
+checks the actual fee and reserves exact principal plus fee before creating signed
+bytes. It marks readiness `preparing` and atomically commits the encrypted wallet
+and signed bytes with transaction ID, expiry, amount and fee. Proposal mutation
+already poisons the in-memory owner on error/cancellation; close and reopen it
+before further preparation. Network/chain/expiry preflight precedes durable broadcast
+intent, so failure there consumes no submission attempt. The preflighted send path
+performs only local expiry checks before sending the saved bytes, without another
+unsigned tip read. Failure or cancellation after intent still has an unknown outcome. Unprepared reservations remain conservative
 until explicitly abandoned through the store's guarded recovery API. The automatic funding coordinator calls this API through the serialized owner.
 
 `rotation/near.rs` supports public and confidential foreign-chain EXACT_OUTPUT swaps.
@@ -538,11 +555,12 @@ TLS validation failures and other rejections fail closed. Paid requests and Zcas
 submissions are never replayed by this mechanism. Payer SOCKS identities and the
 configured Tor-only network policy remain unchanged.
 
-Each provider gets a complete-view deadline of 15 seconds in direct mode or the
-fixed Tor operation allowance (240 seconds, independent of HTTP read inactivity), including its bounded transport retry.
-At most three providers are visited once per view; earlier caller/admission
-deadlines still apply. Logs identify provider indices, failure categories,
-deadlines and fallback success without logging URLs or credentials. Each new view
+Each provider uses connection and response read-inactivity settings, without a
+whole-view deadline. At most three providers are visited once per view, with finite
+unsigned transport retries. Caller cancellation remains supported; financial
+freshness and authorization expiry remain independent of progress. Logs identify
+provider indices, fixed failure categories and fallback success without URLs or
+credentials. Each new view
 starts with the primary; there is no global circuit cycling or cross-wallet
 provider-health preference. With no URL flags, `diagnose_credit` uses the three
 public defaults below. An explicit `--rpc-url` selects only that endpoint unless
@@ -626,8 +644,10 @@ before choosing sub-dollar targets. A payment larger than the configured deposit
 target is refused rather than repeatedly rotating wallets. Explicit sizes in
 existing configurations are unchanged.
 
-`funding_amount_usdc` defaults to `"2.00"`, `max_api_payment_usdc` to `"1.00"`, `wait_seconds`
-to 30 (range 1–3600), and `max_attempts` to 3. Money fields are decimal strings;
+`funding_amount_usdc` defaults to `"2.00"`, `max_api_payment_usdc` to `"1.00"`,
+and `max_attempts` to 3. Payment admission has no total timeout. Legacy
+`wait_seconds` is accepted but ignored with a warning; remove it from wallet
+configuration. Money fields are decimal strings;
 USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
 settings and all risk limits are validated by `config check`/`config show` without
 unlocking state. Endpoint credentials remain environment references. Serving

@@ -97,6 +97,7 @@ pub async fn warm_cache(
             funding.auto_fund = false;
         }
         let deployment = Deployment {
+            unavailable_sources: Default::default(),
             wallet_resolution: config.validate()?,
             config,
             initialized: None,

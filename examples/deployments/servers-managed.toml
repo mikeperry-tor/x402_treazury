@@ -24,7 +24,6 @@ funding_amount_usdc = "5.00"
 max_api_payment_usdc = "1.00"
 max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
-wait_seconds = 30
 
 [wallets.social]
 mode = "zcash_rotation"

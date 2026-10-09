@@ -23,6 +23,7 @@ alloy-primitives = { path = "../../vendor/alloy-primitives" }
 alloy-sol-macro-expander = { path = "../../vendor/alloy-sol-macro-expander" }
 
 [dev-dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 alloy-primitives = "1.5"
 alloy-sol-types = "1.5"
 axum = "0.8"

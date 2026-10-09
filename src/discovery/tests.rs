@@ -54,11 +54,14 @@ fn candidate(name: &str, lifetime: &str, visibility: &str) -> Value {
 
 async fn seed(m: &Manager) {
     let cell = OnceCell::new();
-    cell.set(Ok(Arc::new(serde_json::to_vec(&spec()).unwrap())))
-        .unwrap();
+    cell.set(Fetched {
+        completed: Instant::now(),
+        result: Ok(Arc::new(serde_json::to_vec(&spec()).unwrap())),
+    })
+    .unwrap();
     m.fetches.lock().unwrap().insert(
         "https://api.example.com/openapi.json".into(),
-        (Instant::now(), Arc::new(cell)),
+        Arc::new(cell),
     );
 }
 
@@ -918,7 +921,6 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
             BaseRpc::new("http://127.0.0.1:1/rpc", 12, 120).unwrap(),
             "5",
             SpendPolicy::dollars("0.01").unwrap(),
-            1,
         )
         .unwrap(),
     ));
@@ -1535,4 +1537,92 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     }
     task.abort();
     vendor_task.abort();
+}
+
+#[tokio::test]
+async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let m = manager(None).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = axum::Router::new().fallback({
+        let calls = calls.clone();
+        let arrived = arrived.clone();
+        let release = release.clone();
+        move || {
+            let calls = calls.clone();
+            let arrived = arrived.clone();
+            let release = release.clone();
+            async move {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                arrived.notify_one();
+                if call == 0 {
+                    release.notified().await;
+                    (axum::http::StatusCode::SERVICE_UNAVAILABLE, String::new())
+                } else {
+                    (axum::http::StatusCode::OK, spec().to_string())
+                }
+            }
+        }
+    });
+    let (url, task) = listen(app).await;
+    *m.fixture_endpoint.lock().unwrap() = Some(url);
+    let mut aliases = tokio::task::JoinSet::new();
+    for _ in 0..20 {
+        let m = m.clone();
+        aliases.spawn(async move {
+            m.document("writer", "https://api.example.com/active", false)
+                .await
+        });
+    }
+    arrived.notified().await;
+    tokio::task::yield_now().await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    // A different URL still has capacity despite twenty coalesced waiters.
+    assert!(
+        m.document("reader", "https://api.example.com/other", false)
+            .await
+            .is_ok()
+    );
+    let original = m.fetches.lock().unwrap()["https://api.example.com/active"].clone();
+    // Churn completed retention beyond capacity; an active fetch is never evicted.
+    for n in 0..12 {
+        assert!(
+            m.document(
+                "reader",
+                &format!("https://api.example.com/churn{n}"),
+                false
+            )
+            .await
+            .is_ok()
+        );
+    }
+    assert!(Arc::ptr_eq(
+        &original,
+        &m.fetches.lock().unwrap()["https://api.example.com/active"]
+    ));
+    release.notify_one();
+    while let Some(result) = aliases.join_next().await {
+        assert!(result.unwrap().is_err());
+    }
+    let before = calls.load(Ordering::SeqCst);
+    assert!(
+        m.document("writer", "https://api.example.com/active", false)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        before,
+        "negative backoff prevents a retry storm"
+    );
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    assert!(
+        m.document("writer", "https://api.example.com/active", false)
+            .await
+            .is_ok()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+    task.abort();
 }

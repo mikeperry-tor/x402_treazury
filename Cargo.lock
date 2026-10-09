@@ -6635,6 +6635,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "h2",
+ "http-body",
  "httpdate",
  "hyper",
  "hyper-util",
@@ -7116,6 +7117,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "tonic",
+ "tower",
 ]
 
 [[package]]

@@ -27,12 +27,9 @@ impl BaseRpc {
         expected: &TransferExpectation,
     ) -> Result<Option<TransferProof>> {
         ensure!(expected.amount > U256::ZERO, "zero expected payment amount");
-        let budget = crate::network::global().operation_timeout(Duration::from_secs(15));
         for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
             let client = endpoint.for_address(&expected.payer.to_string())?;
-            let result = tokio::time::timeout(budget, client.transfer_inner(expected))
-                .await
-                .unwrap_or_else(|_| Err(transport::RpcFailure::view_timeout().into()));
+            let result = client.transfer_inner(expected).await;
             match result {
                 Ok(proof) => return Ok(proof),
                 Err(error) => {

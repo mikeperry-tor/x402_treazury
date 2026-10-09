@@ -288,17 +288,30 @@ pub trait Indexer {
     ) -> impl Future<Output = Result<PingResponse, tonic::Status>> + Send;
 }
 
+/// Application-injectable transport retained by every cloned RPC client.
+pub type IndexerTransport = tower::util::BoxCloneSyncService<
+    http::Request<tonic::body::Body>,
+    http::Response<tonic::body::Body>,
+    tonic::Status,
+>;
+
 /// gRPC-backed [`Indexer`] that connects to a Zcash chain indexer (server).
 #[derive(Debug, Clone)]
 pub struct GrpcIndexer {
     uri: http::Uri,
-    clear_net_client: CompactTxStreamerClient<Channel>,
+    clear_net_client: CompactTxStreamerClient<IndexerTransport>,
 }
 
 impl GrpcIndexer {
     /// Use an application-owned channel; all RPCs and clones retain its connector.
     pub fn from_channel(uri: http::Uri, channel: Channel) -> Self {
-        Self { uri, clear_net_client: CompactTxStreamerClient::new(channel) }
+        use tower::ServiceExt;
+        Self::from_transport(uri, IndexerTransport::new(channel.map_err(|e| tonic::Status::from_error(Box::new(e)))))
+    }
+
+    /// Install a reviewed application transport, including per-response progress handling.
+    pub fn from_transport(uri: http::Uri, transport: IndexerTransport) -> Self {
+        Self { uri, clear_net_client: CompactTxStreamerClient::new(transport) }
     }
 
     pub async fn new(uri: http::Uri) -> Result<Self, GetClientError> {
@@ -321,7 +334,8 @@ impl GrpcIndexer {
             endpoint
         };
         let channel = endpoint.connect().await?;
-        let clear_net_client = CompactTxStreamerClient::new(channel);
+        use tower::ServiceExt;
+        let clear_net_client = CompactTxStreamerClient::new(IndexerTransport::new(channel.map_err(|e| tonic::Status::from_error(Box::new(e)))));
 
         Ok(Self {
             uri,
@@ -352,7 +366,8 @@ impl GrpcIndexer {
             endpoint
         };
         let channel = endpoint.connect_lazy();
-        let clear_net_client = CompactTxStreamerClient::new(channel);
+        use tower::ServiceExt;
+        let clear_net_client = CompactTxStreamerClient::new(IndexerTransport::new(channel.map_err(|e| tonic::Status::from_error(Box::new(e)))));
 
         Ok(Self {
             uri,
@@ -366,7 +381,7 @@ impl GrpcIndexer {
     }
 
     /// Returns the "surface net" gRPC client where the IP address is not obfuscated.
-    pub async fn get_clear_net_client(&self) -> CompactTxStreamerClient<Channel> {
+    pub async fn get_clear_net_client(&self) -> CompactTxStreamerClient<IndexerTransport> {
         self.clear_net_client.clone()
     }
 }

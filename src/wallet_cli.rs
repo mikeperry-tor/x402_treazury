@@ -514,7 +514,7 @@ async fn recover_funding(
         network,
     )?;
     let stop = tokio_util::sync::CancellationToken::new();
-    let result = finish_on_shutdown(&stop, async {
+    let result = finish_on_shutdown("wallet_recovery", &stop, async {
         let status = treasury.status().await?;
         let mut reports = Vec::new();
         for job in status.funding_jobs.iter().filter(|job| crate::treasury::recovery::needs_recovery(job) || job.last_error.is_some()) {
@@ -533,6 +533,12 @@ async fn recover_funding(
         anyhow::ensure!(!stop.is_cancelled(), "wallet recovery interrupted; accepted recovery results retained");
         anyhow::Ok(reports)
     }).await;
+    if result
+        .as_ref()
+        .is_err_and(|e| e.is::<crate::server::ForcedShutdown>())
+    {
+        return result.map(|_| ());
+    }
     treasury.close().await?;
     println!(
         "{}",
@@ -556,11 +562,15 @@ async fn recover_expired(
     )?;
     let stop = tokio_util::sync::CancellationToken::new();
     let result = finish_on_shutdown(
+        "wallet_command",
         &stop,
         treasury.recover_expired(operation_id, &mut sender, &stop),
     )
     .await;
     if let Err(error) = result {
+        if error.is::<crate::server::ForcedShutdown>() {
+            return Err(error);
+        }
         treasury.close().await?;
         return Err(error);
     }
@@ -576,6 +586,7 @@ async fn shield_refunds(
     let (mut treasury, settings) = configured(&meta_config, network).await?;
     let stop = tokio_util::sync::CancellationToken::new();
     let result = finish_on_shutdown(
+        "wallet_command",
         &stop,
         treasury.shield_refund(
             job_id,
@@ -593,6 +604,9 @@ async fn shield_refunds(
     )
     .await;
     if let Err(error) = result {
+        if error.is::<crate::server::ForcedShutdown>() {
+            return Err(error);
+        }
         treasury.close().await?;
         return Err(error);
     }
@@ -639,13 +653,16 @@ async fn reconcile(
             result = &mut work => result,
             signal = shutdown_signal() => {
                 stop.cancel();
-                let result = work.await;
+                let result = crate::server::drain_or_force("wallet_command", work).await;
                 signal?;
                 result
             }
         }
     };
     if let Err(error) = result {
+        if error.is::<crate::server::ForcedShutdown>() {
+            return Err(error);
+        }
         treasury.close().await?;
         return Err(error);
     }
@@ -669,20 +686,27 @@ async fn sync(
             closed = parent.closed() => {
                 eprintln!("treasury sync supervisor stopped: deliberately cancelling and checkpointing for wallet safety");
                 stop.cancel();
-                let _ = work.await;
+                let drained = crate::server::drain_or_force("wallet_sync", work).await;
+                if let Err(error) = drained
+                    && error.is::<crate::server::ForcedShutdown>() {
+                    return Err(error);
+                }
                 closed.and_then(|()| anyhow::bail!("treasury sync cancelled by supervisor"))
             }
             result = &mut work => result,
             signal = shutdown_signal() => {
                 eprintln!("treasury sync interrupted: deliberately cancelling and checkpointing for wallet safety");
                 stop.cancel();
-                let result = work.await;
+                let result = crate::server::drain_or_force("wallet_command", work).await;
                 signal?;
                 result
             }
         }
     };
     if let Err(error) = result {
+        if error.is::<crate::server::ForcedShutdown>() {
+            return Err(error);
+        }
         treasury.close().await?;
         return Err(error);
     }
@@ -812,14 +836,15 @@ async fn configured(
 }
 
 #[cfg(feature = "zcash")]
-async fn finish_on_shutdown<T>(
+pub(crate) async fn finish_on_shutdown<T>(
+    stage: &'static str,
     stop: &tokio_util::sync::CancellationToken,
     work: impl std::future::Future<Output = Result<T>>,
 ) -> Result<T> {
     tokio::pin!(work);
     tokio::select! {
         result = &mut work => result,
-        signal = shutdown_signal() => { stop.cancel(); let result = work.await; signal?; result }
+        signal = shutdown_signal() => { stop.cancel(); let result = crate::server::drain_or_force(stage, work).await; signal?; result }
     }
 }
 
@@ -842,4 +867,100 @@ async fn regtest_command_child() {
         std::process::exit(1);
     }
     std::process::exit(0);
+}
+
+#[cfg(all(test, unix, feature = "zcash"))]
+mod shutdown_tests {
+    use super::*;
+
+    #[test]
+    fn signal_drain_child() {
+        let Ok(directory) = std::env::var("X402_TEST_WALLET_DRAIN") else {
+            return;
+        };
+        let directory = PathBuf::from(directory);
+        let stage = match std::env::var("X402_TEST_DRAIN_STAGE").unwrap().as_str() {
+            "bootstrap" => "bootstrap",
+            _ => "wallet_command",
+        };
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let result = runtime.block_on(async {
+            let stop = tokio_util::sync::CancellationToken::new();
+            let (_retain, receive) = std::sync::mpsc::channel::<()>();
+            let blocked = tokio::task::spawn_blocking(move || {
+                let _ = receive.recv();
+            });
+            finish_on_shutdown(stage, &stop, async {
+                // First poll installs the production signal handling in the
+                // sibling select branch before the parent sends any signal.
+                tokio::task::yield_now().await;
+                std::fs::write(directory.join("ready"), "ready").unwrap();
+                stop.cancelled().await;
+                std::fs::write(directory.join("draining"), "accepted work retained").unwrap();
+                blocked.await.unwrap();
+                Ok(())
+            })
+            .await
+        });
+        assert!(result.unwrap_err().is::<crate::server::ForcedShutdown>());
+        eprintln!("{}", crate::server::FORCE_SHUTDOWN_MESSAGE);
+        // The executable's finish() separately tests immediate exit with an
+        // owned blocking worker. Do not join this deliberately blocked fixture.
+        std::process::exit(17);
+    }
+
+    #[tokio::test]
+    async fn wallet_and_bootstrap_drain_accept_a_second_signal() {
+        use std::{process::Stdio, time::Duration};
+        for stage in ["wallet_command", "bootstrap"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "wallet_cli::shutdown_tests::signal_drain_child",
+                    "--nocapture",
+                ])
+                .env("X402_TEST_WALLET_DRAIN", dir.path())
+                .env("X402_TEST_DRAIN_STAGE", stage)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            for marker in ["ready", "draining"] {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while !dir.path().join(marker).exists() {
+                        assert!(
+                            child.try_wait().unwrap().is_none(),
+                            "child stopped before {marker}"
+                        );
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(
+                    std::process::Command::new("/bin/kill")
+                        .args(["-TERM", &child.id().unwrap().to_string()])
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            }
+            let output = tokio::time::timeout(Duration::from_secs(5), child.wait_with_output())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(17));
+            assert!(
+                String::from_utf8(output.stderr)
+                    .unwrap()
+                    .contains(crate::server::FORCE_SHUTDOWN_MESSAGE)
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("draining")).unwrap(),
+                "accepted work retained"
+            );
+        }
+    }
 }

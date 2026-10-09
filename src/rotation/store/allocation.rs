@@ -363,7 +363,8 @@ mod tests {
             total: Some(2_000_000),
         };
         reserve(&mut store, &first, 1, limits).unwrap();
-        store.refresh_unprepared_quote(&first.id).unwrap();
+        assert!(store.refresh_unprepared_quote(&first.id).is_err());
+        store.recover_unprepared_funding(&first.id).unwrap();
         reserve(&mut store, &next, 1, limits).unwrap();
         let third = quoted(&mut store, "third", "2");
         // Simulate incomplete historical accounting, not an empty wallet.

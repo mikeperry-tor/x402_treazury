@@ -6,7 +6,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 mod receipt;
 mod transport;
@@ -92,7 +92,7 @@ impl ViewProgress {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Anchor {
     pub height: u64,
     pub hash: String,
@@ -119,10 +119,15 @@ pub enum AuthorizationOutcome {
 }
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct AuthorizationResolution {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Anchor>,
     pub outcome: AuthorizationOutcome,
     pub block_time: u64,
 }
 pub struct ChainView {
+    /// Admission authority expires independently of retained canonical evidence.
+    /// Derived from the balance block timestamp, never from completion time.
+    pub admission_valid_until: u64,
     pub anchor: Anchor,
     pub balances: BTreeMap<String, U256>,
     pub released: Vec<String>,
@@ -198,14 +203,7 @@ impl BaseRpc {
         })
     }
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
-        transport::rpc(
-            &self.http,
-            &self.url,
-            method,
-            params,
-            crate::network::global().operation_timeout(Duration::from_secs(15)),
-        )
-        .await
+        transport::rpc(&self.http, &self.url, method, params).await
     }
 
     async fn block(&self, tag: &str) -> Result<(Anchor, u64)> {
@@ -240,10 +238,18 @@ impl BaseRpc {
         Ok(U256::from_str_radix(&s[2..], 16)?)
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
+        self.view_with_policy(query, false).await
+    }
+    /// Nonce read outages cannot erase liability or veto spending of unrelated
+    /// remaining capacity. Malformed evidence, chain/balance/anchor failures and
+    /// ordinary background reconciliation retain their strict failure behavior.
+    pub(crate) async fn payment_view(&self, query: ChainQuery) -> Result<ChainView> {
+        self.view_with_policy(query, true).await
+    }
+    async fn view_with_policy(&self, query: ChainQuery, payment: bool) -> Result<ChainView> {
         // Process-local correlation only; never derived from wallet/pool identities.
         static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let view_sequence = NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let budget = crate::network::global().operation_timeout(Duration::from_secs(15));
         let count = self.fallbacks.len() + 1;
         let wallet_count = query.wallets.len();
         let pending_count = query.pending.len();
@@ -254,10 +260,10 @@ impl BaseRpc {
         for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
             let started = std::time::Instant::now();
             let progress = ViewProgress::new();
-            let result =
-                tokio::time::timeout(budget, endpoint.view_inner(query.clone(), &progress))
-                    .await
-                    .unwrap_or_else(|_| Err(transport::RpcFailure::view_timeout().into()));
+            // Required evidence failures restart on a configured fallback.
+            // Optional nonce outages retain liability on this endpoint instead
+            // of making another provider's availability a payment prerequisite.
+            let result = endpoint.view_inner(query.clone(), &progress, payment).await;
             match result {
                 Ok(view) => {
                     if index > 0 {
@@ -267,7 +273,7 @@ impl BaseRpc {
                             provider_count = count,
                             elapsed_ms = started.elapsed().as_millis() as u64,
                             completed_rpc_calls = progress.snapshot().2,
-                            "Base verification succeeded on configured fallback; complete view reverified; network policy unchanged"
+                            "Base verification succeeded on configured fallback; balances and canonical anchors reverified"
                         );
                     }
                     return Ok(view);
@@ -281,7 +287,7 @@ impl BaseRpc {
                         progress.snapshot();
                     tracing::warn!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
                         wallet_count, pending_count, category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
-                        failover, view_budget_seconds = budget.as_secs(), elapsed_ms = started.elapsed().as_millis() as u64,
+                        failover, elapsed_ms = started.elapsed().as_millis() as u64,
                         "Base credit/payment chain verification failed; partial view discarded; only configured read-only fallback permitted");
                     if !failover {
                         return Err(error);
@@ -291,7 +297,12 @@ impl BaseRpc {
         }
         unreachable!("primary Base RPC endpoint always exists")
     }
-    async fn view_inner(&self, query: ChainQuery, progress: &ViewProgress) -> Result<ChainView> {
+    async fn view_inner(
+        &self,
+        query: ChainQuery,
+        progress: &ViewProgress,
+        retain_unavailable: bool,
+    ) -> Result<ChainView> {
         ensure!(
             quantity(
                 &progress
@@ -332,25 +343,11 @@ impl BaseRpc {
                 && query.anchor.as_ref().is_none_or(|a| height >= a.height),
             "invalid confirmed block"
         );
-        let mut balances = BTreeMap::new();
-        for (id, address) in query.wallets {
-            let address: Address = address.parse()?;
-            let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
-            let scoped = self.for_address(&address.to_string())?;
-            let stable = progress
-                .step("confirmed_balance", scoped.call(data.clone(), &confirmed))
-                .await
-                .context(VerificationStage("confirmed balance"))?;
-            let current = progress
-                .step("latest_balance", scoped.call(data, &latest))
-                .await
-                .context(VerificationStage("latest balance"))?;
-            balances.insert(id, stable.min(current));
-        }
         let mut released = Vec::new();
         let mut resolutions = BTreeMap::new();
         let selector = &keccak256("authorizationState(address,bytes32)")[..4];
         let selector = alloy_primitives::hex::encode(selector);
+        let mut unavailable = 0usize;
         for auth in query.pending {
             let payer: Address = auth.payer.parse()?;
             let nonce: B256 = auth.nonce.parse()?;
@@ -360,15 +357,32 @@ impl BaseRpc {
                 alloy_primitives::hex::encode(nonce)
             );
             let scoped = self.for_address(&auth.payer)?;
-            let used = progress
+            let used = match progress
                 .step("authorization_nonce", scoped.call(data, &confirmed))
                 .await
-                .context(VerificationStage("authorization nonce"))?;
+                .context(VerificationStage("authorization nonce"))
+            {
+                Ok(used) => used,
+                Err(error)
+                    if retain_unavailable
+                        && error
+                            .downcast_ref::<RpcFailure>()
+                            .is_some_and(RpcFailure::can_failover) =>
+                {
+                    // In particular, expiry alone cannot release a nonce whose
+                    // canonical state was not observed. Its full amount stays
+                    // reserved by the store, including across restart.
+                    unavailable += 1;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             ensure!(used <= U256::from(1), "invalid authorizationState result");
             if used == U256::from(1) || confirmed_time > auth.valid_before {
                 resolutions.insert(
                     auth.id.clone(),
                     AuthorizationResolution {
+                        anchor: Some(confirmed.clone()),
                         outcome: if used == U256::from(1) {
                             AuthorizationOutcome::Used
                         } else {
@@ -380,7 +394,61 @@ impl BaseRpc {
                 released.push(auth.id);
             }
         }
-        for anchor in [&confirmed, &latest] {
+        if unavailable > 0 {
+            tracing::warn!(
+                unavailable_authorizations = unavailable,
+                category = "authorization_read_unavailable",
+                "Payment nonce observations unavailable; retaining full liabilities and requiring fresh balance evidence"
+            );
+        }
+        // Authorization resolution is historical canonical evidence. Its sweep
+        // cannot age the independently acquired admission balance view.
+        let resolution_anchor = confirmed;
+        let (latest, timestamp) = progress
+            .step("admission_latest_block", self.block("latest"))
+            .await?;
+        validate_timestamp(timestamp, now()?, self.max_age)?;
+        let height = latest
+            .height
+            .checked_sub(self.confirmations)
+            .context("insufficient Base confirmations")?;
+        let (confirmed, confirmed_time) = progress
+            .step(
+                "admission_confirmed_block",
+                self.block(&format!("0x{height:x}")),
+            )
+            .await?;
+        ensure!(
+            confirmed.height == height
+                && confirmed_time <= timestamp
+                && confirmed.height >= resolution_anchor.height,
+            "invalid admission block"
+        );
+        use futures_util::{StreamExt, TryStreamExt};
+        let balances: BTreeMap<_, _> =
+            futures_util::stream::iter(query.wallets.clone().into_iter().map(|(id, address)| {
+                let confirmed = confirmed.clone();
+                let latest = latest.clone();
+                let rpc = self.clone();
+                async move {
+                    let address: Address = address.parse()?;
+                    let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
+                    let scoped = rpc.for_address(&address.to_string())?;
+                    let stable = progress
+                        .step("confirmed_balance", scoped.call(data.clone(), &confirmed))
+                        .await
+                        .context(VerificationStage("confirmed balance"))?;
+                    let current = progress
+                        .step("latest_balance", scoped.call(data, &latest))
+                        .await
+                        .context(VerificationStage("latest balance"))?;
+                    Ok::<_, anyhow::Error>((id.clone(), stable.min(current)))
+                }
+            }))
+            .buffer_unordered(8)
+            .try_collect()
+            .await?;
+        for anchor in [&resolution_anchor, &confirmed, &latest] {
             let (end, _) = progress
                 .step(
                     "anchor_recheck",
@@ -392,11 +460,11 @@ impl BaseRpc {
                 "Base view changed during reconciliation"
             );
         }
-        ensure!(
-            now()?.saturating_sub(timestamp) <= self.max_age,
-            "stale Base block"
-        );
+        // Preserve completed evidence even if balance acquisition outlasted its
+        // admission window. The store checks that window before new authority;
+        // retrying this entire sweep here could hold the pool gate forever.
         Ok(ChainView {
+            admission_valid_until: timestamp.saturating_add(self.max_age),
             anchor: confirmed,
             balances,
             released,
@@ -438,7 +506,7 @@ mod tests {
         let progress = ViewProgress::new();
         progress.step("chain_id", async { Ok(()) }).await.unwrap();
         let result = tokio::time::timeout(
-            Duration::from_millis(20),
+            std::time::Duration::from_millis(20),
             progress.step("latest_block", std::future::pending::<Result<()>>()),
         )
         .await;

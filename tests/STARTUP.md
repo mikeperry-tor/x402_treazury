@@ -5,7 +5,8 @@ failure and caller cancellation closing active requests, untouched queued source
 serial/parallel inventory equality, compatible alias sharing (concurrent and queued),
 strict-limit/timeout separation, shared-download cancellation and fresh loads,
 per-alias overrides/filters/wallets, strict configuration, and JSON stdout with
-progress on stderr. Its isolated SOCKS subprocess verifies that concurrent
+progress on stderr. Optional remote failures allow serving with explicit unavailable
+status, while required sources, inspection and qualification stay strict. Its isolated SOCKS subprocess verifies that concurrent
 catalog and pricing requests retain origin-based discovery identities: same-origin paths
 share credentials, different origins do not. It does not require real Tor.
 

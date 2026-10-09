@@ -422,6 +422,9 @@ impl Treasury {
         if let Some(client) = &mut self.client {
             client.go_offline().await;
         }
+        // Serving can keep the serialized store alive for Base admission after
+        // funding stops. Release the poisoned wallet before waiting for it.
+        drop(self.client.take());
         let result = self
             .store
             .call(|s| s.set_sync_phase(SyncPhase::Offline))
@@ -479,24 +482,38 @@ impl SyncSession {
         settings: &SyncSettings,
         observation: &mut SyncObservation,
     ) -> Result<()> {
-        let mut indexer = tokio::time::timeout(
-            crate::network::global().connection_timeout(Duration::from_secs(30)),
-            crate::network::global().grpc(&self.identity, &settings.endpoint),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("indexer connection timed out"))?
-        .context("indexer connection failed")?;
+        loop {
+            match self.scan_observation(settings, observation).await {
+                Err(error) if error.is::<freshness::FreshObservationRequired>() => {
+                    // Persist completed scan work, but never renew its timestamp
+                    // or publish it as spend-ready. The next pass obtains new
+                    // observations and scans only the remaining history.
+                    self.checkpoint(observation.clone()).await?;
+                    tracing::info!(
+                        stage = "freshness_catch_up",
+                        scanned_blocks = observation.scanned_blocks,
+                        "Treasury scan retained; acquiring fresh spending evidence"
+                    );
+                    tokio::task::yield_now().await;
+                }
+                result => return result,
+            }
+        }
+    }
+    async fn scan_observation(
+        &mut self,
+        settings: &SyncSettings,
+        observation: &mut SyncObservation,
+    ) -> Result<()> {
+        let mut indexer = crate::network::global()
+            .grpc(&self.identity, &settings.endpoint)
+            .await
+            .context("indexer connection failed")?;
         self.client.set_indexer(indexer.clone());
-        let info = tokio::time::timeout(
-            crate::network::global().operation_timeout(Duration::from_secs(15)),
-            indexer.get_lightd_info(
-                crate::network::global()
-                    .operation_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
-            ),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
-        .map_err(|status| diagnostics::tip_failure(status, "starting_tip"))?;
+        let info = indexer
+            .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
+            .await
+            .map_err(|status| diagnostics::tip_failure(status, "starting_tip"))?;
         ensure!(
             info.chain_name == self.network.rpc_name(),
             "indexer is not on mainnet"
@@ -541,16 +558,10 @@ impl SyncSession {
             .map_or(result.blocks_scanned, |progress| {
                 progress.total_blocks_scanned
             });
-        let info = tokio::time::timeout(
-            crate::network::global().operation_timeout(Duration::from_secs(15)),
-            indexer.get_lightd_info(
-                crate::network::global()
-                    .operation_timeout(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT),
-            ),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("indexer tip check timed out"))?
-        .map_err(|status| diagnostics::tip_failure(status, "final_tip"))?;
+        let info = indexer
+            .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
+            .await
+            .map_err(|status| diagnostics::tip_failure(status, "final_tip"))?;
         let height = u64::from(u32::from(result.sync_end_height));
         ensure!(
             info.chain_name == self.network.rpc_name(),

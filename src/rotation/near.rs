@@ -4,6 +4,14 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
+#[derive(Debug)]
+pub(crate) struct QuoteWindowExpired;
+impl std::fmt::Display for QuoteWindowExpired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("quote deadline too close")
+    }
+}
+impl std::error::Error for QuoteWindowExpired {}
 const ZEC: &str = "nep141:zec.omft.near";
 pub(crate) const USDC: &str = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 #[derive(Clone, Serialize, Deserialize)]
@@ -158,6 +166,7 @@ impl NearClient {
         )
     }
     pub async fn quote(&self, request: Value, limits: &Limits, now: u64) -> Result<Quote> {
+        let started = std::time::Instant::now();
         let response = self
             .response(
                 self.wallet_http(&request)?
@@ -166,7 +175,12 @@ impl NearClient {
                     .json(&request),
             )
             .await?;
-        validate_quote(request, response, limits, now)
+        validate_quote(
+            request,
+            response,
+            limits,
+            now.saturating_add(started.elapsed().as_secs()),
+        )
     }
     /// Only rejected, unsigned quotes may adjust output; every accepted quote
     /// still passes the complete route, echo, input-cost and fee-cap validation.
@@ -176,6 +190,7 @@ impl NearClient {
         limits: &Limits,
         now: u64,
     ) -> Result<Quote> {
+        let started = std::time::Instant::now();
         ensure!(
             request["swapType"] == "EXACT_OUTPUT" && request["destinationAsset"] == USDC,
             "minimum adjustment requires exact-output Base USDC"
@@ -189,7 +204,14 @@ impl NearClient {
                 )? <= limits.max_output,
                 "funding_amount_limit_exceeded"
             );
-            match self.quote(request.clone(), limits, now).await {
+            match self
+                .quote(
+                    request.clone(),
+                    limits,
+                    now.saturating_add(started.elapsed().as_secs()),
+                )
+                .await
+            {
                 Ok(quote) => return Ok(quote),
                 Err(error) => {
                     let Some(minimum) = error.downcast_ref::<BridgeMinimum>() else {
@@ -456,8 +478,10 @@ pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64
     // Our authority to send always expires at the earlier local/provider deadline.
     let deadline = deadline.min(timestamp(&request["deadline"])?);
     ensure!(
-        deadline.checked_sub(now).is_some_and(|s| s >= 300),
-        "quote deadline too close"
+        deadline
+            .checked_sub(now)
+            .is_some_and(|s| s >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS),
+        QuoteWindowExpired
     );
     if let Some(fees) = response["quoteRequest"]["appFees"].as_array() {
         let total: u64 = fees

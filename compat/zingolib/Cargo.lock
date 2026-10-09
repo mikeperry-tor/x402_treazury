@@ -6593,6 +6593,7 @@ dependencies = [
  "alloy-sol-types",
  "axum",
  "base64 0.22.1",
+ "futures-util",
  "reqwest",
  "rmcp",
  "serde_json",
@@ -6618,6 +6619,8 @@ dependencies = [
  "dotenvy",
  "fs2",
  "futures-util",
+ "http-body",
+ "httpdate",
  "hyper",
  "hyper-util",
  "libc",
@@ -7047,6 +7050,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "tonic",
+ "tower",
 ]
 
 [[package]]

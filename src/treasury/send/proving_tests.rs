@@ -75,7 +75,7 @@ async fn qualify_preparation(fail_commit: bool) {
             checkpoint_at: 0,
             scanned_blocks: 1,
             target_height: Some(TIP.into()),
-            observed_tip_height: None,
+            observed_tip_height: Some(TIP.into()),
             height: Some(TIP.into()),
             confirmations: 1,
             max_age_seconds: 300,
@@ -128,8 +128,8 @@ async fn qualify_preparation(fail_commit: bool) {
         deadline: now().unwrap() + 600,
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,
-        max_fee_zatoshis: 20_000,
-        max_input_zatoshis: 80_000,
+        max_fee_zatoshis: 120_000,
+        max_input_zatoshis: 180_000,
     };
     if fail_commit {
         let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();

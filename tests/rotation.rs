@@ -32,7 +32,7 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     // Simulate a database produced by the offline foundation, before admission tables.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "DROP TABLE payment_resolutions; DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=0;",
+        "DROP TABLE funding_quote_refreshes; DROP TABLE payment_resolutions; DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=0;",
     )
     .unwrap();
     drop(db);
@@ -352,7 +352,7 @@ fn sync_schema_migrates_admission_state_without_changing_wallet() {
     drop(s);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "DROP TABLE payment_resolutions; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=1;",
+        "DROP TABLE funding_quote_refreshes; DROP TABLE payment_resolutions; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=1;",
     )
     .unwrap();
     drop(db);
@@ -847,6 +847,7 @@ fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     let mut status = store.status().unwrap();
     let wallets = status.pools.remove(0).addresses;
     let view = |first: u64, second: u64| ChainView {
+        admission_valid_until: u64::MAX,
         anchor: Anchor {
             height: 100,
             hash: format!("0x{:064x}", 100),

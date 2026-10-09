@@ -215,7 +215,6 @@ async fn paid_fixture() {
             crate::rotation::base::BaseRpc::new("https://api.example.com/rpc", 12, 120).unwrap(),
             "0.01",
             SpendPolicy::dollars("1").unwrap(),
-            2,
         )
         .unwrap(),
     );

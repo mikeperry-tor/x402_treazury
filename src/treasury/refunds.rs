@@ -120,20 +120,6 @@ impl Treasury {
             "treasury not ready for shielding"
         );
         let operation = uuid::Uuid::new_v4().to_string();
-        let id = operation.clone();
-        let instant = now()?;
-        self.store
-            .call(move |s| {
-                s.bind_operation_recipient(&id, &recipient)?;
-                s.reserve(
-                    &id,
-                    None,
-                    u32::try_from(instant / 86400)?,
-                    i64::try_from(max_fee)?,
-                    i64::try_from(daily_limit)?,
-                )
-            })
-            .await?;
         self.healthy = false;
         let client = self.client.as_mut().context("treasury unavailable")?;
         let _pause = client
@@ -199,6 +185,21 @@ impl Treasury {
                     .all(|i| *i.txout().script_pubkey() == receiver.script().into()),
                 "shielding would link refund addresses"
             );
+            // Reserve only the calculated shielding fee, before creating bytes.
+            // Returned principal is internal wallet movement, not another spend.
+            let id = operation.clone();
+            self.store
+                .call(move |s| {
+                    s.bind_operation_recipient(&id, &recipient)?;
+                    s.reserve(
+                        &id,
+                        None,
+                        u32::try_from(now()? / 86400)?,
+                        i64::try_from(fee)?,
+                        i64::try_from(daily_limit)?,
+                    )
+                })
+                .await?;
             // Treasury initialization supports mnemonic-backed account zero only.
             let phrase = Zeroizing::new(wallet.mnemonic_phrase().context("missing treasury seed")?);
             let mnemonic = bip0039::Mnemonic::<bip0039::English>::from_phrase(&*phrase)
@@ -277,7 +278,9 @@ impl Treasury {
                 expiry_height: transaction.expiry_height().into(),
                 amount_zatoshis: 0,
                 fee_zatoshis: fee,
-                deadline: instant + 86400,
+                deadline: now()?
+                    .checked_add(86400)
+                    .context("shielding deadline overflow")?,
             };
             (raw, facts)
         };

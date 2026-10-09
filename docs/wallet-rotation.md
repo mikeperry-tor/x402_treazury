@@ -103,7 +103,12 @@ The USDC gross allowance deliberately does not use those refund credits.
 Zingolib proposes funding transactions and calculates their standard network fees.
 Refund shielding uses the backend's standard ZIP-317 fee rule. The application
 accepts or rejects the resulting fee; it does not force a lower fee into the
-transaction. Larger transactions can exceed a fee ceiling and require an explicit
+transaction. Calculate-only proposals determine the actual fee before the serialized
+store reserves principal plus that fee (shielding reserves only its fee), and before
+signed bytes are created. A configured maximum is a rejection ceiling, not a
+reservation of money that will not be spent. Proposal mutation or cancellation
+poisons the owner until reopen; exact costs and prepared bytes commit atomically.
+Larger transactions can exceed a fee ceiling and require an explicit
 configuration adjustment. All money values are decimal strings; accounting uses
 integer atomic units, never floating-point currency conversion.
 
@@ -113,6 +118,11 @@ one is required. All financial limits still apply alongside qualification permit
 no configuration value authorizes replay or bypasses a zero-new-funding restriction.
 Positive funded qualification still requires an explicit `max_funding_spend_zec`
 to bound its native-asset permits.
+
+A stopped treasury owner or funding worker pauses funding until process restart.
+It does not stop MCP listeners or Base reconciliation. Existing confirmed assets
+remain usable under ordinary admission checks, with all reservations and unresolved
+liabilities retained. A poisoned treasury owner is closed, never reused in place.
 
 ## Treasury sync freshness
 
@@ -139,16 +149,21 @@ policy; a successful sync is still required before new treasury preparation.
 The Zcash treasury is exclusively spent by this application. Direct and Tor sync
 use the same bounded policy: a successful scan must reach the tip observed at the
 start, and may trail the final indexer observation by at most **three blocks**.
-A regressing indexer tip or greater lag fails the observation. Confirmation counts
+A regressing indexer tip fails the observation. Greater lag or an aged starting
+observation retains the completed scan/checkpoint and starts a fresh observation
+with incremental catch-up. It never relabels old evidence as fresh. Confirmation counts
 and spendability use the **scanned** height, never the newer unscanned tip.
 
 `treasury.max_sync_age_seconds` (default 300) limits the age of the starting tip
 observation, including sync and validation time; completing a slow sync does not
 restart this clock. Status records `target_height` (starting tip), `height` (scan),
 `observed_tip_height` (final query), and `checked_at` (starting observation time).
-Historical snapshots have no observed tip. Accepted lag emits a warning in serving
-logs and wallet-sync stderr. Background serving continues periodic catch-up; the
-one-shot wallet command reports its observation and exits.
+Historical snapshots have no observed tip. Accepted lag is logged at debug level
+and appears in wallet-sync output. Both serving and one-shot sync can acquire a
+fresh observation through incremental catch-up. Ordinary preparation uses the
+same three-block allowance and rejects a regressing observed tip. Read-only
+readiness checks precede proposal mutation and reservation; only a proven untouched
+operation can return `PreparationDeferred`.
 
 This allowance does not change reservations, outgoing transaction tracking,
 confirmation depth, reorg checks or expiry. Recovery that releases an expired
@@ -156,6 +171,26 @@ transaction's reservation still requires zero observed tip lag on both syncs,
 along with buried expiry and confirmed unspent inputs. Unknown historical tip
 evidence cannot satisfy that recovery check. Do not spend the treasury from an
 external wallet while relying on this policy.
+
+Base reconciliation resolves historical authorizations at their original confirmed
+anchor, revalidates that anchor, and then acquires a separate fresh balance view.
+Wallet reads run with bounded concurrency and preserve each wallet’s network
+identity. Balance acquisition runs once; completed canonical evidence is retained
+even if it ages out. The serialized store checks its original block-derived
+admission expiry before reserving a payment or promoting a payer. Stale admission
+returns a readiness error and releases the pool gate; it does not restart the
+sweep indefinitely. Payment acquisition excludes retired-wallet balances while
+still resolving their historical authorizations. Old balances are never assigned
+a new block. Failover restarts the entire coherent view.
+
+For payment admission, an unavailable nonce read leaves its full liability
+reserved without requiring another endpoint to release it. Other valid canonical nonce
+proofs can be committed, and fresh balances minus all remaining liabilities may
+authorize a payment. Expiry without a successful nonce observation releases
+nothing. Invalid data, TLS failures, wrong chains, stale balances and changed
+anchors still fail closed. Required evidence failures retain the ordinary
+configured failover policy; views never mix endpoints. Background reconciliation remains strict and reports
+unavailable observations as failures with its normal backoff.
 
 ## Double buffering and admission
 
@@ -254,6 +289,11 @@ Calculation followed by persistence failure invalidates that in-memory owner for
 further preparation; reopening restores the last durable state rather than making
 a conflicting send.
 
+A quote crossing its delivery margin before the concrete backend dispatches a
+treasury preparation command is a typed pre-preparation deferral. The store
+requires proof of no outgoing or budget record before returning it to `Quoted`;
+ordinary untouched-quote refresh does not consume transaction recovery attempts.
+
 An uncertain broadcast retains the saved bytes and transaction identity. Recovery
 reconciles that operation; explicit rebroadcast uses the same bytes. A timeout,
 indexer omission or provider status is insufficient proof to release source inputs.
@@ -284,8 +324,13 @@ canonical absence, fresh-tip and unspent-input proofs authorize recovery; elapse
 time alone does not. Submitted/ambiguous operations are reconciled before expiry
 recovery, never automatically rebroadcast. A successful recovery archives the old
 operation and returns the job to allocation under its existing funding budgets.
-The profile's `max_attempts` bounds resets using durable recovery/quote-refresh
+The profile's `max_attempts` bounds transaction recovery resets using durable
 history; neither process restart nor operation replacement erases this count.
+New quote refreshes proven to have no outgoing or budget record are explicitly
+marked in additive SQLite schema 12 and excluded from that count; historical
+unclassified records still count. Earlier binaries reject the newer state schema.
+Unsigned quote outages use bounded per-pass work and backoff without consuming
+transaction recovery attempts.
 
 
 The treasury receives/synchronizes Ironwood with capability checks on the injected

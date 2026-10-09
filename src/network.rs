@@ -1,4 +1,6 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
+#[cfg(feature = "zcash")]
+mod grpc;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -224,23 +226,6 @@ impl NetworkContext {
             .into()
             .unwrap_or_else(|| Duration::from_secs(self.policy.read_timeout_seconds.unwrap_or(60)))
     }
-    /// Financial/RPC operation deadlines are independent of HTTP read progress.
-    /// Preserve the existing Tor allowance for multi-step chain operations.
-    pub fn operation_timeout(&self, requested: Duration) -> Duration {
-        if self.policy.mode == Mode::Tor {
-            requested.max(Duration::from_secs(240))
-        } else {
-            requested
-        }
-    }
-    /// For outer connection guards; do not undercut the connector's Tor budget.
-    pub fn connection_timeout(&self, direct: Duration) -> Duration {
-        if self.policy.mode == Mode::Tor || self.policy.connect_timeout_seconds.is_some() {
-            self.policy.timeout()
-        } else {
-            direct
-        }
-    }
     pub fn credentials(&self, id: &IsolationId) -> (String, String) {
         let namespace = self.policy.namespace();
         let token = id.token(namespace);
@@ -433,6 +418,7 @@ impl NetworkContext {
             };
             endpoint = endpoint.tls_config(tls)?;
         }
+        let readiness = grpc::Readiness::new(self.policy.timeout());
         let channel: Channel = if self.policy.mode == Mode::Tor {
             let proxy = self
                 .policy
@@ -449,16 +435,27 @@ impl NetworkContext {
                     .with_auth(user, pass)
                     .local_dns(false);
             endpoint
-                .connect_with_connector(connector)
+                .connect_with_connector(readiness.connector(connector))
                 .await
                 .map_err(|_| anyhow::anyhow!("tor_grpc_connection_failed"))?
         } else {
+            let mut tcp = hyper_util::client::legacy::connect::HttpConnector::new();
+            tcp.enforce_http(false);
+            tcp.set_nodelay(true);
             endpoint
-                .connect()
+                .connect_with_connector(readiness.connector(tcp))
                 .await
                 .map_err(|_| anyhow::anyhow!("grpc_connection_failed"))?
         };
-        let client = zingo_netutils::GrpcIndexer::from_channel(uri, channel);
+        readiness.established();
+        let client = zingo_netutils::GrpcIndexer::from_transport(
+            uri,
+            zingo_netutils::IndexerTransport::new(grpc::ProgressChannel::new(
+                channel,
+                self.read_timeout(None),
+                readiness,
+            )),
+        );
         let mut cache = self.grpc.lock().await;
         if cache.len() >= 256 {
             cache.clear();

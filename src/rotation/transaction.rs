@@ -6,15 +6,18 @@ use anyhow::{Result, ensure};
 use std::future::Future;
 use zeroize::Zeroizing;
 
+// Conservative delivery allowance retained pending the authoritative Zcash
+// 1Click arrival/route contract; never derive settlement from local broadcast.
+// All pre-preparation and first-submission gates use this one policy constant.
 pub const MIN_QUOTE_VALIDITY_SECONDS: u64 = 300;
 
-/// Issued only when the treasury command failed before invoking the preparer.
+/// Issued only through a proven read-only path before proposal/preparation starts.
 /// It is not evidence that an interrupted calculation is safe to repeat.
 #[derive(Debug)]
 pub struct PreparationDeferred;
 impl std::fmt::Display for PreparationDeferred {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("treasury_preparation_deferred: pre-preparation sync unavailable; no calculation started")
+        f.write_str("treasury_preparation_deferred: pre-preparation readiness unavailable; no calculation started")
     }
 }
 impl std::error::Error for PreparationDeferred {}
@@ -126,6 +129,16 @@ pub enum TransactionPresence {
 }
 
 pub trait TransactionSubmission {
+    /// Read-only validation before durable broadcast intent. Failure grants no
+    /// new preparation authority and never alters historical attempt records.
+    fn preflight(
+        &mut self,
+        _transaction: &PreparedTransaction,
+        _rebroadcast: bool,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async { Ok(()) }
+    }
+
     /// Submit these exact durable bytes via the independently configured endpoint.
     /// Timeout/cancellation is Unknown, never evidence that inputs can be reused.
     fn submit(

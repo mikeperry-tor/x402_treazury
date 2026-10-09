@@ -46,6 +46,37 @@ fixture cannot make every negative test pass.
 The [coverage map](../tests/COVERAGE.md) identifies regression boundaries and
 optional qualification methods.
 
+Progress-policy regressions use fragmented unary and streaming gRPC responses
+lasting over twenty seconds, alongside silent headers, stalled bodies and sibling
+stream traffic. Reconnect fixtures delay SOCKS establishment beyond read inactivity
+but within the connection allowance, then verify silent headers still fail.
+Zero-stream-capacity fixtures cover stalled dispatch in direct and Tor modes.
+Saturated-stream fixtures verify sibling traffic cannot renew readiness and
+cancelled calls cannot dispatch when capacity returns. A subprocess test exercises explicit force with a live blocking
+worker, independently of the static-wallet HTTP shutdown fixtures. Wallet and
+bootstrap drain subprocesses exercise the shared first-signal cancellation and
+second-signal force path. Deployment fixtures keep listeners and Base reconciliation
+available after a funding stop; optional remote catalog fixtures isolate missing
+or invalid inferred base URLs while keeping authored URL errors fatal.
+Real-process shutdown fixtures exercise responses beyond the old
+ten-second cutoff, explicit force, HTTP disconnect, stdio EOF and a signal with
+the parent input pipe still open. Treasury fixtures cover incremental catch-up,
+bounded preparation lag, read-only preflight and retained unknown sends; managed
+fixtures separate slow historical reconciliation from fresh admission balances.
+Slow balance acquisition returns without a retry loop, persists canonical
+resolutions, and cannot sign until a subsequent fresh view is acquired. Submission
+fixtures reject failed preflight without intent and tolerate an unsigned tip outage
+after successful preflight without adding another read before sending. Concrete
+funding-backend tests distinguish quote expiry before command dispatch from
+uncertain preparation. Optional catalogs never suppress authored selector errors.
+Optional-outage fixtures also check inherited prefixes and ambiguous listener
+selectors. Birthday fixtures advance the tip between observations. Nonce-outage
+fixtures retain full liabilities, commit independent valid proofs, reject
+insufficient remaining capacity, and preserve those decisions across restart.
+Synthetic proving checks actual-fee affordability and exact saved bytes through
+failed persistence/reopen. These are unfunded/local tests, not evidence of live
+1Click delivery or a resolution of its Zcash quote-deadline contract.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency

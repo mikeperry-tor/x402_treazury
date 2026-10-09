@@ -64,23 +64,30 @@ async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without
     let seen = count.clone();
     let price = Arc::new(AtomicBool::new(false));
     let offer = price.clone();
-    let app = axum::Router::new().route(
-        "/read",
-        axum::routing::get(move |request:axum::extract::Request| {
-            let offer=offer.clone();
-            let seen = seen.clone();
-            async move {
-                assert!(!request.headers().contains_key("payment-signature"));
-                seen.fetch_add(1, Ordering::SeqCst);
-                use axum::response::IntoResponse;
-                use base64::Engine;
-                if offer.load(Ordering::SeqCst)&&request.uri().query().is_none() {
-                    let challenge=base64::engine::general_purpose::STANDARD.encode(json!({"accepts":[{"scheme":"exact","amount":"14000","asset":"USDC","network":"eip155:8453"}]}).to_string());
-                    (axum::http::StatusCode::PAYMENT_REQUIRED,[("payment-required",challenge)],"unpaid").into_response()
-                } else {"free result".into_response()}
+    let handler = axum::routing::get(move |request: axum::extract::Request| {
+        let offer = offer.clone();
+        let seen = seen.clone();
+        async move {
+            assert!(!request.headers().contains_key("payment-signature"));
+            seen.fetch_add(1, Ordering::SeqCst);
+            use axum::response::IntoResponse;
+            use base64::Engine;
+            if offer.load(Ordering::SeqCst) && request.uri().query().is_none() {
+                let challenge=base64::engine::general_purpose::STANDARD.encode(json!({"accepts":[{"scheme":"exact","amount":"14000","asset":"USDC","network":"eip155:8453"}]}).to_string());
+                (
+                    axum::http::StatusCode::PAYMENT_REQUIRED,
+                    [("payment-required", challenge)],
+                    "unpaid",
+                )
+                    .into_response()
+            } else {
+                "free result".into_response()
             }
-        }),
-    );
+        }
+    });
+    let app = axum::Router::new()
+        .route("/read", handler.clone())
+        .route("/price", handler);
     let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
@@ -89,6 +96,13 @@ async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without
         let before = count.load(Ordering::SeqCst);
         let tmp = tempfile::tempdir().unwrap();
         let (mut m, state) = fixture(tmp.path());
+        // Keep /read's required argument intact: startup must never probe it.
+        // This independent argument-free route exercises eligible pricing.
+        let spec_path = tmp.path().join("spec.json");
+        let mut spec: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&spec_path).unwrap()).unwrap();
+        spec["paths"]["/price"] = json!({"get":{}});
+        std::fs::write(spec_path, spec.to_string()).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         drop(listener);
@@ -137,6 +151,10 @@ async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without
         );
         assert_eq!(
             report["pricing_stages"][0]["evidence"]["observed"],
+            usize::from(enabled)
+        );
+        assert_eq!(
+            report["pricing_stages"][0]["evidence"]["skipped_arguments"],
             usize::from(enabled)
         );
         assert_eq!(

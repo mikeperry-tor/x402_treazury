@@ -317,6 +317,7 @@ mod tests {
                 params![id,pool,wallet.id]).unwrap();
         }
         let view = || ChainView {
+            admission_valid_until: u64::MAX,
             anchor: Anchor {
                 height: 10,
                 hash: "block".into(),
@@ -330,6 +331,7 @@ mod tests {
                 (
                     "used".into(),
                     AuthorizationResolution {
+                        anchor: None,
                         outcome: AuthorizationOutcome::Used,
                         block_time: 100,
                     },
@@ -337,6 +339,7 @@ mod tests {
                 (
                     "expired".into(),
                     AuthorizationResolution {
+                        anchor: None,
                         outcome: AuthorizationOutcome::ExpiredUnused,
                         block_time: 100,
                     },

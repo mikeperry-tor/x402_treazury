@@ -27,6 +27,7 @@ pub async fn bootstrap_wallets(path: &Path) -> Result<BootstrapSummary> {
     }
     crate::discovery::policy::validate_registry_path(&config, path)?;
     let deployment = Deployment {
+        unavailable_sources: Default::default(),
         config,
         wallet_resolution,
         initialized: None,
@@ -63,17 +64,11 @@ impl Deployment {
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
         // The supervisor retains ownership and drains even if its caller disappears.
-        let mut task = tokio::spawn(supervise(initialized, names, stop.clone()));
-        tokio::select! {
-            result = &mut task => result.context("bootstrap supervisor failed")?,
-            signal = crate::wallet_cli::shutdown_signal() => {
-                stop.cancel();
-                tracing::warn!("Wallet bootstrap stopping; waiting for accepted financial work to drain");
-                let result = task.await.context("bootstrap supervisor failed")?;
-                signal?;
-                result
-            }
-        }
+        let task = tokio::spawn(supervise(initialized, names, stop.clone()));
+        crate::wallet_cli::finish_on_shutdown("bootstrap", &stop, async {
+            task.await.context("bootstrap supervisor failed")?
+        })
+        .await
     }
 }
 

@@ -63,6 +63,19 @@ impl Payer {
         Ok(Self { client, address })
     }
 }
+/// Monotonic evidence set before durable signed intent or a static paid send.
+/// It is deliberately independent of response decoding and error text.
+#[derive(Clone, Default)]
+pub(crate) struct SubmissionProgress(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl SubmissionProgress {
+    pub(crate) fn mark_possible(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+    pub(crate) fn possible(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 #[derive(Clone)]
 pub struct PaidClient {
     cover: Option<(Arc<crate::cover::Config>, crate::cover::Scope)>,
@@ -179,6 +192,14 @@ impl PaidClient {
         &self,
         route: RoutedRequest,
     ) -> Result<crate::output::HttpOutput> {
+        self.execute_response_observed(route, &SubmissionProgress::default())
+            .await
+    }
+    pub(crate) async fn execute_response_observed(
+        &self,
+        route: RoutedRequest,
+        progress: &SubmissionProgress,
+    ) -> Result<crate::output::HttpOutput> {
         // Pin static signer before any I/O; replacement affects only later calls.
         let payer = self
             .payer
@@ -270,12 +291,13 @@ impl PaidClient {
                 response = self.bound_challenge(response).await?;
                 if let Some(pool) = &self.managed {
                     match pool
-                        .pay_with_cover(
+                        .pay_with_cover_observed(
                             &http,
                             candidate.expect("managed candidate"),
                             retry,
                             response,
                             cover.as_ref(),
+                            progress,
                         )
                         .await
                     {
@@ -311,6 +333,7 @@ impl PaidClient {
                     if let Some(p) = &mut padding {
                         p.dispatched();
                     }
+                    progress.mark_possible();
                     response = http
                         .execute(retry)
                         .await

@@ -295,6 +295,7 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
     denied(s.promote(&pool, 0));
     assert_eq!(before, serde_json::to_value(s.status().unwrap()).unwrap());
     let view = super::super::base::ChainView {
+        admission_valid_until: u64::MAX,
         anchor: super::super::base::Anchor {
             height: 2,
             hash: "block2".into(),

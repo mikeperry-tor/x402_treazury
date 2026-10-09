@@ -1,8 +1,10 @@
 # Independent provider startup
 
-Deferred until partial provider availability is a priority. The bounded eager
-startup optimizations are implemented; this plan changes serving lifecycle and
-agent-visible inventory behavior. The [live integration runner](../../../tests/live/INTEGRATION.md)
+Background publication remains deferred. Bounded eager loading and explicit
+`sources.NAME.optional_startup` failure isolation are implemented: serving reports
+failed optional remote sources as unavailable in inventory and MCP instructions.
+Inspection and qualification remain strict. This plan covers serving while sources
+are still loading and publishing them later; it must preserve that explicit status. The [live integration runner](../../../tests/live/INTEGRATION.md)
 already supports provider testing; partial startup availability remains separate work.
 
 ## Objective
@@ -24,8 +26,9 @@ before awaiting the signed HTTP response. Preserve those boundaries.
 
 `Deployment::load` in `src/deployment.rs` validates the deployment, installs network
 policy, and loads sources through `src/deployment/startup.rs` with a rolling
-concurrency limit (default 2, configurable 1..64). Every source must succeed
-before listener selection and binding. A remote spec failure aborts startup.
+concurrency limit (default 2, configurable 1..64). All loads finish before listener
+selection and binding; required sources must succeed. Optional remote failures
+remain unavailable for that process, with no background retry.
 The first observed load failure cancels pending futures; inventory ordering is
 still deterministic. Phase timings, ready counts and ten-second waiting updates
 go to stderr. Compatible remote aliases already share downloads and parsed documents within

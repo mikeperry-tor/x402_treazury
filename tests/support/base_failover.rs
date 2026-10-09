@@ -9,11 +9,13 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
     let logs = requests.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let block_time = now().unwrap();
     let app = Router::new().route("/{mode}", post(move |Path(mode): Path<String>, Json(v): Json<Value>| {
         let logs = logs.clone();
         async move {
             logs.lock().unwrap().push((mode.clone(), v.clone()));
             let method = v["method"].as_str().unwrap();
+            if mode == "slow" { tokio::time::sleep(std::time::Duration::from_secs(2)).await; }
             if mode == "stall" { tokio::time::sleep(std::time::Duration::from_secs(60)).await; }
             if mode == "malformed" { return "private invalid JSON".into_response(); }
             // Fail only after some useful-looking evidence has been read.
@@ -29,7 +31,7 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
                 "eth_getBlockByNumber" => {
                     let height = if v["params"][0] == "latest" {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap()};
                     let hash = if mode == "conflict" {999} else {height};
-                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{block_time:x}")})
                 }
                 "eth_call" => {
                     assert_eq!(v["params"][1]["requireCanonical"], true);

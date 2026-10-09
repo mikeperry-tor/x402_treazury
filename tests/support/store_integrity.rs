@@ -73,7 +73,7 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
     let jobs = s.status().unwrap().funding_jobs;
     let revision = s.snapshot().unwrap().0;
     drop(s);
-    for version in 0..=11 {
+    for version in 0..=12 {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         fs::create_dir(&state).unwrap();
@@ -138,7 +138,7 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
         assert_eq!(
             s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
                 .unwrap(),
-            11
+            12
         );
         assert_eq!(s.snapshot().unwrap().0, revision);
         assert_eq!(
@@ -407,14 +407,14 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
             format!("prepared-{i}").as_bytes()
         );
     }
-    s.db.execute_batch("PRAGMA user_version=12;").unwrap();
+    s.db.execute_batch("PRAGMA user_version=13;").unwrap();
     drop(s);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err());
     let db = Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap(),
-        12
+        13
     );
     assert_eq!(
         db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
@@ -506,4 +506,95 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
         s.record_refund(refund).unwrap();
         assert_eq!(s.status().unwrap().refunds.len(), 1);
     }
+}
+
+#[test]
+fn expired_admission_evidence_commits_balances_without_promotion_or_reservation() {
+    use crate::rotation::base::{Anchor, ChainView};
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let id = store.id().to_owned();
+    let pool = store.ensure_pool("freshness", "5").unwrap();
+    let jobs = store.funding_jobs().unwrap();
+    for job in &jobs {
+        store
+            .record_credit(&job.wallet_id, "5000000", "old", 10)
+            .unwrap();
+    }
+    let candidate = store.payment_candidate(&pool).unwrap();
+    let view = ChainView {
+        admission_valid_until: 0,
+        anchor: Anchor {
+            height: 20,
+            hash: "historical".into(),
+        },
+        balances: [
+            (jobs[0].wallet_id.clone(), U256::ZERO),
+            (jobs[1].wallet_id.clone(), U256::from(5_000_000)),
+        ]
+        .into(),
+        released: vec![],
+        resolutions: Default::default(),
+    };
+    let error = store
+        .admit_for(&pool, U256::from(1), "offer", view, Some(&candidate))
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("fresh Base balances required"));
+    drop(store);
+    let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    let after = store.payment_candidate(&pool).unwrap();
+    assert_eq!(after.wallet, candidate.wallet);
+    assert_eq!(after.generation, candidate.generation);
+    assert_eq!(store.funding_jobs().unwrap().len(), 2);
+    let attempts: i64 = store
+        .db
+        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(attempts, 0);
+    let (balance, height): (String, i64) = store
+        .db
+        .query_row(
+            "SELECT balance,block_height FROM wallets WHERE id=?1",
+            [&candidate.wallet],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((balance.as_str(), height), ("0", 20));
+}
+
+#[test]
+fn admission_skips_retired_balances_but_retains_their_authorizations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = populated(dir.path());
+    let pool = store.status().unwrap().pools[0].id.clone();
+    let wallet: String = store
+        .db
+        .query_row(
+            "SELECT wallet_id FROM payment_attempts WHERE id='payment'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    store
+        .db
+        .execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])
+        .unwrap();
+    assert!(
+        store
+            .chain_query(&pool)
+            .unwrap()
+            .wallets
+            .iter()
+            .any(|(id, _)| id == &wallet)
+    );
+    let query = store.payment_chain_query(&pool).unwrap();
+    assert!(!query.wallets.iter().any(|(id, _)| id == &wallet));
+    assert!(query.pending.iter().any(|auth| auth.wallet == wallet));
 }

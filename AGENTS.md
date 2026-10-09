@@ -28,6 +28,39 @@ Intents. Optional Tor uses the same network/state machinery as direct mode.
 - `compat/`: independent dependency compatibility and Cargo-managed protoc workspaces.
 - `docs/`: network inventory, funded-test runbook and architecture plans.
 
+## Progress and failure-policy rules
+
+Let valid work finish while it makes progress. Before adding or tightening a timer,
+budget, readiness gate or failure switch, identify its owning layer and the concrete
+resource, external contract or correctness invariant it protects. Check existing
+guards first; do not stack whole-work deadlines or replace removed deadlines with
+enormous durations. Keep the [remaining timer inventory](docs/network-egress.md#remaining-timers-and-budgets)
+current when policy changes.
+
+- Separate connection establishment, per-response read inactivity, evidence freshness,
+  signed authority expiry and health/polling cadence. Unrelated streams, keepalives
+  or merely finishing work cannot renew another response's timer or financial authority.
+- Retain useful scan/reconciliation work, then acquire fresh spending evidence.
+  Historical authorization proofs and fresh admission balances have separate anchors;
+  never relabel stale balances or observations. Wallet count must not become an
+  implicit deadline for historical reconciliation.
+- Put proven read-only readiness/preflight checks before mutation, reservation and
+  broadcast intent. After uncertain mutation or intent, preserve ownership, exact
+  bytes and liabilities; absence of a result is not proof that nothing happened.
+- Scope failures to the affected operation unless typed evidence justifies a wider
+  stop. Unsigned outages must not consume transaction recovery attempts. Preserve
+  finite retry/backoff, optional-source status and required/qualification completeness.
+- Keep active work ownership separate from waiter lifetime and cache retention.
+  Disconnect, cancellation or eviction must not silently orphan financial work,
+  duplicate active I/O, or report forced abandonment as success.
+- Distinguish actual cost from configured ceilings, payment authority from funding
+  preferences, and authority fields from opaque annotations. Preserve explicit caps,
+  byte/storage bounds and existing deployments' effective spending authority.
+- For policy changes, test slow progress beyond the old bound alongside true stalls,
+  unrelated concurrent progress, cancellation and restart where applicable. Assert
+  forbidden side effects stay absent. Test-harness deadlines are not runtime policy;
+  local fixtures do not establish an external settlement contract or live qualification.
+
 ## Live integration runner
 
 `examples/live_integration.rs` and `tests/integration_preparation.rs` share
@@ -98,7 +131,10 @@ Retained evidence never grants spending authority or permission to replay cases.
 
 Treasury sync accepts at most three blocks of tip advancement after scanning a
 freshly observed target, identically for direct and Tor. The starting observation
-age includes sync time; never renew freshness at completion. Persist the final
+age includes sync time; never renew freshness at completion. A completed scan with
+stale observation or excessive lag checkpoints and takes a new observation for
+incremental catch-up. Ordinary preparation accepts the same three-block lag and
+performs read-only readiness checks before proposal mutation or reservation. Persist the final
 `observed_tip_height` separately from scanned `height`; confirmations use the latter.
 Expiry recovery requires equality on both syncs before releasing reservations.
 The treasury is exclusively spent here; accepted lag appears at debug level and in CLI output.
@@ -120,7 +156,14 @@ allocations or submissions. Bootstrap/automatic funding share its eligibility lo
 known unprepared failures or canonically expired signed operations only; uncertain
 preparation, refunds and unresolved confirmed swaps require review. Recovery reset
 limits use durable `funding_recovery` history and profile `max_attempts`, never a
-process-local counter. Do not combine deployment configuration with standalone location/network overrides.
+process-local counter. Unsigned quote outages use per-pass backoff without consuming
+transaction recovery attempts. New refreshes need proof of no outgoing/budget
+record and a durable refresh marker; historical unclassified records still count.
+The requested quote window defaults to 7200 seconds; the returned deadline governs.
+The shared 300-second submission margin awaits the authoritative 1Click Zcash
+deadline/route contract. swap_timeout_seconds is a health threshold with a
+60-second polling floor, never an abort or replacement authority.
+Do not combine deployment configuration with standalone location/network overrides.
 User-facing deployment examples live in `examples/deployments/`; network-only examples in
 `examples/network/`. Preserve user-owned local copies when changing layouts.
 
@@ -131,6 +174,8 @@ to `wallet.key` inside the owner-only state directory; the whole directory conta
 sufficient decryption material. External key paths remain supported. Never replace
 existing state on init. Endpoint defaults are shared with birthday lookup; explicit
 missing environment references fail, and submission otherwise follows the indexer.
+Birthday discovery uses the older valid information/tip observation minus the
+scan rewind; ordinary advancement between independent reads is not a failure.
 
 Managed serving completes initial pool bootstrap before discovery and defaults to
 automatic replacement funding, within configured USDC budgets and ZEC/fee safeguards. `auto_fund=false` pauses it; build features, inspection,
@@ -256,6 +301,9 @@ and [the runtime architecture](docs/architecture.md).
   create a missing registry. `sources refresh/remove` require exclusive registry ownership
   while serving is stopped; refresh fetches and validates without wallet credentials.
   Persistent metadata/specs can still reveal user interests.
+- Import aliases share active fetches without consuming duplicate permits. Never evict
+  active fetches by age/capacity churn. Success retention starts at completion
+  (300 seconds); transient failure backoff is one second. Retain bounded caches.
 - Tests in `src/discovery/tests.rs` inject public-URL documents/local fixtures only
   under `cfg(test)`; no production loopback bypass is permitted. Tests use unfunded
   keys/temporary state and cover actual HTTP management, caps, concurrency and recovery.
@@ -317,11 +365,15 @@ and [the runtime architecture](docs/architecture.md).
   selection; config show exposes discovery_wallets. Keep the discovery-wallet-v1
   selection domain stable. Shared sources do not multiply paid discovery across
   listeners; different wallet scopes cannot coalesce relay requests or relay cache data.
-  Relay-service failure/cancellation disables the shared relay across all wallets.
+  A monotonic submission marker confines proven pre-submission failures/cancellation
+  to bounded target attempts/backoff. Possibly submitted failures/cancellation
+  disable the shared relay across all wallets; absence of receipts proves nothing.
   Attributed target failures are cached without disabling other targets. Target discovery stays
   unsigned GET-only; only relay payment uses PaidClient. Reuse existing wallet caps
   and byte/time limits. Serialize calls, coalesce successful targets, and disable
-  the relay for the run on relay-service failure or cancellation before any retry can spend.
+  the relay for the run on possibly submitted failure/cancellation before any retry can spend.
+  Outer max_response_bytes must fit the JSON envelope/escaping as well as decoded
+  target limits; neither size failure authorizes a paid retry.
   Successful 2xx pricing probes leave prices unknown without invoking the relay.
   Every failed remote catalog fetch or failed HTTP/challenge pricing probe can use the
   configured relay once; no origin-error allowlist. Log source, discovery stage,
@@ -361,7 +413,11 @@ issue tags and must record the exclusions; this does not change runtime selectio
 
 Managed profiles use `funding_amount_usdc`, `max_funding_amount_usdc`,
 `max_api_payment_usdc` and integer `max_conversion_overhead_percent`. An omitted
-maximum funding amount permits no increase above the target. Funding-level
+maximum funding amount permits no increase above the target. Managed profiles
+preserve the historical target payment ceiling by default; explicit
+limit_payments_to_funding_target=false uses the API cap and active confirmed
+capacity minus liabilities. Opaque offer annotations cannot veto valid authority
+fields or change the exact JSON accepted by the signer. Funding-level
 `daily_funding_limit_usdc` and `total_funding_limit_usdc` are optional gross
 allocation budgets across all pools, not API-spending budgets. Managed deployments
 require at least one aggregate budget (daily USDC, total USDC or daily ZEC). Reserve accepted
@@ -389,7 +445,12 @@ All declared managed pools initialize, including those unused by selected tools.
   Never use upstream plaintext saves or quick-send helpers. Failed/cancelled
   preparation or persistence requires owner teardown/reopen, not reuse.
 - Calculate-only preparation checks current quote, exact output/fee/expiry and
-  aggregate budget. Commit prepared bytes and costs before broadcast intent;
+  aggregate budget. Calculate proposal fees before reserving exact principal plus
+  fee (refund shielding reserves only its fee), but reserve before creating signed
+  bytes. Proposal mutation/cancellation poisons the owner until reopen. Read-only
+  submission preflight precedes durable intent; the preflighted send path performs
+  no further unsigned tip read. Post-intent failures stay unknown.
+  Commit prepared bytes and costs before broadcast intent;
   submission consumes a single-use capability. Unknown sends remain possibly
   broadcast. Only explicit reconciliation may rebroadcast identical saved bytes.
 - Absence, expiry or seller responses never release financial exposure. Recovery
@@ -402,17 +463,41 @@ All declared managed pools initialize, including those unused by selected tools.
   completed funding credit is idempotent. Retired balances are not active capacity.
 - `PreparationDeferred` alone certifies that preparation never began; only this
   typed result plus no outgoing/budget record can rewind PREPARING. Missing bytes
-  or error prose cannot establish retry safety.
+  or error prose cannot establish retry safety. Quote-window expiry before the
+  concrete backend dispatches preparation uses this typed deferral.
 - Base RPC failover restarts a complete read-only view, never mixes providers or
   retries signed work. Data-validation/TLS failures do not trigger fallback.
+  Balance sweeps finish once and retain canonical evidence; the store checks the
+  original block-derived admission expiry before reserving or promoting. Stale
+  balances cannot cause an internal repeat loop or authorize spending. Admission
+  omits retired balance reads while retaining historical authorization checks.
+  Payment admission retains unavailable nonce observations as full unresolved
+  liabilities without requiring another provider to release them. Fresh balances minus those
+  liabilities may authorize spending; expiry alone cannot release them. Malformed
+  evidence, TLS/chain/anchor/balance failures stay fatal. Background reconciliation
+  remains strict and backs off on unavailable nonce observations.
   Immutable original operation identities govern recovery, not current pool roles.
 - Logs/status expose bounded fixed failure categories and numeric codes, never
   upstream credential-bearing prose. Drain deliberately for transaction safety;
-  tell operators promptly why shutdown is waiting.
+  tell operators promptly why shutdown is waiting. Accepted MCP calls are owned
+  independently of response delivery, including client disconnect and stdio EOF.
+  Close admission first, drain calls while financial prerequisites remain alive,
+  then stop workers. Treasury/funding failure pauses funding until restart without
+  stopping listeners or Base reconciliation; retain ordinary admission and liabilities.
+  A second signal returns typed `ForcedShutdown` from serving, wallet or bootstrap drains;
+  the executable exits immediately without joining blocking workers or releasing
+  liabilities. Library embedders own their process-level force behavior.
 
 Catalog loading uses rolling scoped futures, deterministic output and a load-scoped
-alias cache keyed by URL, timeout, limit, transport and discovery identity. Failures
-or cancellation cannot publish a partial inventory. Pricing is process-cached
+alias cache keyed by URL, timeout, limit, transport and discovery identity. Required
+failures or cancellation cannot publish a partial inventory. Explicit source
+optional_startup permits whole-source remote failure isolation during serving,
+with unavailable inventory/MCP status; local errors (including authored selectors
+and filters), inspection and qualification remain strict. It does not implement
+background publication or retry. Unresolved exact listener selectors may be
+deferred only when their names belong exclusively to unavailable resolved prefix
+namespaces; overlapping ready namespaces and unrelated names remain errors.
+Pricing is process-cached
 startup-only discovery with independent request limits. See [startup](tests/STARTUP.md).
 Provider TOML composition is one-level; omitted inherits, present values replace,
 empty clears. Relative paths belong to their declaring file. Unknown fields and
@@ -435,9 +520,24 @@ HTTP uses renewable `read_timeout_seconds` in both direct and Tor modes, default
 imports, relay and paid API bodies have no total HTTP download deadline. Optional
 provider/source and source-management overrides use the same name and replace the
 network default. Connection establishment remains separate (15 seconds direct,
-120 seconds Tor by default); both network settings work in either mode. Preserve
-independent admission, chain-view and treasury RPC operation deadlines, including
-the fixed 240-second Tor operation allowance; HTTP inactivity never renews financial
+120 seconds Tor by default); both network settings work in either mode. Treasury gRPC uses the same connection/read-inactivity settings with per-response
+DATA progress below protobuf decoding. Injected transport removes legacy
+`grpc-timeout`; no application total-RPC or complete-message deadlines apply.
+Header inactivity starts at request dispatch. A separate dispatch-readiness guard
+uses the read-inactivity setting for channel-buffer/HTTP/2 stream-capacity waits;
+connector attempts retain their full connection allowance plus a readiness window
+until dispatch proves establishment. Sibling traffic cannot renew this guard,
+which ends at dispatch and never caps an active response.
+Silent headers/stalled bodies retain fixed diagnostics and unknown submission
+obligations. Cancelled/timed-out queued RPCs cannot upload their request bodies
+when peer stream capacity returns. Sync start uses an explicit first-poll acknowledgement; scanner and
+loader retirement drains with periodic progress instead of a timed abort. Base
+read RPCs, chain views and receipt verification use connection/read-inactivity
+timeouts without per-RPC or whole-view deadlines. Managed admission has no total
+timeout, including pool-gate waits; legacy wait_seconds is ignored with a warning
+and omitted from effective configuration. Preserve cancellation and durable
+reservations. Retain finite unsigned retries,
+canonical block checks and evidence freshness checks; HTTP inactivity never renews financial
 or qualification authority. Historical timeout spellings remain readable through
 compatibility aliases; authored configs use the canonical read-timeout name.
 

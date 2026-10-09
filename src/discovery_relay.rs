@@ -104,6 +104,8 @@ pub(crate) async fn build(
 #[derive(Default)]
 struct State {
     stopped: bool,
+    submission: Option<crate::payment::SubmissionProgress>,
+    attempts: BTreeMap<(String, String), (u8, Instant)>,
     responses: BTreeMap<(String, String), Arc<Response>>,
     failures: BTreeMap<(String, String), TargetFailure>,
 }
@@ -259,6 +261,23 @@ impl Relay {
             }
             return Ok(response.clone());
         }
+        if state.stopped && state.submission.as_ref().is_some_and(|p| !p.possible()) {
+            state.stopped = false;
+            tracing::warn!(
+                scope = "pre_submission",
+                "Discovery relay previous request ended before paid intent; unrelated targets remain enabled"
+            );
+        }
+        if let Some((attempts, last)) = state.attempts.get(&key) {
+            ensure!(
+                *attempts < 3,
+                "discovery relay unsigned attempt limit reached for target"
+            );
+            ensure!(
+                last.elapsed() >= std::time::Duration::from_secs(1),
+                "discovery relay target retry backoff"
+            );
+        }
         ensure!(
             !state.stopped,
             "discovery relay disabled after error or cancellation; no paid retry"
@@ -266,6 +285,14 @@ impl Relay {
         // Set BEFORE the first await: cancellation/uncertain settlement cannot restart spending.
         // Serializing paid fetches also prevents queued pricing probes draining a failing wallet.
         state.stopped = true;
+        let progress = crate::payment::SubmissionProgress::default();
+        state.submission = Some(progress.clone());
+        let attempt = state
+            .attempts
+            .entry(key.clone())
+            .or_insert((0, Instant::now()));
+        attempt.0 += 1;
+        attempt.1 = Instant::now();
         tracing::warn!(
             "Using configured paid discovery relay; target content and headers are supplied by relay"
         );
@@ -273,12 +300,12 @@ impl Relay {
         let result = async {
             let output = self
                 .client
-                .execute_response(RoutedRequest {
+                .execute_response_observed(RoutedRequest {
                     method: "POST".into(),
                     url: self.endpoint.clone(),
                     query: BTreeMap::new(),
                     body: Some(serde_json::json!({"url":url,"method":"GET"})),
-                })
+                }, &progress)
                 .await.map_err(|_| anyhow::anyhow!("discovery relay payment, transport or response failed; check wallet and max_response_bytes={}", self.response_limit))?;
             decode(
                 &output.bytes,
@@ -309,6 +336,14 @@ impl Relay {
                     "Curl target fetch failed; no retry for this target, other targets remain enabled"
                 );
                 Err(error)
+            }
+            Err(error) if !progress.possible() => {
+                state.stopped = false;
+                tracing::warn!(
+                    scope = "pre_submission",
+                    "Discovery relay failed before paid intent; target retries bounded, unrelated targets remain enabled"
+                );
+                Err(error.context("discovery relay failed before paid intent"))
             }
             Err(error) => {
                 tracing::warn!("Discovery relay failed; disabled for this run, no paid retry");
@@ -699,6 +734,60 @@ pub(crate) mod tests {
             );
         }
     }
+    #[tokio::test]
+    async fn pre_submission_failure_and_cancellation_leave_other_targets_available() {
+        for cancel in [false, true] {
+            let (mut relay, _, task) = fixture(envelope(TARGET), false, false).await;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}/", listener.local_addr().unwrap());
+            Arc::get_mut(&mut relay).unwrap().endpoint = endpoint;
+            let arrived = Arc::new(tokio::sync::Notify::new());
+            let pending_server = if cancel {
+                let arrived = arrived.clone();
+                Some(tokio::spawn(async move {
+                    let app = Router::new().fallback(move || {
+                        let arrived = arrived.clone();
+                        async move {
+                            arrived.notify_one();
+                            std::future::pending::<String>().await
+                        }
+                    });
+                    axum::serve(listener, app).await.unwrap();
+                }))
+            } else {
+                drop(listener);
+                None
+            };
+            let r = relay.clone();
+            let fetch =
+                tokio::spawn(async move { r.fetch(TARGET, 200, 4096, "max_spec_bytes").await });
+            if cancel {
+                tokio::time::timeout(std::time::Duration::from_secs(5), arrived.notified())
+                    .await
+                    .unwrap();
+                fetch.abort();
+                assert!(matches!(fetch.await, Err(e) if e.is_cancelled()));
+            } else {
+                assert!(fetch.await.unwrap().is_err());
+            }
+            let other_url = "https://other.example/spec";
+            let (mut other, f, other_task) = fixture(envelope(other_url), false, false).await;
+            Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
+            assert!(
+                other
+                    .fetch(other_url, 200, 4096, "max_spec_bytes")
+                    .await
+                    .is_ok()
+            );
+            assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+            task.abort();
+            other_task.abort();
+            if let Some(task) = pending_server {
+                task.abort();
+            }
+        }
+    }
+
     #[tokio::test]
     async fn paid_failure_stops_all_queued_targets_and_never_replays() {
         let (relay, f, task) = fixture(envelope(TARGET), true, false).await;

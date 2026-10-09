@@ -9,6 +9,10 @@ use x402_treazury::{
 };
 
 mod cli;
+mod stdio;
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
 
 #[derive(Default)]
 struct Args {
@@ -52,11 +56,21 @@ struct Args {
 }
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    match run().await {
+    finish(run().await)
+}
+fn finish(result: Result<()>) -> std::process::ExitCode {
+    match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             // Display the cause chain, never anyhow's Debug backtrace.
             eprintln!("error: {error:#}");
+            if error.is::<x402_treazury::server::ForcedShutdown>() {
+                // The operator explicitly chose force. Returning from tokio::main
+                // would still join blocking store/scan/proving work indefinitely.
+                // Atomic snapshots and journals remain authoritative on restart;
+                // do not run cleanup that releases unfinished liabilities here.
+                std::process::exit(1);
+            }
             std::process::ExitCode::FAILURE
         }
     }
@@ -269,11 +283,31 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     server.host_policy =
         x402_treazury::server::host::HostPolicy::new(args.allowed_hosts, args.disable_host_check)?;
     if args.transport == "stdio" {
-        server
-            .serve(rmcp::transport::stdio())
-            .await?
-            .waiting()
-            .await?;
+        let work = server.work.clone();
+        let service = server.serve(stdio::transport()?).await?;
+        let cancel = service.cancellation_token();
+        let waiting = service.waiting();
+        tokio::pin!(waiting);
+        let result = tokio::select! {
+            result = &mut waiting => Some(result),
+            signal = shutdown_signal() => { signal?; None }
+        };
+        work.close();
+        cancel.cancel();
+        tracing::info!("Stdio stopping: draining accepted calls; signal to force exit");
+        if let Some(engine) = &x402_treazury::network::global().cover {
+            engine.stop_ranges().await;
+        }
+        let result = tokio::select! {
+            result = async {
+                let (result, ()) = tokio::join!(async {
+                    match result { Some(result) => result, None => waiting.await }
+                }, work.drain());
+                result
+            } => result,
+            signal = x402_treazury::server::force_signal() => { signal?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
+        };
+        result?;
         if let Some(engine) = &x402_treazury::network::global().cover {
             engine.shutdown().await;
         }
@@ -486,13 +520,22 @@ async fn run_deployment(
         result = &mut serving => result,
         closed = parent.closed() => {
             shutdown.cancel();
-            let result = serving.await;
+            let result = tokio::select! {
+                result = &mut serving => result,
+                force = x402_treazury::server::force_signal() => { force?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
+            };
             closed?;
             result
         }
         signal = shutdown_signal() => {
             shutdown.cancel();
-            let result = serving.await;
+            let result = tokio::select! {
+                result = &mut serving => result,
+                force = x402_treazury::server::force_signal() => {
+                    force?;
+                    anyhow::bail!(x402_treazury::server::ForcedShutdown);
+                }
+            };
             signal.context("shutdown signal handler failed")?;
             result
         }

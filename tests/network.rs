@@ -478,15 +478,6 @@ fn direct_and_tor_share_read_timeout_defaults_and_overrides() {
         },
     ] {
         let ctx = NetworkContext::new(policy.clone()).unwrap();
-        let configured_connection = NetworkContext::new(NetworkPolicy {
-            connect_timeout_seconds: Some(7),
-            ..policy.clone()
-        })
-        .unwrap();
-        assert_eq!(
-            configured_connection.connection_timeout(Duration::from_secs(30)),
-            Duration::from_secs(7)
-        );
         assert_eq!(ctx.read_timeout(None), Duration::from_secs(60));
         assert_eq!(
             ctx.read_timeout(Duration::from_millis(50)),
@@ -511,11 +502,6 @@ fn direct_and_tor_share_read_timeout_defaults_and_overrides() {
                 .is_err()
             );
         }
-        // Existing financial operation budgets are independent of HTTP settings.
-        assert_eq!(
-            ctx.operation_timeout(Duration::from_secs(15)),
-            Duration::from_secs(if policy.mode == Mode::Tor { 240 } else { 15 })
-        );
     }
     let old: NetworkPolicy = toml::from_str("request_timeout_seconds = 240").unwrap();
     assert_eq!(old.read_timeout_seconds, Some(240));
@@ -636,4 +622,417 @@ async fn tor_read_inactivity_covers_headers_and_body() {
             .all(|r| r.host == "budgets.invalid")
     );
     server.abort();
+}
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn grpc_progress_is_per_response_and_ignores_legacy_total_deadlines() {
+    use axum::body::Bytes;
+    use zingo_netutils::{
+        Indexer,
+        lightwallet_protocol::{BlockId, TxFilter},
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut connection = h2::server::handshake(socket).await.unwrap();
+                while let Some(Ok((request, mut respond))) = connection.accept().await {
+                    assert!(!request.headers().contains_key("grpc-timeout"));
+                    tokio::spawn(async move {
+                        if request.uri().path().ends_with("GetLightdInfo") {
+                            // Silent headers must expire even while another RPC progresses.
+                            tokio::time::sleep(Duration::from_secs(35)).await;
+                            return;
+                        }
+                        let response = axum::http::Response::builder()
+                            .header("content-type", "application/grpc")
+                            .body(())
+                            .unwrap();
+                        let mut send = respond.send_response(response, false).unwrap();
+                        if request.uri().path().ends_with("GetBlock") {
+                            send.send_data(Bytes::from_static(&[0, 0]), false).unwrap();
+                            tokio::time::sleep(Duration::from_secs(35)).await;
+                            return;
+                        }
+                        // RawTransaction.data: 30,000 bytes in one protobuf message.
+                        // Its complete message takes >20s, but each DATA gap is <1s.
+                        let mut bytes = vec![0, 0, 0, 117, 52, 10, 176, 234, 1];
+                        bytes.resize(30009, 7);
+                        for chunk in bytes.chunks(500) {
+                            if send
+                                .send_data(Bytes::copy_from_slice(chunk), false)
+                                .is_err()
+                            {
+                                return;
+                            }
+                            tokio::time::sleep(Duration::from_millis(350)).await;
+                        }
+                        let mut trailers = axum::http::HeaderMap::new();
+                        trailers.insert("grpc-status", "0".parse().unwrap());
+                        let _ = send.send_trailers(trailers);
+                    });
+                }
+            });
+        }
+    });
+    let context = NetworkContext::new(NetworkPolicy {
+        read_timeout_seconds: Some(1),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut active = context
+        .grpc(
+            &IsolationId::treasury("progress"),
+            &format!("http://{address}"),
+        )
+        .await
+        .unwrap();
+    let mut headers = active.clone();
+    let mut stalled = active.clone();
+    let mut streaming = active.clone();
+    let work = async {
+        let active = active.get_transaction(TxFilter::default(), Duration::from_millis(10));
+        let headers = headers.get_lightd_info(Duration::from_secs(30));
+        let stalled = stalled.get_block(BlockId::default(), Duration::from_secs(30));
+        let streaming = async {
+            let mut stream = streaming
+                .get_mempool_stream(Duration::from_millis(10))
+                .await
+                .unwrap();
+            assert_eq!(
+                stream.message().await.unwrap().unwrap().data,
+                vec![7; 30000]
+            );
+            assert!(stream.message().await.unwrap().is_none());
+        };
+        let (active, headers, stalled, ()) = tokio::join!(active, headers, stalled, streaming);
+        assert_eq!(active.unwrap().data, vec![7; 30000]);
+        let headers = headers.unwrap_err();
+        assert_eq!(headers.code(), tonic::Code::DeadlineExceeded);
+        assert!(headers.message().contains("grpc_headers_inactivity"));
+        let stalled = stalled.unwrap_err();
+        assert_eq!(stalled.code(), tonic::Code::DeadlineExceeded);
+        assert!(stalled.message().contains("grpc_body_inactivity"));
+    };
+    tokio::time::timeout(Duration::from_secs(35), work)
+        .await
+        .unwrap();
+    server.abort();
+}
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn grpc_reconnect_uses_connection_budget_before_response_inactivity() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_util::sync::CancellationToken;
+    use zingo_netutils::Indexer;
+    let silent = Arc::new(AtomicBool::new(false));
+    let silent_server = silent.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new().fallback(move || {
+        let silent = silent_server.clone();
+        async move {
+            if silent.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            (
+                [("content-type", "application/grpc"), ("grpc-status", "0")],
+                vec![0u8; 5],
+            )
+        }
+    });
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let socks = Socks::start(
+        BTreeMap::from([("reconnect.invalid".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    // Add latency before the second SOCKS handshake, below the configured
+    // connection budget but above response inactivity. The first channel is
+    // actively closed after one successful call to exercise tonic reconnection.
+    let bridge = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_address = bridge.local_addr().unwrap();
+    let socks_address = socks.address;
+    let close_first = CancellationToken::new();
+    let closed = Arc::new(tokio::sync::Notify::new());
+    let (stop, notice) = (close_first.clone(), closed.clone());
+    let bridge_task = tokio::spawn(async move {
+        let mut connections = tokio::task::JoinSet::new();
+        let mut count = 0;
+        loop {
+            let (mut downstream, _) = bridge.accept().await.unwrap();
+            let first = count == 0;
+            count += 1;
+            let (stop, notice) = (stop.clone(), notice.clone());
+            connections.spawn(async move {
+                if !first {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                let mut upstream = TcpStream::connect(socks_address).await.unwrap();
+                tokio::select! {
+                    _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream) => {},
+                    _ = stop.cancelled(), if first => {},
+                }
+                drop(downstream);
+                drop(upstream);
+                if first {
+                    notice.notify_one();
+                }
+            });
+        }
+    });
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(proxy_address),
+        connect_timeout_seconds: Some(5),
+        read_timeout_seconds: Some(1),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut client = context
+        .grpc(
+            &IsolationId::treasury("reconnect"),
+            "http://reconnect.invalid:1234",
+        )
+        .await
+        .unwrap();
+    client
+        .get_lightd_info(Duration::from_millis(10))
+        .await
+        .unwrap();
+    close_first.cancel();
+    closed.notified().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let started = std::time::Instant::now();
+    tokio::time::timeout(
+        Duration::from_secs(8),
+        client.get_lightd_info(Duration::from_millis(10)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(started.elapsed() >= Duration::from_secs(2));
+    assert_eq!(socks.records.lock().unwrap().len(), 2);
+    silent.store(true, Ordering::SeqCst);
+    let error = tokio::time::timeout(
+        Duration::from_secs(3),
+        client.get_lightd_info(Duration::from_secs(30)),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::DeadlineExceeded);
+    assert!(error.message().contains("grpc_headers_inactivity"));
+    bridge_task.abort();
+    server.abort();
+}
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn grpc_stream_capacity_stall_is_bounded_before_dispatch() {
+    use zingo_netutils::Indexer;
+    for tor in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut connection = h2::server::Builder::new()
+                .max_concurrent_streams(0)
+                .handshake::<_, axum::body::Bytes>(socket)
+                .await
+                .unwrap();
+            assert!(
+                connection.accept().await.is_none(),
+                "stalled requests must not dispatch"
+            );
+        });
+        let socks = Socks::start(
+            BTreeMap::from([("capacity.invalid".into(), address)]),
+            Fault::None,
+        )
+        .await;
+        let context = NetworkContext::new(NetworkPolicy {
+            mode: if tor { Mode::Tor } else { Mode::Direct },
+            socks_endpoint: tor.then_some(socks.address),
+            connect_timeout_seconds: Some(1),
+            read_timeout_seconds: Some(1),
+            ..Default::default()
+        })
+        .unwrap();
+        let url = if tor {
+            "http://capacity.invalid:1234".into()
+        } else {
+            format!("http://{address}")
+        };
+        let mut client = context
+            .grpc(&IsolationId::treasury("capacity"), &url)
+            .await
+            .unwrap();
+        // Let the initial SETTINGS arrive before making an RPC.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        for _ in 0..2 {
+            let error = tokio::time::timeout(
+                Duration::from_secs(3),
+                client.get_lightd_info(Duration::from_secs(30)),
+            )
+            .await
+            .expect("readiness must not hang")
+            .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::DeadlineExceeded);
+            assert!(
+                error.message().contains("grpc_dispatch_inactivity"),
+                "{error}"
+            );
+        }
+        drop(client);
+        drop(context);
+        assert!(
+            !server.is_finished(),
+            "zero-capacity origin must receive no RPCs"
+        );
+        server.abort();
+        let _ = server.await;
+    }
+}
+
+#[cfg(feature = "zcash")]
+#[tokio::test]
+async fn grpc_queued_timeout_and_cancellation_do_not_dispatch_when_capacity_returns() {
+    use axum::{
+        body::Bytes,
+        http::{HeaderMap, Response},
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use zingo_netutils::{Indexer, lightwallet_protocol::BlockRange};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let requests = Arc::new(AtomicUsize::new(0));
+    let (done, seen) = (release.clone(), requests.clone());
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut connection = h2::server::Builder::new()
+            .max_concurrent_streams(1)
+            .handshake::<_, Bytes>(socket)
+            .await
+            .unwrap();
+        let mut replies = tokio::task::JoinSet::new();
+        while let Some(request) = connection.accept().await {
+            let (request, mut respond) = request.unwrap();
+            let done = done.clone();
+            let seen = seen.clone();
+            replies.spawn(async move {
+                let streaming = request.uri().path().ends_with("GetBlockRange");
+                // A gRPC method cannot execute without its complete protobuf
+                // body. HTTP/2 may open a pending stream before noticing reset.
+                let mut request_body = request.into_body();
+                let mut bytes = Vec::new();
+                while let Some(data) = request_body.data().await {
+                    let Ok(data) = data else { return };
+                    bytes.extend_from_slice(&data);
+                }
+                assert_eq!(bytes, [0; 5]);
+                seen.fetch_add(1, Ordering::SeqCst);
+                let mut body = respond
+                    .send_response(
+                        Response::builder()
+                            .header("content-type", "application/grpc")
+                            .body(())
+                            .unwrap(),
+                        false,
+                    )
+                    .unwrap();
+                loop {
+                    body.send_data(Bytes::from_static(&[0; 5]), false).unwrap();
+                    if !streaming {
+                        break;
+                    }
+                    tokio::select! {
+                        _ = done.notified() => break,
+                        _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+                    }
+                }
+                let mut trailers = HeaderMap::new();
+                trailers.insert("grpc-status", "0".parse().unwrap());
+                body.send_trailers(trailers).unwrap();
+            });
+        }
+        while let Some(result) = replies.join_next().await {
+            result.unwrap();
+        }
+    });
+    let context = NetworkContext::new(NetworkPolicy {
+        connect_timeout_seconds: Some(1),
+        read_timeout_seconds: Some(1),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut client = context
+        .grpc(
+            &IsolationId::treasury("queue"),
+            &format!("http://{address}"),
+        )
+        .await
+        .unwrap();
+    let mut stream = client
+        .get_block_range(BlockRange::default(), Duration::from_secs(30))
+        .await
+        .unwrap();
+    let receiving = tokio::spawn(async move { while stream.message().await.unwrap().is_some() {} });
+    // One live response occupies the peer's only stream. Its DATA must neither
+    // renew a queued call's readiness nor make a cancelled call dispatch later.
+    let mut cancelled_client = client.clone();
+    let cancelled = tokio::spawn(async move {
+        cancelled_client
+            .get_lightd_info(Duration::from_secs(30))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    cancelled.abort();
+    assert!(cancelled.await.unwrap_err().is_cancelled());
+    let error = tokio::time::timeout(
+        Duration::from_secs(3),
+        client.get_lightd_info(Duration::from_secs(30)),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(
+        error.message().contains("grpc_dispatch_inactivity"),
+        "{error}"
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(3), receiving)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        client.get_lightd_info(Duration::from_secs(30)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        2,
+        "cancelled calls must not reach the provider"
+    );
+    drop(client);
+    drop(context);
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
 }

@@ -20,7 +20,7 @@ pub(crate) async fn check(
                 height,
                 hash: vec![],
             },
-            crate::network::global().operation_timeout(Duration::from_secs(15)),
+            Duration::from_secs(15),
         )
         .await
         .map_err(|_| anyhow::anyhow!("indexer Ironwood capability check failed"))?;
@@ -44,19 +44,11 @@ pub(crate) async fn check_endpoint(
     if !chain.is_nu_active(NetworkUpgrade::Nu6_3, u32::try_from(height)?.into()) {
         return Ok(());
     }
-    tokio::time::timeout(
-        crate::network::global().operation_timeout(Duration::from_secs(30)),
-        async {
-            let mut client = tokio::time::timeout(
-                crate::network::global().connection_timeout(Duration::from_secs(15)),
-                crate::network::global().grpc(identity, endpoint),
-            )
+    {
+        let mut client = crate::network::global()
+            .grpc(identity, endpoint)
             .await
-            .map_err(|_| anyhow::anyhow!("indexer capability connection timed out"))?
             .map_err(|_| anyhow::anyhow!("indexer capability connection failed"))?;
-            check(&mut client, chain, height).await
-        },
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("indexer Ironwood capability check timed out"))?
+        check(&mut client, chain, height).await
+    }
 }

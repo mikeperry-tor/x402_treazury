@@ -5,7 +5,17 @@
 included. `zingo-connector.patch` records the connector Rust source changes:
 
 - `GrpcIndexer::from_channel` wraps an application-owned tonic channel.
+- `GrpcIndexer::from_transport` retains application middleware across all clones.
 - `LightClient::set_indexer` installs that indexer without creating a direct socket.
+
+`zingo-progress.patch` applies after the connector and diagnostic patches. It
+adds injectable service middleware (constructed only by `src/network.rs`), removes
+complete-message timers on sync streams, replaces sync-start polling/abort with
+an owned first-poll acknowledgement, and drains loaders/workers with periodic
+stage diagnostics instead of forced timeout success. Application transport owns
+header/body inactivity; legacy constructors retain library request metadata.
+Read retries, protobuf size bounds, mempool drain and financial authority are
+unchanged. The added Tower utility dependency supports cloneable injected services.
 
 `pepper-sync-diagnostics.patch` records the additional sync diagnostic changes.
 Returned shard-tree errors retain their pool and operation (scan merge, reorg
@@ -31,7 +41,8 @@ dependencies, except Pepper Sync’s unit-test dependencies. Library sources
 build scripts and licenses are preserved. The combined compatibility manifest uses
 these same patches. Run `python3 vendor/verify_zingo.py` to check all
 reviewed files against `zingo-sources.json`; compare `zingo-connector.patch` with the
-pinned upstream commit when updating; check `pepper-sync-diagnostics.patch` too.
+pinned upstream commit when updating; check `pepper-sync-diagnostics.patch` and
+`zingo-progress.patch` too.
 Never edit a reference checkout or Cargo's Git cache to implement these patches.
 
 Sapling parameters are obtained and embedded by the upstream build script, not

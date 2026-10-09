@@ -420,7 +420,10 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
                 "unexpected visibility for {message}: {log}"
             );
         }
-        for message in ["Catalog ready", "All catalogs loaded"] {
+        for message in [
+            "Catalog ready",
+            "Catalog startup finished; required inventory complete",
+        ] {
             assert!(log.contains(message), "missing {message}: {log}");
         }
         assert!(log.contains("elapsed_ms"));
@@ -667,4 +670,201 @@ async fn inspection_retains_shared_http_rejection_without_retry_or_url() {
     );
     server.abort();
     let _ = server.await;
+}
+
+#[tokio::test]
+async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
+    let fixture = Fixture::new(2, Some(1)).await;
+    for gate in &fixture.gates {
+        gate.add_permits(4);
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = config(
+        dir.path(),
+        &format!("http://{}", fixture.address),
+        2,
+        Some(2),
+        "",
+    );
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("[sources.s01]", "[sources.s01]\noptional_startup=true");
+    std::fs::write(&path, text).unwrap();
+    assert!(
+        Deployment::load(&path).await.is_err(),
+        "inspection requires complete catalogs"
+    );
+    let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+    let inventory = deployment.inventory();
+    assert_eq!(inventory[0].unavailable_sources, ["s01"]);
+    assert!(inventory[0].tools.iter().all(|t| t.source == "s00"));
+    assert!(!inventory[0].tools.is_empty());
+    let running = deployment
+        .bind(&BTreeMap::from([
+            ("UNUSED_TEST_KEY".into(), format!("{:064x}", 1)),
+            ("UNUSED_TEST_TOKEN".into(), "test-token".into()),
+        ]))
+        .await
+        .unwrap();
+    let address = running.addresses()[0].1;
+    let stop = tokio_util::sync::CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let response: serde_json::Value = reqwest::Client::new().post(format!("http://{address}/mcp"))
+        .bearer_auth("test-token").header("accept", "application/json, text/event-stream")
+        .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}))
+        .send().await.unwrap().json().await.unwrap();
+    assert!(
+        response["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("s01: UNAVAILABLE")
+    );
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("optional_startup=true", "optional_startup=false");
+    std::fs::write(&path, text).unwrap();
+    assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
+}
+
+#[tokio::test]
+async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
+    let fixture = Fixture::new(1, None).await;
+    fixture.gates[0].add_permits(8);
+    let dir = tempfile::tempdir().unwrap();
+    let path = config(
+        dir.path(),
+        &format!("http://{}", fixture.address),
+        1,
+        Some(1),
+        "",
+    );
+    let original = std::fs::read_to_string(&path).unwrap();
+    for selection in [
+        "include_tools=['this_is_a_local_typo']",
+        "exclude_tools=['this_is_a_local_typo']",
+        "exclude_tools=['*']",
+        "include=['/missing']",
+    ] {
+        let text = original.replace(
+            "[sources.s00]",
+            &format!("[sources.s00]\noptional_startup=true\n{selection}"),
+        );
+        std::fs::write(&path, text).unwrap();
+        let error = Deployment::load_for_unsigned_serving(&path)
+            .await
+            .err()
+            .expect("authored errors must fail startup");
+        assert!(
+            format!("{error:#}").contains("invalid provider tool configuration"),
+            "{selection}: {error:#}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn optional_outage_defers_only_unambiguous_listener_selectors() {
+    let fixture = Fixture::new(2, Some(1)).await;
+    for gate in &fixture.gates {
+        gate.add_permits(32);
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // Exercise inherited provider prefixes, not merely source IDs.
+    std::fs::write(dir.path().join("optional.toml"), "prefix='offline'\n").unwrap();
+    let path = config(
+        dir.path(),
+        &format!("http://{}", fixture.address),
+        2,
+        Some(2),
+        "",
+    );
+    let original = std::fs::read_to_string(&path).unwrap().replace(
+        "[sources.s01]",
+        "[sources.s01]\noptional_startup=true\nextends='optional.toml'",
+    );
+    for (selection, succeeds) in [
+        ("include_tools=['s00_read','offline_read']", true),
+        ("include_tools=['offline_read']", true),
+        ("exclude_tools=['offline_read']", true),
+        ("include_tools=['s00_typo']", false),
+        ("exclude_tools=['s00_typo']", false),
+        ("include_tools=['unknown_read']", false),
+        ("include_tools=['s01_read']", false),
+    ] {
+        std::fs::write(
+            &path,
+            original.replace("[servers.test]", &format!("[servers.test]\n{selection}")),
+        )
+        .unwrap();
+        let result = Deployment::load_for_unsigned_serving(&path).await;
+        assert_eq!(result.is_ok(), succeeds, "{selection}: {:?}", result.err());
+    }
+    // The optional source must not claim a namespace also owned by a ready one,
+    // including nested prefixes that could be ordinary required tool suffixes.
+    for prefix in ["s00", "s00_nested"] {
+        std::fs::write(
+            dir.path().join("optional.toml"),
+            format!("prefix='{prefix}'\n"),
+        )
+        .unwrap();
+        let text = original.replace(
+            "[servers.test]",
+            &format!("[servers.test]\ninclude_tools=['{prefix}_typo']"),
+        );
+        std::fs::write(&path, text).unwrap();
+        assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn optional_remote_base_url_failures_are_isolated_but_authored_urls_are_strict() {
+    let document = std::sync::Arc::new(std::sync::Mutex::new(
+        serde_json::json!({"paths":{"/read":{"get":{}}}}),
+    ));
+    let served = document.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let app = axum::Router::new().fallback(move || {
+            let document = served.lock().unwrap().clone();
+            async move { axum::Json(document) }
+        });
+        axum::serve(listener, app).await.unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("good.json"),
+        r#"{"paths":{"/read":{"get":{}}}}"#,
+    )
+    .unwrap();
+    let path = dir.path().join("config.toml");
+    let config = format!(
+        "version=1\n[sources.good]\nspec='good.json'\nbase_url='http://127.0.0.1:9'\nprobe_pricing=false\n[sources.optional]\nspec='http://{address}/spec'\noptional_startup=true\nprobe_pricing=false\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
+    );
+    for remote in [None, Some("not a URL"), Some("ftp://example.com")] {
+        *document.lock().unwrap() = serde_json::json!({"paths":{"/read":{"get":{}}}, "servers":remote.map(|url| serde_json::json!([{"url":url}]))});
+        std::fs::write(&path, &config).unwrap();
+        let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+        assert_eq!(deployment.inventory()[0].unavailable_sources, ["optional"]);
+        assert!(!deployment.inventory()[0].tools.is_empty());
+        assert!(Deployment::load(&path).await.is_err());
+        std::fs::write(
+            &path,
+            config.replace("optional_startup=true", "optional_startup=false"),
+        )
+        .unwrap();
+        assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
+    }
+    *document.lock().unwrap() = serde_json::json!({"paths":{"/read":{"get":{}}}, "servers":[{"url":"https://example.com"}]});
+    std::fs::write(
+        &path,
+        config.replace(
+            "[sources.optional]",
+            "[sources.optional]\nbase_url='not a URL'",
+        ),
+    )
+    .unwrap();
+    assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
+    server.abort();
 }

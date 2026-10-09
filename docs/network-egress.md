@@ -89,34 +89,66 @@ For compatibility, network `request_timeout_seconds` is an alias for
 both `timeout` and `probe_timeout`, the general `timeout` wins. Authored Tor examples
 now specify 60 seconds; operator-owned files are not rewritten automatically.
 
-Financial operations retain independent overall deadlines: managed admission,
-canonical Base views and application-owned treasury RPC operations retain their
-caller budgets (with the existing fixed 240-second Tor operation allowance).
-HTTP settings do not extend signed authorizations, quote expiry, funding safeguards
-or qualification deadlines. Outer connection guards respect the connection budget.
-Tip checks query the injected indexer directly, avoiding `LightClient::info`'s
-shorter internal deadline.
-Embedded Zingolib/pepper-sync scanning and proving still retain their upstream
-internal RPC/stream deadlines; this does not rewrite upstream retry policies or
-claim to extend every library-internal timeout. Existing injected channels still
-provide Tor isolation for those calls.
+Base read RPCs, complete chain views and receipt verification use connection and
+read-inactivity timeouts, with no separate total deadline in either network mode.
+Progressing reads can finish; actual transport failures retain one unsigned retry
+and configured whole-view fallback. Block age, confirmations and canonical block
+rechecks still determine whether evidence is usable.
+Managed payment admission has no overall elapsed-time deadline, including while
+waiting for its pool gate. Legacy wallet `wait_seconds` is accepted but ignored
+with a warning and omitted from effective configuration.
 
-Connection time counts toward the total request budget. An x402 challenge and its
-single signed attempt are separate requests; the setting is not a whole-tool-call
-deadline. Quote/authorization expiry, swap health thresholds, shutdown drain and
-funded-test deadlines remain independent safety limits and are never extended by
-this policy. A signed-request timeout still leaves durable unresolved exposure.
+Treasury gRPC uses the network connection and read-inactivity settings in both
+modes. The injected transport measures each response independently, below protobuf
+decoding: nonempty HTTP/2 DATA frames renew only that response's timer. Silent
+headers and stalled bodies fail with fixed `grpc_headers_inactivity` and
+`grpc_body_inactivity` diagnostics. Other streams and keepalives cannot renew them.
+Accepted limitation: the header timer starts when the request body is first
+polled, so it includes request upload. The current transport has no per-request
+HTTP/2 upload-consumption hook; a slow, progressing upload can therefore exhaust
+`read_timeout_seconds` before response headers arrive. Upload progress does not
+renew this timer. A timeout does not prove that a transaction was not submitted
+and does not authorize replay. No additional library is vendored to change this.
+Waiting for channel-buffer/HTTP/2 stream capacity is separately bounded by the
+read-inactivity setting and reports `grpc_dispatch_inactivity`. Connector attempts
+retain their full establishment allowance before that readiness window expires;
+the readiness guard ends at dispatch.
+Cancelled/timed-out queued calls also cancel their request bodies, so a pending
+HTTP/2 stream cannot upload stale RPC bytes when capacity returns later.
+Message-size limits remain in force. Legacy library `grpc-timeout` metadata is
+removed at this transport boundary; application total-RPC wrappers and sync's
+complete-message timers are removed. No large substitute duration is used.
+Upstream constructors outside the injected application path keep their own policy.
+Quote and transaction expiry, confirmations, financial evidence freshness and
+qualification authority remain independent of network progress. Submission failure
+still retains unknown outcome and exact saved bytes; no retry authority is added.
+
+Sync launch waits for an explicit first-poll acknowledgement, retaining the task
+handle across a cancelled waiter. Loader and scan-worker retirement drains useful
+work with periodic stage/elapsed diagnostics instead of aborting after ten seconds
+or reporting an aborted worker as successful. Explicit owner cancellation remains
+separate; the mempool's bounded drain policy is unchanged.
+
+An x402 challenge and its single signed attempt are separate requests, each
+subject to connection and read-inactivity limits. There is no whole-tool-call
+timeout imposed by payment admission. Quote/authorization expiry and funded-test
+authority remain independent of progress. Swap delay is a health warning; graceful
+shutdown has no automatic cutoff. A second signal explicitly exits the executable
+without joining blocking scan/proving workers; it does not release liabilities or
+run wallet cleanup. Library serving returns a typed `ForcedShutdown` error for
+its embedding process to handle. A signed-request timeout still leaves durable unresolved exposure.
 
 Managed pool gates protect chain verification, admission, signing and durable
 journaling. Release the gate before signed HTTP submission; a seller delay cannot
 serialize other requests sharing a wallet. Exposure stays reserved until confirmed
 chain reconciliation. A slow Base RPC can still delay admission to that pool;
-the admission deadline bounds waiters, and separate pools remain independent.
+waiters remain cancellable, and separate pools remain independent.
 Help coalesces requests for the same document without blocking other resources.
-Static provider startup remains all-or-nothing, with a rolling catalog-load limit
-of 16 by default (configurable 1..64). Concurrent catalogs retain discovery-origin
+Required catalogs must succeed; explicitly optional remote failures are reported
+as unavailable during serving. The rolling catalog-load limit defaults to 2
+(configurable 1..64). Concurrent catalogs retain discovery-origin
 credentials; paths on the same origin share an identity, different origins do not.
-The queue does not coalesce duplicate downloads. See
+Compatible aliases coalesce downloads within the load. See
 [the deferred independent provider startup plan](plans/deferred/independent_provider_startup.md) for independent
 loading and background pricing. Frozen catalogs and disabled probes avoid those
 startup dependencies in the live qualification.
@@ -273,3 +305,34 @@ not provider-configurable transports. External catalogs/help/API requests still
 use the production factory inside confined subprocesses. See
 [the integration runner](../tests/live/INTEGRATION_REFERENCE.md#owned-tor-qualification)
 for its installed-Tor ownership, private evidence and explicit outage scope.
+
+## Remaining timers and budgets
+
+These scopes are independent; progress renews only transport inactivity, never
+financial or qualification authority.
+
+| Timer or bound | Purpose and behavior |
+| --- | --- |
+| Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
+| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
+| gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
+| Legacy indexer duration arguments | Required by the vendor API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
+| Startup/drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. Sync launch uses an owned acknowledgement; scan retirement drains without a cutoff. |
+| MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
+| Base block age and treasury observation age/lag | Evidence freshness for new authority; slow historical reconciliation and scans acquire new admission/catch-up evidence. Base balance acquisition runs once and retains canonical evidence; the serialized store rejects stale admission without restarting the sweep. Old observations are never relabeled. |
+| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours; the separate 300-second margin remains pending the provider contract. |
+| Refund shielding local 24-hour deadline | Persisted authorization lifetime of that prepared operation, alongside consensus block expiry; never renewed during recovery. |
+| x402 authorization validity | Signed payment authority and canonical expiry recovery, independent of HTTP progress. |
+| Funding polling/backoff and swap delay threshold | Scheduling/health only. Delayed swaps continue reconciliation with a 60-second polling floor; no replacement send. |
+| Import success retention 300 seconds / failure backoff one second | Applies after completion only; active coalesced fetches cannot age out. |
+| Relay attempt backoff one second / three attempts per scoped target | Bounds proven unsigned failures. Possibly submitted failures stop relay spending instead of retrying. |
+| Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Storage/resource/diagnostic contention policy; cache persistence failure does not invalidate a complete response. |
+| Optional cover episodes and three-second task cleanup | Bound optional unsigned work; cannot cut off the real paid call. |
+| Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. |
+| Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
+| Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
+
+Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
+plus explicit MCP, NEAR JSON, protobuf, image and cache limits. They bound memory
+or stored data, not download duration. TLS/HTTP compatibility, authentication,
+canonical proofs, amount caps and signed-work no-replay rules remain enforced.

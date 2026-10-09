@@ -32,10 +32,19 @@ impl std::fmt::Display for SyncDiagnostic {
 }
 impl std::error::Error for SyncDiagnostic {}
 
+fn request_reason(status: &tonic::Status) -> &'static str {
+    match (status.code(), status.message()) {
+        (tonic::Code::DeadlineExceeded, "grpc_headers_inactivity") => "grpc_headers_inactivity",
+        (tonic::Code::DeadlineExceeded, "grpc_dispatch_inactivity") => "grpc_dispatch_inactivity",
+        (tonic::Code::DeadlineExceeded, "grpc_body_inactivity") => "grpc_body_inactivity",
+        _ => "indexer_request_failed",
+    }
+}
+
 pub(crate) fn tip_failure(status: tonic::Status, operation: &'static str) -> anyhow::Error {
     SyncDiagnostic {
         category: "indexer_tip_failed",
-        reason: "indexer_request_failed",
+        reason: request_reason(&status),
         pool: None,
         operation: Some(operation),
         grpc_code: Some(status.code()),
@@ -117,7 +126,7 @@ pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::E
         LightClientError::SyncModeError(e) => mode_reason(e),
         LightClientError::IndexerError(status) => {
             diagnostic.grpc_code = Some(status.code());
-            "indexer_request_failed"
+            request_reason(status)
         }
         LightClientError::ClientError(e) => match e {
             zingo_netutils::GetClientError::InvalidScheme => "indexer_invalid_scheme",
@@ -137,7 +146,7 @@ fn server_reason(error: &ServerError, diagnostic: &mut SyncDiagnostic) -> &'stat
     match error {
         ServerError::RequestFailed(status) => {
             diagnostic.grpc_code = Some(status.code());
-            "indexer_request_failed"
+            request_reason(status)
         }
         ServerError::InvalidFrontier(_) => "indexer_invalid_frontier",
         ServerError::InvalidTransaction(_) => "indexer_invalid_transaction",
@@ -244,6 +253,9 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
 pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return diagnostic.category;
+    }
+    if error.is::<super::freshness::FreshObservationRequired>() {
+        return "sync_freshness_catch_up";
     }
     for cause in error.chain() {
         let message = cause.to_string();
@@ -552,7 +564,7 @@ mod tests {
         let error =
             crate::treasury::freshness::validate(100, 100, 104, std::time::Duration::ZERO, 300)
                 .unwrap_err();
-        assert_eq!(sync_failure(&error), "sync_tip_lag_exceeded");
+        assert_eq!(sync_failure(&error), "sync_freshness_catch_up");
         let error = crate::treasury::freshness::validate(
             100,
             100,
@@ -561,6 +573,6 @@ mod tests {
             300,
         )
         .unwrap_err();
-        assert_eq!(sync_failure(&error), "sync_observation_expired");
+        assert_eq!(sync_failure(&error), "sync_freshness_catch_up");
     }
 }

@@ -39,7 +39,6 @@ use super::{ScanResults, scan};
 const MAX_WORKER_POOLSIZE: usize = 2;
 const MAX_LOAD_NULLIFIERS: usize = 2usize.pow(14);
 
-use zingo_netutils::time::{SCANNER_SHUTDOWN_TIMEOUT, STREAM_MSG_TIMEOUT};
 
 pub(crate) enum ScannerState {
     Verification,
@@ -132,12 +131,11 @@ where
     }
 
     async fn shutdown_loader(&mut self) -> Result<(), ServerError> {
-        let loader = self.loader.take();
-        if let Some(mut loader) = loader {
-            loader.shutdown().await
-        } else {
-            Ok(())
+        if let Some(loader) = self.loader.as_mut() {
+            loader.shutdown().await?;
+            self.loader = None;
         }
+        Ok(())
     }
 
     /// Spawns a worker.
@@ -184,8 +182,8 @@ where
             .position(|worker| worker.id == worker_id)
             .expect("worker should exist");
 
-        let mut worker = self.workers.swap_remove(worker_index);
-        worker.shutdown().await.expect("worker task panicked");
+        self.workers[worker_index].shutdown().await.expect("worker task panicked");
+        self.workers.swap_remove(worker_index);
     }
 
     /// Updates the scanner.
@@ -381,13 +379,7 @@ where
 
                 loop {
                     let msg_res: Result<Option<CompactBlock>, tonic::Status> =
-                        match tokio::time::timeout(STREAM_MSG_TIMEOUT, block_stream.message()).await
-                        {
-                            Ok(res) => res,
-                            Err(_) => {
-                                Err(tonic::Status::deadline_exceeded("stream message timeout"))
-                            }
-                        };
+                        block_stream.message().await;
 
                     let maybe_block = match msg_res {
                         Ok(b) => b,
@@ -414,17 +406,7 @@ where
                             };
 
                             let first_msg_res: Result<Option<CompactBlock>, tonic::Status> =
-                                match tokio::time::timeout(
-                                    STREAM_MSG_TIMEOUT,
-                                    block_stream.message(),
-                                )
-                                .await
-                                {
-                                    Ok(res) => res,
-                                    Err(_) => Err(tonic::Status::deadline_exceeded(
-                                        "stream message timeout after retry",
-                                    )),
-                                };
+                                block_stream.message().await;
 
                             match first_msg_res {
                                 Ok(b) => b,
@@ -606,17 +588,18 @@ where
             drop(receiver);
         }
 
-        let mut handle = self
+        let handle = self
             .handle
-            .take()
+            .as_mut()
             .expect("loader should always have a handle to take!");
 
-        match tokio::time::timeout(SCANNER_SHUTDOWN_TIMEOUT, &mut handle).await {
-            Ok(join_res) => join_res.expect("task panicked")?,
-            Err(_) => {
-                handle.abort();
-                let _ = handle.await;
-                return Err(tonic::Status::deadline_exceeded("loader shutdown timeout").into());
+        let started = std::time::Instant::now();
+        loop {
+            tokio::select! {
+                result = &mut *handle => { result.expect("task panicked")?; break; }
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                    tracing::info!(stage = "loader", elapsed_seconds = started.elapsed().as_secs(), "Waiting for sync work to drain");
+                }
             }
         }
 
@@ -716,17 +699,18 @@ where
             drop(sender);
         }
 
-        let mut handle = self
+        let handle = self
             .handle
-            .take()
+            .as_mut()
             .expect("worker should always have a handle to take!");
 
-        match tokio::time::timeout(SCANNER_SHUTDOWN_TIMEOUT, &mut handle).await {
-            Ok(res) => res,
-            Err(_) => {
-                handle.abort();
-                let _ = handle.await; // ignore join error after abort
-                Ok(())
+        let started = std::time::Instant::now();
+        loop {
+            tokio::select! {
+                result = &mut *handle => return result,
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                    tracing::info!(stage = "scanner", elapsed_seconds = started.elapsed().as_secs(), "Waiting for sync work to drain");
+                }
             }
         }
     }

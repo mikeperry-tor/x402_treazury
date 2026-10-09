@@ -137,12 +137,23 @@ impl Drop for Progress<'_> {
     }
 }
 
+#[derive(Debug)]
+struct RemoteCatalogUnavailable {
+    prefix: String,
+}
+impl std::fmt::Display for RemoteCatalogUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("remote catalog unavailable")
+    }
+}
+impl std::error::Error for RemoteCatalogUnavailable {}
+
 pub(super) async fn load(
     config: &MetaConfig,
     path: &Path,
     warn: bool,
     relay: crate::discovery_relay::Relays,
-) -> Result<BTreeMap<String, Source>> {
+) -> Result<(BTreeMap<String, Source>, BTreeMap<String, String>)> {
     let started = Instant::now();
     let total = config.sources.len();
     catalog_evidence::register(config.sources.keys())?;
@@ -165,10 +176,17 @@ pub(super) async fn load(
     let mut loads = Vec::with_capacity(total);
     for (id, source) in &config.sources {
         let used = config.servers.values().any(|s| s.sources.contains(id));
-        loads.push(load_one(id, source, path, warn && used, &downloads));
+        let downloads = &downloads;
+        loads.push(async move {
+            (
+                id,
+                load_one(id, source, path, warn && used, downloads).await,
+            )
+        });
     }
     let mut pending = stream::iter(loads).buffer_unordered(limit);
     let mut sources = BTreeMap::new();
+    let mut unavailable = BTreeMap::new();
     let collect_failures = catalog_evidence::collecting();
     let mut failures = 0usize;
     let mut first_error = None;
@@ -177,8 +195,15 @@ pub(super) async fn load(
     loop {
         tokio::select! {
             result = pending.next() => match result {
-                Some(result) => {
+                Some((source_id, result)) => {
                     let (id, source) = match result {
+                        Err(error) if warn && !crate::qualification::active() && !catalog_evidence::collecting()
+                            && config.sources[source_id].optional_startup && error.is::<RemoteCatalogUnavailable>() => {
+                            failures += 1;
+                            unavailable.insert(source_id.clone(), error.downcast_ref::<RemoteCatalogUnavailable>().expect("typed remote failure").prefix.clone());
+                            tracing::warn!(source = source_id, state = "unavailable", "Optional source unavailable; required inventory remains complete");
+                            continue;
+                        }
                         Ok(source) => source,
                         Err(error) if collect_failures => {
                             failures += 1;
@@ -203,8 +228,8 @@ pub(super) async fn load(
             completed = sources.len(), "Catalog inspection finished with failures; no partial inventory published");
         return Err(error.context(format!("catalog inspection failed for {failures} of {total} sources; independent catalog results retained")));
     }
-    tracing::info!(target: "x402_treazury::startup", total, elapsed_ms = started.elapsed().as_millis() as u64, "All catalogs loaded");
-    Ok(sources)
+    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len(), elapsed_ms = started.elapsed().as_millis() as u64, "Catalog startup finished; required inventory complete");
+    Ok((sources, unavailable))
 }
 
 async fn load_one(
@@ -292,28 +317,54 @@ impl Source {
         let document = downloads.load(id, &cfg, &http)
             .instrument(tracing::debug_span!(target: "x402_treazury::startup", "catalog_download", source = id))
             .await
+            .map_err(|e| if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") { e.context(RemoteCatalogUnavailable { prefix: cfg.prefix.clone().expect("resolved prefix") }) } else { e })
             .with_context(|| format!("source {id}: loading spec"))?;
         tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
         let generation_started = Instant::now();
-        let base_url = cfg
-            .base_url
-            .clone()
-            .or_else(|| {
-                document
-                    .pointer("/servers/0/url")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
-            })
-            .with_context(|| format!("source {id}: base_url required"))?;
+        let base_url: Result<String> = (|| {
+            let base_url = cfg
+                .base_url
+                .clone()
+                .or_else(|| {
+                    document
+                        .pointer("/servers/0/url")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned)
+                })
+                .with_context(|| format!("source {id}: base_url required"))?;
+            let parsed = reqwest::Url::parse(&base_url)?;
+            ensure!(
+                matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
+                "source {id}: base_url must be HTTP(S)"
+            );
+            Ok(base_url)
+        })();
+        let base_url = base_url.map_err(|error| {
+            if cfg.base_url.is_none()
+                && (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
+            {
+                error.context(RemoteCatalogUnavailable {
+                    prefix: cfg.prefix.clone().expect("resolved prefix"),
+                })
+            } else {
+                error
+            }
+        })?;
         cfg.resolve_cover(&base_url, crate::network::global().policy.cover_enabled())?;
-        let parsed = reqwest::Url::parse(&base_url)?;
-        ensure!(
-            matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
-            "source {id}: base_url must be HTTP(S)"
-        );
         let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
+            .map_err(|e| {
+                if (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
+                    && !e.is::<catalog::ToolConfigurationError>()
+                {
+                    e.context(RemoteCatalogUnavailable {
+                        prefix: cfg.prefix.clone().expect("resolved prefix"),
+                    })
+                } else {
+                    e
+                }
+            })
             .with_context(|| format!("source {id}: catalog generation"))?;
         tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");

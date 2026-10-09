@@ -3,6 +3,17 @@ use crate::rotation::store::SyncObservation;
 use anyhow::{Result, ensure};
 use std::time::Duration;
 
+#[derive(Debug)]
+pub(super) struct FreshObservationRequired;
+impl std::fmt::Display for FreshObservationRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "treasury scan retained; acquiring a fresh observation through incremental catch-up",
+        )
+    }
+}
+impl std::error::Error for FreshObservationRequired {}
+
 pub(super) const MAX_LAG_BLOCKS: u64 = 3;
 
 pub(super) fn validate(
@@ -31,15 +42,40 @@ pub(super) fn validate(
             "Treasury scan completed beyond allowed tip lag; freshness evidence rejected"
         );
     }
-    ensure!(
-        lag <= MAX_LAG_BLOCKS,
-        "treasury sync tip lag exceeds {MAX_LAG_BLOCKS}-block limit (scanned={scanned}, tip={tip}, lag={lag}); another sync required"
-    );
-    ensure!(
-        elapsed <= Duration::from_secs(max_age_seconds),
-        "treasury sync observation exceeded max_sync_age_seconds={max_age_seconds}; another sync required"
-    );
+    if lag > MAX_LAG_BLOCKS {
+        return Err(FreshObservationRequired.into());
+    }
+    if elapsed > Duration::from_secs(max_age_seconds) {
+        return Err(FreshObservationRequired.into());
+    }
     Ok(lag)
+}
+
+/// Ordinary spending shares sync's bounded lag; a new observation may not regress.
+pub(super) fn spending_ready(
+    status: &crate::rotation::store::Status,
+    tip: u64,
+    now: u64,
+) -> Result<()> {
+    let sync = status
+        .sync
+        .as_ref()
+        .filter(|s| s.fresh(now, status.snapshot_revision))
+        .ok_or_else(|| anyhow::anyhow!("treasury requires a fresh sync before calculation"))?;
+    let height = sync
+        .height
+        .ok_or_else(|| anyhow::anyhow!("missing scanned height"))?;
+    ensure!(
+        sync.observed_tip_height
+            .is_some_and(|observed| tip >= observed),
+        "preparation tip regressed"
+    );
+    ensure!(
+        tip.checked_sub(height)
+            .is_some_and(|lag| lag <= MAX_LAG_BLOCKS),
+        "treasury requires catch-up before calculation"
+    );
+    Ok(())
 }
 
 // Non-inclusion evidence must not inherit ordinary funding's lag allowance.
@@ -66,8 +102,7 @@ mod tests {
         assert!(
             validate(100, 101, 105, Duration::ZERO, 300)
                 .unwrap_err()
-                .to_string()
-                .contains("4")
+                .is::<FreshObservationRequired>()
         );
         assert!(validate(100, 99, 101, Duration::ZERO, 300).is_err());
         assert!(validate(100, 101, 100, Duration::ZERO, 300).is_err());

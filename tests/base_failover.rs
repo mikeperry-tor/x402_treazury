@@ -122,7 +122,10 @@ async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
             1
         );
     }
-    logs.lock().unwrap().clear();
+    // Completed failover can leave already-dispatched sibling balance requests
+    // reaching the old fixture. Give cancellation its own origin and capture.
+    server.abort();
+    let (address, logs, server) = fixture::fixture().await;
     let rpc = BaseRpc::with_fallbacks(
         &[
             format!("http://{address}/stall"),
@@ -141,5 +144,35 @@ async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
         .is_err()
     );
     assert!(logs.lock().unwrap().iter().all(|(mode, _)| mode == "stall"));
+    server.abort();
+}
+
+#[tokio::test]
+async fn progressing_complete_view_survives_former_deadline_without_fallback() {
+    let (address, logs, server) = fixture::fixture().await;
+    let rpc = BaseRpc::with_fallbacks(
+        &[
+            format!("http://{address}/slow"),
+            format!("http://{address}/ok"),
+        ],
+        12,
+        120,
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    let view = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        rpc.view(fixture::query()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(started.elapsed() > std::time::Duration::from_secs(15));
+    assert_eq!(view.balances.len(), 2);
+    let calls = logs.lock().unwrap();
+    // Chain identity, two latest/confirmed anchor pairs, four wallet balance
+    // reads and three canonical anchor rechecks (historical, stable, latest).
+    assert_eq!(calls.len(), 12);
+    assert!(calls.iter().all(|(mode, _)| mode == "slow"));
     server.abort();
 }

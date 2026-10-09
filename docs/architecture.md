@@ -26,7 +26,9 @@ for example, file uploads and asynchronous job orchestration are unsupported.
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
 source overrides, listener defaults and optional automatic assignment. Static
 sources load before serving through a rolling queue, defaulting to 2 active loads
-(`startup.catalog_concurrency`, 1..64). Any failure cancels unfinished loads; source
+(`startup.catalog_concurrency`, 1..64). Required failures cancel unfinished loads;
+serving can omit an explicitly `optional_startup` remote failure with unavailable
+status in inventory and MCP instructions. Inspection/qualification remain strict. Source
 completion order cannot change the final sorted inventory. All declared sources
 are loaded, including those unused by listeners. Remote aliases share fetching
 and immutable parsed JSON within a load only for the same exact URL, requested
@@ -49,7 +51,9 @@ bypasses qualification. See [discovery disk caching](configuration.md#automatic-
 `src/discovery_relay.rs` implements an explicitly configured paid Curl fallback.
 It resolves one assigned wallet per source (or an explicit override), uses the
 ordinary paid client, serializes requests across wallets and disables
-further relay spending across all wallets after error or cancellation. Local bootstrap metadata avoids
+further relay spending across all wallets after a possibly submitted payment fails
+or is cancelled. Proven pre-submission failures retain bounded retry/backoff and
+do not disable unrelated targets. Local bootstrap metadata avoids
 a catalog dependency cycle. `deployment/bootstrap.rs` supervises initial funding
 and confirmation before ordinary managed serving loads catalogs, and also powers
 `wallet bootstrap`. It drains accepted work before reopening ownership for serving;
@@ -69,7 +73,12 @@ Independent background startup of static sources is still
 
 `src/server.rs` serves tools through `rmcp`. Streamable HTTP listeners are
 bearer-authenticated and stateless; stdio reserves stdout for protocol messages.
-Logs go to stderr. Current HTTP operation does not promise a server-to-client
+Accepted calls live in `server/work.rs` independently of response-delivery futures.
+Disconnect and stdio EOF cannot abandon them. Graceful shutdown closes admission,
+drains accepted calls with periodic progress, then stops financial workers; a second
+signal explicitly forces exit without clearing liabilities. Stdio input uses a
+bounded dedicated reader so an open parent pipe cannot hold Tokio runtime shutdown
+after accepted work drains. Logs go to stderr. Current HTTP operation does not promise a server-to-client
 list-changed notification channel. Dynamic deployments expose listener-scoped
 search/call fallback tools for clients that cache their initial inventory.
 

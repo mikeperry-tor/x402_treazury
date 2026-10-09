@@ -542,7 +542,6 @@ mod tests {
             BaseRpc::new("http://127.0.0.1:1", 1, 60).unwrap(),
             "1",
             SpendPolicy::dollars("1").unwrap(),
-            1,
         )
         .unwrap();
         let client =

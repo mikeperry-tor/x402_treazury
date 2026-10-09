@@ -77,7 +77,7 @@ impl Store {
     /// Recovery history survives restarts and operation replacement.
     pub fn funding_recovery_count(&self, job: &str) -> Result<u64> {
         let count: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM funding_recovery WHERE job_id=?1",
+            "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)",
             [job],
             |r| r.get(0),
         )?;
@@ -162,9 +162,24 @@ impl Store {
             "recovery refused: operation has consumed budget"
         );
         tx.execute("INSERT INTO funding_recovery SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1", [job])?;
+        if refresh {
+            let reserved: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
+                [&operation],
+                |r| r.get(0),
+            )?;
+            ensure!(
+                !reserved,
+                "quote refresh refused: preparation has durable effects"
+            );
+            tx.execute(
+                "INSERT INTO funding_quote_refreshes(operation_id) VALUES(?1)",
+                [&operation],
+            )?;
+        }
         tx.execute("DELETE FROM budget_entries WHERE id=?1", [&operation])?;
         tx.execute("DELETE FROM funding_refunds WHERE job_id=?1", [job])?;
-        tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=?3,next_poll=0,last_error=NULL WHERE job_id=?1", params![job,Uuid::new_v4().to_string(),if refresh { attempts.saturating_add(1) } else {0}])?;
+        tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=?3,next_poll=0,last_error=NULL WHERE job_id=?1", params![job,Uuid::new_v4().to_string(),if refresh { attempts } else {0}])?;
         tx.execute("DELETE FROM funding_health WHERE job_id=?1", [job])?;
         tx.commit()?;
         Ok(())

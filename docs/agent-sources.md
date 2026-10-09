@@ -111,8 +111,7 @@ Descriptions and schemas are not silently truncated.
 ## Limits and network policy
 
 Default operator limits are 16 registrations across the deployment, 100 tools per
-source, 200 dynamic tools per endpoint, 32 MiB per specification and a 30-second fetch
-deadline. These defaults need not appear in ordinary configuration. Advanced overrides
+source, 200 dynamic tools per endpoint and 32 MiB per specification. These defaults need not appear in ordinary configuration. Advanced overrides
 live in `[source_management]`: `max_sources`, `max_tools_per_source`,
 `max_tools_per_server`, `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
 `read_timeout_seconds`, and `allowed_origins`. The optional read-inactivity
@@ -120,11 +119,14 @@ override replaces the network default (60 seconds in either transport). Spec and
 API responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
 legacy alias.
 
-Source counts are bounded to 1024, tool counts to 10,000, specifications to 64 MiB and
-fetch deadlines to 300 seconds. Disabled registrations still occupy quota. Management
+Source counts are bounded to 1024, tool counts to 10,000 and specifications to 64 MiB. Disabled registrations still occupy quota. Management
 requests have a 64 KiB limit; forwarded API calls retain normal API behavior. Import
 concurrency is four process-wide and one per endpoint; at most 16 mutation jobs can
-be outstanding. Saturation returns an explicit busy error. Publication and quota
+be outstanding. Aliases share an active fetch without each consuming a permit.
+Active fetches cannot be evicted by retention age or completed-cache churn; a full
+active cache returns busy. Success retention is 300 seconds from completion,
+transient failure backoff one second. Completed entries remain byte/count bounded.
+Saturation returns an explicit busy error. Publication and quota
 checks are serialized, so concurrent additions cannot publish partial sources.
 
 JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and

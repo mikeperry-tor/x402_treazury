@@ -6,6 +6,7 @@ use serde_json::Map;
 use std::{collections::BTreeMap, sync::Arc};
 mod auth;
 pub mod host;
+pub mod work;
 
 const PRICING_GUIDANCE: &str = "Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.";
 
@@ -19,6 +20,7 @@ fn pricing_instructions(authored: Option<&str>) -> String {
 
 #[derive(Clone)]
 pub struct Server {
+    pub work: work::Work,
     pub catalog: Arc<CatalogState>,
     pub discovery: Option<Arc<crate::discovery::Manager>>,
     pub catalog_server: String,
@@ -50,6 +52,7 @@ impl Server {
         max_response_chars: Option<usize>,
     ) -> Self {
         Self {
+            work: Default::default(),
             host_policy: Default::default(),
             discovery: None,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
@@ -218,8 +221,22 @@ impl ServerHandler for Server {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        let server = self.clone();
+        self.work
+            .run(async move { server.call_tool_owned(request, context.id).await })
+            .await
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?
+    }
+}
+
+impl Server {
+    async fn call_tool_owned(
+        &self,
+        request: CallToolRequestParams,
+        id: RequestId,
+    ) -> Result<CallToolResponse, McpError> {
         let arguments = request.arguments.unwrap_or_default();
-        let claim = crate::qualification::claim(&self.name, &request.name, &arguments, &context.id)
+        let claim = crate::qualification::claim(&self.name, &request.name, &arguments, &id)
             .await
             .map_err(|error| {
                 tracing::warn!("qualification application admission refused: {error:#}");
@@ -327,19 +344,26 @@ pub fn http_app_with_auth(server: Server, token: Option<String>) -> axum::Router
         .layer(middleware::from_fn_with_state(auth, gate))
 }
 
-// Shared contract for standalone and deployment HTTP listeners.
-pub(crate) const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-pub(crate) const SHUTDOWN_TIMEOUT_MESSAGE: &str =
-    "shutdown deadline exceeded; pending paid calls may have unknown outcomes";
+pub const FORCE_SHUTDOWN_MESSAGE: &str = "forced shutdown; unfinished paid operations may have unknown outcomes; reservations remain for recovery";
+
+/// Only explicit operator force requests may bypass process teardown. Library
+/// callers receive this marker; the executable exits without joining workers.
+#[derive(Debug)]
+pub struct ForcedShutdown;
+impl std::fmt::Display for ForcedShutdown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(FORCE_SHUTDOWN_MESSAGE)
+    }
+}
+impl std::error::Error for ForcedShutdown {}
 
 pub(crate) fn log_http_shutdown() {
     tracing::info!(
-        "Shutting down: draining in-flight requests for up to 10 seconds to let pending payments finish safely. Please wait."
+        "Shutting down: draining accepted work so pending payments finish safely. Please wait. Send a second signal to force exit."
     );
 }
 
-/// Serve standalone HTTP with the same signal-triggered drain deadline as deployments.
-/// The executable drops its runtime on return, cancelling any unfinished handlers.
+/// Stop admission and retain accepted calls until their work finishes.
 pub async fn serve_http(
     listener: tokio::net::TcpListener,
     server: Server,
@@ -350,6 +374,7 @@ pub async fn serve_http(
     use std::future::IntoFuture;
     let stop = tokio_util::sync::CancellationToken::new();
     let _cancel_on_drop = stop.clone().drop_guard();
+    let work = server.work.clone();
     let serving = axum::serve(listener, http_app_with_auth(server, token))
         .with_graceful_shutdown(stop.clone().cancelled_owned())
         .into_future();
@@ -359,17 +384,66 @@ pub async fn serve_http(
         signal = shutdown => signal,
     };
     log_http_shutdown();
+    work.close();
     stop.cancel();
     if let Some(engine) = &crate::network::global().cover {
         engine.stop_ranges().await;
     }
-    tokio::time::timeout(SHUTDOWN_TIMEOUT, serving)
-        .await
-        .context(SHUTDOWN_TIMEOUT_MESSAGE)??;
+    tokio::select! {
+        result = async {
+            let (result, ()) = tokio::join!(wait_with_progress("http_transport", serving), work.drain());
+            result
+        } => result?,
+        signal = force_signal() => { signal?; anyhow::bail!(ForcedShutdown); }
+    }
     if let Some(engine) = &crate::network::global().cover {
         engine.emit_summary();
     }
     signal.context("shutdown signal handler failed")?;
+    Ok(())
+}
+
+pub(crate) async fn wait_with_progress<T>(
+    stage: &'static str,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    tokio::pin!(future);
+    let started = std::time::Instant::now();
+    loop {
+        tokio::select! {
+            result = &mut future => return result,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
+                tracing::info!(stage, elapsed_seconds = started.elapsed().as_secs(), "Waiting for shutdown drain");
+            }
+        }
+    }
+}
+
+/// Drain accepted work after shutdown; an additional operator signal is force.
+/// The executable handles this marker before joining blocking workers.
+pub(crate) async fn drain_or_force<T>(
+    stage: &'static str,
+    work: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    tracing::info!(
+        stage,
+        "Draining accepted work; send another signal to force exit with unfinished liabilities retained"
+    );
+    tokio::select! {
+        result = wait_with_progress(stage, work) => result,
+        signal = force_signal() => { signal?; anyhow::bail!(ForcedShutdown); }
+    }
+}
+
+/// A second operator signal is explicit force, independent of network progress.
+pub async fn force_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! { result = tokio::signal::ctrl_c() => result?, _ = term.recv() => {} }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await?;
     Ok(())
 }
 

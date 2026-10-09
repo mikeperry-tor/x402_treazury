@@ -35,3 +35,6 @@ CREATE TABLE IF NOT EXISTS funding_health(job_id TEXT PRIMARY KEY REFERENCES fun
 CREATE TABLE IF NOT EXISTS operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT NOT NULL);
 -- version 11
 CREATE TABLE payment_resolutions(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),outcome TEXT NOT NULL CHECK(outcome IN ('USED','EXPIRED_UNUSED')),height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL);
+
+-- version 12
+CREATE TABLE funding_quote_refreshes(operation_id TEXT PRIMARY KEY REFERENCES funding_recovery(operation_id));

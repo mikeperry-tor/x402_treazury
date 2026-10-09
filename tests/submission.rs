@@ -7,7 +7,7 @@ use axum::{
 };
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU8, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
 };
 use x402_treazury::{
     rotation::{
@@ -52,6 +52,8 @@ fn raw() -> Vec<u8> {
 }
 #[derive(Clone)]
 struct Mock {
+    tip_unavailable: Arc<AtomicBool>,
+    tips: Arc<AtomicUsize>,
     mode: Arc<AtomicU8>,
     blocks: Arc<AtomicUsize>,
     sends: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -64,7 +66,13 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
     let mut status = "0";
     let response = match uri.path().rsplit('/').next().unwrap() {
         "GetLightdInfo" => bytes(4, if mode == 4 { b"test" } else { b"main" }),
-        "GetLatestBlock" => number(1, if mode == 5 { 500 } else { 499 }),
+        "GetLatestBlock" => {
+            s.tips.fetch_add(1, Ordering::SeqCst);
+            if s.tip_unavailable.load(Ordering::SeqCst) {
+                status = "14";
+            }
+            number(1, if mode == 5 { 500 } else { 499 })
+        }
         "SendTransaction" => {
             s.sends.lock().unwrap().push(body.to_vec());
             if mode == 3 {
@@ -153,6 +161,8 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
     let raw = raw();
     let tx = Transaction::read(raw.as_slice(), BranchId::Nu5).unwrap();
     let state = Mock {
+        tip_unavailable: Arc::new(AtomicBool::new(false)),
+        tips: Arc::new(AtomicUsize::new(0)),
         mode: Arc::new(AtomicU8::new(0)),
         blocks: Arc::new(AtomicUsize::new(0)),
         sends: Arc::new(Mutex::new(vec![])),
@@ -191,6 +201,31 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
     let prepared = PreparedTransaction::load(&store, "op").unwrap();
     // Different endpoints: lookup must work even if the submission endpoint fails.
     let mut sender = GrpcSubmission::new(endpoint.clone(), endpoint.clone()).unwrap();
+    for mode in [4, 5] {
+        state.mode.store(mode, Ordering::SeqCst);
+        assert!(sender.preflight(&prepared, false).await.is_err());
+        assert_eq!(store.operation("op").unwrap().attempts, 0);
+        assert_eq!(
+            store.prepared_bytes("op").unwrap().as_slice(),
+            raw.as_slice()
+        );
+        assert!(state.sends.lock().unwrap().is_empty());
+    }
+    let mut unavailable =
+        GrpcSubmission::new("http://127.0.0.1:1".into(), endpoint.clone()).unwrap();
+    assert!(unavailable.preflight(&prepared, false).await.is_err());
+    assert_eq!(store.operation("op").unwrap().attempts, 0);
+    state.mode.store(0, Ordering::SeqCst);
+    state.tip_unavailable.store(true, Ordering::SeqCst);
+    assert!(sender.preflight(&prepared, false).await.is_err());
+    assert_eq!(store.operation("op").unwrap().attempts, 0);
+    assert!(state.sends.lock().unwrap().is_empty());
+    state.tip_unavailable.store(false, Ordering::SeqCst);
+    sender.preflight(&prepared, false).await.unwrap();
+    let tips = state.tips.load(Ordering::SeqCst);
+    // An unsigned tip outage after successful preflight cannot strand the first
+    // send after intent: no further readiness read belongs on that path.
+    state.tip_unavailable.store(true, Ordering::SeqCst);
     assert_eq!(
         sender
             .submit(
@@ -201,6 +236,8 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
         SubmissionOutcome::Accepted
     );
     assert_eq!(state.sends.lock().unwrap()[0], frame(bytes(1, &raw)));
+    assert_eq!(state.tips.load(Ordering::SeqCst), tips);
+    state.tip_unavailable.store(false, Ordering::SeqCst);
     for mode in [1, 2] {
         state.mode.store(mode, Ordering::SeqCst);
         assert_eq!(

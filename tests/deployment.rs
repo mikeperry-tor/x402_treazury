@@ -360,7 +360,7 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
                 "max_api_payment_usdc = \"0.02\"",
                 "max_api_payment_usdc = \"-1\"",
             ),
-            "invalid max_price",
+            "invalid max_api_payment_usdc",
         ),
         (
             format!("unknown = true\n{}", configuration()),

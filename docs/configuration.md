@@ -56,9 +56,21 @@ simultaneous large downloads leave headroom when Tor’s prebuilt Conflux capaci
 is unavailable. Current measurements do not establish that mechanism or an optimal
 limit; see [startup qualification](../tests/STARTUP.md). Pricing concurrency is separate.
 
-A free slot starts the next source immediately. Serving still waits for every
-declared catalog and startup pricing discovery; a catalog failure aborts startup
-and cancels unfinished loads. Tool ordering and wallet bindings do not depend on
+A free slot starts the next source immediately. Serving waits for catalog loading
+and startup pricing discovery. Sources are required by default: a failure aborts
+startup and cancels unfinished loads. Set `sources.NAME.optional_startup = true`
+to let serving continue after that source’s remote catalog fetch, parse or tool
+generation fails. Stderr and MCP instructions identify the unavailable source;
+its tools are omitted as a complete unit. Local configuration errors remain fatal,
+including unknown exact tool selectors and authored filters selecting no tools
+from a nonempty remote catalog.
+An unresolved exact listener selector is deferred only if its name falls
+exclusively under unavailable sources' resolved prefixes (including inherited
+prefixes). Unknown namespaces and names also attributable to a ready source
+remain errors; an optional outage cannot hide a required-source typo.
+Inspection, frozen inventories and qualification remain strict. There is no
+background publication or retry; restart to retry unavailable sources. An optional
+source that keeps downloading still occupies its normal slot until completion. Tool ordering and wallet bindings do not depend on
 completion order. `config check`, `catalog tools` and `catalog tags` use the same loader;
 `config show` remains offline and reports the effective limit. Progress, source
 fetch/parse and generation timings, and pricing timings go to stderr; a ten-second
@@ -231,6 +243,7 @@ mode = "zcash_rotation"
 funding_amount_usdc = "5.00"
 max_funding_amount_usdc = "6.00" # explicitly bound bridge-minimum increases
 max_api_payment_usdc = "1.00"
+# limit_payments_to_funding_target = false # opt in to using the API cap alone
 max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 
@@ -273,6 +286,13 @@ template contents. Separate deployments require separate initialized treasuries
 as described in the managed-wallet section.
 
 Template changes update settings for existing generated pools. In particular,
+Managed profiles retain `limit_payments_to_funding_target = true` by default,
+preserving the historical effective API ceiling of the smaller funding target and
+`max_api_payment_usdc`. Set it false explicitly to admit payments above the funding
+target when they fit the explicit API cap and confirmed active balance minus
+liabilities. Disabling the API cap too leaves only available capacity; this never
+authorizes extra funding or use of retired funds.
+
 `funding_amount_usdc` changes only future address allocations, preserving existing keys
 and their captured targets. Changing scope or renaming a source/server may create
 new pools. Managed startup disables pools absent from the resolved set and keeps
@@ -342,10 +362,12 @@ those values in its TOML instead. Serving/authentication flags belong only to
 Startup validates credentials and binds every listener before serving any.
 A bind failure releases listeners already acquired. Both standalone HTTP and
 meta-config serving handle SIGINT/SIGTERM by stopping listeners and allowing
-in-flight calls up to ten seconds to finish. A stderr message announces the drain
-and asks you to wait so pending payments can finish safely. Exceeding the deadline
-returns an error reporting that paid outcomes may be unknown; signed requests are
-never replayed during shutdown. A listener failure also stops its
+accepted calls to finish without a fixed drain deadline. Stderr announces the drain
+and reports stages, call counts and elapsed time every ten seconds. A second
+SIGINT/SIGTERM forces exit with an unknown-outcome warning; it never releases
+reservations or replays signed work. MCP client disconnect and stdio EOF stop
+response delivery without abandoning application-owned calls. Funding and
+reconciliation remain available until accepted deployment calls finish. A listener failure also stops its
 siblings. Managed profiles retain durable payment uncertainty through shutdown;
 automatic NEAR funding is controlled by `funding.auto_fund`.
 
@@ -551,7 +573,11 @@ overrides the network default for that scope, including pricing and help.
 seconds Tor. Both settings work in either mode; there is no Tor read-timeout floor.
 Read timeout accepts 1..86400 seconds at network/source-management level and
 positive fractional seconds at provider level. Connection timeout accepts 1..300.
-Financial operation deadlines and transaction expiry remain independent.
+Base RPCs, chain views and receipt verification have no separate total deadline;
+they use these connection and read-inactivity limits. Chain freshness checks,
+transaction expiry and qualification deadlines remain independent. Managed payment
+admission has no total timeout; legacy wallet `wait_seconds` is ignored with a
+warning and omitted from effective configuration.
 
 Legacy network `request_timeout_seconds` is accepted as an alias with its literal
 value now meaning read inactivity. Provider `timeout` and `probe_timeout`, import
@@ -870,6 +896,11 @@ an HTTPS `base_url`. The bundled provider pins the vendor schema and advertises
 $0.01 per fetch; the live challenge and the wallet's existing `max_api_payment_usdc` are
 authoritative. Its existing timeout, transport and `max_response_bytes` settings
 bound the relay call; the target's existing `max_spec_bytes` bounds decoded catalogs.
+These are separate allocations: the bootstrap provider’s `max_response_bytes`
+must also fit the JSON envelope, headers and escaped target text. In the worst
+case JSON text escaping uses six bytes per target byte, plus envelope overhead.
+Set the outer limit explicitly for expected documents; raising only the target
+limit cannot make it fit. Neither size failure authorizes a paid retry.
 No additional spending caps or download settings are introduced.
 
 Without `wallet`, each source uses one of its effective assigned wallet profiles.
@@ -916,13 +947,14 @@ the same wallet/relay scope for each target URL. A valid, correctly attributed C
 response reporting an origin HTTP error, connection failure, unusable catalog or
 pricing response ends fallback for that target. Its failure is retained so aliases
 cannot retry it, while other targets can still use Curl. No upstream error text is logged.
-Payment failures, transport failures reaching Curl, or invalid/unattributable relay
-envelopes disable further relay calls across all wallets for that run.
-Cancellation also disables further calls, including after
-a signed submission. Queued targets cannot spin on the wallet; there is no automatic
-retry, alternate relay, or replay of an uncertain payment. A new explicit command or
-process restart starts a new run and can spend again. Catalog failure still aborts
-startup; pricing failures remain unknown estimates. Existing successful results and
+A monotonic submission marker distinguishes proven pre-submission failures from
+possibly paid work. Pre-submission failure or cancellation leaves unrelated targets
+usable; subsequent requests for that scoped target have at most three attempts
+with a one-second backoff. Once signed submission may have begun, failure,
+cancellation or an invalid/unattributable envelope disables relay spending across
+all wallets for the run. No uncertain signed request is replayed. A new explicit command or
+process restart starts a new run and can spend again. Required catalog failure
+still aborts startup; pricing failures remain unknown estimates. Existing successful results and
 fresh cache entries remain usable.
 
 Relay responses must match the target URL and GET method and contain complete JSON

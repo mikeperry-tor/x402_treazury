@@ -37,7 +37,7 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
     std::fs::write(&path, config()).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
     assert_eq!(shown["wallets"]["research"]["funding_amount_usdc"], "2.00");
-    assert_eq!(shown["wallets"]["research"]["wait_seconds"], 30);
+    assert!(shown["wallets"]["research"].get("wait_seconds").is_none());
     assert_eq!(
         shown["treasury"]["state_dir"],
         dir.path().join("state/treasury").to_str().unwrap()
@@ -88,10 +88,6 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
         (
             "base_rpc_url_env = \"BASE_RPC\"",
             "base_rpc_url_env = \"BASE_RPC\"\nconfidentiality = \"invalid\"",
-        ),
-        (
-            "max_conversion_overhead_percent = 5",
-            "max_conversion_overhead_percent = 5\nwait_seconds = 0",
         ),
         (
             "max_conversion_overhead_percent = 5",
@@ -367,5 +363,23 @@ async fn managed_profiles_require_at_least_one_aggregate_budget() {
         )
         .unwrap();
         Deployment::show_config(&path).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn obsolete_admission_timeout_is_accepted_but_not_exposed_as_effective_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("servers.toml");
+    for value in [0, 1, 30, 7200] {
+        std::fs::write(
+            &path,
+            config().replace(
+                "max_conversion_overhead_percent = 5",
+                &format!("max_conversion_overhead_percent = 5\nwait_seconds = {value}"),
+            ),
+        )
+        .unwrap();
+        let shown = Deployment::show_config(&path).await.unwrap();
+        assert!(shown["wallets"]["research"].get("wait_seconds").is_none());
     }
 }

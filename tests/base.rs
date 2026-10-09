@@ -83,7 +83,14 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
                 .filter(|v| v["method"] == "eth_call")
                 .collect::<Vec<_>>();
             assert_eq!(calls.len(), 3);
-            for (call, height) in calls.into_iter().zip([88, 100, 88]) {
+            // Historical nonce resolution precedes fresh stable/current balances.
+            assert!(
+                !calls[0]["params"][0]["data"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("0x70a08231")
+            );
+            for (call, height) in calls.into_iter().zip([88, 88, 100]) {
                 assert_eq!(
                     call["params"][1],
                     json!({"blockHash":format!("0x{height:064x}"),"requireCanonical":true})
