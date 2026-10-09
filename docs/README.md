@@ -17,7 +17,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
-[Plans](plans/) describe unfinished work, including artifact storage.
+[Plans](plans/) describe unfinished work, including artifact storage and
+[removing avoidable failure policies](plans/no_self_sabotage.md).
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover independent provider startup, polling,
