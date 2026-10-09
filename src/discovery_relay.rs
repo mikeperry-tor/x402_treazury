@@ -130,6 +130,82 @@ impl std::fmt::Display for TargetFailure {
     }
 }
 impl std::error::Error for TargetFailure {}
+/// Deliberately has no source: upstream errors can contain credentials or prose.
+#[derive(Debug)]
+struct RelayFailure {
+    reason: &'static str,
+    status: Option<u16>,
+}
+impl RelayFailure {
+    fn from_error(error: &anyhow::Error) -> Self {
+        if let Some(http) = error.downcast_ref::<reqwest::Error>() {
+            let reason = if http.is_timeout() && http.is_connect() {
+                "connection_timeout"
+            } else if http.is_timeout() {
+                "read_inactivity"
+            } else if http.is_connect() {
+                "connection"
+            } else {
+                "transport"
+            };
+            return Self {
+                reason,
+                status: http.status().map(|s| s.as_u16()),
+            };
+        }
+        if let Some(http) = error.downcast_ref::<crate::payment::HttpFailure>() {
+            return Self {
+                reason: "http_status",
+                status: Some(http.status.as_u16()),
+            };
+        }
+        if error
+            .downcast_ref::<crate::limits::DownloadLimit>()
+            .is_some()
+        {
+            return Self {
+                reason: "download_limit",
+                status: None,
+            };
+        }
+        #[cfg(feature = "zcash")]
+        if let Some(admission) = error.downcast_ref::<crate::rotation::error::AdmissionError>() {
+            use crate::rotation::error::AdmissionError;
+            let reason = match admission {
+                AdmissionError::PayerChanged => "payer_changed",
+                AdmissionError::UnsupportedPayment(_) => "unsupported_payment",
+                AdmissionError::PriceLimit(_) => "price_limit",
+                AdmissionError::PaymentPending(_) => "payment_pending",
+                AdmissionError::WalletNotReady(_) => "wallet_not_ready",
+                AdmissionError::FundingUnavailable(_) => "funding_unavailable",
+                AdmissionError::FundingRestricted | AdmissionError::FundingPermitDenied => {
+                    "funding_denied"
+                }
+                AdmissionError::OutcomeUnknown(_) => "payment_outcome_unknown",
+                AdmissionError::ChainRecoveryRequired(_) => "chain_recovery_required",
+            };
+            return Self {
+                reason,
+                status: None,
+            };
+        }
+        Self {
+            reason: "payment_or_response",
+            status: None,
+        }
+    }
+}
+impl std::fmt::Display for RelayFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "discovery relay request failed: reason={}", self.reason)?;
+        if let Some(status) = self.status {
+            write!(f, " http_status={status}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for RelayFailure {}
+
 pub struct Relay {
     client: PaidClient,
     endpoint: String,
@@ -300,13 +376,33 @@ impl Relay {
         let result = async {
             let output = self
                 .client
-                .execute_response_observed(RoutedRequest {
-                    method: "POST".into(),
-                    url: self.endpoint.clone(),
-                    query: BTreeMap::new(),
-                    body: Some(serde_json::json!({"url":url,"method":"GET"})),
-                }, &progress)
-                .await.map_err(|_| anyhow::anyhow!("discovery relay payment, transport or response failed; check wallet and max_response_bytes={}", self.response_limit))?;
+                .execute_response_observed(
+                    RoutedRequest {
+                        method: "POST".into(),
+                        url: self.endpoint.clone(),
+                        query: BTreeMap::new(),
+                        body: Some(serde_json::json!({"url":url,"method":"GET"})),
+                    },
+                    &progress,
+                )
+                .await
+                .map_err(|error| {
+                    let failure = RelayFailure::from_error(&error);
+                    tracing::warn!(
+                        reason = failure.reason,
+                        http_status = failure.status,
+                        connect_timeout_seconds =
+                            crate::network::global().policy.connect_timeout().as_secs(),
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        possible_submission = progress.possible(),
+                        relay_read_timeout_seconds = crate::network::global()
+                            .read_timeout(self.client.timeout())
+                            .as_secs_f64(),
+                        max_response_bytes = self.response_limit,
+                        "Discovery relay request failed"
+                    );
+                    failure
+                })?;
             decode(
                 &output.bytes,
                 url,
@@ -455,11 +551,19 @@ pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status:
         stage,
         reason,
         http_status,
+        connect_timeout_seconds = crate::network::global().policy.connect_timeout().as_secs(),
+        read_timeout_seconds = crate::network::global()
+            .read_timeout(
+                cfg.read_timeout_seconds
+                    .map(std::time::Duration::from_secs_f64)
+            )
+            .as_secs_f64(),
         "Discovery fetch failed; trying configured paid Curl relay once"
     );
 }
 pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
     let failure = error.downcast_ref::<TargetFailure>();
+    let request = error.downcast_ref::<RelayFailure>();
     tracing::warn!(
         source = cfg
             .discovery_source
@@ -467,8 +571,13 @@ pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
             .or(cfg.prefix.as_deref())
             .unwrap_or("standalone"),
         stage,
-        reason = failure.map(|f| f.reason).unwrap_or("relay_unavailable"),
-        http_status = failure.and_then(|f| f.status),
+        reason = failure
+            .map(|f| f.reason)
+            .or_else(|| request.map(|f| f.reason))
+            .unwrap_or("relay_unavailable"),
+        http_status = failure
+            .and_then(|f| f.status)
+            .or_else(|| request.and_then(|f| f.status)),
         "Curl relay fallback failed or unavailable; discovery fetch failed, no retry"
     );
 }
@@ -529,7 +638,7 @@ pub(crate) mod tests {
                 std::future::pending::<()>().await;
             }
             if f.reject {
-                return StatusCode::BAD_GATEWAY.into_response();
+                return (StatusCode::BAD_GATEWAY, "PRIVATE_UPSTREAM_DETAIL").into_response();
             }
             return axum::Json(f.body).into_response();
         }
@@ -785,6 +894,74 @@ pub(crate) mod tests {
             if let Some(task) = pending_server {
                 task.abort();
             }
+        }
+    }
+
+    #[test]
+    fn relay_diagnostics_discard_untrusted_causes() {
+        let error = anyhow::anyhow!("PRIVATE_UPSTREAM_DETAIL");
+        assert_eq!(
+            RelayFailure::from_error(&error).to_string(),
+            "discovery relay request failed: reason=payment_or_response"
+        );
+        #[cfg(feature = "zcash")]
+        {
+            let error = anyhow::Error::new(crate::rotation::error::AdmissionError::PriceLimit(
+                "PRIVATE_UPSTREAM_DETAIL",
+            ));
+            assert_eq!(
+                RelayFailure::from_error(&error).to_string(),
+                "discovery relay request failed: reason=price_limit"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_errors_preserve_safe_causes_without_authorizing_paid_retries() {
+        for (reason, reject, stall, limit) in [
+            ("http_status", true, false, 4096),
+            ("read_inactivity", false, true, 4096),
+            ("download_limit", false, false, 16),
+        ] {
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            let _guard = tracing::subscriber::set_default(subscriber);
+            let (mut relay, f, task) = fixture(envelope(TARGET), reject, stall).await;
+            let inner = Arc::get_mut(&mut relay).unwrap();
+            inner.client = inner
+                .client
+                .clone()
+                .with_timeout(std::time::Duration::from_millis(200))
+                .with_download_limits(limit, 4096);
+            inner.response_limit = limit;
+            let error = relay
+                .fetch(TARGET, 200, 4096, "max_spec_bytes")
+                .await
+                .err()
+                .unwrap();
+            let failure = error.downcast_ref::<RelayFailure>().unwrap();
+            assert_eq!(failure.reason, reason);
+            assert_eq!(failure.status, reject.then_some(502));
+            log_failure(&Config::default(), "catalog", &error);
+            assert!(!format!("{error:#}").contains("PRIVATE_UPSTREAM_DETAIL"));
+            assert!(
+                relay
+                    .fetch("https://example.com/other", 200, 4096, "max_spec_bytes")
+                    .await
+                    .is_err()
+            );
+            assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+            assert_eq!(f.calls.load(Ordering::SeqCst), 2);
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert!(logs.contains(&format!("reason=\"{reason}\"")), "{logs}");
+            assert!(logs.contains("possible_submission=true"), "{logs}");
+            assert!(!logs.contains("PRIVATE_UPSTREAM_DETAIL"));
+            assert!(!logs.contains(TARGET));
+            task.abort();
         }
     }
 

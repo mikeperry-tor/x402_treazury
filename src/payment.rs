@@ -11,6 +11,19 @@ use x402_chain_eip155::{V1Eip155ExactClient, V2Eip155ExactClient, V2Eip155UptoCl
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 
+/// Typed HTTP status for callers that must discard untrusted response prose.
+#[derive(Debug)]
+pub(crate) struct HttpFailure {
+    pub status: reqwest::StatusCode,
+    detail: String,
+}
+impl std::fmt::Display for HttpFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP {}: {}", self.status, self.detail)
+    }
+}
+impl std::error::Error for HttpFailure {}
+
 pub const USDC: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 #[derive(Clone)]
 pub struct SpendPolicy {
@@ -402,7 +415,11 @@ impl PaidClient {
             } else { error })?;
         if !status.is_success() {
             let body = String::from_utf8_lossy(&bytes);
-            bail!("HTTP {status}: {} {body}", detail.unwrap_or(Value::Null));
+            return Err(HttpFailure {
+                status,
+                detail: format!("{} {body}", detail.unwrap_or(Value::Null)),
+            }
+            .into());
         }
         Ok(crate::output::HttpOutput {
             advisories: vec![],

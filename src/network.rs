@@ -76,7 +76,7 @@ impl NetworkPolicy {
             );
         }
         ensure!(
-            (1..=300).contains(&self.timeout().as_secs()),
+            (1..=300).contains(&self.connect_timeout().as_secs()),
             "network connect timeout must be 1..300 seconds"
         );
         ensure!(
@@ -90,14 +90,14 @@ impl NetworkPolicy {
             .as_deref()
             .unwrap_or("x402_treazury")
     }
-    fn timeout(&self) -> Duration {
+    pub(crate) fn connect_timeout(&self) -> Duration {
         Duration::from_secs(self.connect_timeout_seconds.unwrap_or(match self.mode {
             Mode::Direct => 15,
             Mode::Tor => 120,
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
@@ -296,7 +296,7 @@ impl NetworkContext {
             .no_proxy()
             .retry(reqwest::retry::never())
             .read_timeout(timeout)
-            .connect_timeout(self.policy.timeout())
+            .connect_timeout(self.policy.connect_timeout())
             .redirect(reqwest::redirect::Policy::none());
         if parsed.scheme() == "https" {
             if !transport.allow_http1 {
@@ -406,7 +406,7 @@ impl NetworkContext {
         );
         let mut endpoint = Endpoint::from_shared(url.to_owned())
             .map_err(|_| anyhow::anyhow!("invalid indexer endpoint"))?
-            .connect_timeout(self.policy.timeout())
+            .connect_timeout(self.policy.connect_timeout())
             .tcp_nodelay(true);
         if uri.scheme_str() == Some("https") {
             let tls = ClientTlsConfig::new().with_webpki_roots();
@@ -418,7 +418,7 @@ impl NetworkContext {
             };
             endpoint = endpoint.tls_config(tls)?;
         }
-        let readiness = grpc::Readiness::new(self.policy.timeout());
+        let readiness = grpc::Readiness::new(self.policy.connect_timeout());
         let channel: Channel = if self.policy.mode == Mode::Tor {
             let proxy = self
                 .policy

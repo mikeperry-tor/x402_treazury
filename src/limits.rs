@@ -11,6 +11,23 @@ pub fn help_default() -> usize {
     HELP_BYTES
 }
 
+#[derive(Debug)]
+pub(crate) struct DownloadLimit {
+    pub kind: &'static str,
+    pub setting: &'static str,
+    pub limit: usize,
+}
+impl std::fmt::Display for DownloadLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} exceeds {}={} bytes; content rejected, no partial content returned. Ask the operator to raise {} if appropriate.",
+            self.kind, self.setting, self.limit, self.setting
+        )
+    }
+}
+impl std::error::Error for DownloadLimit {}
+
 pub fn exceeded(kind: &'static str, setting: &'static str, limit: usize) -> anyhow::Error {
     // Do not include URLs, headers, document excerpts or credentials in logs.
     tracing::warn!(
@@ -19,9 +36,12 @@ pub fn exceeded(kind: &'static str, setting: &'static str, limit: usize) -> anyh
         limit_bytes = limit,
         "download limit exceeded; content rejected, no partial content returned"
     );
-    anyhow::anyhow!(
-        "{kind} exceeds {setting}={limit} bytes; content rejected, no partial content returned. Ask the operator to raise {setting} if appropriate."
-    )
+    DownloadLimit {
+        kind,
+        setting,
+        limit,
+    }
+    .into()
 }
 pub async fn read(
     mut response: reqwest::Response,

@@ -64,6 +64,13 @@ See [cache warming](configuration.md#warming-a-selected-source-including-directl
 
 ## Timeout budgets and concurrency
 
+Omitting timeout settings selects defaults; it does not disable timeouts. Provider
+files inherited with `extends` can override the network read default, including
+for discovery. The Curl relay uses its own provider settings. Relay request
+failures report a fixed reason, available HTTP status, elapsed time, possible
+submission state, and its configured read/byte limits without upstream prose.
+An uncertain paid failure still disables the relay for the run.
+
 All outbound HTTP uses `read_timeout_seconds`, defaulting to 60 seconds in both
 direct and Tor mode. Each successful response read renews the inactivity budget;
 there is no total HTTP response deadline. This covers catalogs, lazy help, pricing,

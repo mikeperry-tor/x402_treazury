@@ -377,8 +377,10 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
         return Err(error);
     }
     let http_error = error.downcast_ref::<reqwest::Error>();
-    let reason = if http_error.is_some_and(reqwest::Error::is_timeout) {
-        "timeout"
+    let reason = if http_error.is_some_and(|e| e.is_timeout() && e.is_connect()) {
+        "connection_timeout"
+    } else if http_error.is_some_and(reqwest::Error::is_timeout) {
+        "read_inactivity"
     } else if http_error.is_some_and(reqwest::Error::is_connect) {
         "connection"
     } else if http_error.and_then(reqwest::Error::status).is_some() {
