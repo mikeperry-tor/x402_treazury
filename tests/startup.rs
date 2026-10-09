@@ -570,6 +570,8 @@ async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits
         "max_spec_bytes=1",
         "allow_http1=true",
         "allow_tls12=true",
+        "catalog_cache_ttl_seconds=120",
+        "catalog_cache_ttl_seconds=0",
     ] {
         let mut fixture = Fixture::new(1, None).await;
         let dir = tempfile::tempdir().unwrap();

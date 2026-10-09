@@ -195,6 +195,18 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     assert!(!disabled.status.success());
     assert!(String::from_utf8_lossy(&disabled.stderr).contains("http_cache_enabled=false"));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+    std::fs::write(
+        path,
+        original.replace(
+            "[sources.api]",
+            "[sources.api]\ncatalog_cache_ttl_seconds=0",
+        ),
+    )
+    .unwrap();
+    let disabled = cli(&["catalog", "warm", "--config", path, "--direct"]).await;
+    assert!(!disabled.status.success());
+    assert!(String::from_utf8_lossy(&disabled.stderr).contains("catalog_cache_ttl_seconds=0"));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     std::fs::write(path, original).unwrap();
     // Expired direct entries cannot be revalidated over Tor or trigger direct I/O.
     let db = rusqlite::Connection::open(dir.path().join("state/http-cache/discovery-v1.sqlite"))

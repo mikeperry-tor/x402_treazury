@@ -228,7 +228,8 @@ async fn catalogs_survive_reopen_revalidate_replace_and_never_serve_stale_errors
     expire(slot.clone()).await;
     origin.lock().unwrap().mode = 2;
     assert_eq!(catalog(&url, &cfg).await.unwrap()["value"], 2);
-    assert!(slot.read().await.is_none());
+    assert!(slot.read().await.unwrap().metadata.fresh());
+    expire(slot.clone()).await;
     origin.lock().unwrap().mode = 4;
     assert!(catalog(&url, &cfg).await.is_err());
     assert!(slot.read().await.is_none());
@@ -557,7 +558,7 @@ async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_
         slot.write(Some(entry)).await;
         origin.lock().unwrap().mode = 2;
         catalog::load_json_discovery(&cfg, &http).await.unwrap();
-        assert!(slot.read().await.is_none());
+        assert!(slot.read().await.unwrap().metadata.fresh());
     }
     .with_subscriber(subscriber)
     .await;
@@ -569,7 +570,7 @@ async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_
         "cache=\"disk_hit\"",
         "cache=\"revalidate\"",
         "cache=\"revalidated\"",
-        "cache_policy=\"no_store\"",
+        "origin_policy=\"no_store\"",
     ] {
         assert!(logs.contains(field), "missing {field}: {logs}");
     }
@@ -607,7 +608,7 @@ fn cache_policy_labels_explain_conservative_rejections() {
 }
 
 #[test]
-fn catalog_fallback_is_24_hours_and_never_overrides_explicit_policy() {
+fn catalog_local_ttl_overrides_origin_freshness_and_logs_policy() {
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -617,44 +618,46 @@ fn catalog_fallback_is_24_hours_and_never_overrides_explicit_policy() {
     tracing::subscriber::with_default(subscriber, || {
         for values in [
             vec![],
-            vec![("etag", "\"one\"")],
-            vec![("cache-control", "private")],
-            vec![("last-modified", "Sun, 06 Nov 1994 08:49:37 GMT")],
+            vec![("cache-control", "no-store")],
+            vec![("cache-control", "no-cache")],
+            vec![("cache-control", "max-age=0, must-revalidate")],
+            vec![("cache-control", "max-age=999999")],
+            vec![("cache-control", "max-age=bad")],
+            vec![("expires", "0"), ("age", "999999")],
         ] {
             let h = headers(&values);
-            let m = Metadata::from_catalog_headers(&h, Duration::ZERO, None).unwrap();
-            assert!(m.heuristic && m.fresh());
-            assert_eq!(m.expires - m.stored, 86399);
-            assert_eq!(Metadata::policy_label(&h, Some(&m)), "heuristic_fresh");
+            for ttl in [86400, 120] {
+                let m = Metadata::from_catalog_headers(&h, Duration::ZERO, None, ttl).unwrap();
+                assert!(m.local_override && m.fresh());
+                assert_eq!(m.expires - m.stored, ttl);
+                assert_eq!(Metadata::policy_label(&h, Some(&m)), "local_override");
+            }
+            assert!(Metadata::from_catalog_headers(&h, Duration::ZERO, None, 0).is_none());
         }
     });
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    assert!(logs.contains("INFO") && logs.contains("fallback_ttl_seconds=86400"));
-    for values in [
-        vec![("cache-control", "max-age=0, must-revalidate")],
-        vec![("cache-control", "no-cache")],
-        vec![("expires", "0")],
+    for expected in [
+        "INFO",
+        "ttl_seconds=86400",
+        "ttl_seconds=120",
+        "origin_policy=\"no_store\"",
+        "cache_policy=\"local_override\"",
     ] {
-        let m = Metadata::from_catalog_headers(&headers(&values), Duration::ZERO, None).unwrap();
-        assert!(!m.heuristic && !m.fresh());
+        assert!(logs.contains(expected), "missing {expected}: {logs}");
     }
+    assert!(Metadata::from_headers(&HeaderMap::new(), Duration::ZERO, None).is_none());
+    let delayed =
+        Metadata::from_relay_headers(&HeaderMap::new(), Duration::from_secs(121), Some(120))
+            .unwrap();
     assert!(
-        Metadata::from_catalog_headers(
-            &headers(&[("cache-control", "no-store")]),
-            Duration::ZERO,
-            None
-        )
-        .is_none()
-    );
-    assert!(
-        Metadata::from_headers(&HeaderMap::new(), Duration::ZERO, None).is_none(),
-        "pricing has no heuristic lifetime"
+        !delayed.fresh(),
+        "coalesced relay reuse must not renew lifetime"
     );
 }
 
 #[tokio::test]
 async fn headerless_and_private_vary_catalogs_reuse_disk_without_cookies() {
-    for mode in [9, 10, 12] {
+    for mode in [2, 9, 10, 11, 12] {
         let dir = tempfile::tempdir().unwrap();
         let (url, origin, task) = fixture().await;
         origin.lock().unwrap().mode = mode;
@@ -703,31 +706,58 @@ fn lists_extensions_private_variants_and_304_refresh_are_supported() {
     ]);
     h.append("cache-control", "max-age=600".parse().unwrap());
     h.append("vary", "Cookie".parse().unwrap());
-    let mut m = Metadata::from_catalog_headers(&h, Duration::ZERO, None).unwrap();
+    let mut m = Metadata::from_catalog_headers(&h, Duration::ZERO, None, 86400).unwrap();
     assert!(m.fresh());
     assert!(!m.headers.contains_key("set-cookie"));
     m.expires = 0;
     let validation = headers(&[("vary", "Accept-Encoding, Cookie")]);
     assert!(m.matches_validation(&validation));
-    let refreshed = Metadata::from_catalog_headers(&validation, Duration::ZERO, Some(&m)).unwrap();
-    assert!(refreshed.fresh() && !refreshed.heuristic);
+    let refreshed =
+        Metadata::from_catalog_headers(&validation, Duration::ZERO, Some(&m), 86400).unwrap();
+    assert!(refreshed.fresh() && refreshed.local_override);
     let restrictive = Metadata::from_catalog_headers(
         &headers(&[("cache-control", "max-age=60, max-age=0")]),
         Duration::ZERO,
         None,
+        86400,
     )
     .unwrap();
-    assert!(!restrictive.fresh());
+    assert!(restrictive.fresh());
     assert!(
         Metadata::from_catalog_headers(
             &headers(&[("vary", "if-none-match")]),
             Duration::ZERO,
-            None
+            None,
+            86400
         )
         .is_none()
     );
     assert!(
-        Metadata::from_relay_headers(&h, Duration::ZERO, true).is_none(),
+        Metadata::from_relay_headers(&h, Duration::ZERO, Some(86400)).is_none(),
         "relay target request headers are unknown"
     );
+}
+
+#[tokio::test]
+async fn catalog_ttl_zero_and_changes_are_isolated_from_pricing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (url, origin, task) = fixture().await;
+    let mut cfg = config(dir.path());
+    catalog(&url, &cfg).await.unwrap();
+    let pricing = Slot::new(&cfg, &url, "pricing", 1024).unwrap();
+    cfg.catalog_cache_ttl_seconds = 120;
+    catalog(&url, &cfg).await.unwrap();
+    let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+    let metadata = slot.read().await.unwrap().metadata;
+    assert_eq!(metadata.expires - metadata.stored, 120);
+    cfg.catalog_cache_ttl_seconds = 0;
+    assert!(Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).is_none());
+    assert_eq!(
+        pricing.key,
+        Slot::new(&cfg, &url, "pricing", 1024).unwrap().key
+    );
+    catalog(&url, &cfg).await.unwrap();
+    catalog(&url, &cfg).await.unwrap();
+    assert_eq!(origin.lock().unwrap().calls.len(), 4);
+    task.abort();
 }

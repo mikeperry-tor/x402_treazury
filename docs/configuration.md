@@ -729,28 +729,37 @@ behavior. `config show` remains offline. A provider or source can opt out with
 `http_cache_enabled = false`; this also prevents sharing a disk-enabled alias's
 catalog load or pricing initialization.
 
-Caching uses the normal unsigned GET; there are no extra HEAD probes. Catalogs
-honor `Cache-Control: max-age` or `Expires`, accounting for `Date`, `Age` and
-request duration. **Without an explicit freshness lifetime, catalogs default to
-24 hours**, including validator-only responses. An INFO message records
-`fallback_ttl_seconds=86400` whenever that policy is applied. `no-cache` still
-requires revalidation and `max-age=0` remains immediately stale. Stale catalogs
-with `ETag` or `Last-Modified` use one conditional GET; a matching 304 reuses the
-body and refreshes metadata. Failed requests never fall back to stale documents.
+Catalogs are local snapshots, using a provider/source setting:
+
+```toml
+catalog_cache_ttl_seconds = 86400 # default: 24 hours; 0 disables catalog disk caching
+```
+
+A deployment source can override its provider's value. Any positive integer sets
+local retention regardless of upstream `Cache-Control` or `Expires`, including
+`no-store`, `no-cache` and `max-age=0`. INFO logs record
+`cache_policy="local_override"`, `ttl_seconds`, and a fixed `origin_policy` label.
+This setting does not affect pricing caching; `http_cache_enabled=false` disables
+both. Changing the catalog TTL separates disk entries and shared startup loads.
+
+Caching uses the normal unsigned GET; there are no extra HEAD probes. The TTL
+starts after a complete catalog download. Once expired, catalogs with `ETag` or
+`Last-Modified` use one conditional GET; a matching 304 reuses the body and starts
+a new local lifetime. Without validators, the catalog is downloaded again.
+Failed refreshes never fall back to expired documents.
 
 This owner-only private cache permits `private` responses and responses carrying
 `Set-Cookie`; cookies are neither saved nor sent. Ordinary `Vary` is supported by
-pinning the complete unsigned discovery request profile (`Accept: */*`,
+pinning the unsigned discovery request profile (`Accept: */*`,
 `Accept-Encoding: identity`, no cookies, credentials or custom request headers).
-The profile version and URL are part of the cache key; named absent headers stay
-absent on subsequent requests. `Vary: *`, conditional-header variants, `no-store`,
-malformed policies and credential-bearing URLs remain excluded. Repeated list
-headers and quoted cache-control extensions are supported. Conflicting valid
-max-age directives use the shortest lifetime. Curl's effective target request
-headers are unknown, so relay responses with `Vary` are not persisted.
+The profile version and URL are part of the cache key. `Vary: *`, conditional-header
+variants and credential-bearing URLs remain excluded. Curl's effective target
+request headers are unknown, so relay responses with `Vary` are not persisted.
+Relay catalogs use the same local TTL, measured from the original completed relay
+response so sharing it cannot renew its lifetime.
 
-The new request-profile cache key intentionally causes one initial miss for
-entries written by older versions; those disposable entries are left for eviction.
+The local-policy cache key causes one initial miss for catalogs written by older
+versions; those disposable entries are left for eviction.
 
 Pricing persists only the derived display estimate from a usable HTTP 402 with
 explicit, positive freshness, capped by `probe_ttl_seconds`. Payment challenges,
@@ -776,8 +785,8 @@ so a historical cache hit cannot qualify a fresh network observation. Ordinary
 loads report source-specific cache decisions on stderr at info level: catalog
 `miss`, `disk_hit`, `revalidate`, `revalidated`, `shared_load`, and successful
 `stored` events. Configuration logs distinguish disabled caching from a missing
-cache directory. Response policy labels explain `requires_revalidation`,
-`heuristic_fresh`, `no_store`, `vary_star`, or invalid/unsupported policies
+cache directory. Response policy labels explain `local_override`,
+`requires_revalidation`, `no_store`, `vary_star`, or invalid/unsupported policies
 without exposing raw headers or validators. A fresh policy is eligibility;
 `stored` confirms a successful disk write. Relay cache reuse and directly warmed
 cache provenance remain explicit.
@@ -786,8 +795,8 @@ Startup pricing summaries report `disk_hits`, `process_hits`, `shared`, and
 `network_initializations` per source, including disabled discovery. These count
 probe initializations, not individual HTTP requests or advertised prices embedded
 in a catalog. Cache support is response-dependent, not a provider allowlist.
-`max-age=0, must-revalidate` with an ETag still needs a network request each load;
-a 304 reuses the saved body. Missing entries alone do not prove a provider forbids
+Catalogs with `max-age=0, must-revalidate` reuse local snapshots until the configured
+TTL expires; then a 304 can reuse the saved body. Missing entries alone do not prove a provider forbids
 caching: expiration, eviction, network/timeout policy changes, and failed writes
 also affect reuse.
 
@@ -803,7 +812,7 @@ repeat it or use a comma-separated list. Omitting it selects every declared sour
 Only selected catalogs are fetched. `--discover-pricing` also warms eligible unsigned
 GET estimates, respecting source opt-outs, endpoint caps and the union of listener
 filters. The command requires an existing treasury state directory and rejects
-`http_cache_enabled = false` on a selected source. Without `--direct`, it uses the
+`http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on a selected source. Without `--direct`, it uses the
 deployment's network policy. It starts no listeners or funding workers. It opens
 only the resolved discovery wallets when paid relay warming is enabled below;
 otherwise it remains unsigned and opens no wallet.
@@ -826,12 +835,10 @@ continues to bypass all disk caches and cannot invoke this warm path.
 
 The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
 `fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`; `fresh_pricing_entries`
-counts persistent, fresh estimates. Fetching successfully does not imply caching
-is supported: catalogs with explicit zero freshness or `no-cache` still require
-revalidation, and entries
-without explicit freshness cannot bypass a Tor-blocked origin. Normal HTTP storage
-restrictions and limits still apply; `--direct` does not force persistence or
-extend lifetimes. A failed multi-source warm can leave completed disposable entries.
+counts persistent, fresh estimates. Catalogs use the configured local TTL,
+including when upstream requests no storage or immediate revalidation. Variant,
+size and provenance restrictions still apply; `--direct` does not override them
+or extend lifetimes. A failed multi-source warm can leave completed disposable entries.
 
 #### Paid discovery relay
 

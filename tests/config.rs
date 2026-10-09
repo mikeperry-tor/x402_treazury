@@ -18,6 +18,7 @@ allow_tls12 = true
 max_response_bytes = 100
 max_help_bytes = 50
 max_spec_bytes = 200
+catalog_cache_ttl_seconds = 123
 [overrides.stable_old]
 description = "Old"
 "#,
@@ -31,6 +32,7 @@ tags = []
 timeout = 42
 allow_http1 = false
 http_cache_enabled = false
+catalog_cache_ttl_seconds = 0
 max_help_bytes = 80
 [overrides.stable_new]
 description = "New"
@@ -40,6 +42,11 @@ description = "New"
     let resolved = config::resolve(source, &deployment).await.unwrap();
     assert!(!resolved.settings.allow_http1);
     assert!(!resolved.settings.http_cache_enabled);
+    assert_eq!(resolved.settings.catalog_cache_ttl_seconds, 0);
+    assert_eq!(
+        resolved.origins["catalog_cache_ttl_seconds"],
+        deployment.display().to_string()
+    );
     assert_eq!(
         resolved.origins["http_cache_enabled"],
         deployment.display().to_string()
@@ -85,6 +92,7 @@ description = "New"
     )
     .await
     .unwrap();
+    assert_eq!(resolved.settings.catalog_cache_ttl_seconds, 123);
     assert_eq!(
         resolved.settings.spec,
         deployment
@@ -103,6 +111,8 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
     for invalid in [
         r#"{"spec":"api.json"}"#,
         "spec = 'api.json'\nunknown = true",
+        "spec = 'api.json'\ncatalog_cache_ttl_seconds = -1",
+        "spec = 'api.json'\ncatalog_cache_ttl_seconds = 1.5",
         "spec = 'api.json'\ntimeout = 0",
         "extends = ['a.toml']",
         "spec = 'api.json'\nmax_response_bytes = 0",

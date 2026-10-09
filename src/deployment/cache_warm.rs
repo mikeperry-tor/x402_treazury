@@ -64,6 +64,10 @@ pub async fn warm_cache(
             .await?
             .settings;
         ensure!(
+            cfg.catalog_cache_ttl_seconds > 0,
+            "source {id}: cache warming is disabled by catalog_cache_ttl_seconds=0"
+        );
+        ensure!(
             cfg.http_cache_enabled,
             "source {id}: cache warming is disabled by http_cache_enabled=false"
         );

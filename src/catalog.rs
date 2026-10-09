@@ -76,6 +76,8 @@ pub struct Config {
     #[serde(skip)]
     pub discovery_relay: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
     pub http_cache_enabled: bool,
+    /// Local catalog snapshot lifetime; zero disables catalog disk caching.
+    pub catalog_cache_ttl_seconds: u64,
     #[serde(skip)]
     #[doc(hidden)]
     pub http_cache_directory: Option<std::path::PathBuf>,
@@ -151,6 +153,7 @@ impl Default for Config {
             discovery_source: None,
             discovery_relay: None,
             http_cache_enabled: true,
+            catalog_cache_ttl_seconds: 86400,
             http_cache_directory: None,
             http_cache_direct_warm_target: None,
             reliability_tags: vec![],
@@ -324,7 +327,7 @@ pub async fn load_json_with_limit(
 #[tracing::instrument(name = "catalog", skip_all, fields(source = cfg.discovery_source.as_deref().unwrap_or("standalone")))]
 pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) -> Result<Value> {
     tracing::info!(
-        cache = crate::http_cache::Slot::availability(cfg),
+        cache = crate::http_cache::Slot::availability(cfg, "catalog"),
         "Catalog disk cache configuration"
     );
     let relay_slot = crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
@@ -391,8 +394,8 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
     if let Some(slot) = relay_slot {
         let metadata = crate::http_cache::Metadata::from_relay_headers(
             &response.headers,
-            response.cache_delay(),
-            true,
+            response.catalog_cache_age(),
+            Some(cfg.catalog_cache_ttl_seconds),
         );
         tracing::info!(
             cache = "relay_response",
@@ -497,8 +500,9 @@ pub(crate) async fn load_json_cached(
                 }
                 let metadata = crate::http_cache::Metadata::from_catalog_headers(
                     response.headers(),
-                    started.elapsed(),
+                    std::time::Duration::ZERO,
                     Some(&entry.metadata),
+                    slot.as_ref().map_or(0, |s| s.catalog_ttl),
                 );
                 tracing::info!(
                     cache_policy = crate::http_cache::Metadata::policy_label(
@@ -529,28 +533,8 @@ pub(crate) async fn load_json_cached(
                     .error_for_status()
                     .map_err(reqwest::Error::without_url)
                     .context(LoadStage::Headers)?;
-                let metadata = if response.status() == reqwest::StatusCode::OK {
-                    crate::http_cache::Metadata::from_catalog_headers(
-                        response.headers(),
-                        started.elapsed(),
-                        None,
-                    )
-                } else {
-                    None
-                };
-                tracing::info!(
-                    cache = if slot.is_some() {
-                        "enabled"
-                    } else {
-                        "unavailable"
-                    },
-                    cache_policy = crate::http_cache::Metadata::policy_label(
-                        response.headers(),
-                        metadata.as_ref()
-                    ),
-                    http_status = response.status().as_u16(),
-                    "Catalog origin response cache policy"
-                );
+                let status = response.status();
+                let headers = response.headers().clone();
                 let body_started = std::time::Instant::now();
                 let bytes =
                     crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
@@ -561,6 +545,27 @@ pub(crate) async fn load_json_cached(
                     "Catalog response body complete");
                 // Only complete, valid JSON catalogs reach persistent storage.
                 let document = parse_document(&bytes)?;
+                let metadata = if status == reqwest::StatusCode::OK {
+                    crate::http_cache::Metadata::from_catalog_headers(
+                        &headers,
+                        std::time::Duration::ZERO,
+                        None,
+                        slot.as_ref().map_or(0, |s| s.catalog_ttl),
+                    )
+                } else {
+                    None
+                };
+                tracing::info!(
+                    cache = if slot.is_some() {
+                        "enabled"
+                    } else {
+                        "unavailable"
+                    },
+                    cache_policy =
+                        crate::http_cache::Metadata::policy_label(&headers, metadata.as_ref()),
+                    http_status = status.as_u16(),
+                    "Catalog origin response cache policy"
+                );
                 if let (Some(slot), Some(metadata)) = (&slot, metadata) {
                     slot.write(Some(crate::http_cache::Entry {
                         metadata,

@@ -22,6 +22,7 @@ type DownloadKey = (
     crate::network::HttpPolicy,
     Option<std::path::PathBuf>,
     bool,
+    u64,
     Option<String>,
 );
 type Document = Arc<serde_json::Value>;
@@ -72,6 +73,7 @@ impl Downloads {
             cfg.transport(),
             cfg.http_cache_directory.clone(),
             cfg.http_cache_enabled,
+            cfg.catalog_cache_ttl_seconds,
             cfg.discovery_relay.as_ref().map(|r| r.key.clone()),
         );
         let cell = {
@@ -358,7 +360,7 @@ pub(super) async fn price_source<'a>(
         let prices=discovery.prices;
         tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing, prices = prices.len(),
             disk_hits, process_hits, shared, network_initializations,
-            disk_cache = crate::http_cache::Slot::availability(&source.config),
+            disk_cache = crate::http_cache::Slot::availability(&source.config, "pricing"),
             skipped_embedded = discovery.evidence.skipped_embedded,
             elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
         if prices.is_empty() {

@@ -296,10 +296,12 @@ and [the runtime architecture](docs/architecture.md).
   retain estimates; authored tool description overrides still apply last.
 - `src/http_cache.rs` persists remote catalogs and header-supported derived
   pricing estimates under existing treasury `state_dir/http-cache/`. Respect
-  `http_cache_enabled=false`, network/transport scope, HTTP freshness and validators;
+  `http_cache_enabled=false`, network/transport scope and validators;
   never persist payment challenges or serve stale data on origin failures. Catalogs
-  without explicit freshness default to 24 hours with an INFO fallback-TTL log;
-  no-cache/max-age=0 still require validation and no-store is honored. Private and
+  use provider/source `catalog_cache_ttl_seconds` (default 86400, zero disables
+  catalog persistence) regardless of origin freshness/no-store/no-cache. Log
+  local_override, TTL and fixed origin policy at INFO. Expired snapshots use
+  validators when available. Pricing retains HTTP freshness and storage rules. Private and
   cookie-bearing responses are cacheable without storing cookies. Ordinary Vary
   uses a versioned, fixed unsigned request-header profile; Vary:* and conditional
   variants are excluded. Relay Vary is excluded because target request headers are
@@ -324,8 +326,8 @@ and [the runtime architecture](docs/architecture.md).
   Every failed remote catalog fetch or failed HTTP/challenge pricing probe can use the
   configured relay once; no origin-error allowlist. Log source, discovery stage,
   fixed failure category and available HTTP status without URLs or upstream prose.
-  Relay cache entries retain separate provenance and origin-derived freshness
-  (including the catalog-only 24-hour fallback when unspecified);
+  Relay cache entries retain separate provenance, local catalog TTL and
+  origin-derived pricing freshness; shared responses cannot renew lifetimes;
   never revalidate through Curl, use outer relay headers or persist challenges.
   Serving initializes wallets before relay catalog I/O; warming denies funding and
   opens only resolved wallets for selected sources. Ordinary managed serving with

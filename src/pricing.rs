@@ -337,7 +337,7 @@ async fn probe_request(
                 let metadata = crate::http_cache::Metadata::from_relay_headers(
                     &response.headers,
                     response.cache_delay(),
-                    false,
+                    None,
                 );
                 result = price_headers(&response.headers, Some(402), metadata);
                 write_slot = relay_slot;

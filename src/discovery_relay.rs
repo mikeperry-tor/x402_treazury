@@ -149,6 +149,9 @@ pub struct Response {
     received: Instant,
 }
 impl Response {
+    pub fn catalog_cache_age(&self) -> std::time::Duration {
+        self.received.elapsed()
+    }
     pub fn cache_delay(&self) -> std::time::Duration {
         self.delay.saturating_add(self.received.elapsed())
     }
@@ -910,6 +913,15 @@ pub(crate) mod tests {
         )
         .unwrap();
         response.received = Instant::now() - std::time::Duration::from_secs(601);
+        assert!(
+            !crate::http_cache::Metadata::from_relay_headers(
+                &response.headers,
+                response.catalog_cache_age(),
+                Some(600)
+            )
+            .unwrap()
+            .fresh()
+        );
         assert!(
             !crate::http_cache::Metadata::from_headers(
                 &response.headers,

@@ -20,7 +20,7 @@ pub(crate) struct Metadata {
     pub stored: u64,
     pub expires: u64,
     #[serde(default)]
-    heuristic: bool,
+    local_override: bool,
     // Ephemeral provenance: never written back as authority to revalidate.
     #[serde(skip)]
     direct_reuse: bool,
@@ -80,29 +80,61 @@ pub(crate) fn discovery_get(http: &reqwest::Client, url: &str) -> reqwest::Reque
 
 impl Metadata {
     pub fn from_headers(headers: &HeaderMap, delay: Duration, old: Option<&Self>) -> Option<Self> {
-        Self::parse(headers, delay, old, false)
+        Self::parse(headers, delay, old)
     }
     pub fn from_catalog_headers(
         headers: &HeaderMap,
         delay: Duration,
         old: Option<&Self>,
+        ttl_seconds: u64,
     ) -> Option<Self> {
-        Self::parse(headers, delay, old, true)
+        if ttl_seconds == 0 {
+            return None;
+        }
+        // Catalog snapshots use local retention, independently of HTTP freshness.
+        // Retain validators and variant identity, never cookies or upstream prose.
+        let mut selected = HeaderMap::new();
+        for name in ["etag", "last-modified", "vary"] {
+            if let Some(value) = old.and_then(|m| m.headers.get(name)) {
+                selected.insert(name, value.parse().ok()?);
+            }
+            if headers.contains_key(name) {
+                selected.remove(name);
+                for value in headers.get_all(name) {
+                    selected.append(name, value.clone());
+                }
+            }
+        }
+        selected.insert("cache-control", "max-age=1".parse().ok()?);
+        let mut metadata = Self::parse(&selected, Duration::ZERO, None)?;
+        metadata.local_override = true;
+        metadata.expires = metadata
+            .stored
+            .saturating_add(ttl_seconds.saturating_sub(delay.as_secs()));
+        tracing::info!(
+            cache_policy = "local_override",
+            ttl_seconds,
+            origin_policy =
+                Self::policy_label(headers, Self::from_headers(headers, delay, None).as_ref()),
+            "Catalog uses configured local cache lifetime instead of origin freshness"
+        );
+        Some(metadata)
     }
-    /// Curl does not expose its effective target request headers. Do not infer
-    /// variant equivalence from its outer paid request or cache those variants.
-    pub fn from_relay_headers(headers: &HeaderMap, delay: Duration, catalog: bool) -> Option<Self> {
+    /// Curl does not expose its effective target request headers.
+    pub fn from_relay_headers(
+        headers: &HeaderMap,
+        delay: Duration,
+        catalog_ttl: Option<u64>,
+    ) -> Option<Self> {
         if headers.contains_key("vary") {
             return None;
         }
-        Self::parse(headers, delay, None, catalog)
+        match catalog_ttl {
+            Some(ttl) => Self::from_catalog_headers(headers, delay, None, ttl),
+            None => Self::from_headers(headers, delay, None),
+        }
     }
-    fn parse(
-        headers: &HeaderMap,
-        delay: Duration,
-        old: Option<&Self>,
-        catalog: bool,
-    ) -> Option<Self> {
+    fn parse(headers: &HeaderMap, delay: Duration, old: Option<&Self>) -> Option<Self> {
         let mut selected = old.map(|m| m.headers.clone()).unwrap_or_default();
         // A validation response supplies a new age observation, not the age of
         // the previous download. Synthesize its receipt Date if omitted.
@@ -205,15 +237,7 @@ impl Metadata {
                     .saturating_sub(response_date.unwrap_or(stored))
             })
         });
-        let heuristic = catalog && explicit.is_none() && !validate;
-        let lifetime = explicit.or(heuristic.then_some(86400));
-        if heuristic {
-            tracing::info!(
-                cache_policy = "heuristic",
-                fallback_ttl_seconds = 86400,
-                "Catalog has no explicit freshness; applying 24-hour cache lifetime"
-            );
-        }
+        let lifetime = explicit;
         let apparent = stored.saturating_sub(response_date.unwrap_or(stored));
         let corrected = age
             .saturating_add(delay.as_secs().saturating_add(1))
@@ -226,7 +250,6 @@ impl Metadata {
         if lifetime.is_none()
             && !selected.contains_key("etag")
             && !selected.contains_key("last-modified")
-            && !catalog
         {
             return None;
         }
@@ -234,7 +257,7 @@ impl Metadata {
             headers: selected,
             stored,
             expires,
-            heuristic,
+            local_override: false,
             direct_reuse: false,
         })
     }
@@ -242,8 +265,8 @@ impl Metadata {
     pub fn policy_label(headers: &HeaderMap, metadata: Option<&Self>) -> &'static str {
         if let Some(metadata) = metadata {
             return if metadata.fresh() {
-                if metadata.heuristic {
-                    "heuristic_fresh"
+                if metadata.local_override {
+                    "local_override"
                 } else {
                     "fresh"
                 }
@@ -333,11 +356,14 @@ pub(crate) struct Slot {
     resource: String,
     source: String,
     limit: usize,
+    pub catalog_ttl: u64,
 }
 impl Slot {
-    pub fn availability(cfg: &crate::catalog::Config) -> &'static str {
+    pub fn availability(cfg: &crate::catalog::Config, kind: &str) -> &'static str {
         if !cfg.http_cache_enabled {
             "disabled_by_config"
+        } else if kind == "catalog" && cfg.catalog_cache_ttl_seconds == 0 {
+            "disabled_by_catalog_ttl"
         } else if crate::qualification::active() {
             "disabled_for_qualification"
         } else if cfg.http_cache_directory.is_none() {
@@ -347,7 +373,10 @@ impl Slot {
         }
     }
     pub fn new(cfg: &crate::catalog::Config, url: &str, kind: &str, limit: usize) -> Option<Self> {
-        if !cfg.http_cache_enabled || crate::qualification::active() {
+        if !cfg.http_cache_enabled
+            || crate::qualification::active()
+            || (kind == "catalog" && cfg.catalog_cache_ttl_seconds == 0)
+        {
             return None;
         }
         let directory = cfg.http_cache_directory.clone()?;
@@ -378,6 +407,17 @@ impl Slot {
                 .ok()?
             )
         );
+        let key = if kind == "catalog" {
+            format!(
+                "{:x}",
+                Sha256::digest(format!(
+                    "local-catalog-v1:{}:{key}",
+                    cfg.catalog_cache_ttl_seconds
+                ))
+            )
+        } else {
+            key
+        };
         // Separate provenance: an ordinary direct-mode cache never crosses policy
         // boundaries. Only explicitly warmed entries target another configured policy.
         let direct_key = format!(
@@ -402,6 +442,7 @@ impl Slot {
                 .clone()
                 .unwrap_or_else(|| "standalone".into()),
             limit,
+            catalog_ttl: cfg.catalog_cache_ttl_seconds,
         })
     }
     pub(crate) fn relay(mut self, identity: &str) -> Self {
