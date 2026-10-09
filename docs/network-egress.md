@@ -139,8 +139,11 @@ separate; the mempool's bounded drain policy is unchanged.
 Stateless MCP HTTP responses use SSE framing with keepalive comments every two
 seconds while awaiting the tool result. These keep the client response connection
 active, not the remote provider's progress timer or payment authority. Client
-whole-tool deadlines remain independent. The qualification reader bounds the
-complete wire body and extracts the terminal JSON response for saved evidence.
+whole-tool deadlines remain independent. Keepalives start when the SSE response
+opens; the pinned SDK's per-request protocol-negotiation path still waits for its
+first protocol message before opening the stream. The installed oMLX initialize
+path is covered by the slow-call interoperability experiment. The qualification
+reader bounds the complete wire body and extracts the terminal JSON response for saved evidence.
 
 The pinned rmcp service has a response drain of two seconds after cancellation or
 five seconds after transport closure. Its `timed out draining in-flight responses`

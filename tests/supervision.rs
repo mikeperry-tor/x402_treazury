@@ -226,7 +226,7 @@ async fn unsigned_child_enforces_auth_refuses_payment_and_drains_on_parent_eof()
         .await
         .unwrap();
     drop(pipe);
-    wait_log(dir.path(), "draining in-flight requests").await;
+    wait_log(dir.path(), "draining accepted work").await;
     assert!(
         child.try_wait().unwrap().is_none(),
         "child abandoned an in-flight request"
@@ -291,7 +291,7 @@ async fn parent_pipe_is_required_and_signal_shutdown_does_not_wait_for_pipe_eof(
     assert!(child.try_wait().unwrap().is_none());
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGTERM) }, 0);
     assert!(exit(&mut child).await.success());
-    assert!(log(dir.path()).contains("draining in-flight requests"));
+    assert!(log(dir.path()).contains("draining accepted work"));
     drop(pipe);
     server.abort();
 }
