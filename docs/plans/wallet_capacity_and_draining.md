@@ -87,9 +87,14 @@ spelling must be pinned with parser/help fixtures before implementation proceeds
 - Validate that an enabled large tier's effective cap permits at least one atomic
   unit above `T`. Enabling the tier alone cannot increase the parent cap.
 - Retention is independently opt-in per tier, with `max_draining_wallets`, default
-  eight when enabled, and `max_retirement_remainder_usdc`, default zero. Parse the
-  latter as a bounded nonnegative integer amount of micro-USDC; existing positive-
-  only funding parsers cannot be reused unchanged. No threshold scales with target.
+  eight when enabled, and `max_retirement_remainder_usdc`, default `"0.01"`
+  (10,000 micro-USDC). Explicit `"0"` opts into zero automatic remainder retirement.
+  Ordinary and large tiers configure these values separately. Each omitted value
+  resolves to its own default; a large tier does not inherit an ordinary-tier
+  override. An operator may explicitly set a larger large-tier retirement limit.
+  Parse the amount as bounded nonnegative integer micro-USDC; existing positive-only
+  funding parsers cannot be reused unchanged. No threshold scales with target or
+  with the minimum payment amount routed to the large pair.
 - Zero draining slots still applies the remainder limit. Configuration must impose
   a finite supported count ceiling chosen from the RPC/freshness measurements in
   validation. Eight is the proposed default, not evidence of acceptable latency.
@@ -111,6 +116,10 @@ future routing/caps and future allocations, but never rewrites a wallet's accept
 funding target, signed authority or history. “Tier membership” means immutable
 stored membership, while spending eligibility uses current enabled configuration.
 A retained large wallet serving a small call still uses its large-tier cap.
+The above-`T` routing threshold does not impose a minimum payment on large-tier
+drainers: any otherwise eligible small payment may use one, whether its remaining
+balance is above or below `T`. This does not make a large active/ready wallet
+eligible for small calls or waive the existing payer-handoff rules.
 
 Use deterministic supported-offer order: choose the first fully valid offer that
 fits current routing and effective-cap policy. Do not shop across offers according
@@ -183,6 +192,11 @@ is either a funded `READY` wallet or an `ALLOCATED` replacement with its existin
 funding job. Bootstrap's two initial jobs are the existing exception. `READY` means
 funding completed, not untouched/full capacity. Draining wallets never become pair
 slots again and acquire no new funding job; their historical funding records remain.
+Every drainer counts against its immutable origin tier's draining limit, including
+after small payments reduce a large-tier remainder below `T`. It is never converted
+to an ordinary-tier wallet, moved between pools or charged to an ordinary draining
+slot. Neither unused slots nor a larger retirement tolerance in another tier can
+be borrowed to bypass its origin tier's bounds.
 
 Use one shared gate per logical profile for both child pools, foreground admission,
 background reconciliation, pair maintenance and retirement. Hold it across query
@@ -382,11 +396,46 @@ pause flag, reset command or approval threshold. Reevaluate through normal
 reconciliation/maintenance cadence and configuration reload/restart paths. Fresh
 balance evidence is required for a new transition, not a historical log entry.
 
-The default limit is zero. That can eventually prevent rotation when all retained
-balances are positive and no smaller calls arrive. Explain this progress tradeoff
-explicitly. Operators can make ordinary authorized calls that fit the balances,
+The default limit is $0.01 per retirement. Positive remainders, including sub-cent
+amounts, remain usable while retention space exists. Under count pressure, an
+eligible remainder at or below $0.01 may retire; a $0.010001 remainder exceeds the
+default limit. This keeps the live wallet count bounded without requiring tiny
+remainders to reach exactly zero. It does not guarantee rotation: if every eligible
+remainder exceeds the limit, the maintenance transition remains blocked.
+Explicit zero tolerance can block rotation whenever only positive remainders
+remain. Explain both progress tradeoffs and cumulative retirement accounting.
+Operators can make ordinary authorized calls that fit the balances,
 raise count/tolerance, or manually retire a drainer. No synthetic paid drain probes,
 age-based retirement or implicit cumulative loss budget are introduced.
+
+### Large-tier remainders and full draining sets
+
+With ordinary target $2 and large target $10, a large active wallet holding $1.40
+cannot cover a $5 request. When the normal promotion conditions are satisfied, the
+large ready wallet takes over and the $1.40 wallet becomes a large-tier drainer.
+A later eligible $0.003 ordinary API call can use that drainer under the shared
+selection/admission rules. Its membership, accounting and draining-slot charge
+remain in the large tier; no transfer or ordinary-tier capacity reservation occurs.
+Cross-tier small-call eligibility is not a guarantee that a particular drainer
+will be selected or eventually reach zero.
+
+If the large draining set is full, consider only the outgoing large-tier wallet
+and eligible large-tier drainers for retirement under the large tier's own limit.
+If none qualifies, block the transition requiring another large draining slot.
+Affordable existing payments, including small calls against enabled large drainers,
+continue, as do independently permitted ordinary-tier maintenance and already-owned
+funding jobs. Do not spill wallets into the ordinary draining set or recursively
+retire ordinary wallets to make room. If both sets are full, evaluate each tier's
+maintenance independently; shared treasury budgets and ownership still apply.
+
+Keep the $0.01 default for both tiers. A remainder below the large pair's routing
+threshold can still fund small calls, so that threshold does not justify automatic
+retirement of larger amounts. For workloads making only expensive calls, small
+remainders may never be consumed. Without sweeping or aggregation, the operator
+must accept more retained wallets, explicitly tolerate larger retirement amounts,
+or accept blocked replacement transitions. Moving wallets between tiers would only
+relocate this constraint. Document this workload tradeoff without promising that
+retention always restores progress.
 
 ### Allocation boundary and existing funding jobs
 
@@ -436,7 +485,7 @@ Persist the fact that a tier entered retained-balance management so removing TOM
 cannot silently restore unlimited automatic retirement of its retained capital.
 For such tiers, disabling/removing retention stops adding drainers (effective count
 zero), keeps existing drainers eligible under current tier/cap policy, and applies
-the current explicit remainder limit, default zero, to future automatic positive
+the current remainder limit, default $0.01, to future automatic positive
 retirements. Display this resolution in offline config policy and runtime status.
 Do not silently delete, freeze or retire existing drainers. Re-enabling uses the
 same identities. Configuration count reductions do not bulk-clean the set.
@@ -520,14 +569,14 @@ untouched ready wallets, active-only admission and retirement on every promotion
 | Destination | Required update and consistency check |
 | --- | --- |
 | `README.md` | Tier and retention opt-ins, wallet-sharing table boundaries, initial versus retained capital, high-cost POST binding and remaining limitations |
-| `docs/configuration.md` | Final TOML names/defaults/ranges, single cap formula, absent/disabled-tier routing, exact route bindings, retained-mode disable semantics, offline resolution policy and rename behavior |
-| `docs/wallet-rotation.md` | Full transition table including spent-secondary repair, generic ready/draining admission, shared gate, evidence distinctions, single retirement tolerance and funding ownership boundary |
+| `docs/configuration.md` | Final TOML names/defaults/ranges, independent per-tier retention overrides with $0.01 default for each, single cap formula, absent/disabled-tier routing, exact route bindings, retained-mode disable semantics, offline resolution policy and rename behavior |
+| `docs/wallet-rotation.md` | Full transition table including spent-secondary repair, generic ready/draining admission, immutable origin-tier count/accounting, small-call use of large drainers, independent full-set behavior and expensive-only workload tradeoff, shared gate, evidence distinctions, single retirement tolerance and funding ownership boundary |
 | `docs/wallet-cli.md` and generated `wallet --help` / `wallet retire --help` | Exact command and maximum-remainder option, exclusive ownership, drainer-only scope, no implicit funding, status terminology and backup/upgrade procedure |
 | `docs/architecture.md` | Logical profile/child membership, one gate, scoped Base views, mutation ordering, maintenance intent and treasury reuse |
 | `docs/agent-sources.md` | Unchanged dynamic profile sharing and principal rules; agents cannot select tiers/author route policy; dynamic fallback uses the same admission and binding behavior |
 | `docs/network-egress.md` | Candidate RPC work/concurrency/count ceiling, exact/conservative anchors, handoff identity, remaining timer/budget inventory; no new whole-work deadline |
 | `docs/cover-traffic.md` | Selected payer remains cover owner across tier/draining paths; one permitted re-challenge and POST limitations |
-| `examples/deployments/servers-managed.toml` | Commented opt-in example with explicit parent cap, large target, retention tolerance, gross budget and initial allocation cost |
+| `examples/deployments/servers-managed.toml` | Commented opt-in example with explicit parent cap, large target, separate ordinary/large retention settings, an optional explicit large-tier tolerance override, gross budget and initial allocation cost; overrides do not change documented defaults |
 | `examples/deployments/agent-sources-managed.toml` | Verify shared dynamic wallet behavior remains accurate; show no automatic per-source tier creation |
 | `examples/deployments/public-payment-demo.toml`, `public-swap-demo.toml`, and `docs/public-swap-demo.md` | Preserve bounded-demo opt-outs and existing authority; do not silently enable large bootstrap or retention |
 | `tests/live/INTEGRATION.md`, `INTEGRATION_REFERENCE.md`, and `integration/SCENARIO_PRESETS.md` | Versioned tier/wallet/generation evidence, repair/POST/retirement assertions and exact run-authority boundaries |
@@ -565,12 +614,15 @@ harness deadlines are not runtime policy.
 | Relay and dynamic fallback | Actual `POST /curl` outer binding; inner GET is not replay permission; same profile ownership and caps; possible-submission marker never reset; no extra paid probes |
 | Candidate availability | Optional drainer RPC failure/staleness does not block independently valid active admission; unknown balances never become zero; complete-view assertions remain; no mixed endpoint or invented anchors |
 | Evidence divergence | Confirmed/latest differ in both directions; admission uses conservative amount, retirement waits locally; persisted exact amount matches its anchor; unrelated safe wallet still pays; unexpected later credits do not rewrite retirement events |
-| Retention limits | Zero/default/max/invalid counts, reduced count without growth or bulk cleanup; positive remainders retained with room; exact remainder limit and one atomic unit above; unavailable/busy wallets excluded from eviction |
+| Retention limits | Zero/default/max/invalid counts, reduced count without growth or bulk cleanup; omitted remainder limit resolves to 10,000 micro-USDC; sub-cent and exactly $0.01 remainders retained with room and eligible for retirement under pressure; $0.010001 exceeds default; explicit zero blocks positive retirement; unavailable/busy wallets excluded from eviction |
+| Independent tier retention policy | Omitted settings default independently to eight slots/$0.01; ordinary override does not alter large defaults and large override does not alter ordinary policy; changing targets/route threshold cannot scale tolerances or move wallet membership |
+| Small calls on large drainers | $2/$10 targets, $1.40 outgoing large remainder and later $0.003 eligible call; same wallet/pool, large-tier slot charge, caps and payer binding; no ordinary slot consumption, transfer or extra funding; works with ordinary draining set full and with a large drainer whose balance still exceeds `T` |
+| Full large/both draining sets | Retire only within the affected tier's configured tolerance; above-limit obstruction blocks only the required transition; small payments and independently permitted ordinary maintenance/owned funding continue; no borrowed slots, cross-tier eviction, reclassification or recursive retirement; expensive-only workload stays bounded without guaranteed progress |
 | Retirement accounting | No retirement with unresolved work or stale evidence; one pressure retirement per transition, atomic event/role/outbox; no loss on denied allocation; repeated small retirements visible; legacy unknowns and warning suppression |
 | Owned funding jobs | Promotion fills final draining slot but its replacement remains fundable; later retention pressure cannot require a second retirement; current monetary/qualification restrictions still enforced; competing worker creates no duplicate slot |
 | Maintenance resumption | Durable bounded intent, concurrent needs coalesce within one generation, fresh evidence after restart/spending/policy change, invalidated/satisfied need discarded; accepted intent survives cancelled waiter without API replay; auto-fund-disabled/recovery paths only report it; no stale intent grants API or funding authority; no mutable pause reset required |
 | Manual retirement | Exclusive lock while serving stopped, exact drainer/profile identity, explicit maximum amount, disabled-tier administration, pending/active/ready rejection, cancellation and atomic event; no signing/transfer/allocation |
-| Lifecycle changes | Large remove/re-enable restores same identity; ordinary-only routing restored; retention disable keeps old drainers eligible with no growth and zero default loss limit; threshold changes and new profile name cannot adopt old state/reset budgets |
+| Lifecycle changes | Large remove/re-enable restores same identity; ordinary-only routing restored; retention disable keeps old drainers eligible with no growth and $0.01 default remainder limit; explicit zero remains effective when configured; threshold changes and new profile name cannot adopt old state/reset budgets |
 | Child policy resolution | Funding, recovery, status and qualification resolve child membership rather than display suffix/name; disabled-child uncertain operations remain recoverable; source/listener bindings retain sharing |
 | Cancellation/crash recovery | Before/after admission, signed journal, promotion, repair, quote reservation, funding confirmation and retirement; accepted work retains ownership/exact bytes; no replay or orphan outbox |
 | Funding limits | Combined tiers, UTC rollover, refunds, immutable accepted outputs, unsigned outages and durable attempts; zero-new-funding checked before setup and every supervised reopen |
