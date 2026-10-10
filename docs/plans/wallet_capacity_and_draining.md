@@ -69,8 +69,17 @@ Proposed configuration concepts, with final TOML names to settle before coding:
   not accidentally reject every large payment, nor may enabling the large tier
   silently remove all target limits. Validate contradictory/unusable settings.
 - Retained-balance mode is independently opt-in, with an explicit maximum draining
-  wallet count per tier. This preserves old deployments' address-lifetime policy.
-  A configured zero retains existing immediate retirement.
+  wallet count per tier, provisionally eight. These are partially spent wallets,
+  not additional funded hot spares. Each tier still has only one active and one
+  ready wallet. This preserves old deployments' address-lifetime policy when the
+  mode is absent. Within retained-balance mode, zero draining slots still enforces
+  the configured retirement-loss limits; it must not bypass them.
+- Configurable `retirement_soft_limit_usdc` and `retirement_hard_limit_usdc` per
+  tier govern the confirmed remainder made unavailable by each automatic
+  retirement. Require `0 <= soft <= hard`, using integer USDC atomic units. These
+  names are proposed. Omitted limits in retained-balance mode resolve to zero;
+  positive loss tolerance requires explicit configuration. Limits do not scale
+  automatically with the funding target. See the retirement policy below.
 - Inherit existing conversion-overhead and ZEC/fee safeguards initially. Any later
   tier override must be explicit and must preserve treasury-wide ceilings.
 
@@ -139,6 +148,8 @@ Recommended selection order:
 5. Promote only a verified sufficient spare in that tier. Commit the previous
    active's new role, generation, replacement allocation/outbox and payment
    admission under the same existing ownership and transaction guarantees.
+   If the retirement-loss policy prevents replacement funding, use the separate
+   existing-slot admission path below instead of requiring promotion to pay.
 
 Selection of an already-spendable draining wallet must not itself trigger promotion
 or refill. All selection and admission paths revalidate enabled profile/tier,
@@ -187,26 +198,137 @@ Once signed/journaled, no challenge refresh or second-wallet attempt is permitte
 | --- | --- | --- |
 | `ALLOCATED` to `READY` | Existing canonical funding readiness | Existing credit/funding journal behavior |
 | `READY` to `ACTIVE` | Bootstrap or permitted promotion | Tier generation and replacement ownership remain atomic |
-| `ACTIVE` to `DRAINING` | Promotion with a positive confirmed remainder and retention enabled | Preserve key, balance provenance and every liability; no refill for the old wallet |
-| `ACTIVE` to `RETIRED` | Existing retirement mode, or proven empty wallet with no liabilities | Retain all historical records |
+| `ACTIVE` to `DRAINING` | Promotion with a remainder to retain under the count and loss policy | Preserve key, balance provenance and every liability; no refill for the old wallet |
+| `ACTIVE` to `RETIRED` | Existing legacy retirement mode, proven empty wallet, or permitted automatic remainder retirement | Retain all historical records; journal any positive remainder |
 | `DRAINING` to `DRAINING` | New eligible payment or reconciliation | Reserve and resolve on the same wallet |
-| `DRAINING` to `RETIRED` | Fresh canonical zero balance and no unresolved liabilities, or explicit operator retirement | Stop new admissions, retain funds/keys and recovery obligations |
+| `DRAINING` to `RETIRED` | Fresh canonical balance and no unresolved liabilities under the count/loss policy, or explicit operator retirement | Stop new admissions, retain funds/keys and recovery obligations; journal any positive remainder |
 | `RETIRED` to spendable | Never automatically | Historical retirees are not reactivated by migration |
 
 Do not equate unavailable balances, busy reservations, seller receipts, or missed
 RPC responses with emptiness. A nonzero remainder is not automatically dust; future
-APIs may accept it. Explicit retirement of nonzero balances must report that they
+APIs may accept it. Retirement of nonzero balances must report that they
 remain owned but unavailable for new payments. It neither deletes funds nor spends
 them. A disabled profile/tier blocks new admissions while reconciliation continues.
 
 The draining count protects bounded admission RPC work and retained live candidate
-state. Recommended initial cap behavior: stop a promotion that would exceed it,
-while continuing eligible payments and reconciliation. Return a specific capacity
-reason; do not silently evict a funded wallet or discard an active operation.
-Operators can drain, raise the bound explicitly, or explicitly retire a remainder.
-This can reduce availability when no suitable small calls arrive and must be shown
-in status/help. Decide the numeric default before implementation; test it as a
-resource bound, not as an elapsed-work deadline.
+state. Propose eight draining slots per tier, configurable and subject to measured
+RPC/freshness validation. With both tiers enabled, that means at most sixteen
+draining wallets plus four active/ready wallets, excluding in-progress replacement
+allocations and historical retirees. It is not eight replacement spares. Historical
+liability reconciliation remains complete regardless of this live-candidate bound.
+
+### Soft and hard retirement loss limits
+
+Define retirement loss as the fresh confirmed USDC balance removed from future
+payment eligibility. Keys and funds remain owned; this is operationally stranded
+capital, not an on-chain transfer, destruction of funds, or a realized network fee.
+Do not promise automatic recovery of retired funds. A wallet with unresolved
+liabilities is ineligible for automatic loss-based retirement: subtracting its
+reservations must not make its full balance look like an inexpensive remainder.
+
+Use the soft limit as the routine-retirement tolerance and the hard limit as the
+maximum tolerance when draining slots are full. This gives the thresholds distinct
+behavior without introducing an approval pause between them:
+
+| Confirmed remainder | At promotion with room to retain it | When a draining slot must be freed |
+| --- | --- | --- |
+| Zero, with no liabilities | Retire without a loss warning | Retire without a loss warning |
+| Positive and at or below soft | Retire automatically with INFO as expected residual loss | Retire automatically with INFO as expected residual loss |
+| Above soft and at or below hard | Retain for later payments | May retire automatically with WARN explicitly identifying soft-limit exceedance |
+| Above hard | Retain for later payments | Do not retire automatically; consider another eligible wallet, otherwise pause new funding for this tier while existing slots remain spendable |
+
+Apply routine soft-limit retirement when an active wallet leaves the pair, or
+after a draining wallet's payment canonically resolves and leaves a small remainder.
+Do not retire active/ready wallets merely because their current available balance
+is small. No age timer, extra paid probe, or synthetic purchase is needed.
+
+At a full count, consider the outgoing active wallet and existing draining wallets
+in that tier. Choose the smallest fresh confirmed remainder among eligible wallets,
+with a deterministic identity tie-break. Retiring the outgoing wallet can avoid
+adding a new draining entry; retiring an older one can retain a more useful outgoing
+balance. At most one positive-balance retirement is needed for a normal promotion.
+Never retire a wallet reserved for the current payment, or one with unresolved
+work, to make room. Configuration reductions below the existing draining count
+must not trigger a bulk-loss cleanup: retain existing ownership, stop growing the
+set, and expose the excess until ordinary eligible retirements reduce it.
+
+Count pressure alone does not block if an eligible retirement fits the hard limit.
+If freeing capacity would require a retirement above the hard limit, expose a typed
+retirement-loss funding pause for that tier (the affected wallet set), not a payment
+ban or treasury-wide pause. A single above-hard wallet does not trigger a pause
+while space or a cheaper eligible retirement remains. Existing eligible payments,
+other tiers' authorized funding, and reconciliation continue. Unavailable
+or stale evidence and unresolved liabilities retain their existing typed safety
+failures; a monetary tolerance does not waive them. Operators can drain balances,
+raise the count or loss limit explicitly, or explicitly retire a chosen remainder.
+
+For illustration, with soft=$0.01 and hard=$0.10, a $0.008 remainder retires with
+INFO, a $0.06 remainder is kept while space remains but may retire with WARN when
+full, and a $0.12 remainder cannot be automatically retired. If it is the cheapest
+eligible retirement needed to free capacity, new funding for that tier pauses;
+payments that fit an existing slot can still proceed. These are example
+tolerances, not defaults or an assertion that the losses are negligible.
+
+### Spending existing slots during a funding pause
+
+Allow payment admission against any existing eligible active, ready or draining
+slot in the selected tier, subject to the same caps, routing scope, fresh evidence,
+liabilities and payer/transport binding. A payment must fit a single wallet; balances
+are not aggregated. Prefer the normal draining/active selection order, then an
+already-funded ready wallet when promotion would require forbidden retirement or
+replacement funding. A loss pause does not enable small calls on the large
+active/ready pair or override the ordinary tier-routing policy.
+
+This requires an explicit existing-slot admission path: it must reserve and journal
+against the selected wallet without forcing promotion, retirement, new allocation
+or a replacement outbox. The ready wallet can stay in its existing slot while being
+spent; status must show its actual available capacity rather than imply it remains
+a fully funded untouched spare. Do not promote or allocate merely because it was
+used. Extend all ready-wallet reconciliation and role assumptions to support its
+pending authorizations and partial or zero confirmed balance. Existing active
+liabilities remain reserved and do not prevent independently affordable admission
+on another slot; they still cannot authorize promotion or new funding.
+
+Enforce the tier funding pause in both foreground allocation and background funding
+paths before any new funding reservation or preparation. Unreserved queued work
+waits without acquiring new spending authority. Already reserved, prepared or
+possibly submitted work retains its exact ownership and ordinary completion/recovery
+obligations; do not abandon it or interpret the pause as cancellation authority.
+The transition initiating funding must establish its permitted slot/retirement
+capacity atomically so concurrent workers cannot bypass the limit.
+
+Re-evaluate using fresh canonical evidence after spending/reconciliation or an
+explicit policy change. Resume normal authorized replacement funding when space
+exists or an eligible retirement fits the hard limit; do not require a restart or
+manual reset. Persist enough role, loss and funding-job state to reconstruct the
+pause after restart, but never treat a persisted balance as fresh resumption proof.
+Report the funding reason separately from current per-wallet spending capacity.
+
+### Durable loss accounting
+
+Per-wallet limits do not bound cumulative loss: one hundred $0.10 retirements can
+strand $10. Record each retirement's wallet/tier, canonical balance anchor, amount,
+reason, applicable limits and time in the same store transaction as its role change
+and any associated promotion/outbox. Admission rechecks the limits and evidence
+inside that transaction. Emit INFO for committed positive retirements at or below
+soft, and WARN for committed above-soft retirements permitted under capacity
+pressure, with sanitized amounts/reasons. Neither tier of logging precedes commit.
+Use the durable event for status after crashes. Bound repeated loss/funding-pause
+warnings with explicit suppression counts, not by dropping accounting.
+
+Report cumulative stranded USDC and retirement count per tier/profile and treasury,
+with a breakdown for above-soft retirements. Accounting survives restarts, renames
+and config changes. Do not subtract it from gross funding history, count it as an
+API fee, or let it replenish any funding budget. Historical unclassified retirements
+remain visibly unknown rather than being reported as zero loss. Later unexpected
+credits do not rewrite the original retirement event or reactivate the address.
+
+An optional cumulative automatic-retirement budget could additionally cap repeated
+small losses, but is not enabled implicitly by these per-wallet limits. If added,
+it needs an explicit scope/period, durable accounting and separate typed exhaustion
+reason. This first version records cumulative loss without adding another default
+progress gate. Explicit manual retirement above the hard limit is a separate
+operator action, never an automated response to a failed admission.
 
 Do not introduce age-based automatic retirement, fresh whole-sweep deadlines,
 reconciliation wallet-count deadlines, or timers renewed by unrelated progress.
@@ -229,11 +351,18 @@ under existing treasury ownership; one tier's unsigned outage should not prevent
 independent eligible work, while uncertain treasury mutation retains its existing
 wider safety scope.
 
+Loss-based retirement attached to a promotion commits only if that promotion is
+otherwise authorized. Validate replacement funding restrictions and permits before
+retiring a positive balance; a denied allocation must not strand funds as a side
+effect. Standalone retirement of a canonically resolved draining remainder never
+allocates a replacement or changes another wallet's funding authority.
+
 Preserve zero-new-funding restrictions before setup and every supervised reopen.
-Already-spendable draining selection can be read/admit-only, but promotion still
-includes replacement allocation and therefore retains its current funding gate.
-Separating promotion from allocation would be a distinct policy change with its
-own design and tests. Recovery/admin commands never bootstrap an absent large
+Existing-slot admission performs no allocation or preparation and cannot bypass
+payment qualification authority. Promotion with replacement allocation retains
+its current funding gate; existing-slot service does not weaken that gate. Test
+this path explicitly under zero-new-funding restrictions and preserve old started
+runs' observation-only behavior. Recovery/admin commands never bootstrap an absent large
 pair, allocate a replacement, or acquire a new funding permit.
 
 Removing or disabling a tier prevents new starts but leaves exact signed bytes,
@@ -266,7 +395,7 @@ response grants permission to repeat financial work.
 | Area | Required work |
 | --- | --- |
 | `src/rotation/config.rs`, deployment config and assignment | Parse/validate tier and retention settings; preserve sharing boundaries and cap semantics; offline resolved configuration |
-| `src/rotation/store.rs`, `store/allocation.rs`, `store/funding.rs` | Membership migration, role constraints, selection/admission, atomic transitions, bounded draining capacity, funding ownership |
+| `src/rotation/store.rs`, `store/allocation.rs`, `store/funding.rs` | Membership migration, role constraints, selection/admission, atomic transitions, draining capacity and loss limits, durable retirement accounting, funding ownership |
 | `src/rotation/manager.rs`, `src/rotation/error.rs` | Profile coordinator, typed selection outcomes, freshness and cap checks, candidate handoff |
 | `src/payment.rs`, `src/network.rs`, cover integration | One bounded re-challenge with the actual selected payer; unchanged signed-attempt and isolation rules |
 | `src/rotation/base.rs` and transport | Query eligible wallet balances while reconciling all historical liabilities; preserve coherent anchors and bounded concurrency |
@@ -276,8 +405,9 @@ response grants permission to repeat financial work.
 | README, wallet/config guides, examples, architecture and network inventory | Explain allocation cost, routing threshold, POST limits, retirement tradeoffs and unchanged qualification limits |
 
 Status should distinguish configured targets/caps, observed confirmed balances,
-outstanding liabilities, freshness, pair readiness, draining count/cap and why a
-promotion or payment cannot proceed. Never sum all tier balances and present the
+outstanding liabilities, freshness, pair readiness, draining count/cap, soft/hard
+loss limits, cumulative stranded amounts and why a promotion or payment cannot
+proceed. Never sum all tier balances and present the
 sum as the maximum payable request. Retired and disabled capacity must not appear
 as active spendable capacity. Keep ordinary logs sanitized and bounded.
 
@@ -296,7 +426,11 @@ Assert forbidden I/O and mutations as well as expected results.
 | Unknown or changing price | Candidate handoff reaches correct transport; one GET/HEAD re-challenge only; changed amount/requirements revalidated; POST never automatically replayed |
 | Concurrent admissions | No double reservation, duplicate replacement or cap bypass; stable identity under parallel tier/draining calls; shared listeners observe the same state |
 | Pending liability | No false depletion/promotion, no release from seller response or unavailable nonce; other eligible draining capacity remains independently accountable |
-| Retention bound | Boundary and overflow, tiny positive remainder, explicit retirement, zero-balance canonical retirement; no hidden eviction or allocation |
+| Retention bound | Default/effective count, zero slots, boundary and overflow, tier scope, count reduction without bulk retirement, smallest eligible remainder selection |
+| Retirement loss limits | Zero/equal/invalid limits; exact soft/hard and one atomic unit above each; at/below-soft retirement logs INFO; above-soft retirement only under pressure logs WARN; above-hard pauses only affected-tier new funding; explicit manual retirement |
+| Service during loss pause | Independently sufficient active/ready/draining slots still pay, including partially spent ready slots; no forced retirement, allocation, preparation or outbox; no cross-tier routing bypass; pending liabilities preserved; other tier funding unaffected |
+| Funding pause recovery | Foreground/background race, queued unreserved work, already committed funding recovery, restart reconstruction, fresh-evidence automatic resumption after spending; no stale saved balance or log message grants authority |
+| Retirement safety and accounting | No retirement with pending liabilities or stale/unknown balance; full confirmed balance measured; no loss on denied promotion; atomic events/roles/outbox; concurrent eviction; cancellation/restart; repeated small losses visible; legacy unknowns and bounded WARN suppression |
 | Stale evidence and RPC failure | Preserve useful historical work; reject stale admission; no mixed anchors, fabricated zero or timer renewed by unrelated progress |
 | Cancellation and restart | Surviving accepted store work, exact signed bytes and liabilities, one outbox, no orphan ownership or replay after lost response |
 | Funding budget/recovery | Combined tier limits, rollover, refunds, accepted quote targets, unsigned outages, durable attempts and zero-new-funding all unchanged |
@@ -321,23 +455,27 @@ operator authority; preserve existing deferred acceptance limits.
 
 ## Delivery sequence and decisions
 
-1. Settle configuration names, tier ceiling semantics, draining count/default and
-   explicit nonzero retirement behavior. Confirm the stable threshold and eager
+1. Settle configuration names, tier ceiling semantics, provisional eight-slot
+   draining default and soft/hard loss policy. Confirm the stable threshold and eager
    bootstrap interpretation. Keep these decisions visible in user documentation.
 2. Implement durable tier membership and role migration with legacy/restart tests.
    Prove old pool identities and financial histories remain unchanged.
 3. Implement selected-candidate handoff and transport binding, including changed
    challenges and non-GET limitations. Establish this before advertising routing.
-4. Implement bounded draining selection and atomic promotion/retirement, initially
-   for the ordinary tier, with concurrency, uncertainty and cancellation coverage.
+4. Implement bounded draining selection, configurable loss limits, durable loss
+   accounting, atomic promotion/retirement and existing-slot service during tier
+   funding pauses, initially for the ordinary tier, with concurrency, uncertainty
+   and cancellation coverage.
 5. Add the optional large pair, authority validation, bootstrap/funding integration,
    cross-tier draining selection, and configuration lifecycle handling.
 6. Update status, admin/backup, qualification evidence and maintained guides. Run
    the focused matrix and final repository checks. Keep unfinished modes disabled.
 
 Recommended first version: fixed targets, two independent pairs within each
-existing profile, deterministic selection from bounded draining balances, and no
-automatic retirement of positive balances. The principal remaining tradeoff is
-availability when retained-wallet capacity fills; explicit blocking is predictable
-and preserves funds, whereas automatic positive-balance retirement would require
-a separately documented operator policy.
+existing profile, deterministic selection from bounded draining balances, and
+explicit configurable soft/hard loss tolerances. Small accepted losses permit
+progress with INFO and durable accounting. Above-soft losses are permitted only
+under slot pressure and log WARN. An otherwise required retirement above the hard
+tolerance pauses new funding for that tier while affordable existing-slot payments
+continue. Existing financial, freshness and ownership safeguards remain independent
+and authoritative.
