@@ -136,7 +136,7 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
                 .contains("Per-call USDC estimate unavailable")
         );
         assert!(tool.description.contains("Original credit conditions."));
-        assert!(tool.description.contains("configured 0.014 USDC/credit"));
+        assert!(tool.description.ends_with(" [conf]."));
         assert!(!tool.description.contains("Estimated cost:"));
     }
     let logs = String::from_utf8(writer.0.lock().unwrap().clone()).unwrap();
@@ -165,10 +165,7 @@ async fn privacy_subsets_inherit_conversion_despite_instruction_overrides() {
                 "{}",
                 tool.name
             );
-            assert!(
-                tool.description
-                    .contains("payment challenge is authoritative")
-            );
+            assert!(tool.description.ends_with(" [conf]."));
             assert!(
                 !tool
                     .description

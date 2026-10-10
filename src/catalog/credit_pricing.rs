@@ -42,10 +42,7 @@ impl CreditPricing {
     }
     pub(super) fn describe(&self, metadata: &Value) -> String {
         let rate = self.rate().expect("validated credit pricing");
-        let provenance = format!(
-            " [spec credits × configured {} USDC/credit; estimate, payment challenge is authoritative].",
-            amount(rate as u128)
-        );
+        let provenance = " [conf].";
         match self.estimate(metadata, rate) {
             Some(line) => format!("Estimated cost: {line}{provenance}"),
             None => {
