@@ -3,479 +3,619 @@
 ## Objective and status
 
 Draft implementation plan. Retain useful balances after rotation and optionally
-provide a separate large-capacity Base USDC wallet pair under an existing managed
-wallet profile. Ordinary calls continue using small wallets; expensive calls have
-explicitly funded capacity without increasing every wallet's target. This plan
-does not implement the feature or authorize funded execution.
+provide a separate large-capacity Base USDC pair under an existing managed wallet
+profile. Ordinary calls use ordinary capacity; expensive calls have explicitly
+funded capacity without increasing every wallet's target. This document plans the
+feature; it does not implement it or authorize funded execution.
 
-The proposed architecture reuses double buffering for each capacity tier and adds
-a bounded set of draining wallets. It avoids an unrestricted wallet scheduler.
-Funding amounts remain deterministic in this phase. Amount randomization, sweeping
-change, topping up old addresses, and combining wallets into one payment are out
-of scope. Larger wallets and longer address use have privacy costs; neither tiers
-nor retained balances establish unlinkability.
+Use ordinary and optional large child pools, a bounded draining set, one generic
+wallet admission path, and explicit pair-maintenance transitions. Payment
+eligibility and permission to allocate a replacement are separate decisions.
+Positive balances are retained while space exists. One explicit retirement limit
+allows bounded remainder retirement under count pressure. There is no routine
+positive-balance retirement threshold or separately persisted funding-pause switch.
 
-## Existing implementation
+Funding targets remain deterministic. Amount randomization, sweeping change,
+topping up old addresses, combining wallets into one payment, and an unrestricted
+wallet scheduler remain outside this version. Larger wallets and longer address
+use have privacy costs; neither tiers nor retained balances establish unlinkability.
+High-cost POST support requires an operator-declared initial tier binding and a
+sufficient initial payer; funding a large pair alone cannot route every unknown
+POST transparently.
 
-- `src/rotation/config.rs` defines the managed funding target, maximum accepted
-  funding output, API cap, and historical target-based payment ceiling.
-- `src/rotation/store.rs` has one `ACTIVE` and one `READY` wallet per pool, enforced
-  by partial unique indexes. Promotion retires the previous active, activates the
-  spare, and allocates its replacement in one durable transaction. Admission also
-  compares the expected wallet and pool generation before reserving a payment.
-- `src/rotation/manager.rs` validates challenges, obtains canonical balance and
-  nonce evidence, admits under a pool gate, and journals signed authorization
-  before submission. Pending liabilities cannot trigger promotion.
-- `src/payment.rs` selects a payer before the initial HTTP request. The transport
-  is bound to that address. A pre-signing payer change permits at most one new
-  unsigned GET/HEAD challenge; other methods receive a payer-change error.
-- `src/rotation/store.rs` currently excludes retired balances from admission while
-  retaining their historical authorization reconciliation. Its role CHECK constraint
-  excludes `DRAINING`; this is a schema change, not merely another selection query.
-- `src/deployment.rs`, `src/deployment/bootstrap.rs`, `src/rotation/funding.rs`, and
-  `src/wallet_cli.rs` share managed setup, bootstrap, supervision and recovery paths.
+## Existing implementation and dependency boundaries
 
-Existing financial and network contracts remain authoritative. See
-[wallet rotation](../wallet-rotation.md), [architecture](../architecture.md),
+- `src/rotation/config.rs` defines funding targets/output ceilings, the API cap,
+  and the compatibility-default target-based payment ceiling.
+- `src/rotation/store.rs` enforces one `ACTIVE` and one `READY` wallet per pool.
+  Current promotion retires the active and allocates a replacement atomically, but
+  commits before returning `PayerChanged`. The new design must explicitly change
+  this ordering rather than assume admission already shares that transaction.
+- `src/rotation/manager.rs` holds the pool gate from reconciliation through signed
+  journaling. `chain_query_inner` deletes unsigned `ADMITTED` rows under this
+  ownership assumption. Serializing database calls alone does not protect a signer
+  between admission and journaling.
+- `src/rotation/base.rs` stores `min(confirmed_balance, latest_balance)` for
+  admission. That conservative amount is not necessarily the exact balance at the
+  confirmed anchor. Retirement accounting needs separately preserved evidence.
+- `src/payment.rs` binds transport to a candidate before the initial request and
+  permits one pre-signing GET/HEAD re-challenge on payer change. Other methods fail
+  before signing. `src/discovery_relay.rs` uses `POST /curl` and shares this limit.
+- Retired wallets retain historical reconciliation but cannot pay. The wallet role
+  CHECK excludes `DRAINING`; migration must preserve foreign keys and encrypted
+  records. Pool and funding-policy resolution currently use names in several paths.
+- Deployment setup, bootstrap, supervised funding, wallet administration and
+  recovery share production paths. Extend them rather than duplicate them.
+
+Keep the pinned x402 2.0.2 signer and exact EIP-3009 accepted-payload validation.
+The signer supplies cryptographic authorization and random nonces; it does not own
+our wallet selection, durable liabilities, retirement or funding policy. Use one
+application cap calculation at selection and authoritative store admission; SDK
+validation remains a distinct protocol check. No new signer or nonce scheduler is
+needed. Permit2/upto support is not added by this plan.
+
+Production funding uses the local 1Click adapter, not the Omni Bridge SDK in
+`reference_repos/Near-One`. Reference checkouts are supporting material, not proof
+of the pinned application's contracts. Cargo pins and reviewed vendor patches
+remain authoritative for Zingolib integration. Keep one serialized treasury owner
+and existing quote, deadline, canonical settlement and recovery checks. This work
+establishes no new external settlement contract and changes no submission margin.
+See [wallet rotation](../wallet-rotation.md), [architecture](../architecture.md),
 [network policy](../network-egress.md), and
 [qualification limits](../testing.md#qualification-status).
 
-## Proposed configuration and authority
+## Configuration, routing and authority
 
-Keep one logical named profile and its existing listener/source bindings. Add an
-optional large tier belonging only to that profile. It must not become a global
-high-value wallet shared across otherwise isolated profiles, or cause automatic
-per-source pool creation. Dynamic sources and paid discovery relays use the same
-effective profile resolution as today.
+Keep one logical named profile and existing listener/source wallet bindings. Its
+large tier never becomes a global high-value wallet or causes automatic per-source
+pool creation. Dynamic sources and discovery relays retain current effective
+profile resolution. Configuration is operator-owned; agent arguments cannot grant
+a tier, wallet, funding permission or larger payment cap.
 
-Define `T` as the ordinary profile's configured `funding_amount_usdc`. Interpret
-"above the minimum of the original pair" as `payment > T`, not the lesser current
-balance, the bridge's current route minimum, or a discovered provider estimate.
-Exactly `T` stays in the ordinary tier. A bridge minimum adjustment must not silently
-move the routing threshold. Profile changes may change the explicit threshold for
-future admissions, but never rewrite existing wallet targets or signed authority.
+The following semantics are settled for this version. Final TOML layout and CLI
+spelling must be pinned with parser/help fixtures before implementation proceeds.
 
-Proposed configuration concepts, with final TOML names to settle before coding:
+- Optional nested `large` configuration has a funding target and maximum accepted
+  output. The target must exceed ordinary `funding_amount_usdc`, denoted `T`.
+- Keep one parent `max_api_payment_usdc`. Do not add a separate large-tier API cap.
+  Apply the existing `limit_payments_to_funding_target` setting to the selected
+  wallet's current tier target: ordinary `T` or large `L`. With the default true,
+  `effective_cap(tier) = min(parent_cap, configured_tier_target)`; with false it is
+  the parent cap. Preserve the existing representation of an unlimited parent cap.
+  Actual admission additionally requires independently verified capacity minus
+  unresolved liabilities. Funding output ceilings never grant payment authority.
+- Validate that an enabled large tier's effective cap permits at least one atomic
+  unit above `T`. Enabling the tier alone cannot increase the parent cap.
+- Retention is independently opt-in per tier, with `max_draining_wallets`, default
+  eight when enabled, and `max_retirement_remainder_usdc`, default zero. Parse the
+  latter as a bounded nonnegative integer amount of micro-USDC; existing positive-
+  only funding parsers cannot be reused unchanged. No threshold scales with target.
+- Zero draining slots still applies the remainder limit. Configuration must impose
+  a finite supported count ceiling chosen from the RPC/freshness measurements in
+  validation. Eight is the proposed default, not evidence of acceptable latency.
+- Inherit conversion-overhead, recovery-attempt and ZEC/fee safeguards. Add no
+  tier-specific budget ledger or fee policy in this version.
 
-- An optional nested large tier with its own funding target, maximum accepted
-  output, and explicit per-payment ceiling. Require its target to exceed `T` and
-  its effective payment range to include at least one amount above `T`.
-- The parent `max_api_payment_usdc` remains an overall ceiling. Effective large-tier
-  authority is the intersection of parent and tier caps, the tier target policy,
-  and actual confirmed capacity minus liabilities. Enabling a tier alone cannot
-  raise the parent cap. Without a tier, preserve existing target-limit behavior,
-  including `limit_payments_to_funding_target=false`.
-- Define target-limit behavior per selected tier: the legacy ordinary target must
-  not accidentally reject every large payment, nor may enabling the large tier
-  silently remove all target limits. Validate contradictory/unusable settings.
-- Retained-balance mode is independently opt-in, with an explicit maximum draining
-  wallet count per tier, provisionally eight. These are partially spent wallets,
-  not additional funded hot spares. Each tier still has only one active and one
-  ready wallet. This preserves old deployments' address-lifetime policy when the
-  mode is absent. Within retained-balance mode, zero draining slots still enforces
-  the configured retirement-loss limits; it must not bypass them.
-- Configurable `retirement_soft_limit_usdc` and `retirement_hard_limit_usdc` per
-  tier govern the confirmed remainder made unavailable by each automatic
-  retirement. Require `0 <= soft <= hard`, using integer USDC atomic units. These
-  names are proposed. Omitted limits in retained-balance mode resolve to zero;
-  positive loss tolerance requires explicit configuration. Limits do not scale
-  automatically with the funding target. See the retirement policy below.
-- Inherit existing conversion-overhead and ZEC/fee safeguards initially. Any later
-  tier override must be explicit and must preserve treasury-wide ceilings.
+Routing has two explicit modes:
 
-For ordinary target `T` and large target `L`, two fully funded pairs allocate
-`2*T + 2*L` USDC before accepted bridge-minimum increases. For example, $2 and $10
-targets allocate $24, rather than the current $4. This is capital allocation, not
-API consumption or total ZEC cost. Report both planned allocation and the maximum
-under configured output ceilings, with conversion and network costs separate.
+| Current configuration | Eligible capacity by amount |
+| --- | --- |
+| No enabled large tier | Preserve ordinary-only legacy authority, including above-`T` payments when target limiting is false and actual ordinary capacity suffices |
+| Enabled large tier, amount `<= T` | Ordinary active/ready/draining plus enabled large-tier draining wallets; never automatically use the large active/ready pair |
+| Enabled large tier, amount `> T` | Large active/ready/draining only; insufficient capacity cannot churn the ordinary pair |
 
-Use eager bootstrap for an enabled large pair in the first implementation. It
-matches the existing ready-pair contract and avoids challenge-triggered funding.
-Ordinary managed serving with auto-funding initializes both enabled pairs before
-discovery; explicit bootstrap does likewise. Existing funded service can continue
-under existing auto-fund-disabled rules. Config inspection, wallet init/sync and
-source registration never acquire funding authority. Lazy large-pair bootstrap is
-a separate possible extension, not an implicit fallback.
+Exactly `T` is ordinary. Bridge minimum increases do not change `T`. Disabling or
+removing the large tier restores ordinary-only routing under current ordinary caps;
+it does not expose disabled large drainers. Changing configured targets changes
+future routing/caps and future allocations, but never rewrites a wallet's accepted
+funding target, signed authority or history. “Tier membership” means immutable
+stored membership, while spending eligibility uses current enabled configuration.
+A retained large wallet serving a small call still uses its large-tier cap.
 
-## Pool structure and durable identities
+Use deterministic supported-offer order: choose the first fully valid offer that
+fits current routing and effective-cap policy. Do not shop across offers according
+to transient balances or retry another offer after a signed attempt. Test mixed
+unsupported, over-cap and cross-tier offers. Catalog prices remain estimates and
+do not select tiers or authorize calls.
 
-Prefer a logical profile mapped to ordinary and optional large child pools, each
-reusing the existing pair lifecycle, rather than making every pair operation
-understand multiple active/ready slots. A coordinator chooses the eligible pool
-and draining wallet before admission. Prove this approach against the migration
-and identity requirements before committing to the representation.
+### Initial tier bindings for POST and other methods
 
-Preserve the existing ordinary pool ID, wallet IDs, sequence numbers, encrypted
-keys and authenticated encryption context. Add explicit durable profile-to-tier
-membership with uniqueness constraints; do not infer authority from generated
-display-name suffixes. A large child must not collide with another configured
-profile, inherit an unrelated pool, or reset gross funding history. Existing
-qualification references to the ordinary pool must still resolve exactly.
+Include operator-owned exact method/path initial tier bindings in this version.
+Implement them in provider/source settings with explicit source overrides, resolved
+through the existing selected catalog. Reject duplicate/conflicting entries,
+unknown routes and large bindings without an enabled large tier. No URL patterns,
+price estimates, agent-supplied overrides or new global wallet selector are needed.
+The binding selects the initial tier within the already resolved profile; it never
+changes owner, cap or amount routing. A large-bound route returning a small-priced
+challenge fails eligibility for that pair rather than silently bypassing routing.
 
-Each tier retains one active, one ready, and at most the existing permitted
-replacement work. Draining wallets have no funding outbox and cannot become active
-or ready again. Keep pair generation separate from any routing/configuration
-revision needed to validate candidate selection. Ordinary payment completion must
-not invalidate unrelated candidate handles merely because a different wallet paid.
+Default initial selection uses the ordinary active; a large binding uses the large
+active. An initial binding is not a guarantee that the chosen address can afford an
+unknown price. POST cannot switch to a ready/draining address after its challenge.
+When the bound wallet remains sufficient and eligible, keep it even if a drainer
+would otherwise be preferred. If it is unsuitable, return the actionable typed
+failure without promotion, allocation, signing or replay. Repeating the same call
+is not a guaranteed remedy. Expose this limitation in help and operator guidance.
 
-## Selection and admission
+Dynamic registration cannot author these bindings. This version confines bindings
+to operator-configured provider/source catalogs, including the relay bootstrap
+provider; dynamically imported routes keep ordinary initial selection. A future
+dynamic-route policy is separate work. Dynamic fallback still uses the same
+challenge-based GET/HEAD selection and generic admission. A relay binding applies
+to the outer `POST /curl`, never the fetched target's method. Define and test this
+at the shared PaidClient boundary. Removing a large tier also requires removing
+its initial bindings; reject the conflicting configuration before mutation.
 
-Validate the complete supported offer and payment authority before selection can
-mutate roles, allocate replacements, reserve funds, or sign. Startup pricing and
-catalog descriptions remain estimates and never authorize or route a payment on
-their own. Multiple offers must retain deterministic supported-offer selection.
+### Initial allocation and startup
 
-For an amount above `T`, select only the large tier; absence, disablement or
-insufficient capacity returns a typed result without churning the ordinary pair.
-For an amount at or below `T`, use ordinary capacity with the draining exception
-below. Do not use the large active/ready pair as an automatic small-payment fallback.
+Two fully funded pairs initially allocate `2*T + 2*L` USDC before accepted bridge
+minimum increases: $2/$10 targets initially allocate $24. Report that initial
+amount and its configured maximum, with conversion/network costs separate.
+Subsequent balances retained in drainers add capital outside the pair; neither
+number is lifetime allocation, current total holdings or API consumption.
 
-Recommended selection order:
+Use eager bootstrap for enabled pairs. Ordinary managed serving with auto-funding
+initializes both pairs before discovery; explicit bootstrap does likewise. A large
+pair's failure can therefore prevent this initial startup, even if the ordinary
+pair is funded. Document and test partial startup rather than imply independent
+startup availability. Existing auto-fund-disabled operation retains its rules.
+Inspection, init/sync and source registration never acquire funding authority.
+Large bootstrap is not triggered by a provider challenge. Lazy bootstrap remains
+outside this version.
 
-1. Consider eligible draining wallets within the logical profile. For a small call,
-   allow both ordinary and large draining balances; for a large call, allow only
-   large draining balances. This lets a $1 remainder from a large wallet be useful.
-   Enforce the current caps and original tier eligibility; a draining wallet's
-   balance is never an independent grant of authority.
-2. Choose the smallest sufficient available draining balance, with a deterministic
-   tie-break on immutable wallet identity. Availability means a fresh confirmed
-   balance minus every unresolved reservation, never the last saved balance.
-3. Otherwise use the selected tier's active wallet if sufficient.
-4. Otherwise apply the existing pending-liability rule before considering a
-   promotion. Insufficiency explained by unresolved active liabilities does not
-   permit promotion or replacement allocation. Choosing another already-draining
-   wallet with independent capacity does not release those liabilities.
-5. Promote only a verified sufficient spare in that tier. Commit the previous
-   active's new role, generation, replacement allocation/outbox and payment
-   admission under the same existing ownership and transaction guarantees.
-   If the retirement-loss policy prevents replacement funding, use the separate
-   existing-slot admission path below instead of requiring promotion to pay.
+## Durable membership and ownership
 
-Selection of an already-spendable draining wallet must not itself trigger promotion
-or refill. All selection and admission paths revalidate enabled profile/tier,
-wallet membership, role, caps, revision and evidence inside the serialized store.
-Use an initial coordinator gate per logical profile if needed for correctness;
-release it before awaiting the signed provider response. Avoid locking two tier
-gates in inconsistent order or serializing unrelated profiles.
+Map each logical profile to its existing ordinary pool and optional large child
+pool through explicit unique durable membership. Preserve ordinary pool/wallet
+IDs, sequence numbers, keys and authenticated encryption context. Generated names
+are display values, not authority or ownership. Child IDs must not collide with
+another profile or reset gross funding history.
 
-No wallet aggregation, Base transfers between these addresses, or replay under a
-different payer is part of this design.
+Resolve funding policy, profile enablement, recovery and qualification through
+that membership everywhere currently relying on `job.pool_name` or pool-name
+lookups. Disabled children retain exact operation ownership for recovery. Keep
+pair generation separate from relevant routing/configuration revision. Payments
+and reconciliation on other wallets must not invalidate an otherwise eligible
+selected wallet merely because another payment completed.
 
-## Challenge and network identity binding
+Each bootstrapped tier has at most one active and one secondary slot. The secondary
+is either a funded `READY` wallet or an `ALLOCATED` replacement with its existing
+funding job. Bootstrap's two initial jobs are the existing exception. `READY` means
+funding completed, not untouched/full capacity. Draining wallets never become pair
+slots again and acquire no new funding job; their historical funding records remain.
 
-This is a prerequisite, not a transport detail to resolve after state changes.
-The initial request often has no known price. It cannot reliably choose the large
-tier or a fitting remainder before receiving a challenge.
+Use one shared gate per logical profile for both child pools, foreground admission,
+background reconciliation, pair maintenance and retirement. Hold it across query
+preparation, RPC evidence acquisition, admission, signing and signed journaling.
+All paths that clear unsigned `ADMITTED` rows must take that same gate. Release it
+before a provider request/response, including the unsigned re-challenge. Reacquire
+and revalidate on return. No nested independently operating child gates, and no
+serialization of unrelated profiles beyond the existing store/treasury ownership.
+The store still rechecks role, membership, policy revision and evidence atomically;
+the gate does not substitute for those checks or accepted-worker cancellation rules.
 
-Replace the current assumption that re-running `candidate()` always discovers
-the desired new active with an explicit internal selected-candidate handoff. It
-must bind logical profile, tier/pool, wallet/address, relevant generation/revision,
-and request context. It is not agent-supplied authority, a balance reservation,
-or permission to reuse a previous challenge. It must survive the single allowed
-GET/HEAD re-challenge without starting again at the ordinary active wallet.
+## Evidence, selection and generic admission
 
-Acquire the new wallet's identity-bound client, obtain a fresh unsigned challenge,
-validate its price and requirements again, and admit against fresh evidence. If
-the challenge changes tier, the selected wallet is no longer suitable, or concurrent
-work invalidates the candidate, return a typed result after the existing bounded
-re-challenge allowance. Do not introduce a payer-selection retry loop.
+Separate historical authorization reconciliation from fresh admission evidence.
+Retain every unresolved liability until existing canonical resolution permits its
+release. Unavailable nonce observations retain exposure. Malformed evidence,
+changed anchors and wrong-chain observations retain their typed safety failures.
+Do not add a whole-sweep deadline or a wallet-count deadline for historical work.
 
-For POST and other methods outside the current GET/HEAD rule, preserve the
-actionable pre-signing payer-change failure. Document that transparent routing of
-an unknown expensive POST is not solved by funding another pair. Optional future
-operator-declared route-to-tier hints would need separate validation and still
-would not authorize a stale challenge or automatic POST replay.
+Extend typed balance evidence to preserve exact confirmed balance and anchor,
+latest balance and anchor, and the conservative admission amount
+`min(confirmed, latest)`. Availability subtracts every unresolved reservation from
+that conservative amount. Saved amounts may guide ordering, never authorize a
+payment or retirement. Store complete provenance without labelling the minimum as
+an exact confirmed balance.
 
-The exact same selected identity must govern provider transport, Tor isolation,
-cover state, signer and durable payment record. Validate direct calls, dynamic
-fallback, and paid discovery relay behavior. A possible relay submission still
-disables shared relay retries as today; routing cannot reset its submission marker.
-Once signed/journaled, no challenge refresh or second-wallet attempt is permitted.
+Retirement uses the exact fresh confirmed balance. If latest evidence differs,
+defer retirement of that wallet until fresh confirmed/latest evidence agrees;
+do not mistake a recent debit for confirmed emptiness or omit a visible incoming
+credit from the retirement decision. This wallet-local condition does not prevent
+otherwise safe admission using the conservative amount. It is not an assertion
+that future unexpected credits are impossible. Never require equality of the two
+balance observations merely to pay.
 
-## Draining and retirement transitions
+### Bounded selection without a global best-fit requirement
 
-| Transition | Required condition | Durable effect |
-| --- | --- | --- |
-| `ALLOCATED` to `READY` | Existing canonical funding readiness | Existing credit/funding journal behavior |
-| `READY` to `ACTIVE` | Bootstrap or permitted promotion | Tier generation and replacement ownership remain atomic |
-| `ACTIVE` to `DRAINING` | Promotion with a remainder to retain under the count and loss policy | Preserve key, balance provenance and every liability; no refill for the old wallet |
-| `ACTIVE` to `RETIRED` | Existing legacy retirement mode, proven empty wallet, or permitted automatic remainder retirement | Retain all historical records; journal any positive remainder |
-| `DRAINING` to `DRAINING` | New eligible payment or reconciliation | Reserve and resolve on the same wallet |
-| `DRAINING` to `RETIRED` | Fresh canonical balance and no unresolved liabilities under the count/loss policy, or explicit operator retirement | Stop new admissions, retain funds/keys and recovery obligations; journal any positive remainder |
-| `RETIRED` to spendable | Never automatically | Historical retirees are not reactivated by migration |
+Within eligible tier scope, use a deterministic draining order: saved available
+amounts sufficient for the offer first, ordered ascending, then remaining drainers,
+with immutable wallet-ID ties. These are ordering hints only. Verify candidates
+against fresh evidence and choose the first sufficient one. Try each candidate at
+most once per selection pass, then the active, then the ready wallet. A verified
+usable bound payer for a non-rechallengeable method takes precedence over draining.
+Re-challenge admission revalidates its selected payer without restarting the search.
 
-Do not equate unavailable balances, busy reservations, seller receipts, or missed
-RPC responses with emptiness. A nonzero remainder is not automatically dust; future
-APIs may accept it. Retirement of nonzero balances must report that they
-remain owned but unavailable for new payments. It neither deletes funds nor spends
-them. A disabled profile/tier blocks new admissions while reconciliation continues.
+Do not require fresh balances for all candidates to prove a global minimum. An
+optional candidate's unavailable/stale balance makes that candidate unavailable;
+a separately verifiable active/ready wallet may still pay. Preserve diagnostics
+and do not turn partial observation into proof of emptiness, complete inventory
+or retirement permission. Invalid shared chain evidence remains an integrity
+failure, not an ignorable candidate miss.
 
-The draining count protects bounded admission RPC work and retained live candidate
-state. Propose eight draining slots per tier, configurable and subject to measured
-RPC/freshness validation. With both tiers enabled, that means at most sixteen
-draining wallets plus four active/ready wallets, excluding in-progress replacement
-allocations and historical retirees. It is not eight replacement spares. Historical
-liability reconciliation remains complete regardless of this live-candidate bound.
+Implement explicitly scoped balance queries/views and store updates for this path.
+Current `apply_chain_view` requires every non-retired wallet in a view; do not remove
+that completeness assertion globally. A partial view must name its observed wallet
+set, update only those balances, retain all other liabilities and carry compatible
+canonical anchors. Never combine balances across endpoints to fabricate one view.
+Retain independently anchored historical resolution evidence under existing rules.
+Keep bounded RPC concurrency and bound one pass by the configured live candidate
+set; introduce no repeated candidate search or unrelated-progress freshness renewal.
 
-### Soft and hard retirement loss limits
+### One admission operation
 
-Define retirement loss as the fresh confirmed USDC balance removed from future
-payment eligibility. Keys and funds remain owned; this is operationally stranded
-capital, not an on-chain transfer, destruction of funds, or a realized network fee.
-Do not promise automatic recovery of retired funds. A wallet with unresolved
-liabilities is ineligible for automatic loss-based retirement: subtracting its
-reservations must not make its full balance look like an inexpensive remainder.
+Every existing eligible active, ready or draining wallet uses the same admission
+operation: validate offer and current caps, verify fresh capacity, reserve the
+amount, sign, validate the payload and journal before submission. Store admission
+rechecks exact identity, membership, enablement, role and relevant revision.
+No role change or funding allocation is required merely because the payer is ready
+or draining. Existing active liabilities cannot block an independently affordable
+payment on another wallet, but still prohibit retiring/replacing that busy active.
 
-Use the soft limit as the routine-retirement tolerance and the hard limit as the
-maximum tolerance when draining slots are full. This gives the thresholds distinct
-behavior without introducing an approval pause between them:
+This behavior applies regardless of whether replacement funding is blocked by
+retention, lack of a permit, disabled automatic funding or another funding reason.
+There is no special loss-pause admission implementation. Payment qualification
+permission remains independently required. Legacy deployments retain their cap,
+address-retirement and funding authority; use of an already funded ready slot is
+an intentional availability extension that must be documented and tested.
 
-| Confirmed remainder | At promotion with room to retain it | When a draining slot must be freed |
-| --- | --- | --- |
-| Zero, with no liabilities | Retire without a loss warning | Retire without a loss warning |
-| Positive and at or below soft | Retire automatically with INFO as expected residual loss | Retire automatically with INFO as expected residual loss |
-| Above soft and at or below hard | Retain for later payments | May retire automatically with WARN explicitly identifying soft-limit exceedance |
-| Above hard | Retain for later payments | Do not retire automatically; consider another eligible wallet, otherwise pause new funding for this tier while existing slots remain spendable |
+## Challenge handoff and mutation ordering
 
-Apply routine soft-limit retirement when an active wallet leaves the pair, or
-after a draining wallet's payment canonically resolves and leaves a small remainder.
-Do not retire active/ready wallets merely because their current available balance
-is small. No age timer, extra paid probe, or synthetic purchase is needed.
+Validate the complete supported offer and SDK envelope before any financial
+mutation. Return an internal selected-candidate handoff binding profile, tier,
+pool, wallet/address, relevant revision and request context. It is neither an
+agent-supplied token nor a reservation or permission to reuse the first challenge.
 
-At a full count, consider the outgoing active wallet and existing draining wallets
-in that tier. Choose the smallest fresh confirmed remainder among eligible wallets,
-with a deterministic identity tie-break. Retiring the outgoing wallet can avoid
-adding a new draining entry; retiring an older one can retain a more useful outgoing
-balance. At most one positive-balance retirement is needed for a normal promotion.
-Never retire a wallet reserved for the current payment, or one with unresolved
-work, to make room. Configuration reductions below the existing draining count
-must not trigger a bulk-loss cleanup: retain existing ownership, stop growing the
-set, and expose the excess until ordinary eligible retirements reduce it.
+For GET/HEAD requiring another payer:
 
-Count pressure alone does not block if an eligible retirement fits the hard limit.
-If freeing capacity would require a retirement above the hard limit, expose a typed
-retirement-loss funding pause for that tier (the affected wallet set), not a payment
-ban or treasury-wide pause. A single above-hard wallet does not trigger a pause
-while space or a cheaper eligible retirement remains. Existing eligible payments,
-other tiers' authorized funding, and reconciliation continue. Unavailable
-or stale evidence and unresolved liabilities retain their existing typed safety
-failures; a monetary tolerance does not waive them. Operators can drain balances,
-raise the count or loss limit explicitly, or explicitly retire a chosen remainder.
+1. Select the prospective identity without promotion, retirement or allocation.
+2. Release the profile gate, acquire the identity-bound client and obtain the one
+   permitted new unsigned challenge.
+3. Reacquire the gate; validate the new offer, routing and fresh wallet evidence.
+   Keep the selected identity if still eligible. Changed requirements are validated
+   completely; a further payer change returns a typed failure without another loop.
+4. Admit on that wallet. If a normal promotion is also permitted, commit the role
+   changes, retirement event if any, replacement ownership/outbox and admission in
+   one transaction. If maintenance is blocked, admit without the role changes.
+5. Sign and journal on the admitted identity before the sole paid submission.
 
-For illustration, with soft=$0.01 and hard=$0.10, a $0.008 remainder retires with
-INFO, a $0.06 remainder is kept while space remains but may retire with WARN when
-full, and a $0.12 remainder cannot be automatically retired. If it is the cheapest
-eligible retirement needed to free capacity, new funding for that tier pauses;
-payments that fit an existing slot can still proceed. These are example
-tolerances, not defaults or an assertion that the losses are negligible.
+Cancellation, unusable second challenges and exhausted handoff allowance cannot
+themselves request promotion, retirement or replacement. The handoff path commits
+no maintenance before final offer/identity validation. A valid capacity shortfall
+may instead record the separate maintenance intent defined below; it does not
+allocate in response to a transport failure or payer-change error. Independent
+already-authorized background work may continue. After a store mutation is
+accepted, waiter cancellation does not undo it or grant permission to repeat it.
+If admission commits and signing fails, retain current unsigned-lease cleanup
+semantics under the shared gate; committed maintenance is not rolled back by a
+missing provider result.
 
-### Spending existing slots during a funding pause
+Provider transport, Tor isolation, cover state, signer and durable payment record
+must use the same address. Direct calls, dynamic fallback and paid relay all use
+this path. Possible relay submission still disables shared retries and routing
+cannot reset its marker. No challenge refresh or second-wallet attempt is allowed
+after signed journaling. No automatic POST replay is introduced.
 
-Allow payment admission against any existing eligible active, ready or draining
-slot in the selected tier, subject to the same caps, routing scope, fresh evidence,
-liabilities and payer/transport binding. A payment must fit a single wallet; balances
-are not aggregated. Prefer the normal draining/active selection order, then an
-already-funded ready wallet when promotion would require forbidden retirement or
-replacement funding. A loss pause does not enable small calls on the large
-active/ready pair or override the ordinary tier-routing policy.
+## Pair maintenance and retained balances
 
-This requires an explicit existing-slot admission path: it must reserve and journal
-against the selected wallet without forcing promotion, retirement, new allocation
-or a replacement outbox. The ready wallet can stay in its existing slot while being
-spent; status must show its actual available capacity rather than imply it remains
-a fully funded untouched spare. Do not promote or allocate merely because it was
-used. Extend all ready-wallet reconciliation and role assumptions to support its
-pending authorizations and partial or zero confirmed balance. Existing active
-liabilities remain reserved and do not prevent independently affordable admission
-on another slot; they still cannot authorize promotion or new funding.
+Maintenance restores useful pair capacity under current funding authority; it is
+separate from eligibility to spend existing funds. It has two replacement-producing
+transitions, both requiring fresh evidence, no unresolved work on the outgoing
+wallet, permitted retention/retirement, and current allocation/funding permits.
 
-Enforce the tier funding pause in both foreground allocation and background funding
-paths before any new funding reservation or preparation. Unreserved queued work
-waits without acquiring new spending authority. Already reserved, prepared or
-possibly submitted work retains its exact ownership and ordinary completion/recovery
-obligations; do not abandon it or interpret the pause as cancellation authority.
-The transition initiating funding must establish its permitted slot/retirement
-capacity atomically so concurrent workers cannot bypass the limit.
+| Transition | Preconditions and durable result |
+| --- | --- |
+| Bootstrap `ALLOCATED` to pair roles | Existing canonical funding readiness for both initial wallets; preserve bootstrap ownership |
+| Replacement `ALLOCATED` to `READY` | Existing canonical funding readiness completes the already-owned secondary slot |
+| Normal promotion | Active cannot cover an authorized demand without pending liabilities; ready can. Move outgoing active to draining/retired, activate ready and create exactly one secondary allocation atomically; include admission when serving the selected ready payer |
+| Repair spent secondary | Both pair wallets cannot cover the validated capacity need and have no unresolved liabilities; ready is below that need. Move ready to draining/retired and create exactly one secondary allocation without requiring it to be promotable; keep the active unchanged |
+| Proven-empty active maintenance | With no active liabilities and a positive eligible ready balance, promotion may restore service without another provider call, under the same retention and funding gates |
+| Existing wallet payment | Active/ready/draining role is unchanged unless an independently permitted normal promotion is committed with admission |
+| Empty drainer retirement | Fresh matching confirmed/latest zero balance and no unresolved work; retain all records |
+| Pressure retirement | An outgoing pair wallet or eligible drainer may retire within the single remainder limit to permit one maintenance transition |
+| Manual drainer retirement | Explicit operator action described below; no replacement allocation |
+| Retired to spendable | Never automatically, including migration and re-enable |
 
-Re-evaluate using fresh canonical evidence after spending/reconciliation or an
-explicit policy change. Resume normal authorized replacement funding when space
-exists or an eligible retirement fits the hard limit; do not require a restart or
-manual reset. Persist enough role, loss and funding-job state to reconstruct the
-pause after restart, but never treat a persisted balance as fresh resumption proof.
-Report the funding reason separately from current per-wallet spending capacity.
+A validated capacity need must come from a fully supported, currently authorized
+challenge or an outstanding maintenance need originally observed that way. Persist
+only wallet/generation-bound maintenance intent and required capacity, not a payment
+permit or a replayable provider request. Before later repair, revalidate current
+profile/tier/caps, fresh evidence, funding policy and current permits. Disabled or
+no-longer-applicable intent is inactive; it never authorizes a new API request.
+Store at most one such need per secondary generation, retaining the largest still
+eligible amount from concurrent valid shortfalls; clear it when satisfied or
+invalidated, and never carry it into a replacement generation. This is scheduling
+evidence, not a new spending budget or timer.
 
-### Durable loss accounting
+Record this intent under the profile gate only after a complete supported offer
+and fresh evidence establish a capacity shortfall, with no sufficient eligible
+wallet found. The unsigned call returns a typed capacity result and is finished.
+The accepted intent can survive its waiter, but never reserves a payment or stores
+provider arguments for replay. Automatic maintenance or explicit bootstrap may
+later execute it under their current funding authority; auto-fund-disabled service,
+read-only admin and recovery only report it. A binding/payer-change failure,
+unavailable balance, unsupported offer or rejected cap cannot create this intent.
+The absence of an old API waiter neither revokes an accepted maintenance intent
+nor supplies missing funding authority.
 
-Per-wallet limits do not bound cumulative loss: one hundred $0.10 retirements can
-strand $10. Record each retirement's wallet/tier, canonical balance anchor, amount,
-reason, applicable limits and time in the same store transaction as its role change
-and any associated promotion/outbox. Admission rechecks the limits and evidence
-inside that transaction. Emit INFO for committed positive retirements at or below
-soft, and WARN for committed above-soft retirements permitted under capacity
-pressure, with sanitized amounts/reasons. Neither tier of logging precedes commit.
-Use the durable event for status after crashes. Bound repeated loss/funding-pause
-warnings with explicit suppression counts, not by dropping accounting.
+For repair, the required amount must fit the configured future funding target as
+well as the effective cap. Do not assume a bridge minimum increase will make a new
+wallet large enough. An above-target payment allowed by the target-limit opt-out
+can spend existing capacity, but cannot repeatedly allocate smaller replacements.
+A sufficient existing wallet should serve the request without request-triggered
+repair. Pending liabilities cannot establish depletion or cause slot replacement.
+A ready wallet is not replaced merely because it was used once or fell below target.
 
-Report cumulative stranded USDC and retirement count per tier/profile and treasury,
-with a breakdown for above-soft retirements. Accounting survives restarts, renames
-and config changes. Do not subtract it from gross funding history, count it as an
-API fee, or let it replenish any funding budget. Historical unclassified retirements
-remain visibly unknown rather than being reported as zero loss. Later unexpected
-credits do not rewrite the original retirement event or reactivate the address.
+Example: active=$1.40 and ready=$0 after independent ready-slot payments. A valid
+$1.80 need under a $2 target can request secondary repair even though no spare is
+promotable. If retention blocks the transition, preserve the maintenance intent.
+Once space becomes available, fresh evidence and current funding authority allow
+retirement of the empty ready and exactly one $2 replacement. On confirmed funding,
+normal admission/promotion is possible. The old API call is never replayed.
+Test the same sequence with a positive insufficient ready remainder and with
+pending ready authorizations that postpone repair.
 
-An optional cumulative automatic-retirement budget could additionally cap repeated
-small losses, but is not enabled implicitly by these per-wallet limits. If added,
-it needs an explicit scope/period, durable accounting and separate typed exhaustion
-reason. This first version records cumulative loss without adding another default
-progress gate. Explicit manual retirement above the hard limit is a separate
-operator action, never an automated response to a failed admission.
+### One retirement tolerance, applied under pressure
 
-Do not introduce age-based automatic retirement, fresh whole-sweep deadlines,
-reconciliation wallet-count deadlines, or timers renewed by unrelated progress.
-Retain canonical historical reconciliation and acquire separate fresh admission
-evidence as today. Update the network timer/budget inventory for changed count or
-byte bounds and identify their owning layer.
+For tiers using retention, retain positive outgoing balances while space exists.
+Retire proven-empty wallets without a loss warning. When a transition needs a slot,
+consider the outgoing wallet and eligible drainers in that tier; choose the smallest
+fresh exact confirmed remainder within `max_retirement_remainder_usdc`, with an
+immutable identity tie-break. Retirement candidate evidence can be collected for
+this maintenance decision without making every payment depend on that collection.
+An unknown or busy wallet is ineligible; it is never treated as the cheapest.
 
-## Funding and recovery
+A pressure decision can operate on the eligible freshly observed subset. It need
+not prove a global minimum across unavailable wallets. If none qualifies, retain
+ownership and report the typed obstruction; missing evidence and an exceeded
+monetary limit remain distinguishable. At most one positive retirement is allowed
+per ordinary transition. Never retire the selected payer or a wallet with unresolved
+work. With a reduced count, do not grow the existing draining set or bulk-retire it;
+a transition can retire its outgoing wallet or replace one existing drainer while
+keeping the count unchanged. Empty/manual retirements can reduce the excess.
 
-Both tiers use the same treasury, serialized budget reservation, gross USDC limits,
-ZEC limits, fee checks, quote authentication and recovery history. Accepted targets
-are immutable; retries cannot resize a quote-bound wallet. No tier-specific budget
-ledger may reset or evade treasury-wide history on configuration changes.
+If the needed retirement is above the limit, block that maintenance/allocation
+transition. Existing payments and independently owned funding jobs continue.
+Derive the obstruction from roles, intent and current policy; there is no durable
+pause flag, reset command or approval threshold. Reevaluate through normal
+reconciliation/maintenance cadence and configuration reload/restart paths. Fresh
+balance evidence is required for a new transition, not a historical log entry.
 
-Replacement funding is caused by an authorized pair transition, never by an
-ordinary switch among draining wallets. A temporarily unaffordable request,
-unsupported scheme, over-cap offer, unsigned outage or cancelled waiter cannot
-allocate repeated replacements. Schedule ordinary and large funding jobs fairly
-under existing treasury ownership; one tier's unsigned outage should not prevent
-independent eligible work, while uncertain treasury mutation retains its existing
-wider safety scope.
+The default limit is zero. That can eventually prevent rotation when all retained
+balances are positive and no smaller calls arrive. Explain this progress tradeoff
+explicitly. Operators can make ordinary authorized calls that fit the balances,
+raise count/tolerance, or manually retire a drainer. No synthetic paid drain probes,
+age-based retirement or implicit cumulative loss budget are introduced.
 
-Loss-based retirement attached to a promotion commits only if that promotion is
-otherwise authorized. Validate replacement funding restrictions and permits before
-retiring a positive balance; a denied allocation must not strand funds as a side
-effect. Standalone retirement of a canonically resolved draining remainder never
-allocates a replacement or changes another wallet's funding authority.
+### Allocation boundary and existing funding jobs
 
-Preserve zero-new-funding restrictions before setup and every supervised reopen.
-Existing-slot admission performs no allocation or preparation and cannot bypass
-payment qualification authority. Promotion with replacement allocation retains
-its current funding gate; existing-slot service does not weaken that gate. Test
-this path explicitly under zero-new-funding restrictions and preserve old started
-runs' observation-only behavior. Recovery/admin commands never bootstrap an absent large
-pair, allocate a replacement, or acquire a new funding permit.
+Establish replacement slot ownership and the necessary retention/retirement in the
+same allocation transaction. A full draining set after that commit does not revoke
+the already-owned replacement slot or require another retirement before its funding.
+One outstanding secondary allocation excludes a second repair/promotion allocation.
 
-Removing or disabling a tier prevents new starts but leaves exact signed bytes,
-funding/refund jobs, keys, historical budgets and liabilities recoverable. Re-enable
-only through the same durable identity and current authority. Renaming must not
-adopt unrelated state or reset recovery attempts. Config changes to targets apply
-to future allocations; they do not refill previously allocated wallets.
+Background funding checks the existing slot/job ownership and current funding
+restrictions, monetary budgets and permits before new reservation/preparation.
+It does not rerun unrelated retirement selection at every phase. Unallocated
+maintenance intent waits when blocked; already allocated jobs retain ownership.
+Already reserved, prepared or possibly submitted work follows existing completion
+and recovery obligations. New restrictions never mean an uncertain transaction
+was cancelled. Foreground and background paths share the same transition function.
+
+### Durable accounting and manual retirement
+
+Journal each positive retirement in the role-change transaction with wallet,
+profile/tier, exact confirmed balance/anchor, latest corroborating anchor, amount,
+reason, applicable policy and time. Emit a sanitized WARN after committed automatic
+positive retirement; explicit manual retirement reports its accepted amount. Empty
+retirement needs no loss warning. Bound repeated obstruction warnings with explicit
+suppression counts while retaining every durable event.
+
+Report the sum as **recorded balance at retirement**, with automatic/manual and
+legacy/retention reasons. It is not current retired holdings, an API fee or destroyed
+funds. Later credits do not rewrite the event or reactivate a wallet. Historical
+unclassified retirements remain unknown. The sum never replenishes gross funding
+budgets. Per-retirement tolerance does not bound cumulative stranded capital.
+
+Add `wallet retire --config FILE --profile NAME --tier TIER --wallet-id ID --max-remainder-usdc AMOUNT`
+(final shared-Clap spelling to pin with fixtures; tier is `ordinary` or `large`).
+Require exclusive treasury/store
+ownership while serving is stopped. Permit only a `DRAINING` wallet in the asserted
+profile/tier, including a disabled one for administration, with fresh evidence and
+no unresolved work. The explicit amount is the operator's maximum for this action;
+reject a larger observed remainder. This permits an intentional retirement above
+the automatic limit without an interactive approval workflow. It signs no payment,
+transfers no funds, allocates nothing and preserves keys/history. Active/ready slot
+removal is outside this manual command. Read-only status remains separate.
+
+## Configuration lifecycle, funding and recovery
+
+Legacy tiers that never enabled retention keep the existing retirement policy.
+Persist the fact that a tier entered retained-balance management so removing TOML
+cannot silently restore unlimited automatic retirement of its retained capital.
+For such tiers, disabling/removing retention stops adding drainers (effective count
+zero), keeps existing drainers eligible under current tier/cap policy, and applies
+the current explicit remainder limit, default zero, to future automatic positive
+retirements. Display this resolution in offline config policy and runtime status.
+Do not silently delete, freeze or retire existing drainers. Re-enabling uses the
+same identities. Configuration count reductions do not bulk-clean the set.
+
+Removing/disabling the large tier disables all its new admissions and allocations,
+including its drainers, while preserving exact signed bytes, jobs, refunds and
+liabilities for recovery. Re-enabling resolves the same durable child. Configuration
+changes apply to future authority and allocations; accepted quote targets and past
+retirement events remain immutable. Offline `config show` states runtime identity/
+retention-resolution rules without opening state; runtime status gives the resolved
+historical facts.
+
+Profile rename is not an in-place operation in this version. A new configured name
+creates a separate profile only under ordinary new-funding authority; the old one
+remains disabled and recoverable. No suffix-based adoption or history transfer.
+Treasury-wide budgets still include both histories. Document this before showing
+configuration rename examples. A dedicated identity-preserving rename is deferred.
+
+Both tiers use the same treasury, gross USDC and ZEC limits, fee checks, quote
+authentication and durable recovery history. Schedule jobs through the existing
+turn/backoff scheduler; do not add a second tier scheduler or promise parallel
+Zcash mutation. Test independent eligible work after unsigned failures, while
+preserving the wider scope justified by uncertain treasury mutation.
+
+Check allocation restrictions and permits before any positive retirement attached
+to maintenance. A denied transition cannot strand funds as a side effect. Preserve
+zero-new-funding restrictions before setup and each supervised reopen. Generic
+admission consumes no new funding authority; promotion/repair allocation does.
+Recovery and read-only administration never bootstrap a child, fulfill maintenance
+intent with a new allocation or acquire a new funding permit. Explicit bootstrap
+and authorized automatic maintenance use the same eligibility implementation.
+Old started qualification runs remain observation-only.
 
 ## Schema migration and restart
 
-Version the store migration, extend role constraints, and preserve foreign keys,
-partial unique indexes and encrypted records. SQLite table replacement, if needed
-for the role CHECK, must be transactional and checked with foreign-key validation.
-Keep admission schema versioning distinct from the encrypted instance format.
+Version admission schema separately from encrypted instance format. Extend role
+constraints and add explicit tier membership, retained-mode history and bounded
+maintenance intent while preserving foreign keys, partial unique indexes and
+existing encrypted records. Transactional table replacement must retain indexes,
+triggers and all referencing rows; validate foreign keys before commit. Exercise
+rollback and reopen after injected failures, not just a successful empty migration.
 
-Map every existing pool to its ordinary tier without allocating any wallet or
-rewriting historical financial events. Existing retired wallets remain retired.
-Migration alone must not enable retention or large-tier spending. Older executables
-must reject a newer incompatible schema; document backup/upgrade expectations
-rather than promising downgrade by restoring a stale financial snapshot.
+Map existing pools to ordinary membership without allocation, retention enablement,
+key rewriting or historical event rewriting. Existing retirees remain retired.
+Older executables must reject incompatible new state. Document backup/upgrade
+requirements without suggesting downgrade via a stale financial snapshot.
 
-Restart must reconstruct child membership, active/ready/draining roles, generation,
-funding outboxes and pending authorization ownership exactly. Test crashes before
-and after durable promotion, admission, signed journaling, quote reservation and
-funding confirmation. Accepted store work survives waiter cancellation. No missing
-response grants permission to repeat financial work.
+Restart reconstructs membership, roles, generations, intents, funding slot ownership
+and pending authorizations exactly. Accepted store work survives waiter cancellation.
+No missing response grants permission to repeat financial work. Test before/after
+admission, journaling, promotion, secondary repair, quote reservation, funding credit
+and manual retirement commits. Backups include all new state and decryption material
+under existing privacy/ownership rules; test restored readability and ownership in
+isolated unfunded fixtures.
 
 ## Implementation surfaces
 
 | Area | Required work |
 | --- | --- |
-| `src/rotation/config.rs`, deployment config and assignment | Parse/validate tier and retention settings; preserve sharing boundaries and cap semantics; offline resolved configuration |
-| `src/rotation/store.rs`, `store/allocation.rs`, `store/funding.rs` | Membership migration, role constraints, selection/admission, atomic transitions, draining capacity and loss limits, durable retirement accounting, funding ownership |
-| `src/rotation/manager.rs`, `src/rotation/error.rs` | Profile coordinator, typed selection outcomes, freshness and cap checks, candidate handoff |
-| `src/payment.rs`, `src/network.rs`, cover integration | One bounded re-challenge with the actual selected payer; unchanged signed-attempt and isolation rules |
-| `src/rotation/base.rs` and transport | Query eligible wallet balances while reconciling all historical liabilities; preserve coherent anchors and bounded concurrency |
-| `src/deployment.rs`, `src/deployment/bootstrap.rs`, `src/rotation/funding.rs`, `src/wallet_cli.rs` | Both-tier startup/bootstrap, worker scheduling, configuration removal, read-only admin behavior |
-| Store status/backup/recovery and CLI output | Tier/role attribution, recoverable state, available versus reserved balances and funding limitations |
-| `src/rotation/store/qualification.rs`, qualification modules, shared live driver | Exact tier/pool/wallet attribution, compatible evidence/report readers and versioned new observations |
-| README, wallet/config guides, examples, architecture and network inventory | Explain allocation cost, routing threshold, POST limits, retirement tradeoffs and unchanged qualification limits |
+| `src/rotation/config.rs`, provider/deployment config and assignment | Concrete tier/retention/route-binding schema, shared cap calculation, exact route validation, offline resolution policy |
+| `src/rotation/store.rs`, `store/allocation.rs`, `store/funding.rs` | Membership/role migration, generic admission, bounded maintenance intent, two replacement transitions, atomic accounting and slot ownership |
+| `src/rotation/manager.rs`, `src/rotation/error.rs` | Shared profile gate, scoped candidate selection, typed failures, selected-candidate handoff, shared maintenance entry point |
+| `src/payment.rs`, `src/network.rs`, cover and relay integration | Initial binding, bound-payer preference, one GET/HEAD handoff, mutation ordering and unchanged signed-attempt isolation |
+| `src/rotation/base.rs` and store evidence application | Distinct exact/conservative balances, scoped views without weakened full-view validation, retained historical reconciliation |
+| `src/deployment.rs`, `src/deployment/bootstrap.rs`, `src/rotation/funding.rs`, `src/wallet_cli.rs`, shared CLI tree | Both-tier setup, member-based policy resolution, existing scheduler integration, disabled-child recovery and explicit manual retirement |
+| Status/backup and qualification modules, shared live driver | Actual per-wallet capacity, membership, maintenance/accounting provenance, versioned observations and historical reader compatibility |
 
-Status should distinguish configured targets/caps, observed confirmed balances,
-outstanding liabilities, freshness, pair readiness, draining count/cap, soft/hard
-loss limits, cumulative stranded amounts and why a promotion or payment cannot
-proceed. Never sum all tier balances and present the
-sum as the maximum payable request. Retired and disabled capacity must not appear
-as active spendable capacity. Keep ordinary logs sanitized and bounded.
+Status distinguishes configured targets/caps, exact observed balances, conservative
+admission amounts, liabilities, freshness, roles, draining count/limit, recorded
+retirement amounts, pending maintenance and owned replacement jobs. A ready wallet
+can be partially spent; pair status must say so. Report disabled/retired holdings
+separately and never present summed tier balances as maximum payable request size.
+Ordinary logs and public reports remain sanitized and bounded.
 
-## Validation matrix
+## Documentation update checklist
+
+Update these destinations with implementation, keeping this document marked as a
+plan until the behavior is delivered. Audit statements about one pair per profile,
+untouched ready wallets, active-only admission and retirement on every promotion.
+
+| Destination | Required update and consistency check |
+| --- | --- |
+| `README.md` | Tier and retention opt-ins, wallet-sharing table boundaries, initial versus retained capital, high-cost POST binding and remaining limitations |
+| `docs/configuration.md` | Final TOML names/defaults/ranges, single cap formula, absent/disabled-tier routing, exact route bindings, retained-mode disable semantics, offline resolution policy and rename behavior |
+| `docs/wallet-rotation.md` | Full transition table including spent-secondary repair, generic ready/draining admission, shared gate, evidence distinctions, single retirement tolerance and funding ownership boundary |
+| `docs/wallet-cli.md` and generated `wallet --help` / `wallet retire --help` | Exact command and maximum-remainder option, exclusive ownership, drainer-only scope, no implicit funding, status terminology and backup/upgrade procedure |
+| `docs/architecture.md` | Logical profile/child membership, one gate, scoped Base views, mutation ordering, maintenance intent and treasury reuse |
+| `docs/agent-sources.md` | Unchanged dynamic profile sharing and principal rules; agents cannot select tiers/author route policy; dynamic fallback uses the same admission and binding behavior |
+| `docs/network-egress.md` | Candidate RPC work/concurrency/count ceiling, exact/conservative anchors, handoff identity, remaining timer/budget inventory; no new whole-work deadline |
+| `docs/cover-traffic.md` | Selected payer remains cover owner across tier/draining paths; one permitted re-challenge and POST limitations |
+| `examples/deployments/servers-managed.toml` | Commented opt-in example with explicit parent cap, large target, retention tolerance, gross budget and initial allocation cost |
+| `examples/deployments/agent-sources-managed.toml` | Verify shared dynamic wallet behavior remains accurate; show no automatic per-source tier creation |
+| `examples/deployments/public-payment-demo.toml`, `public-swap-demo.toml`, and `docs/public-swap-demo.md` | Preserve bounded-demo opt-outs and existing authority; do not silently enable large bootstrap or retention |
+| `tests/live/INTEGRATION.md`, `INTEGRATION_REFERENCE.md`, and `integration/SCENARIO_PRESETS.md` | Versioned tier/wallet/generation evidence, repair/POST/retirement assertions and exact run-authority boundaries |
+| `tests/live/integration/managed-deployment.example.toml`, `rotation.example.toml`, `authorization.example.toml` | Explicit optional new scenario scope and cumulative charges; no new authority inherited from old manifests |
+| `docs/testing.md` and `docs/plans/deferred/live_integration_acceptance.md` | Offline evidence limits and unchanged deferred funded lifecycle/privacy qualification; implemented tests do not imply live qualification |
+| `AGENTS.md` | Reconcile active/ready lifecycle and profile guidance after implementation, preserving treasury, payment and qualification safeguards |
+
+Verify internal links, examples and generated help against the final parser.
+Documentation assertions should be checked in existing CLI/config/contract suites
+where those outputs already have fixtures. Keep user-owned local deployment copies
+untouched. Public Markdown excludes raw identifiers, credentials, paths and provider
+prose; private JSON retains necessary typed evidence under existing bounds.
+
+## Validation matrix and acceptance gates
 
 Use temporary state, deterministic unfunded keys and local protocol fixtures.
-Assert forbidden I/O and mutations as well as expected results.
+Assert forbidden provider I/O, signing, retirement, allocation and preparation as
+well as successful outcomes. Use barriers/fault injection for race boundaries;
+harness deadlines are not runtime policy.
 
 | Scenario | Required assertions |
 | --- | --- |
-| Legacy config and migration | Same IDs, keys, caps, roles, budgets and effective authority; no extra wallets, funding or retired-wallet revival |
-| Config boundaries | Disabled/absent tier, invalid ranges, exact `T`, one atomic unit above `T`, parent/tier caps, target-limit opt-out, route minimum changes |
-| Both-pair bootstrap | Exactly the expected jobs/allocations, shared budgets, partial readiness, restart and auto-fund/qualification restrictions |
-| Useful ordinary remainder | $1.40 active cannot pay $1.80; spare does; $0.30 later uses the retained wallet without a new replacement |
-| Large routing | Above-`T` uses large tier only; small calls do not deplete its active/ready pair; a permitted large-tier remainder can serve small calls |
-| Unknown or changing price | Candidate handoff reaches correct transport; one GET/HEAD re-challenge only; changed amount/requirements revalidated; POST never automatically replayed |
-| Concurrent admissions | No double reservation, duplicate replacement or cap bypass; stable identity under parallel tier/draining calls; shared listeners observe the same state |
-| Pending liability | No false depletion/promotion, no release from seller response or unavailable nonce; other eligible draining capacity remains independently accountable |
-| Retention bound | Default/effective count, zero slots, boundary and overflow, tier scope, count reduction without bulk retirement, smallest eligible remainder selection |
-| Retirement loss limits | Zero/equal/invalid limits; exact soft/hard and one atomic unit above each; at/below-soft retirement logs INFO; above-soft retirement only under pressure logs WARN; above-hard pauses only affected-tier new funding; explicit manual retirement |
-| Service during loss pause | Independently sufficient active/ready/draining slots still pay, including partially spent ready slots; no forced retirement, allocation, preparation or outbox; no cross-tier routing bypass; pending liabilities preserved; other tier funding unaffected |
-| Funding pause recovery | Foreground/background race, queued unreserved work, already committed funding recovery, restart reconstruction, fresh-evidence automatic resumption after spending; no stale saved balance or log message grants authority |
-| Retirement safety and accounting | No retirement with pending liabilities or stale/unknown balance; full confirmed balance measured; no loss on denied promotion; atomic events/roles/outbox; concurrent eviction; cancellation/restart; repeated small losses visible; legacy unknowns and bounded WARN suppression |
-| Stale evidence and RPC failure | Preserve useful historical work; reject stale admission; no mixed anchors, fabricated zero or timer renewed by unrelated progress |
-| Cancellation and restart | Surviving accepted store work, exact signed bytes and liabilities, one outbox, no orphan ownership or replay after lost response |
-| Funding budget/recovery | Combined tier limits, rollover, refunds, accepted quote targets, unsigned outages, durable attempts and zero-new-funding all unchanged |
-| Configuration removal/re-enable | No new starts in disabled tier; all journals recover; no authority/budget reset or cross-profile wallet adoption |
-| Direct/Tor/cover and relay | Payer transport equals signer identity; fresh challenge uses new identity; relay retry-disable semantics preserved; no extra paid probes |
-| Saved/live evidence | Tier/payer/generation provenance, historical report compatibility, true retired capacity excluded, no inferred readiness or fee proof |
-| Slow reconciliation | Progress beyond prior test durations with many historical wallets, true stalls, concurrent unrelated progress and cancelled waiters; no new runtime deadline |
+| Legacy authority | Existing IDs/keys/caps/roles/budgets survive; above-`T` ordinary calls with target opt-out still work without a large tier; no migration-created funding or retired revival |
+| Migration with real relationships | Populate funding jobs, attempts, resolutions, refunds and encrypted records; validate foreign keys/indexes/decryption; inject failure during table replacement, reopen and compare pre-migration state; old executable rejects new schema |
+| Config/cap boundaries | Exact `T`, one atomic unit above, enabled/disabled large, parent cap, target opt-out, immutable old wallet targets and bridge minimum changes; invalid/unusable tiers and zero/overflow decimal parsing |
+| Multi-offer selection | Unsupported and over-cap offers skipped deterministically, tier eligibility respected; balances do not reorder offers; exact accepted JSON reaches signer |
+| Both-pair bootstrap | Expected jobs/capital, shared budgets, partial readiness and failed large startup, restart, auto-fund-disabled and zero-new-funding restrictions |
+| Useful remainder | $1.40 active cannot pay $1.80, ready pays via permitted handoff/promotion; later $0.30 uses retained capacity without another allocation |
+| Generic ready admission | Identical safety path with retention obstruction, denied funding permit, auto-fund disabled and active pending liabilities; no required role mutation or new funding; no cross-tier/cap bypass |
+| Empty secondary repair | Active=$1.40, ready=$0, valid need=$1.80, target=$2; blocked maintenance resumes with fresh evidence after space is freed; one replacement without sufficient-spare promotion; confirmed replacement permits later service, never API replay |
+| Partial/busy secondary repair | Positive insufficient ready retained/retired by policy; ready with unresolved authorization not replaced; an above-target need cannot churn smaller replacements; repeated/concurrent requests share one intent/allocation |
+| Gate ownership | Pause between admission and journaling while background reconcile/retirement and another tier call contend; live `ADMITTED` row survives; cancellation/restart cleans only proven unsigned work; unrelated profiles progress |
+| Initial binding and POST | Cheap POST keeps sufficient bound active despite eligible drainer; large-bound POST pays when sufficient; unbound expensive POST, small price on large binding and insufficient bound payer fail before mutation/signing/replay; invalid/duplicate/agent-authored bindings rejected |
+| Handoff ordering | Correct direct/Tor/cover identity; one GET/HEAD re-challenge; changed amount/requirements, concurrent role/config changes, cancellation, transport error and unusable second challenge cause no request-triggered maintenance before admission |
+| Relay and dynamic fallback | Actual `POST /curl` outer binding; inner GET is not replay permission; same profile ownership and caps; possible-submission marker never reset; no extra paid probes |
+| Candidate availability | Optional drainer RPC failure/staleness does not block independently valid active admission; unknown balances never become zero; complete-view assertions remain; no mixed endpoint or invented anchors |
+| Evidence divergence | Confirmed/latest differ in both directions; admission uses conservative amount, retirement waits locally; persisted exact amount matches its anchor; unrelated safe wallet still pays; unexpected later credits do not rewrite retirement events |
+| Retention limits | Zero/default/max/invalid counts, reduced count without growth or bulk cleanup; positive remainders retained with room; exact remainder limit and one atomic unit above; unavailable/busy wallets excluded from eviction |
+| Retirement accounting | No retirement with unresolved work or stale evidence; one pressure retirement per transition, atomic event/role/outbox; no loss on denied allocation; repeated small retirements visible; legacy unknowns and warning suppression |
+| Owned funding jobs | Promotion fills final draining slot but its replacement remains fundable; later retention pressure cannot require a second retirement; current monetary/qualification restrictions still enforced; competing worker creates no duplicate slot |
+| Maintenance resumption | Durable bounded intent, concurrent needs coalesce within one generation, fresh evidence after restart/spending/policy change, invalidated/satisfied need discarded; accepted intent survives cancelled waiter without API replay; auto-fund-disabled/recovery paths only report it; no stale intent grants API or funding authority; no mutable pause reset required |
+| Manual retirement | Exclusive lock while serving stopped, exact drainer/profile identity, explicit maximum amount, disabled-tier administration, pending/active/ready rejection, cancellation and atomic event; no signing/transfer/allocation |
+| Lifecycle changes | Large remove/re-enable restores same identity; ordinary-only routing restored; retention disable keeps old drainers eligible with no growth and zero default loss limit; threshold changes and new profile name cannot adopt old state/reset budgets |
+| Child policy resolution | Funding, recovery, status and qualification resolve child membership rather than display suffix/name; disabled-child uncertain operations remain recoverable; source/listener bindings retain sharing |
+| Cancellation/crash recovery | Before/after admission, signed journal, promotion, repair, quote reservation, funding confirmation and retirement; accepted work retains ownership/exact bytes; no replay or orphan outbox |
+| Funding limits | Combined tiers, UTC rollover, refunds, immutable accepted outputs, unsigned outages and durable attempts; zero-new-funding checked before setup and every supervised reopen |
+| Scheduling | Existing turn/backoff scheduler advances independent eligible jobs after an unsigned failure; uncertain treasury mutation preserves its wider stop; no new per-tier scheduler |
+| Backup/status/evidence | New schema restored in isolated fixture; partial ready capacity accurate, disabled/retired capacity excluded, recorded retirement totals distinct from current holdings; historical reports readable and old started runs observation-only |
+| Performance and stalls | Measure RPC count and admission latency with default/max drainers in direct/local SOCKS fixtures; validate finite count ceiling and freshness; long historical progress, true stalls, unrelated concurrent progress and cancelled waiters preserve existing policy |
 
-Extend focused suites in `tests/rotation.rs`, `tests/managed_config.rs`,
-`tests/payments.rs`, `tests/network.rs`, `tests/wallet_workflow.rs`, and
-`tests/integration_preparation.rs`, plus adjacent unit tests where appropriate.
-The shared live driver remains in `examples/live_integration/driver.rs`; do not
-duplicate CLI/module wiring. Qualification manifests must explicitly represent
-enabled tiers and retain cumulative source/job/API charges. Old started runs remain
-observation-only and cannot gain authority through a migrated reader.
+Extend `tests/rotation.rs`, `tests/managed_config.rs`, `tests/payments.rs`,
+`tests/network.rs`, `tests/wallet_workflow.rs`, `tests/integration_preparation.rs`,
+and adjacent Base/store/funding unit suites. Include existing store integrity and
+funding-restriction fixtures for migration and authority boundaries. Shared live
+wiring remains in `examples/live_integration/driver.rs`.
 
-Run focused default-Zcash tests after each change, then the repository's required
-default-build validation before completion. Do not run no-default-feature suites
-without a separate request. Offline fixtures do not qualify real settlement,
-funded crash recovery, or privacy. Any live-funded validation requires separate
-operator authority; preserve existing deferred acceptance limits.
+Before implementation, pin config/help fixtures and table-driven state transitions
+covering both replacement paths, blocked maintenance and removal/re-enable. Before
+shipping selection, validate scoped evidence and the shared-gate race tests. Before
+enabling large tiers, validate POST/relay bindings and combined budgets. Do not mark
+performance validation complete merely because a functional fixture passed: record
+candidate counts, RPC counts, observed latency and freshness outcomes, and choose
+the supported count ceiling from those results. Local Tor/SOCKS fixtures establish
+no live privacy or settlement qualification.
 
-## Delivery sequence and decisions
+Run focused default-Zcash suites for each change, then `scripts/check.sh` for the
+repository's required default-build validation. Do not run no-default-feature suites
+without a separate request. Validate documentation links/examples/help after final
+names settle. Offline fixtures cannot qualify real settlement, funded crash recovery
+or privacy. Live-funded work requires separate operator authority and explicitly
+versioned tier/pool/wallet/job scope with cumulative charges. Preserve existing
+deferred acceptance limits and old runs' observation-only status.
 
-1. Settle configuration names, tier ceiling semantics, provisional eight-slot
-   draining default and soft/hard loss policy. Confirm the stable threshold and eager
-   bootstrap interpretation. Keep these decisions visible in user documentation.
-2. Implement durable tier membership and role migration with legacy/restart tests.
-   Prove old pool identities and financial histories remain unchanged.
-3. Implement selected-candidate handoff and transport binding, including changed
-   challenges and non-GET limitations. Establish this before advertising routing.
-4. Implement bounded draining selection, configurable loss limits, durable loss
-   accounting, atomic promotion/retirement and existing-slot service during tier
-   funding pauses, initially for the ordinary tier, with concurrency, uncertainty
-   and cancellation coverage.
-5. Add the optional large pair, authority validation, bootstrap/funding integration,
-   cross-tier draining selection, and configuration lifecycle handling.
-6. Update status, admin/backup, qualification evidence and maintained guides. Run
-   the focused matrix and final repository checks. Keep unfinished modes disabled.
+## Delivery sequence
 
-Recommended first version: fixed targets, two independent pairs within each
-existing profile, deterministic selection from bounded draining balances, and
-explicit configurable soft/hard loss tolerances. Small accepted losses permit
-progress with INFO and durable accounting. Above-soft losses are permitted only
-under slot pressure and log WARN. An otherwise required retirement above the hard
-tolerance pauses new funding for that tier while affordable existing-slot payments
-continue. Existing financial, freshness and ownership safeguards remain independent
-and authoritative.
+1. Pin configuration/CLI names and fixtures, routing/cap formulas, initial bindings,
+   count-validation method and both replacement transitions. Document deliberate
+   legacy availability changes and high-cost POST limitations.
+2. Implement membership/role migration, exact versus conservative evidence and the
+   shared profile gate. Prove legacy identities/history and reconciliation ownership.
+3. Implement generic admission, bounded scoped candidate selection and mutation-free
+   handoff before financial transitions. Cover cheap POST and outer relay behavior.
+4. Implement ordinary-tier retention, single pressure-retirement limit, durable
+   accounting, normal promotion and spent-secondary repair. Prove progress after
+   obstructions clear without repeated allocation or a mutable pause flag.
+5. Add the large child, current-authority resolution, eager bootstrap, exact initial
+   route bindings, cross-tier draining and removal/re-enable handling through the
+   same admission/maintenance/funding paths.
+6. Add explicit manual drainer retirement, status/backup and versioned qualification
+   evidence. Complete the documentation checklist, focused matrix and repository
+   validation. Keep unfinished modes disabled and qualification claims bounded.
