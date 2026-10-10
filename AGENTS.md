@@ -37,6 +37,31 @@ guards first; do not stack whole-work deadlines or replace removed deadlines wit
 enormous durations. Keep the [remaining timer inventory](docs/network-egress.md#remaining-timers-and-budgets)
 current when policy changes.
 
+- Needless double-enforcement is forbidden. When an operator-controlled resource or
+  existing authority already supplies the intended limit, do not add, preserve or
+  recommend a second policy ceiling for the same purpose. Each additional limit must
+  protect a distinct concrete resource, authority boundary or correctness invariant;
+  generic caution and hypothetical users are not justification. Remove redundant
+  policy instead of adding configuration, counters, recovery paths or scheduling to
+  work around it. Checks at separate trust or concurrency boundaries remain necessary
+  when they prevent stale admission or races; share their calculation rather than
+  confusing repeated validation with an independent spending ceiling.
+- Funding the treasury expresses the operator's intended funding-capital limit.
+  Under ordinary enabled auto-funding, actual spendable treasury funds are the limit;
+  adding funds supplies additional capacity without another budget-setting step.
+  Do not require, retain or reintroduce daily/cumulative USDC allocation budgets or
+  daily treasury ZEC spending budgets to double-enforce that choice. Their removal is
+  settled repository policy, not an unresolved authority-expansion question to reopen
+  in feature reviews. Preserve actual reservations/liabilities, confirmation and
+  readiness checks, per-payment authority, per-operation cost/fee safeguards, explicit
+  auto-funding controls and separately authorized qualification-run limits: these
+  protect distinct invariants. Displayed total balance is not spendable capacity.
+- Avoid preventable agent-call delays and blocking by default. Prefer simple bounded
+  preparation and maintenance ahead of demand when existing authority permits it.
+  Straightforward optimizations need focused correctness, race and side-effect tests,
+  not an extensive benchmark study to justify their inclusion. Reserve broader
+  measurements for tuning resource limits, evaluating complex scheduling or making
+  quantitative performance claims; never weaken financial safeguards for latency.
 - Separate connection establishment, per-response read inactivity, evidence freshness,
   signed authority expiry and health/polling cadence. Unrelated streams, keepalives
   or merely finishing work cannot renew another response's timer or financial authority.
@@ -55,7 +80,9 @@ current when policy changes.
   duplicate active I/O, or report forced abandonment as success.
 - Distinguish actual cost from configured ceilings, payment authority from funding
   preferences, and authority fields from opaque annotations. Preserve explicit caps,
-  byte/storage bounds and existing deployments' effective spending authority.
+  byte/storage bounds and existing deployments' effective spending authority, subject
+  to explicitly approved policy removals above. This preservation rule must not be
+  used to perpetuate redundant limits or relitigate their approved removal.
 - For policy changes, test slow progress beyond the old bound alongside true stalls,
   unrelated concurrent progress, cancellation and restart where applicable. Assert
   forbidden side effects stay absent. Test-harness deadlines are not runtime policy;
@@ -178,7 +205,8 @@ Birthday discovery uses the older valid information/tip observation minus the
 scan rewind; ordinary advancement between independent reads is not a failure.
 
 Managed serving completes initial pool bootstrap before discovery and defaults to
-automatic replacement funding, within configured USDC budgets and ZEC/fee safeguards. `auto_fund=false` pauses it; build features, inspection,
+automatic replacement funding, using actual spendable treasury funds under ZEC/fee
+safeguards. `auto_fund=false` pauses it; build features, inspection,
 wallet initialization and sync never authorize automatic funding. Qualification
 restrictions remain authoritative, and bounded live demos retain explicit opt-outs.
 
@@ -425,17 +453,21 @@ maximum funding amount permits no increase above the target. Managed profiles
 preserve the historical target payment ceiling by default; explicit
 limit_payments_to_funding_target=false uses the API cap and active confirmed
 capacity minus liabilities. Opaque offer annotations cannot veto valid authority
-fields or change the exact JSON accepted by the signer. Funding-level
-`daily_funding_limit_usdc` and `total_funding_limit_usdc` are optional gross
-allocation budgets across all pools, not API-spending budgets. Managed deployments
-require at least one aggregate budget (daily USDC, total USDC or daily ZEC). Reserve accepted
-quote outputs alongside source reservations in the serialized store worker;
-derive history from original authenticated quotes and source journals, including
-archived operations. Missing relevant history fails closed. Pending allocations
-survive UTC rollover; refunds do not replenish total USDC allowance. Preserve
-canonical expiry/unprepared recovery and never reset budgets on restart or rename.
+fields or change the exact JSON accepted by the signer. The funding-capital policy is
+actual spendable treasury funds after confirmations, reservations/liabilities and fees.
+`daily_funding_limit_usdc`, `total_funding_limit_usdc` and
+`daily_treasury_spend_limit_zec`, including the aggregate-budget requirement, are
+obsolete policy slated for removal wherever still implemented. This guidance settles
+the policy now; it does not claim that runtime/configuration removal has shipped.
+Do not adapt or replace their enforcement for new features. Remove them with explicit
+obsolete-field diagnostics and consistent configuration/documentation updates rather
+than silently ignoring configured values. Preserve original authenticated quotes,
+source journals, archived operations and exact accounting/reservations. Missing
+history needed to establish actual liabilities fails closed. UTC rollover and gross
+historical allocations do not define funding authority. Canonical completion,
+refund accounting and proven unprepared/expired recovery remain the owners of
+reservation release; removing budget policy never deletes financial history.
 Native safeguards are `max_funding_spend_zec` (optional per wallet transfer),
-`daily_treasury_spend_limit_zec` (optional treasury-wide),
 `max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` (both default
 0.0003 ZEC). Network-fee settings reject proposals; they never override standard
 wallet fee calculation. Current TOML rejects obsolete option names; historical
@@ -452,8 +484,8 @@ All declared managed pools initialize, including those unused by selected tools.
   snapshots and outgoing operations atomically; revision CAS prevents stale saves.
   Never use upstream plaintext saves or quick-send helpers. Failed/cancelled
   preparation or persistence requires owner teardown/reopen, not reuse.
-- Calculate-only preparation checks current quote, exact output/fee/expiry and
-  aggregate budget. Calculate proposal fees before reserving exact principal plus
+- Calculate-only preparation checks current quote, exact output/fee/expiry, actual
+  spendable capacity and applicable operation/run authority. Calculate proposal fees before reserving exact principal plus
   fee (refund shielding reserves only its fee), but reserve before creating signed
   bytes. Proposal mutation/cancellation poisons the owner until reopen. Read-only
   submission preflight precedes durable intent; the preflighted send path performs
@@ -477,13 +509,18 @@ All declared managed pools initialize, including those unused by selected tools.
   retries signed work. Data-validation/TLS failures do not trigger fallback.
   Balance sweeps finish once and retain canonical evidence; the store checks the
   original block-derived admission expiry before reserving or promoting. Stale
-  balances cannot cause an internal repeat loop or authorize spending. Admission
+  balances cannot authorize spending. Bounded unsigned verification may refresh
+  evidence once when a concurrent canonical resolution invalidates its compatibility;
+  repeated refresh-until-success loops remain prohibited. Admission
   omits retired balance reads while retaining historical authorization checks.
   Payment admission retains unavailable nonce observations as full unresolved
   liabilities without requiring another provider to release them. Fresh balances minus those
   liabilities may authorize spending; expiry alone cannot release them. Malformed
-  evidence, TLS/chain/anchor/balance failures stay fatal. Background reconciliation
-  remains strict and backs off on unavailable nonce observations.
+  evidence and TLS/chain/anchor integrity failures fail the affected verification;
+  wider stops require typed evidence of wider impact. An unavailable refresh alone
+  does not invalidate independently usable evidence. Unavailable nonce observations
+  retain liabilities and back off historical reconciliation; that backoff must not
+  suppress independently verified balance publication or affordable admission.
   Immutable original operation identities govern recovery, not current pool roles.
 - Logs/status expose bounded fixed failure categories and numeric codes, never
   upstream credential-bearing prose. Drain deliberately for transaction safety;
