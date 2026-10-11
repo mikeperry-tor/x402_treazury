@@ -822,3 +822,80 @@ async fn cancelled_atomic_commit_keeps_complete_signed_liability_and_support() {
     let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_atomic_counts(&store, 2, 1);
 }
+
+#[test]
+#[ignore = "subprocess helper invoked by atomic_payment_survives_process_exit"]
+fn atomic_payment_process_child() {
+    let dir = std::path::PathBuf::from(std::env::var_os("X402_ATOMIC_FIXTURE_DIR").unwrap());
+    let id = std::env::var("X402_ATOMIC_FIXTURE_ID").unwrap();
+    let mut store = Store::open(&dir.join("state"), &dir.join("key"), &id).unwrap();
+    let prepared = prepared_payment(&mut store);
+    if std::env::var("X402_ATOMIC_FIXTURE_PHASE").unwrap() == "committed" {
+        store
+            .journal_authorization(&prepared, prepared_authorization(&prepared), None)
+            .unwrap();
+    }
+    // Neither SQLite nor the owning store/gate receives a destructor here.
+    std::process::exit(0);
+}
+
+#[test]
+fn atomic_payment_survives_process_exit_before_and_after_commit() {
+    for (phase, committed) in [("prepared", false), ("committed", true)] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = populated(dir.path());
+        let id = store.id().to_owned();
+        drop(store);
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "rotation::store::integrity_tests::atomic_payment_process_child",
+                "--ignored",
+            ])
+            .env("X402_ATOMIC_FIXTURE_DIR", dir.path())
+            .env("X402_ATOMIC_FIXTURE_ID", &id)
+            .env("X402_ATOMIC_FIXTURE_PHASE", phase)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+        assert_atomic_counts(&store, 1 + i64::from(committed), i64::from(committed));
+    }
+}
+
+#[tokio::test]
+async fn owner_panic_never_acknowledges_or_loses_an_atomic_payment() {
+    for committed in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = populated(dir.path());
+        let id = state.id().to_owned();
+        let prepared = prepared_payment(&mut state);
+        let auth = prepared_authorization(&prepared);
+        let (store, worker) = StoreHandle::spawn(state);
+        let gate = store.group_gate(&prepared.pool).unwrap();
+        let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
+        let result: Result<()> = store
+            .call_with_guard(guard, move |s| {
+                if committed {
+                    s.journal_authorization(&prepared, auth, None)?;
+                }
+                panic!("injected atomic payment owner failure");
+            })
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("store worker stopped")
+        );
+        assert!(worker.await.unwrap_err().is_panic());
+        assert!(gate.try_lock().is_ok());
+        drop(store);
+        let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+        assert_atomic_counts(&store, 1 + i64::from(committed), i64::from(committed));
+    }
+}

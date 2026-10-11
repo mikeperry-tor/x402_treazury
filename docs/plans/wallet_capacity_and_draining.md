@@ -2484,8 +2484,11 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   integration tests, the old/new qualification report fixture and all-target
   Clippy passed. Targeted fixtures cover support-write rollback, final predicates,
   cancellation/lost delivery after accepted commit, restart and absence of unsigned
-  rows. Further owner panic/process-exit fixtures and the evidence-race recovery
-  integration remain required before moving RPC outside the gate in step 3.
+  rows. Additional owner-panic and destructor-free subprocess-exit fixtures pass
+  before and after commit: reopening retains either no new payment or the complete
+  signed liability and support, and owner failure never acknowledges success.
+  Evidence-race recovery integration remains required before moving RPC outside
+  the gate in step 3.
 
 Steps 2–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
