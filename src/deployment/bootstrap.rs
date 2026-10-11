@@ -1,6 +1,9 @@
 //! Catalog-free initial funding, using the ordinary durable worker and owner.
 use super::*;
-use crate::rotation::store::{Status, funding::FundingPhase};
+use crate::rotation::store::{
+    StoreHandle,
+    bootstrap::{GROUP_PAGE, PATH_PAGE, StartupDisposition},
+};
 
 #[derive(Serialize)]
 pub struct BootstrapSummary {
@@ -64,7 +67,8 @@ impl Deployment {
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
         // The supervisor retains ownership and drains even if its caller disappears.
-        let task = tokio::spawn(supervise(initialized, names, stop.clone()));
+        let attempts = startup_attempts(&self.wallet_resolution.wallets);
+        let task = tokio::spawn(supervise(initialized, names, attempts, stop.clone()));
         crate::wallet_cli::finish_on_shutdown("bootstrap", &stop, async {
             task.await.context("bootstrap supervisor failed")?
         })
@@ -72,133 +76,231 @@ impl Deployment {
     }
 }
 
-fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
-    let mut ready = true;
-    for name in names {
-        let pool = status
-            .pools
-            .iter()
-            .find(|pool| &pool.name == name)
-            .context("bootstrap pool missing from state")?;
-        ensure!(pool.enabled, "wallet {name}: pool is disabled");
-        let blocked: Vec<_> = status
-            .funding_jobs
-            .iter()
-            .filter(|job| {
-                job.pool_id == pool.id
-                    // Confirmed destination credit completes bootstrap even if
-                    // source accounting still retains a historical timeout.
-                    // The funding worker reconciles that outbox independently.
-                    && job.phase != FundingPhase::Complete
-                    && (job.timed_out
-                        || matches!(
-                            job.phase,
-                            FundingPhase::RecoveryRequired | FundingPhase::RefundPending
-                        ))
-            })
-            .collect();
-        if pool.bootstrapped && blocked.is_empty() {
-            continue;
+/// The same treasury and funding tasks survive startup readiness and catalog I/O.
+/// Dropping a startup waiter cancels new work, then drains the owned tasks.
+type FundingTask = tokio::task::JoinHandle<Result<()>>;
+pub(super) type FundingTasks = (Option<FundingTask>, Option<FundingTask>);
+pub(super) struct FundingSupervisor {
+    pub(super) stop: CancellationToken,
+    store: Option<crate::rotation::store::StoreHandle>,
+    treasury: Option<tokio::task::JoinHandle<Result<()>>>,
+    funding: Option<tokio::task::JoinHandle<Result<()>>>,
+    attempts: BTreeMap<String, u32>,
+}
+impl FundingSupervisor {
+    fn start(
+        owner: crate::treasury::Treasury,
+        runtime: FundingRuntime,
+        attempts: BTreeMap<String, u32>,
+    ) -> Self {
+        let store = owner.store_handle();
+        let stop = CancellationToken::new();
+        let (commands, sender, worker) = runtime;
+        let treasury = tokio::spawn({
+            let stopped = stop.clone();
+            async move {
+                let _stop_on_exit = stopped.clone().drop_guard();
+                owner.run_commands(commands, sender, stopped).await
+            }
+        });
+        let funding = tokio::spawn({
+            let stopped = stop.clone();
+            async move {
+                let _stop_on_exit = stopped.clone().drop_guard();
+                worker.run(stopped).await
+            }
+        });
+        Self {
+            stop,
+            store: Some(store),
+            treasury: Some(treasury),
+            funding: Some(funding),
+            attempts,
         }
-        let automatic = !blocked.is_empty()
-            && blocked.iter().all(|job| {
-                crate::treasury::recovery::can_recover_facts(
-                    job,
-                    status
-                        .treasury_operations
-                        .iter()
-                        .find(|operation| operation.operation_id == job.operation_id),
-                )
-            });
-        let manual: Vec<_> = blocked
-            .into_iter()
-            .filter(|job| {
-                !crate::treasury::recovery::can_recover_facts(
-                    job,
-                    status
-                        .treasury_operations
-                        .iter()
-                        .find(|operation| operation.operation_id == job.operation_id),
-                )
-            })
-            .collect();
-        if !manual.is_empty() {
-            let details = manual
-                .into_iter()
-                .map(|job| blocked_job(status, job))
-                .collect::<Vec<_>>()
-                .join("\n");
-            bail!("wallet {name}: bootstrap blocked; completed funding is retained\n{details}");
-        }
-        ensure!(
-            !pool.funding_degraded
-                || automatic
-                || status.funding_jobs.iter().any(|job| {
-                    job.pool_id == pool.id && job.phase == FundingPhase::Complete && job.timed_out
-                }),
-            "wallet {name}: funding is degraded with no recovery job identified; inspect wallet status --config FILE; completed funding is retained"
-        );
-        ready = false;
     }
-    Ok(ready)
+    pub(super) fn store(&self) -> crate::rotation::store::StoreHandle {
+        self.store.as_ref().expect("owned funding store").clone()
+    }
+    pub(super) fn into_tasks(mut self) -> FundingTasks {
+        self.store.take();
+        (self.treasury.take(), self.funding.take())
+    }
+    pub(super) async fn shutdown(mut self) -> Result<()> {
+        self.stop.cancel();
+        self.store.take();
+        let funding = self.funding.take();
+        let treasury = self.treasury.take();
+        let funding_result = match funding {
+            Some(task) => task
+                .await
+                .context("startup funding drain failed")
+                .and_then(|result| result),
+            None => Ok(()),
+        };
+        let treasury_result = match treasury {
+            Some(task) => task
+                .await
+                .context("startup treasury drain failed")
+                .and_then(|result| result),
+            None => Ok(()),
+        };
+        funding_result?;
+        treasury_result
+    }
+    async fn wait_inventory(&self, names: &BTreeSet<String>) -> Result<()> {
+        let mut next_progress = tokio::time::Instant::now();
+        loop {
+            ensure!(
+                !self.stop.is_cancelled(),
+                "startup funding owner stopped; persisted work retained"
+            );
+            let progress = tokio::time::Instant::now() >= next_progress;
+            if check_startup(&self.store(), names, &self.attempts, None, progress).await? {
+                return Ok(());
+            }
+            if progress {
+                next_progress = tokio::time::Instant::now() + Duration::from_secs(60);
+            }
+            tokio::select! {
+                _ = self.stop.cancelled() => bail!("startup funding owner stopped; persisted work retained"),
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+    }
+}
+impl Drop for FundingSupervisor {
+    fn drop(&mut self) {
+        if self.treasury.is_none() && self.funding.is_none() {
+            return;
+        }
+        self.stop.cancel();
+        self.store.take();
+        let treasury = self.treasury.take();
+        let funding = self.funding.take();
+        // Accepted financial commands retain their owner after a cancelled caller.
+        tokio::spawn(async move {
+            if let Some(task) = funding
+                && !matches!(task.await, Ok(Ok(())))
+            {
+                tracing::warn!(
+                    category = "startup_funding_drain_failed",
+                    "Startup funding drain failed; persisted financial work retained"
+                );
+            }
+            if let Some(task) = treasury
+                && !matches!(task.await, Ok(Ok(())))
+            {
+                tracing::warn!(
+                    category = "startup_treasury_drain_failed",
+                    "Startup treasury drain failed; persisted financial work retained"
+                );
+            }
+        });
+    }
 }
 
-fn blocked_job(status: &Status, job: &crate::rotation::store::funding::FundingJob) -> String {
-    let operation = status
-        .treasury_operations
-        .iter()
-        .find(|op| op.operation_id == job.operation_id);
-    let phase = serde_json::to_value(&job.phase).expect("funding phase serializes");
-    let phase = phase.as_str().expect("funding phase is a string");
-    let source = operation
-        .map(|op| format!("{} (submission attempts={})", op.submission, op.attempts))
-        .unwrap_or_else(|| {
-            "not recorded; this alone does not prove preparation never started".into()
-        });
-    let next = "Run wallet recover --config FILE for a guarded recovery assessment. Eligible jobs recover automatically during bootstrap; unresolved preparation, refunds and conflicting evidence require review. Completed funding and reservations are retained.";
-    format!(
-        "  job={} phase={} timed_out={} quote_attempts={}\n  last_error={}\n  source_operation={}\n  {}",
-        job.id,
-        phase,
-        job.timed_out,
-        job.attempts,
-        job.last_error
-            .as_deref()
-            .unwrap_or("not recorded; the original cause cannot be inferred from this phase"),
-        source,
-        next
-    )
+impl Deployment {
+    pub(super) async fn bootstrap_for_serving(
+        &self,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+    ) -> Result<InitializedWallets> {
+        let names: BTreeSet<_> = self
+            .wallet_resolution
+            .wallets
+            .iter()
+            .filter(|(_, wallet)| wallet.managed())
+            .map(|(name, _)| name.clone())
+            .collect();
+        let needed = self
+            .config
+            .discovery_relay
+            .as_ref()
+            .filter(|policy| policy.serve)
+            .map(|policy| {
+                crate::discovery_relay::resolve_wallets(
+                    policy,
+                    &self.config,
+                    &self.wallet_resolution,
+                    self.config.sources.keys().cloned(),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default()
+            .into_values()
+            .collect();
+        let mut initialized = self
+            .initialize_wallets(env, restriction, None, &needed)
+            .await?;
+        let owner = initialized
+            .treasury
+            .take()
+            .context("startup treasury unavailable")?;
+        let runtime = initialized
+            .funding_runtime
+            .take()
+            .context("startup funding worker unavailable")?;
+        let supervisor = FundingSupervisor::start(
+            owner,
+            runtime,
+            startup_attempts(&self.wallet_resolution.wallets),
+        );
+        if self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
+            && let Err(error) = supervisor.wait_inventory(&names).await
+        {
+            drop(initialized);
+            supervisor.shutdown().await?;
+            return Err(error);
+        }
+        initialized.supervisor = Some(supervisor);
+        Ok(initialized)
+    }
+}
+
+impl InitializedWallets {
+    pub(super) async fn shutdown(mut self) -> Result<()> {
+        let supervisor = self.supervisor.take();
+        drop(self);
+        if let Some(supervisor) = supervisor {
+            supervisor.shutdown().await?;
+        }
+        Ok(())
+    }
 }
 
 async fn supervise(
     initialized: InitializedWallets,
     names: BTreeSet<String>,
+    attempts: BTreeMap<String, u32>,
     stop: CancellationToken,
 ) -> Result<BootstrapSummary> {
     let InitializedWallets {
         wallets,
         treasury,
         funding_runtime,
+        supervisor,
         managed_pools,
     } = initialized;
+    ensure!(
+        supervisor.is_none(),
+        "explicit bootstrap received a running supervisor"
+    );
     let owner = treasury.context("bootstrap treasury unavailable")?;
     let store = owner.store_handle();
     // No paid clients or pool gates are needed. Drop their store handles before
     // closing the owner, whose close waits for the store worker to drain.
     drop(wallets);
     drop(managed_pools);
-    let initial = store
-        .call(|s| s.status())
-        .await
-        .and_then(|s| {
-            let recovering = s.funding_jobs.iter().filter(|job| names.contains(&job.pool_name)
-                && crate::treasury::recovery::needs_recovery(job)
-                && crate::treasury::recovery::can_recover_facts(job, s.treasury_operations.iter().find(|operation| operation.operation_id == job.operation_id))).count();
-            if recovering > 0 {
-                tracing::info!(jobs = recovering, "Recovering existing funding before bootstrap; waiting for verified transaction expiry where required; no manual recovery command needed");
-            }
-            complete(&s, &names)
-        });
+    let captured = match capture_startup(&store, &names).await {
+        Ok(captured) => captured,
+        Err(error) => {
+            drop(funding_runtime);
+            drop(store);
+            owner.close().await?;
+            return Err(error);
+        }
+    };
+    let initial = check_startup(&store, &names, &attempts, Some(&captured), true).await;
     if !matches!(initial, Ok(false)) {
         drop(funding_runtime);
         drop(store);
@@ -222,12 +324,19 @@ async fn supervise(
     let monitor = async move {
         let mut next_progress = tokio::time::Instant::now();
         loop {
-            let status = store.call(|s| s.status()).await?;
-            if complete(&status, &monitored_names)? {
+            let progress = tokio::time::Instant::now() >= next_progress;
+            if check_startup(
+                &store,
+                &monitored_names,
+                &attempts,
+                Some(&captured),
+                progress,
+            )
+            .await?
+            {
                 return Ok(());
             }
-            if tokio::time::Instant::now() >= next_progress {
-                log_progress(&status, &monitored_names);
+            if progress {
                 next_progress = tokio::time::Instant::now() + Duration::from_secs(60);
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -249,31 +358,128 @@ async fn supervise(
     })
 }
 
-fn log_progress(status: &Status, names: &BTreeSet<String>) {
-    for job in &status.funding_jobs {
-        if !names.contains(&job.pool_name) || job.phase == FundingPhase::Complete {
-            continue;
-        }
-        let operation = status
-            .treasury_operations
-            .iter()
-            .find(|op| op.operation_id == job.operation_id);
-        tracing::info!(
-            wallet = %job.pool_name,
-            job_id = %job.id,
-            phase = ?job.phase,
-            timed_out = job.timed_out,
-            source_submission = operation.map(|op| op.submission.as_str()),
-            expiry_height = operation.map(|op| op.facts.expiry_height),
-            sync_height = status.sync.as_ref().and_then(|sync| sync.height),
-            sync_fresh = status.sync_fresh,
-            "Bootstrap waiting for existing funding; progress checked automatically"
-        );
-    }
+fn startup_attempts(wallets: &BTreeMap<String, WalletConfig>) -> BTreeMap<String, u32> {
+    wallets
+        .iter()
+        .filter_map(|(name, wallet)| match wallet {
+            WalletConfig::ZcashRotation { max_attempts, .. } => Some((name.clone(), *max_attempts)),
+            _ => None,
+        })
+        .collect()
 }
 
-// The monitor owns its store handle. Dropping it before joining the owner is
-// essential: owner.close waits for every store handle to disappear.
+async fn capture_startup(
+    store: &StoreHandle,
+    names: &BTreeSet<String>,
+) -> Result<BTreeMap<String, i64>> {
+    let mut captured = BTreeMap::new();
+    let names: Vec<_> = names.iter().cloned().collect();
+    for page in names.chunks(GROUP_PAGE) {
+        let page = page.to_vec();
+        for group in store.call(move |s| s.startup_groups(&page)).await? {
+            captured.insert(group.name, group.through_sequence);
+        }
+    }
+    Ok(captured)
+}
+
+/// A serving pass checks destination ownership; explicit bootstrap checks only
+/// its captured destination jobs. Neither waits for their source-only backlog.
+async fn check_startup(
+    store: &StoreHandle,
+    names: &BTreeSet<String>,
+    attempts: &BTreeMap<String, u32>,
+    captured: Option<&BTreeMap<String, i64>>,
+    progress: bool,
+) -> Result<bool> {
+    let names: Vec<_> = names.iter().cloned().collect();
+    let mut all_ready = true;
+    for page in names.chunks(GROUP_PAGE) {
+        let page = page.to_vec();
+        let groups = store.call(move |s| s.startup_groups(&page)).await?;
+        for group in groups {
+            ensure!(group.enabled, "bootstrap group disabled");
+            if captured.is_none() && group.serving_ready {
+                continue;
+            }
+            let through = captured
+                .and_then(|c| c.get(&group.name))
+                .copied()
+                .unwrap_or(group.through_sequence);
+            let mut cursor = -1;
+            let mut path_count = 0;
+            let mut pending = 0;
+            let mut actionable = false;
+            let mut logged = 0;
+            let maximum = *attempts
+                .get(&group.name)
+                .context("startup funding policy missing")?;
+            loop {
+                let pool = group.pool.clone();
+                let paths = store
+                    .call(move |s| s.startup_paths_page(&pool, cursor, through, PATH_PAGE))
+                    .await?;
+                if paths.is_empty() {
+                    break;
+                }
+                for path in paths {
+                    cursor = path.sequence;
+                    path_count += 1;
+                    let disposition = path.disposition(maximum, group.source_pending);
+                    if disposition == StartupDisposition::DestinationReady {
+                        continue;
+                    }
+                    pending += 1;
+                    actionable |= !matches!(disposition, StartupDisposition::Obstructed(_));
+                    if progress && logged < 8 {
+                        logged += 1;
+                        tracing::info!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap awaiting destination inventory; original operation remains owned");
+                    }
+                }
+            }
+            if captured.is_some() && path_count > 0 && pending == 0 {
+                continue;
+            }
+            all_ready = false;
+            if !actionable && pending > 0 {
+                let name = group.name.clone();
+                let serving = captured.is_none();
+                if let Some(obstructions) = store
+                    .call(move |s| s.startup_obstruction(&name, maximum, serving))
+                    .await?
+                {
+                    return Err(StartupObstructed {
+                        group: group.name,
+                        obstructions,
+                    }
+                    .into());
+                }
+            }
+            // No job rows is incomplete, never an impossibility proof. Schema16
+            // incorporates enabled vacant claims in this same structural query.
+        }
+    }
+    Ok(all_ready)
+}
+#[derive(Debug)]
+struct StartupObstructed {
+    group: String,
+    obstructions: Vec<(String, &'static str)>,
+}
+impl std::fmt::Display for StartupObstructed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "wallet {}: startup incomplete;", self.group)?;
+        for (job, reason) in &self.obstructions {
+            write!(f, " job={job} reason={reason};")?;
+        }
+        write!(
+            f,
+            " accepted work and reservations retained; inspect wallet recover --config FILE"
+        )
+    }
+}
+impl std::error::Error for StartupObstructed {}
+
 async fn run_workers(
     monitor: impl std::future::Future<Output = Result<()>>,
     treasury: impl std::future::Future<Output = Result<()>> + Send + 'static,
@@ -325,174 +531,174 @@ async fn run_workers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rotation::store::PoolStatus;
-    fn status() -> Status {
-        Status {
-            treasury_id: "test".into(),
-            birthday: 0,
-            snapshot_revision: 0,
-            pools: vec![PoolStatus {
-                id: "pool".into(),
-                name: "web".into(),
-                deposit_atomic: "2000000".into(),
-                generation: 0,
-                enabled: true,
-                bootstrapped: false,
-                funding_degraded: false,
-                addresses: vec![],
-            }],
-            sync: None,
-            outgoing_pending: false,
-            sync_fresh: false,
-            treasury_operations: vec![],
-            funding_jobs: vec![],
-            refunds: vec![],
-        }
-    }
-    #[test]
-    fn bootstrap_requires_every_initial_pair_and_rejects_degraded_or_disabled_pools() {
-        let names = BTreeSet::from(["web".to_owned()]);
-        let mut status = status();
-        assert!(!complete(&status, &names).unwrap());
-        status.pools[0].funding_degraded = true;
-        assert!(
-            complete(&status, &names)
-                .unwrap_err()
-                .to_string()
-                .contains("degraded")
-        );
-        status.pools[0].funding_degraded = false;
-        status.pools[0].bootstrapped = true;
-        assert!(complete(&status, &names).unwrap());
-        status.pools[0].enabled = false;
-        assert!(complete(&status, &names).is_err());
-        assert!(complete(&status, &BTreeSet::from(["missing".to_owned()])).is_err());
-    }
-    #[test]
-    fn bootstrap_completion_requires_confirmed_credit_for_both_candidates() {
+    #[tokio::test]
+    async fn scoped_startup_waits_for_actionable_sibling_and_reports_only_fixed_obstructions() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store = crate::rotation::store::Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture snapshot",
-        )
-        .unwrap();
-        store.ensure_pool("web", "2").unwrap();
-        let names = BTreeSet::from(["web".to_owned()]);
-        let jobs = store.funding_jobs().unwrap();
-        assert_eq!(jobs.len(), 2);
-        store
-            .record_credit(&jobs[0].wallet_id, &jobs[0].target, "fixture", 1)
-            .unwrap();
-        assert!(!complete(&store.status().unwrap(), &names).unwrap());
-        store
-            .record_credit(&jobs[1].wallet_id, &jobs[1].target, "fixture", 1)
-            .unwrap();
-        assert!(complete(&store.status().unwrap(), &names).unwrap());
-        store.ensure_pool("web", "2").unwrap();
-        assert_eq!(store.funding_jobs().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn completed_swap_timeout_does_not_block_bootstrap_or_clear_accounting() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = crate::rotation::store::Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture snapshot",
-        )
-        .unwrap();
-        store.ensure_pool("web", "2").unwrap();
-        let names = BTreeSet::from(["web".to_owned()]);
-        let jobs = store.funding_jobs().unwrap();
-        store.mark_funding_timeout(&jobs[0].id).unwrap();
-        store
-            .record_credit(&jobs[0].wallet_id, &jobs[0].target, "fixture", 1)
-            .unwrap();
-        assert!(!complete(&store.status().unwrap(), &names).unwrap());
-        store
-            .record_credit(&jobs[1].wallet_id, &jobs[1].target, "fixture", 1)
-            .unwrap();
-        let status = store.status().unwrap();
-        assert_eq!(status.funding_jobs[0].phase, FundingPhase::Complete);
-        assert!(status.funding_jobs[0].timed_out);
-        assert!(complete(&status, &names).unwrap());
-        assert!(store.status().unwrap().funding_jobs[0].timed_out);
-
-        // A genuinely unfinished timeout still waits, even in a pool whose
-        // initial pair was previously funded.
-        let mut unfinished = status;
-        unfinished.funding_jobs[0].phase = FundingPhase::Swapping;
-        assert!(!complete(&unfinished, &names).unwrap());
-        unfinished.funding_jobs[0].phase = FundingPhase::RefundPending;
-        assert!(complete(&unfinished, &names).is_err());
-    }
-
-    #[test]
-    fn recovery_diagnostic_names_job_before_generic_degraded_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = crate::rotation::store::Store::create(
+        let mut state = crate::rotation::store::Store::create(
             &dir.path().join("state"),
             &dir.path().join("key"),
             1,
             b"fixture",
         )
         .unwrap();
-        store.ensure_pool("web", "2").unwrap();
-        let job = store.funding_jobs().unwrap().remove(0);
-        store
-            .advance_funding(
-                &job.id,
-                FundingPhase::Allocated,
-                FundingPhase::RecoveryRequired,
+        state.ensure_pool("web", "5").unwrap();
+        let jobs = state.funding_jobs().unwrap();
+        state
+            .defer_funding(
+                &jobs[0].id,
+                0,
+                Some("treasury_insufficient_spendable_funds; private fixture prose"),
+                false,
             )
             .unwrap();
-        let mut status = store.status().unwrap();
-        status.pools[0].funding_degraded = true;
+        let (store, owner) = StoreHandle::spawn(state);
         let names = BTreeSet::from(["web".to_owned()]);
-        let error = complete(&status, &names).unwrap_err().to_string();
-        assert!(error.contains(&job.id));
-        assert!(error.contains("RECOVERY_REQUIRED"));
-        assert!(error.contains("last_error=not recorded"));
-        assert!(error.contains("wallet recover --config FILE"));
-        assert!(!error.contains(&job.recipient));
-        status
-            .treasury_operations
-            .push(crate::rotation::transaction::OperationStatus {
-                operation_id: job.operation_id.clone(),
-                facts: crate::rotation::transaction::TransactionFacts {
-                    txid: "private-txid".into(),
-                    expiry_height: 100,
-                    amount_zatoshis: 1,
-                    fee_zatoshis: 1,
-                    deadline: 100,
-                },
-                submission: "UNKNOWN".into(),
-                attempts: 1,
-            });
-        assert!(!complete(&status, &names).unwrap());
-        let error = blocked_job(&status, &status.funding_jobs[0]);
-        assert!(error.contains("source_operation=UNKNOWN (submission attempts=1)"));
-        assert!(error.contains("wallet recover --config FILE"));
-        assert!(!error.contains("recover-unprepared"));
-        assert!(!error.contains("private-txid"));
-        assert!(!error.contains("--rebroadcast"));
-        status.treasury_operations[0].submission = "PREPARED".into();
-        status.treasury_operations[0].attempts = 0;
-        assert!(!complete(&status, &names).unwrap());
-        let error = blocked_job(&status, &status.funding_jobs[0]);
-        assert!(error.contains("wallet recover --config FILE"));
-        assert!(!error.contains("Run wallet reconcile"));
-        status.funding_jobs[0].last_error =
-            Some("funding_recovery_requires_operator; recovery_attempt_limit_reached".into());
+        let attempts = BTreeMap::from([("web".to_owned(), 3)]);
         assert!(
-            complete(&status, &names)
-                .unwrap_err()
-                .to_string()
-                .contains("recovery_attempt_limit_reached")
+            !check_startup(&store, &names, &attempts, None, false)
+                .await
+                .unwrap()
         );
+        let blocked = jobs[1].id.clone();
+        store
+            .call(move |s| {
+                s.defer_funding(
+                    &blocked,
+                    0,
+                    Some("funding_amount_limit_exceeded; private fixture prose"),
+                    false,
+                )
+            })
+            .await
+            .unwrap();
+        let error = check_startup(&store, &names, &attempts, None, false)
+            .await
+            .unwrap_err();
+        assert!(error.is::<StartupObstructed>());
+        let message = error.to_string();
+        for job in &jobs {
+            assert!(message.contains(&job.id));
+            assert!(!message.contains(&job.recipient));
+        }
+        assert!(!message.contains("private fixture prose"));
+        let captured = capture_startup(&store, &names).await.unwrap();
+        store
+            .call(move |s| {
+                for job in jobs {
+                    s.record_credit(&job.wallet_id, &job.target, "fixture", 100)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(
+            check_startup(&store, &names, &attempts, None, false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            check_startup(&store, &names, &attempts, Some(&captured), false)
+                .await
+                .unwrap()
+        );
+        drop(store);
+        owner.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_handoff_keeps_the_same_store_and_workers_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::rotation::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let (store, store_owner) = crate::rotation::store::StoreHandle::spawn(store);
+        let stop = CancellationToken::new();
+        let treasury_stop = stop.clone();
+        let treasury = tokio::spawn(async move {
+            treasury_stop.cancelled().await;
+            store_owner.await?;
+            Ok(())
+        });
+        let funding_stop = stop.clone();
+        let funding_store = store.clone();
+        let funding = tokio::spawn(async move {
+            funding_stop.cancelled().await;
+            drop(funding_store);
+            Ok(())
+        });
+        let supervisor = FundingSupervisor {
+            stop: stop.clone(),
+            store: Some(store.clone()),
+            treasury: Some(treasury),
+            funding: Some(funding),
+            attempts: BTreeMap::new(),
+        };
+        let (treasury, funding) = supervisor.into_tasks();
+        assert!(
+            !stop.is_cancelled(),
+            "readiness handoff must not stop funding"
+        );
+        assert_eq!(store.call(|s| Ok(s.status()?.birthday)).await.unwrap(), 1);
+        assert!(!treasury.as_ref().unwrap().is_finished());
+        assert!(!funding.as_ref().unwrap().is_finished());
+        drop(store);
+        stop.cancel();
+        funding.unwrap().await.unwrap().unwrap();
+        treasury.unwrap().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropped_startup_owner_drains_accepted_work_and_releases_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::rotation::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let (store, store_owner) = crate::rotation::store::StoreHandle::spawn(store);
+        let stop = CancellationToken::new();
+        let (finish, accepted) = tokio::sync::oneshot::channel::<()>();
+        let (closed, closure) = tokio::sync::oneshot::channel();
+        let treasury_stop = stop.clone();
+        let treasury = tokio::spawn(async move {
+            treasury_stop.cancelled().await;
+            store_owner.await?;
+            let _ = closed.send(());
+            Ok(())
+        });
+        let funding_store = store.clone();
+        let funding = tokio::spawn(async move {
+            accepted.await?;
+            funding_store
+                .call(|s| {
+                    s.ensure_pool("accepted", "2")?;
+                    Ok(())
+                })
+                .await?;
+            drop(funding_store);
+            Ok(())
+        });
+        drop(FundingSupervisor {
+            stop: stop.clone(),
+            store: Some(store),
+            treasury: Some(treasury),
+            funding: Some(funding),
+            attempts: BTreeMap::new(),
+        });
+        assert!(stop.is_cancelled());
+        finish.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), closure)
+            .await
+            .unwrap()
+            .unwrap();
+        let status = crate::rotation::store::status(&dir.path().join("state")).unwrap();
+        assert!(status.pools.iter().any(|pool| pool.name == "accepted"));
     }
 
     #[tokio::test]
@@ -580,3 +786,11 @@ mod tests {
         assert!(stop.is_cancelled());
     }
 }
+
+#[cfg(test)]
+#[path = "bootstrap_paused_tests.rs"]
+mod paused_tests;
+
+#[cfg(test)]
+#[path = "bootstrap_actor_tests.rs"]
+mod actor_tests;

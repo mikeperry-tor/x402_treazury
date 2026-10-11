@@ -1,4 +1,4 @@
-//! Process-local restrictions for supervised qualification. Never grants authority.
+//! Process-local funding restrictions. Never grants authority.
 use super::error::AdmissionError;
 use anyhow::Result;
 
@@ -6,6 +6,8 @@ use anyhow::Result;
 pub enum FundingRestriction {
     #[default]
     Ordinary,
+    /// Ordinary auto_fund=false: reconcile accepted work without new funding.
+    Paused,
     /// Existing payments/reconciliation remain possible; no new allocation or ZEC spend.
     DenyNewFunding,
 }
@@ -18,6 +20,9 @@ impl FundingRestriction {
                 "qualification funding limit is zero; new funding denied; existing active-wallet calls and reconciliation remain available"
             );
             anyhow::bail!(AdmissionError::FundingRestricted);
+        }
+        if self == Self::Paused {
+            anyhow::bail!("funding_disabled");
         }
         Ok(())
     }

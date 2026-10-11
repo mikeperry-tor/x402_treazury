@@ -2572,10 +2572,25 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   Base acquisition fixtures, two recovery-disposition fixtures, and real backend
   quote-prerequisite/typed-diagnostic checks. The isolated scheduling snapshot
   passed 282 default-Zcash library tests, 20 funding integrations, all-target
-  Clippy with warnings denied, and formatting checks. Startup continuity is the
-  next separately reviewed portion of this milestone.
+  Clippy with warnings denied, and formatting checks. Startup continuity is a
+  separate commit below.
 
-Steps 6–9 remain unfinished except for the portions described above. The known
+- Step 6 startup continuity retains the same treasury actor and funding worker
+  from pre-discovery bootstrap into serving. Ordinary paused funding starts an
+  observer with a distinct no-new-funding guard; qualification restrictions retain
+  precedence. Cancellation and startup errors drain accepted work. Startup uses
+  bounded configured-group/destination-path reads rather than full status/history,
+  checks destination readiness separately from source completion, and rechecks all
+  obstructed paths against committed facts. Explicit bootstrap captures its initial
+  inventory rather than chasing later replacements. Actual local treasury/worker
+  fixtures cover held sync with independent provider/credit commits and original
+  bytes/reservations through reopen, plus paused ownership across startup handoff.
+  The isolated continuity snapshot passed 16 bootstrap/store/restriction fixtures,
+  two deployment lifecycle fixtures, all-target Clippy with warnings denied, and
+  formatting checks. Final enabled-claim and default-identity behavior belongs to
+  step 7.
+
+Steps 7–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
 conversion has been performed. The source lacks immutable destination-readiness

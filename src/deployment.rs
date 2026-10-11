@@ -363,11 +363,7 @@ impl Deployment {
             && restriction != crate::rotation::restriction::FundingRestriction::DenyNewFunding
             && !crate::qualification::active()
             && !catalog_evidence::collecting()
-            && deployment
-                .config
-                .funding
-                .as_ref()
-                .is_some_and(|f| f.auto_fund)
+            && deployment.config.funding.as_ref().is_some()
             && deployment
                 .wallet_resolution
                 .wallets
@@ -381,89 +377,112 @@ impl Deployment {
             for source in deployment.config.sources.values() {
                 crate::config::resolve(source.provider.clone(), path).await?;
             }
-            deployment.bootstrap(env).await?;
+            deployment.initialized =
+                Some(deployment.bootstrap_for_serving(env, restriction).await?);
         }
-        let relay = if let Some(policy) = deployment
-            .config
-            .discovery_relay
-            .clone()
-            .filter(|p| p.serve)
-            && let Some((env, restriction)) = relay_env
-        {
-            ensure!(
-                !crate::qualification::active() && !catalog_evidence::collecting(),
-                "paid discovery relay is unavailable during qualification"
-            );
-            // Validate listener credentials before discovery can spend.
-            for server in deployment.config.servers.values().filter(|s| s.auth) {
-                required_secret(env, &server.bearer_token_env)?;
-            }
-            let bindings = crate::discovery_relay::resolve_wallets(
-                &policy,
-                &deployment.config,
-                &deployment.wallet_resolution,
-                deployment.config.sources.keys().cloned(),
-            )?;
-            let needed = bindings.values().cloned().collect();
-            let initialized = deployment
-                .initialize_wallets(env, restriction, None, &needed)
-                .await?;
-            let relay =
-                crate::discovery_relay::build(&policy, path, &bindings, &initialized.wallets)
-                    .await?;
-            deployment.initialized = Some(initialized);
-            relay
-        } else {
-            Default::default()
-        };
-        let config = &deployment.config;
-        let wallet_resolution = &deployment.wallet_resolution;
-        let (sources, unavailable_sources) = startup::load(config, path, warn, relay).await?;
-        let mut selected = BTreeMap::new();
-        for (name, server) in &config.servers {
-            let tools = select_listener_tools(name, server, &sources, &unavailable_sources)?;
-            selected.insert(name.clone(), tools);
-        }
-        let mut cover_owners = BTreeMap::new();
-        for (server, tools) in &selected {
-            for (id, tool) in tools {
-                let source = &sources[id];
-                if tool.help_url.is_some() {
-                    continue;
+        let loaded: Result<()> = async {
+            let relay = if let Some(policy) = deployment
+                .config
+                .discovery_relay
+                .clone()
+                .filter(|p| p.serve)
+                && let Some((env, restriction)) = relay_env
+            {
+                ensure!(
+                    !crate::qualification::active() && !catalog_evidence::collecting(),
+                    "paid discovery relay is unavailable during qualification"
+                );
+                // Validate listener credentials before discovery can spend.
+                for server in deployment.config.servers.values().filter(|s| s.auth) {
+                    required_secret(env, &server.bearer_token_env)?;
                 }
-                if let Some(cover) = &source.config.cover_traffic {
-                    let route =
-                        if tool.path.starts_with("https://") || tool.path.starts_with("http://") {
+                let bindings = crate::discovery_relay::resolve_wallets(
+                    &policy,
+                    &deployment.config,
+                    &deployment.wallet_resolution,
+                    deployment.config.sources.keys().cloned(),
+                )?;
+                let needed = bindings.values().cloned().collect();
+                if deployment.initialized.is_none() {
+                    deployment.initialized = Some(
+                        deployment
+                            .initialize_wallets(env, restriction, None, &needed)
+                            .await?,
+                    );
+                }
+                crate::discovery_relay::build(
+                    &policy,
+                    path,
+                    &bindings,
+                    &deployment
+                        .initialized
+                        .as_ref()
+                        .expect("initialized discovery wallets")
+                        .wallets,
+                )
+                .await?
+            } else {
+                Default::default()
+            };
+            let config = &deployment.config;
+            let wallet_resolution = &deployment.wallet_resolution;
+            let (sources, unavailable_sources) = startup::load(config, path, warn, relay).await?;
+            let mut selected = BTreeMap::new();
+            for (name, server) in &config.servers {
+                let tools = select_listener_tools(name, server, &sources, &unavailable_sources)?;
+                selected.insert(name.clone(), tools);
+            }
+            let mut cover_owners = BTreeMap::new();
+            for (server, tools) in &selected {
+                for (id, tool) in tools {
+                    let source = &sources[id];
+                    if tool.help_url.is_some() {
+                        continue;
+                    }
+                    if let Some(cover) = &source.config.cover_traffic {
+                        let route = if tool.path.starts_with("https://")
+                            || tool.path.starts_with("http://")
+                        {
                             tool.path.clone()
                         } else {
                             source.base_url.clone()
                         };
-                    cover.validate_origin(&route)?;
-                    let key = (
-                        wallet_resolution.bindings[server][id].wallet.clone(),
-                        reqwest::Url::parse(&route)?.origin().ascii_serialization(),
-                        source.config.transport(),
-                        crate::network::global()
-                            .read_timeout(
-                                source
-                                    .config
-                                    .read_timeout_seconds
-                                    .map(Duration::from_secs_f64),
-                            )
-                            .as_millis(),
-                    );
-                    if let Some(previous) = cover_owners.insert(key, cover) {
-                        ensure!(
-                            previous == cover,
-                            "conflicting cover settings for shared wallet/origin"
+                        cover.validate_origin(&route)?;
+                        let key = (
+                            wallet_resolution.bindings[server][id].wallet.clone(),
+                            reqwest::Url::parse(&route)?.origin().ascii_serialization(),
+                            source.config.transport(),
+                            crate::network::global()
+                                .read_timeout(
+                                    source
+                                        .config
+                                        .read_timeout_seconds
+                                        .map(Duration::from_secs_f64),
+                                )
+                                .as_millis(),
                         );
+                        if let Some(previous) = cover_owners.insert(key, cover) {
+                            ensure!(
+                                previous == cover,
+                                "conflicting cover settings for shared wallet/origin"
+                            );
+                        }
                     }
                 }
             }
+            deployment.unavailable_sources = unavailable_sources.into_keys().collect();
+            deployment.sources = sources;
+            deployment.selected = selected;
+            Ok(())
         }
-        deployment.unavailable_sources = unavailable_sources.into_keys().collect();
-        deployment.sources = sources;
-        deployment.selected = selected;
+        .await;
+        if let Err(error) = loaded {
+            #[cfg(feature = "zcash")]
+            if let Some(initialized) = deployment.initialized.take() {
+                initialized.shutdown().await?;
+            }
+            return Err(error);
+        }
         Ok(deployment)
     }
     /// Credential-free qualification snapshot, returned only by an explicit CLI inspection.
@@ -641,6 +660,14 @@ impl Deployment {
                         })
                         .await?;
                 }
+                if !f.auto_fund {
+                    store
+                        .call(|s| {
+                            s.pause_new_funding();
+                            Ok(())
+                        })
+                        .await?;
+                }
                 let managed = self
                     .wallet_resolution
                     .wallets
@@ -687,44 +714,42 @@ impl Deployment {
                 }
                 tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
                     "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to funding budgets, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
-                if f.auto_fund {
-                    let (handle, commands) = crate::treasury::actor::channel();
-                    let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
-                    let session = f.near_user_session_env.as_deref().map(secret).transpose()?;
-                    let backend = crate::rotation::funding::Backend {
-                        treasury: handle,
-                        store: store.clone(),
-                        near: crate::rotation::near::NearClient::with_session(
-                            key.as_deref(),
-                            session.as_deref(),
-                        )?,
-                        base,
-                        wallets: self.wallet_resolution.wallets.clone(),
-                        funding: f.clone(),
-                        daily_limit: t
-                            .daily_treasury_spend_limit_zec
-                            .as_deref()
-                            .map(crate::rotation::config::zatoshis)
-                            .transpose()?
-                            .unwrap_or(i64::MAX) as u64,
-                        max_network_fee: crate::rotation::config::zatoshis(
-                            &t.max_funding_transaction_fee_zec,
-                        )? as u64,
-                    };
-                    let sender = crate::treasury::submission::GrpcSubmission::new(
-                        t.submission_endpoint(|name| env.get(name).cloned())?,
-                        t.indexer_endpoint(|name| env.get(name).cloned())?,
-                    )?;
-                    funding_runtime = Some((
-                        commands,
-                        sender,
-                        crate::rotation::funding::FundingWorker::new(
-                            store.clone(),
-                            backend,
-                            f.poll_seconds,
-                        ),
-                    ));
-                }
+                let (handle, commands) = crate::treasury::actor::channel();
+                let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
+                let session = f.near_user_session_env.as_deref().map(secret).transpose()?;
+                let backend = crate::rotation::funding::Backend {
+                    treasury: handle,
+                    store: store.clone(),
+                    near: crate::rotation::near::NearClient::with_session(
+                        key.as_deref(),
+                        session.as_deref(),
+                    )?,
+                    base,
+                    wallets: self.wallet_resolution.wallets.clone(),
+                    funding: f.clone(),
+                    daily_limit: t
+                        .daily_treasury_spend_limit_zec
+                        .as_deref()
+                        .map(crate::rotation::config::zatoshis)
+                        .transpose()?
+                        .unwrap_or(i64::MAX) as u64,
+                    max_network_fee: crate::rotation::config::zatoshis(
+                        &t.max_funding_transaction_fee_zec,
+                    )? as u64,
+                };
+                let sender = crate::treasury::submission::GrpcSubmission::new(
+                    t.submission_endpoint(|name| env.get(name).cloned())?,
+                    t.indexer_endpoint(|name| env.get(name).cloned())?,
+                )?;
+                funding_runtime = Some((
+                    commands,
+                    sender,
+                    crate::rotation::funding::FundingWorker::new(
+                        store.clone(),
+                        backend,
+                        f.poll_seconds,
+                    ),
+                ));
                 treasury = Some(owner);
             }
         }
@@ -734,6 +759,8 @@ impl Deployment {
             treasury,
             #[cfg(feature = "zcash")]
             funding_runtime,
+            #[cfg(feature = "zcash")]
+            supervisor: None,
             #[cfg(feature = "zcash")]
             managed_pools,
         })
@@ -867,6 +894,7 @@ impl Deployment {
         unsigned: bool,
     ) -> Result<RunningDeployment> {
         let secret = |key: &str| required_secret(env, key);
+        let setup: Result<_> = async {
         // Validate every credential before opening any port.
         let mut tokens = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
@@ -912,15 +940,26 @@ impl Deployment {
                 #[cfg(feature = "zcash")]
                 funding_runtime: None,
                 #[cfg(feature = "zcash")]
+                supervisor: None,
+                #[cfg(feature = "zcash")]
                 managed_pools: Vec::new(),
             }
-        } else if let Some(mut initialized) = self.initialized.take() {
+        } else if self.initialized.is_some() {
+            let initialized=self.initialized.as_mut().expect("initialized serving wallets");
             #[cfg(feature = "zcash")]
             if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding
-                && let Some(treasury) = &initialized.treasury
+                && let Some(store) = initialized
+                    .treasury
+                    .as_ref()
+                    .map(|treasury| treasury.store_handle())
+                    .or_else(|| {
+                        initialized
+                            .supervisor
+                            .as_ref()
+                            .map(|supervisor| supervisor.store())
+                    })
             {
-                treasury
-                    .store_handle()
+                store
                     .call(|store| {
                         store.deny_new_funding();
                         Ok(())
@@ -955,10 +994,22 @@ impl Deployment {
                     initialized.wallets.insert(name, PaidClient::new(payer));
                 }
             }
-            initialized
+            self.initialized.take().expect("initialized serving wallets")
         } else {
             self.initialize_wallets(env, restriction, None, &BTreeSet::new())
                 .await?
+        };
+        Ok((tokens,initialized))
+        }.await;
+        let (mut tokens, initialized) = match setup {
+            Ok(setup) => setup,
+            Err(error) => {
+                #[cfg(feature = "zcash")]
+                if let Some(initialized) = self.initialized.take() {
+                    initialized.shutdown().await?;
+                }
+                return Err(error);
+            }
         };
         let wallets = initialized.wallets;
         #[cfg(feature = "zcash")]
@@ -966,71 +1017,91 @@ impl Deployment {
         #[cfg(feature = "zcash")]
         let funding_runtime = initialized.funding_runtime;
         #[cfg(feature = "zcash")]
+        let supervisor = initialized.supervisor;
+        #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
-        self.discover_prices().await?;
-        let mut servers = self.build_servers(&wallets);
-        let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
-        for (name, server) in &servers {
-            let tools = server.catalog.read().views["default"].clone();
-            if self.config.source_management.is_some()
-                || self.config.servers[name].discover_on_demand
-            {
-                ensure!(
-                    tools
-                        .iter()
-                        .all(|t| !t.tool.name.starts_with("x402_treazury_")
-                            && !t.tool.name.starts_with("dyn_")),
-                    "static tool uses reserved namespace"
-                );
+        let bound: Result<_> = async {
+            self.discover_prices().await?;
+            let mut servers = self.build_servers(&wallets);
+            let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
+            for (name, server) in &servers {
+                let tools = server.catalog.read().views["default"].clone();
+                if self.config.source_management.is_some()
+                    || self.config.servers[name].discover_on_demand
+                {
+                    ensure!(
+                        tools
+                            .iter()
+                            .all(|t| !t.tool.name.starts_with("x402_treazury_")
+                                && !t.tool.name.starts_with("dyn_")),
+                        "static tool uses reserved namespace"
+                    );
+                }
+                snapshot.views.insert(name.clone(), tools);
             }
-            snapshot.views.insert(name.clone(), tools);
-        }
-        let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
-        let protected = crate::discovery::policy::protected_paths(&self.config, &self.config_path);
-        let manager = if let Some(policy) = self.config.source_management.clone() {
-            Some(
-                crate::discovery::Manager::new(
-                    policy,
-                    self.config.servers.clone(),
-                    wallets,
-                    catalog.clone(),
-                    protected,
+            let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
+            let protected =
+                crate::discovery::policy::protected_paths(&self.config, &self.config_path);
+            let manager = if let Some(policy) = self.config.source_management.clone() {
+                Some(
+                    crate::discovery::Manager::new(
+                        policy,
+                        self.config.servers.clone(),
+                        wallets,
+                        catalog.clone(),
+                        protected,
+                    )
+                    .await?,
                 )
-                .await?,
-            )
-        } else {
-            None
-        };
-        let mut listeners = Vec::new();
-        let mut accepted_work = Vec::new();
-        for (name, cfg) in &self.config.servers {
-            let mut server = servers.remove(name).unwrap();
-            server.catalog = catalog.clone();
-            server.catalog_server = name.clone();
-            server.host_policy = crate::server::host::HostPolicy::new(
-                cfg.allowed_hosts.clone(),
-                cfg.disable_host_check,
-            )?;
-            if cfg.source_management {
-                manager
-                    .as_ref()
-                    .context("source management unavailable")?
-                    .directory(name)
-                    .with_context(|| {
-                        format!("server {name}: directory search wallet unavailable")
-                    })?;
+            } else {
+                None
+            };
+            let mut listeners = Vec::new();
+            let mut accepted_work = Vec::new();
+            for (name, cfg) in &self.config.servers {
+                let mut server = servers.remove(name).unwrap();
+                server.catalog = catalog.clone();
+                server.catalog_server = name.clone();
+                server.host_policy = crate::server::host::HostPolicy::new(
+                    cfg.allowed_hosts.clone(),
+                    cfg.disable_host_check,
+                )?;
+                if cfg.source_management {
+                    manager
+                        .as_ref()
+                        .context("source management unavailable")?
+                        .directory(name)
+                        .with_context(|| {
+                            format!("server {name}: directory search wallet unavailable")
+                        })?;
+                }
+                server.discovery = manager.clone();
+                let listener = TcpListener::bind(cfg.listen)
+                    .await
+                    .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
+                accepted_work.push(server.work.clone());
+                listeners.push((
+                    name.clone(),
+                    listener,
+                    http_app_with_auth(server, tokens.remove(name).unwrap()),
+                ));
             }
-            server.discovery = manager.clone();
-            let listener = TcpListener::bind(cfg.listen)
-                .await
-                .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
-            accepted_work.push(server.work.clone());
-            listeners.push((
-                name.clone(),
-                listener,
-                http_app_with_auth(server, tokens.remove(name).unwrap()),
-            ));
+            Ok((listeners, accepted_work))
         }
+        .await;
+        let (listeners, accepted_work) = match bound {
+            Ok(bound) => bound,
+            Err(error) => {
+                #[cfg(feature = "zcash")]
+                {
+                    drop(managed_pools);
+                    if let Some(supervisor) = supervisor {
+                        supervisor.shutdown().await?;
+                    }
+                }
+                return Err(error);
+            }
+        };
         Ok(RunningDeployment {
             listeners,
             accepted_work,
@@ -1042,6 +1113,8 @@ impl Deployment {
             treasury,
             #[cfg(feature = "zcash")]
             funding_runtime,
+            #[cfg(feature = "zcash")]
+            supervisor,
             #[cfg(feature = "zcash")]
             managed_pools,
         })
@@ -1160,6 +1233,8 @@ struct InitializedWallets {
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
+    supervisor: Option<bootstrap::FundingSupervisor>,
+    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
 }
 #[cfg(feature = "zcash")]
@@ -1177,6 +1252,8 @@ pub struct RunningDeployment {
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
+    supervisor: Option<bootstrap::FundingSupervisor>,
+    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
     #[cfg(feature = "zcash")]
     treasury: Option<crate::treasury::Treasury>,
@@ -1190,6 +1267,13 @@ impl RunningDeployment {
             .collect()
     }
     pub async fn serve(self, shutdown: CancellationToken) -> Result<()> {
+        #[cfg(feature = "zcash")]
+        let stop = self
+            .supervisor
+            .as_ref()
+            .map(|supervisor| supervisor.stop.clone())
+            .unwrap_or_default();
+        #[cfg(not(feature = "zcash"))]
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
         let reconciliation_stop = CancellationToken::new();
@@ -1204,34 +1288,38 @@ impl RunningDeployment {
             });
         }
         #[cfg(feature = "zcash")]
-        let (treasury_task, funding_task) = match (self.treasury, self.funding_runtime) {
-            (Some(owner), Some((commands, sender, worker))) => (
-                Some(tokio::spawn({
-                    let stopped = stop.clone();
-                    async move {
-                        let _stop_on_exit = stopped.clone().drop_guard();
-                        owner.run_commands(commands, sender, stopped).await
-                    }
-                })),
-                Some(tokio::spawn({
-                    let stopped = stop.clone();
-                    async move {
-                        let _stop_on_exit = stopped.clone().drop_guard();
-                        worker.run(stopped).await
-                    }
-                })),
-            ),
-            (Some(owner), None) => (
-                Some(tokio::spawn({
-                    let stopped = stop.clone();
-                    async move {
-                        let _stop_on_exit = stopped.clone().drop_guard();
-                        owner.run_sync(stopped).await
-                    }
-                })),
-                None,
-            ),
-            (None, _) => (None, None),
+        let (treasury_task, funding_task) = if let Some(supervisor) = self.supervisor {
+            supervisor.into_tasks()
+        } else {
+            match (self.treasury, self.funding_runtime) {
+                (Some(owner), Some((commands, sender, worker))) => (
+                    Some(tokio::spawn({
+                        let stopped = stop.clone();
+                        async move {
+                            let _stop_on_exit = stopped.clone().drop_guard();
+                            owner.run_commands(commands, sender, stopped).await
+                        }
+                    })),
+                    Some(tokio::spawn({
+                        let stopped = stop.clone();
+                        async move {
+                            let _stop_on_exit = stopped.clone().drop_guard();
+                            worker.run(stopped).await
+                        }
+                    })),
+                ),
+                (Some(owner), None) => (
+                    Some(tokio::spawn({
+                        let stopped = stop.clone();
+                        async move {
+                            let _stop_on_exit = stopped.clone().drop_guard();
+                            owner.run_sync(stopped).await
+                        }
+                    })),
+                    None,
+                ),
+                (None, _) => (None, None),
+            }
         };
         #[cfg(feature = "zcash")]
         let mut reconciliation = JoinSet::new();

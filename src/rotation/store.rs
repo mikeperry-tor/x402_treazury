@@ -4,6 +4,7 @@ mod allocation;
 mod backup;
 mod evidence;
 pub use evidence::BalanceSupport;
+pub(crate) mod bootstrap;
 #[cfg(feature = "zcash")]
 mod expiry;
 pub mod funding;
@@ -521,6 +522,12 @@ impl Store {
         tracing::warn!(
             "qualification funding restriction installed: zero new jobs and zero new ZEC spending; existing reconciliation remains available"
         );
+    }
+    /// Ordinary pause cannot weaken a previously installed qualification restriction.
+    pub fn pause_new_funding(&mut self) {
+        if self.funding_restriction != super::restriction::FundingRestriction::DenyNewFunding {
+            self.funding_restriction = super::restriction::FundingRestriction::Paused;
+        }
     }
     /// Install once, before pool setup. Reopening requires explicit reinstallation.
     pub fn install_funding_permits(
