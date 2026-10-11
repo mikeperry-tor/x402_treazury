@@ -391,6 +391,11 @@ impl Store {
         store.snapshot()?;
         configure(&store.db)?;
         admission_schema(&store.db)?;
+        // Exclusive stopped-service ownership proves no signer from the prior
+        // process can still publish these unsigned leases. Signed rows survive.
+        store
+            .db
+            .execute("DELETE FROM payment_attempts WHERE state='ADMITTED'", [])?;
         Ok(store)
     }
     pub fn id(&self) -> &str {
@@ -1212,9 +1217,13 @@ fn read_status(db: &Connection) -> Result<Status> {
 // The async facade serializes all SQL on a dedicated blocking task. A cancelled
 // caller drops only its response receiver; an accepted transaction still finishes.
 type Work = Box<dyn FnOnce(&mut Store) + Send>;
+type GroupGates = std::sync::Arc<
+    std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+>;
 #[derive(Clone)]
 pub struct StoreHandle {
     sender: tokio::sync::mpsc::Sender<Work>,
+    group_gates: GroupGates,
 }
 impl StoreHandle {
     pub fn spawn(store: Store) -> (Self, tokio::task::JoinHandle<()>) {
@@ -1225,7 +1234,22 @@ impl StoreHandle {
                 work(&mut store);
             }
         });
-        (Self { sender }, task)
+        (
+            Self {
+                sender,
+                group_gates: Default::default(),
+            },
+            task,
+        )
+    }
+    /// All independently constructed payment owners for this store/group share
+    /// the same gate, including while an accepted SQL job outlives its waiter.
+    pub(crate) fn group_gate(&self, pool: &str) -> Result<std::sync::Arc<tokio::sync::Mutex<()>>> {
+        let mut gates = self
+            .group_gates
+            .lock()
+            .map_err(|_| anyhow::anyhow!("group gate registry poisoned"))?;
+        Ok(gates.entry(pool.to_owned()).or_default().clone())
     }
     pub async fn call<T: Send + 'static>(
         &self,
@@ -1358,25 +1382,21 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    /// Called while holding this pool's payment gate. ADMITTED rows cannot have escaped
-    /// the process: every send must first durably change state to POSSIBLY_SUBMITTED.
-    pub fn chain_query(&mut self, pool: &str) -> Result<super::base::ChainQuery> {
+    /// Read-only query construction is also used by funding credit without the
+    /// payment gate. It must never reclaim a live signer's unsigned reservation.
+    pub fn chain_query(&self, pool: &str) -> Result<super::base::ChainQuery> {
         self.chain_query_inner(pool, true)
     }
     /// Historical authorizations still reconcile, but retired balances cannot
     /// fund a payment and must not delay acquisition of active admission evidence.
-    pub(crate) fn payment_chain_query(&mut self, pool: &str) -> Result<super::base::ChainQuery> {
+    pub(crate) fn payment_chain_query(&self, pool: &str) -> Result<super::base::ChainQuery> {
         self.chain_query_inner(pool, false)
     }
     fn chain_query_inner(
-        &mut self,
+        &self,
         pool: &str,
         retired_balances: bool,
     ) -> Result<super::base::ChainQuery> {
-        self.db.execute(
-            "DELETE FROM payment_attempts WHERE pool_id=?1 AND state='ADMITTED'",
-            [pool],
-        )?;
         let wallets = self
             .db
             .prepare("SELECT id,address FROM wallets WHERE pool_id=?1 AND (role!='RETIRED' OR (?2 AND EXISTS (SELECT 1 FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED')))")?
@@ -1401,6 +1421,16 @@ impl Store {
             pending,
             anchor,
         })
+    }
+    /// Temporary legacy cleanup: only the next owner holding the shared group
+    /// gate may reclaim abandoned unsigned leases. Store FIFO ordering drains
+    /// any previously accepted admission/journal before this deletion.
+    pub(crate) fn clear_abandoned_admissions(&mut self, pool: &str) -> Result<()> {
+        self.db.execute(
+            "DELETE FROM payment_attempts WHERE pool_id=?1 AND state='ADMITTED'",
+            [pool],
+        )?;
+        Ok(())
     }
     /// Chain-only reconciliation. Never admits a payment or promotes a payer.
     pub fn reconcile_pool(&mut self, pool: &str, view: super::base::ChainView) -> Result<()> {

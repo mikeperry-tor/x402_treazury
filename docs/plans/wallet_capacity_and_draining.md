@@ -2,8 +2,8 @@
 
 ## Objective and status
 
-Draft implementation plan; no feature or funded execution is authorized by this
-file. Replace the active/ready pair with one active wallet, a small reserve slot,
+Implementation in progress under the operator's implementation request; this file
+does not authorize funded execution. Replace the active/ready pair with one active wallet, a small reserve slot,
 an optional large reserve slot, and retained wallets. One named managed profile
 owns the group. Every wallet uses the same group per-payment cap. Reserve sizes
 control replenishment, not spending authority or wallet classification.
@@ -2448,6 +2448,25 @@ current behavior or alter historical evidence. Pin middleware provenance before 
 handoff. Public reports omit private identifiers, credentials, prose and paths.
 
 ## Delivery sequence
+
+### Completed scope
+
+- **Step 1 — independent ownership fix:** chain-query construction is read-only.
+  Legacy unsigned cleanup now runs explicitly under the shared store/group gate,
+  or after exclusive stopped-service reopen. Signed journals survive both paths.
+  The shared-gate factory portion of step 2 was brought forward because independently
+  constructed pool handles must not reclaim one another's live unsigned leases.
+  Focused default-Zcash validation: 56 rotation unit tests, 38 managed-payment tests
+  and 18 rotation integration tests passed (subprocess helper tests remain ignored
+  when not invoked by their parents); all-target Clippy with warnings denied and
+  formatting checks passed. Fixtures cover actual backend credit during an admitted
+  payment, read-only reconciliation/query construction, cancelled accepted SQL work,
+  independent handles and exclusive reopen. Network fixtures require localhost access.
+  Temporary cleanup remains only until step 2 replaces the two-step admission path.
+
+Steps 2–9 remain unfinished, apart from the shared-gate factory described above.
+
+### Remaining delivery order
 
 Deliver independently reviewable milestones with focused default-Zcash regression checks
 at each boundary. Preserve one final configuration/runtime model; intermediate review steps

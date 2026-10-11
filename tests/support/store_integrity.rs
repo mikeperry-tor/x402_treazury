@@ -572,7 +572,7 @@ fn expired_admission_evidence_commits_balances_without_promotion_or_reservation(
 #[test]
 fn admission_skips_retired_balances_but_retains_their_authorizations() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = populated(dir.path());
+    let store = populated(dir.path());
     let pool = store.status().unwrap().pools[0].id.clone();
     let wallet: String = store
         .db
@@ -597,4 +597,71 @@ fn admission_skips_retired_balances_but_retains_their_authorizations() {
     let query = store.payment_chain_query(&pool).unwrap();
     assert!(!query.wallets.iter().any(|(id, _)| id == &wallet));
     assert!(query.pending.iter().any(|auth| auth.wallet == wallet));
+}
+
+#[test]
+fn unsigned_queries_preserve_leases_and_exclusive_reopen_cleans_only_unsigned() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = populated(dir.path());
+    let id = store.id().to_owned();
+    let pool = store.status().unwrap().pools.remove(0).id;
+    store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'unsigned',pool_id,wallet_id,generation,amount,requirements_hash,'ADMITTED' FROM payment_attempts WHERE id='payment'", []).unwrap();
+    store.chain_query(&pool).unwrap();
+    store.payment_chain_query(&pool).unwrap();
+    let count = |s: &Store| {
+        s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap()
+    };
+    assert_eq!(count(&store), 2);
+    drop(store);
+    let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert_eq!(count(&store), 1);
+    assert_eq!(store.chain_query(&pool).unwrap().pending[0].id, "payment");
+}
+
+#[tokio::test]
+async fn abandoned_lease_cleanup_follows_accepted_work_and_shared_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = populated(dir.path());
+    let pool = store.status().unwrap().pools.remove(0).id;
+    let (store, worker) = StoreHandle::spawn(store);
+    let gate = store.group_gate(&pool).unwrap();
+    let other = store.clone().group_gate(&pool).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&gate, &other));
+    let guard = gate.lock().await;
+    assert!(other.try_lock().is_err());
+    let (started, accepted) = tokio::sync::oneshot::channel();
+    let (release, paused) = std::sync::mpsc::channel();
+    let waiter = tokio::spawn({
+        let store = store.clone();
+        async move {
+            store.call(move |s| {
+                started.send(()).unwrap();
+                paused.recv().unwrap();
+                s.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'abandoned',pool_id,wallet_id,generation,amount,requirements_hash,'ADMITTED' FROM payment_attempts WHERE id='payment'", [])?;
+                Ok(())
+            }).await
+        }
+    });
+    accepted.await.unwrap();
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    drop(guard);
+    let _next_owner = other.lock().await;
+    release.send(()).unwrap();
+    store
+        .call(move |s| {
+            s.clear_abandoned_admissions(&pool)?;
+            let rows: i64 =
+                s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))?;
+            assert_eq!(rows, 1);
+            assert_eq!(s.chain_query(&pool)?.pending[0].id, "payment");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    worker.await.unwrap();
 }

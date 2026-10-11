@@ -31,7 +31,7 @@ pub struct ManagedPool {
     base: BaseRpc,
     payment_limit: U256,
     policy: SpendPolicy,
-    gate: Mutex<()>,
+    gate: Arc<Mutex<()>>,
 }
 struct Offer {
     raw: Value,
@@ -59,12 +59,12 @@ impl ManagedPool {
         policy: SpendPolicy,
     ) -> Result<Self> {
         Ok(Self {
+            gate: store.group_gate(&pool)?,
             store,
             pool,
             base,
             payment_limit: positive_usdc(deposit)?.min(policy.max_atomic.unwrap_or(U256::MAX)),
             policy,
-            gate: Mutex::new(()),
         })
     }
     /// Explicit operator opt-out of the historical funding-target payment ceiling.
@@ -77,7 +77,13 @@ impl ManagedPool {
     pub async fn reconcile(&self) -> Result<()> {
         let _gate = self.gate.lock().await;
         let pool = self.pool.clone();
-        let query = self.store.call(move |s| s.chain_query(&pool)).await?;
+        let query = self
+            .store
+            .call(move |s| {
+                s.clear_abandoned_admissions(&pool)?;
+                s.chain_query(&pool)
+            })
+            .await?;
         let observation = crate::qualification::pool_observation(&self.pool).await;
         let view = self.base.view(query).await?;
         let pool = self.pool.clone();
@@ -184,7 +190,10 @@ impl ManagedPool {
             let pool = self.pool.clone();
             let query = self
                 .store
-                .call(move |s| s.payment_chain_query(&pool))
+                .call(move |s| {
+                    s.clear_abandoned_admissions(&pool)?;
+                    s.payment_chain_query(&pool)
+                })
                 .await?;
             let view = self.base.payment_view(query).await?;
             let pool = self.pool.clone();
@@ -475,4 +484,44 @@ fn validate_payload(payload: &Value, offer: &Offer, payer: &str) -> Result<Autho
         valid_after: after,
         valid_before: before,
     })
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn independently_constructed_pool_handles_share_the_store_group_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = super::super::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = state.ensure_pool("shared", "5").unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let make = || {
+            ManagedPool::new(
+                store.clone(),
+                pool.clone(),
+                BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
+                "5",
+                SpendPolicy::dollars("5").unwrap(),
+            )
+            .unwrap()
+        };
+        let first = make();
+        let second = make();
+        assert!(Arc::ptr_eq(&first.gate, &second.gate));
+        let guard = first.gate.lock().await;
+        assert!(second.gate.try_lock().is_err());
+        drop(guard);
+        assert!(second.gate.try_lock().is_ok());
+        drop(first);
+        drop(second);
+        drop(store);
+        worker.await.unwrap();
+    }
 }
