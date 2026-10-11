@@ -274,6 +274,8 @@ before updating a local deployment. Old target/budget fields are rejected; walle
 state conversion is separate from configuration. The inspected legacy source lacks
 immutable readiness proof and cannot be converted under the strict contract.
 Ordinary startup rejects legacy schemas before loading keys or mutating state.
+The [known-state preflight notes](docs/operator-notes/privacy-local-schema12.md)
+describe the separate utility, rejection evidence and backup requirements.
 
 Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 

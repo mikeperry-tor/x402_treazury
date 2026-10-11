@@ -758,3 +758,12 @@ Automatic retirement runs during ordinary reconciliation under the configured
 per-wallet tolerance, including with `auto_fund=false`. It preserves keys and funds;
 there is no manual retirement command. See [automatic retirement](wallet-rotation.md#automatic-retirement)
 for dual-balance evidence, pending-work exclusions and qualification restrictions.
+
+The one-time [known-state preflight](operator-notes/privacy-local-schema12.md) is a
+separate Rust example, outside the production wallet command tree. It requires
+stopped-service exclusive ownership and inspects a disposable database snapshot
+without loading keys, connecting to a network or changing source state. The
+inspected schema12 source is rejected for missing immutable destination-readiness
+support. No successful transformation is available; ordinary `recover` cannot
+manufacture that proof or convert the schema. The notes describe full-backup
+requirements and why an old backup cannot safely undo subsequent financial work.

@@ -2616,7 +2616,17 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   traffic accounting. Four focused retention fixtures and all 13 active network
   integrations passed, including live-handle identity, TLS and slow progress.
 
-Steps 8 and 9 remain unfinished. The known
+- Step 8 implements the selected strict preflight-rejection branch as a standalone
+  Rust example outside the production CLI. Exclusive ownership precedes a private
+  disposable database/journal snapshot; no keys, networking or source writes are
+  involved. Seven unfunded fixtures passed, covering repeated byte preservation,
+  committed WAL inspection, ownership/schema guards, unresolved source obligations,
+  missing original resolution/readiness support, structural current-schema recognition
+  and private query-only copies. The operator note explicitly excludes successful
+  transformation, restored-key and live migration claims. The utility has not been
+  run on real state. Final integration/documentation remains step 9.
+
+The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
 conversion has been performed. The source lacks immutable destination-readiness

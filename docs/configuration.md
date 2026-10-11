@@ -403,6 +403,7 @@ before new quote acceptance/preparation. Configuration edits do not convert stat
 The inspected schema12 privacy-local source lacks immutable destination readiness
 support and is unsupported by the strict conversion contract. Ordinary startup
 rejects legacy schemas without mutation. No successful conversion or incident repair is implied.
+See the [known-state preflight and preservation limits](operator-notes/privacy-local-schema12.md).
 See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
 for the bounded selector and its accepted limitations.
 

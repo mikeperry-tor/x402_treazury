@@ -12,12 +12,12 @@ invocation and Cargo-managed protoc; do not append a second `--locked` flag.
 
 ```sh
 scripts/zcash.sh test --all-targets -- --test-threads=1
-cargo test --locked --no-default-features --all-targets
 cargo fmt --check
 scripts/zcash.sh clippy --all-targets -- -D warnings
 ```
 
-Run feature configurations sequentially: subprocess tests use the built executable
+Reduced-feature suites require an explicit request. Run requested feature
+configurations sequentially: subprocess tests use the built executable
 path. Prefer focused tests for a change, then the relevant broader suite.
 `scripts/check.sh` is the full qualification wrapper, including compatibility and
 vendor verification. Building dependencies/proving parameters can require network
@@ -31,8 +31,8 @@ by their parent tests differ from ignored optional live tests.
 | --- | --- |
 | Catalog/config/providers | Generated schemas, selected operations, routing, pricing descriptions, composition and pinned local catalogs. |
 | MCP/deployment/discovery | Auth, scope and grants, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and ownership release. |
-| Payments/managed rotation | Real local signing, cap/asset validation, reserve-before-send, no paid replay, concurrent admission, single promotion/outbox and canonical liability release. |
-| Treasury/store/funding | Encrypted persistence, migrations, snapshot ordering, budget gates, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
+| Payments/managed rotation | Real local signing, cap/asset validation, reserve-before-send, no paid replay, concurrent admission, exact reserve-claim consumption, independent refill allocation, retained-wallet selection, and canonical liability release. |
+| Treasury/store/funding | Encrypted persistence, explicit conversion preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
 | Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, proxy failure, TLS, redirects and public-destination enforcement. |
 | Output/resource limits | Exact/over-bound behavior, visible errors and logs, no partial cache success, no retry of paid oversized responses, typed inline image/mapping behavior. |
 
@@ -76,6 +76,26 @@ insufficient remaining capacity, and preserve those decisions across restart.
 Synthetic proving checks actual-fee affordability and exact saved bytes through
 failed persistence/reopen. These are unfunded/local tests, not evidence of live
 1Click delivery or a resolution of its Zcash quote-deadline contract.
+
+Managed-capacity fixtures exercise actual local HTTP signing and canonical Base
+observations: a $10 balance with $4 unresolved authority cannot pay $8; canonical
+USED evidence leaves $6, while canonical expired-unused evidence releases the
+liability without relabeling or renewing the original $10 observation. Candidate
+passes cover inventory beyond a page, independent completed candidates, contention,
+and complete-negative versus unavailable evidence. Funding-owner fixtures exercise
+independent bounded quote/status/credit progress, per-kind backoff, exact operation
+bindings, cancellation and reopen. Shared balance-read fixtures verify coalescing
+and retained acquisition ownership after a waiter leaves. These tests preserve
+serialized treasury prerequisites and accepted financial work.
+
+The narrow conversion utility has synthetic fixtures for strict source-shape and
+proof validation, rejection before mutation, repeated/reopened inspection,
+exclusive ownership, and committed WAL inspection without changing source sidecars.
+The operator-identified real state was inspected read-only and was **not converted**:
+legacy completion records lack the required immutable destination-readiness support.
+Synthetic checks do not supply that missing proof or qualify a live migration.
+Funded lifecycle, privacy and combined cover/payment acceptance retain the limits
+listed under [qualification status](#qualification-status).
 
 ## Coverage and complexity
 
