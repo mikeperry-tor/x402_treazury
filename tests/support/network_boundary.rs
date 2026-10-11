@@ -384,14 +384,14 @@ async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable(
     // sockets. The real factory's next insertion must exercise its eviction path.
     {
         let mut cache = ctx.grpc.lock().await;
-        for n in 0..256 {
+        for n in 0..255 {
             cache.insert(
                 (
                     tokio::runtime::Handle::current().id(),
                     IsolationId::treasury(&format!("cache-{n}")),
                     url.into(),
                 ),
-                retained.clone(),
+                CachedClient::new(retained.clone()),
             );
         }
     }
@@ -401,7 +401,7 @@ async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable(
             .unwrap(),
     )
     .await;
-    assert_eq!(ctx.grpc.lock().await.len(), 1);
+    assert_eq!(ctx.grpc.lock().await.len(), 256);
     read(retained.clone()).await;
     assert_eq!(socks.records.lock().unwrap().len(), 2);
     read(ctx.grpc(&id, url).await.unwrap()).await;

@@ -2607,10 +2607,16 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   share this boundary so no intermediate model admits unowned reserve payments.
   The isolated core snapshot also passed all-target Clippy, 18 scoped treasury
   fixtures and the durable qualification-vacancy regression.
-  Network/cover retention remains a separate step-7 commit; conversion and final
-  integration remain steps 8 and 9.
+  Network/cover retention follows in the separate step-7 commit below.
 
-The remaining portions of steps 7–9 are unfinished. The known
+- Step 7 network/cover retention uses individual least-recently-used HTTP/gRPC
+  eviction and reclaims only exhausted, fully inactive cover owners whose session
+  cleanup has released ownership. Retained capability/fallback state is preserved;
+  ordinary eviction permits later bounded qualification without resetting process
+  traffic accounting. Four focused retention fixtures and all 13 active network
+  integrations passed, including live-handle identity, TLS and slow progress.
+
+Steps 8 and 9 remain unfinished. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
 conversion has been performed. The source lacks immutable destination-readiness

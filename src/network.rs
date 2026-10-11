@@ -189,17 +189,46 @@ struct HttpKey {
     origin: String,
     timeout_ms: u64,
 }
+struct CachedClient<T> {
+    client: T,
+    last_used: std::time::Instant,
+}
+impl<T> CachedClient<T> {
+    fn new(client: T) -> Self {
+        Self {
+            client,
+            last_used: std::time::Instant::now(),
+        }
+    }
+    fn touch(&mut self) -> &T {
+        self.last_used = std::time::Instant::now();
+        &self.client
+    }
+}
+fn evict_oldest<K: Clone + Eq + std::hash::Hash, T>(cache: &mut HashMap<K, CachedClient<T>>) {
+    if cache.len() >= 256
+        && let Some(key) = cache
+            .iter()
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(key, _)| key.clone())
+    {
+        cache.remove(&key);
+    }
+}
 pub struct NetworkContext {
     pub cover: Option<Arc<crate::cover::runtime::Engine>>,
     pub policy: NetworkPolicy,
-    http: Mutex<HashMap<HttpKey, reqwest::Client>>,
+    http: Mutex<HashMap<HttpKey, CachedClient<reqwest::Client>>>,
     #[cfg(test)]
     test_root: Option<&'static [u8]>,
     #[cfg(test)]
     test_dns: Option<Arc<dyn reqwest::dns::Resolve>>,
     #[cfg(feature = "zcash")]
     grpc: tokio::sync::Mutex<
-        HashMap<(tokio::runtime::Id, IsolationId, String), zingo_netutils::GrpcIndexer>,
+        HashMap<
+            (tokio::runtime::Id, IsolationId, String),
+            CachedClient<zingo_netutils::GrpcIndexer>,
+        >,
     >,
 }
 impl NetworkContext {
@@ -289,8 +318,8 @@ impl NetworkContext {
             timeout_ms: timeout.as_millis().try_into()?,
         };
         let mut clients = self.http.lock().expect("network cache poisoned");
-        if let Some(client) = clients.get(&key) {
-            return Ok(client.clone());
+        if let Some(client) = clients.get_mut(&key) {
+            return Ok(client.touch().clone());
         }
         let mut builder = reqwest::Client::builder()
             .no_proxy()
@@ -329,10 +358,8 @@ impl NetworkContext {
             .build()
             .context("network client construction failed")?;
         // Eviction drops only cache ownership. Existing requests keep their connections.
-        if clients.len() >= 256 {
-            clients.clear();
-        }
-        clients.insert(key, client.clone());
+        evict_oldest(&mut clients);
+        clients.insert(key, CachedClient::new(client.clone()));
         Ok(client)
     }
     pub fn discovery(
@@ -393,8 +420,8 @@ impl NetworkContext {
             id.clone(),
             url.to_owned(),
         );
-        if let Some(client) = self.grpc.lock().await.get(&key) {
-            return Ok(client.clone());
+        if let Some(client) = self.grpc.lock().await.get_mut(&key) {
+            return Ok(client.touch().clone());
         }
         zingo_netutils::ensure_default_crypto_provider();
         let uri: tonic::codegen::http::Uri = url
@@ -457,10 +484,12 @@ impl NetworkContext {
             )),
         );
         let mut cache = self.grpc.lock().await;
-        if cache.len() >= 256 {
-            cache.clear();
+        // Another caller may have populated this key while connection setup ran.
+        if let Some(existing) = cache.get_mut(&key) {
+            return Ok(existing.touch().clone());
         }
-        cache.insert(key, client.clone());
+        evict_oldest(&mut cache);
+        cache.insert(key, CachedClient::new(client.clone()));
         Ok(client)
     }
 }
@@ -728,5 +757,41 @@ impl Drop for QualificationProbes {
         for task in &self.tasks {
             task.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn interleaved_wallet_clients_preserve_frequent_provider_entry() {
+        let context = NetworkContext::new(NetworkPolicy::default()).unwrap();
+        let origin = "https://provider.example";
+        let provider = IsolationId::discovery(origin).unwrap();
+        for n in 0..768 {
+            context.http(&provider, origin, None).unwrap();
+            context
+                .http(
+                    &IsolationId::treasury(&format!("wallet-{n}")),
+                    "https://base.example",
+                    None,
+                )
+                .unwrap();
+            let cache = context.http.lock().unwrap();
+            assert_eq!(cache.len(), (n + 2).min(256));
+            assert!(cache.keys().any(|key| key.identity == provider));
+        }
+        let cache = context.http.lock().unwrap();
+        assert!(
+            !cache
+                .keys()
+                .any(|key| key.identity == IsolationId::treasury("wallet-0"))
+        );
+        assert!(
+            cache
+                .keys()
+                .any(|key| key.identity == IsolationId::treasury("wallet-767"))
+        );
     }
 }

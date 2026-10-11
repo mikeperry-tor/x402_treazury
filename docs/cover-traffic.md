@@ -1,5 +1,8 @@
 # Optional HTTP/2 cover traffic
 
+See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
+
 Treazury can add bounded unsigned range reads and randomized request headers to
 operator-selected API calls. Cover defaults on in Tor mode and off in direct mode;
 it remains experimental.
@@ -211,15 +214,18 @@ Every real physical request takes priority: outstanding cover streams are cancel
 and their local cleanup is awaited before dispatch. Cover stays paused through
 challenge/sign/retry until final response headers, then may overlap body download
 and the sampled successful-call tail. Thus cover does not run throughout the
-entire paid handshake. A canceled qualification remains unavailable for that owner
-for the process lifetime. This conservative rule prevents probe/retry storms.
+entire paid handshake. A canceled or failed qualification remains unavailable
+while that owner's cache entry is retained. Repeated calls and new episodes on
+the retained entry do not retry qualification. Ordinary eviction of a fully
+inactive entry forgets that result; a later recreation can qualify again under
+the unchanged process traffic limits.
 
 Cover never signs, retries a signed request, obtains an allowance, promotes a
 wallet or triggers funding. Static and managed calls retain ordinary financial
 admission and receipt handling. Optional failures are advisory; a real API error
 still follows the normal payment/output path. A rejected padded payment is never
 replayed without padding. Shutdown cancels cover and drains accepted financial
-work using the normal safety deadline.
+work through the retained application owner; cover cleanup cannot abandon payment work.
 
 Shared connections can still fail or experience resource contention. Optional
 error handling does not guarantee real-call availability. A three-call Tor
@@ -237,7 +243,8 @@ changed validators, overflows, early EOF and deadlines refuse the resource. An
 optional `fallback_url` is tried at most once after completed initial qualification
 failure, within the same episode/global budgets. Rate limits, HTTP/2 unavailability,
 deadlines and cancellation do not trigger fallback. Success pins that resource for
-the owner lifetime; failure of both candidates disables ranges. Failure after a
+the retained owner's lifetime; failure of both candidates disables ranges while
+that cache entry remains retained. Failure after a
 successful qualification does not switch resources. There is no full-download
 fallback, periodic requalification, paid retry or cross-origin redirect. Logs retain the primary refusal and `cover_fallback_selected`.
 
@@ -258,6 +265,22 @@ apply. Dispatched requests stay charged on failure; in-flight reservations do no
 expire. Completed budget entries remain charged for a full window after completion,
 a conservative rolling limit. Budget/history/owner exhaustion is an explicit
 refusal, never permission to drop accounting or queue real calls indefinitely.
+
+At the owner bound, insertion reclaims the least-recently-used fully inactive
+entry. Reclamation requires an exhausted episode, zero real calls and streams,
+and completed session ownership: task callbacks and cancellation cleanup must
+have released their session handles. Zero counters alone are insufficient. An
+expired episode is not replaced while its old cleanup still owns the session.
+If every owner remains active or draining, optional cover reports unavailability;
+real financial work keeps its existing ownership.
+
+Retained entries preserve capability, chosen fallback and padding rejection
+state. Ordinary eviction forgets completed positive and negative results and the
+used fallback. Recreation starts ordinary bounded qualification; entries are
+never evicted solely to retry a failed qualification. There is no negative-cache
+tombstone registry, suppression timer or periodic collector. Eviction never
+resets process request/byte accounting or an active episode's budgets. Additional
+unsigned qualification after recreation remains charged to those same limits.
 
 Byte counts describe application-reader bytes and uncompressed header values,
 not encrypted wire traffic. Buffered TCP/TLS/Tor bytes can exceed the requested

@@ -1,5 +1,8 @@
 # Runtime egress inventory
 
+See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
+
 In direct mode, Base RPC providers contacted for verification can associate the
 client's public IP address with queried wallet addresses, including when fallback
 providers are used. Serving emits a warning about this exposure. In Tor mode,
@@ -11,8 +14,12 @@ suppressed. RPC providers still receive the wallet addresses being queried.
 identities, reqwest pools and tonic channels. Direct and Tor use the same factory,
 callers and payment/funding state machines. Cache keys include identity, endpoint,
 timeout settings and the owning Tokio runtime. Sync releases its channels before
-tearing down its private runtime. Cache eviction drops ownership without interrupting
-in-flight handles. Each cache retains at most 256 entries.
+tearing down its private runtime. Each cache retains at most 256 entries and evicts
+one least-recently-used entry when admitting another. Access refreshes recency;
+interleaved wallet traversal does not flush frequently reused provider clients.
+Eviction drops only cache ownership: acquired handles retain connections and
+in-flight work. Isolation, origin, runtime and transport keys remain unchanged;
+there is no cache-maintenance timer or wallet-inventory limit.
 
 | Caller | Transport and identity |
 | --- | --- |
@@ -351,6 +358,8 @@ financial or qualification authority.
 | Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and their freshness is never renewed. |
 | Managed payment owners: 128 | Bounds completed financial observations and private signing work retained while waiting for the group gate or signed dispatch. Saturation cannot sign or create a liability. |
 | Reconciliation: four balance reads and four history reads per group | Separate bounded rolling work permits balance refresh while historical nonce reads progress. Five-second cadence and history failure backoff up to 300 seconds control polling only; captured keyset passes have no inventory-count or elapsed-time cutoff. |
+| Candidate acquisition: four reads, 64-row keyset pages | A captured inventory boundary prevents arrivals from extending a pass. Bound payer and ready reserves get priority while a traversal lane remains available. Sufficient cached evidence can finish before unrelated reads; caller cancellation aborts only its unsigned acquisitions. |
+| Runtime price hints: 300-second receipt lifetime, 512 entries | Bounded process memory for trusted operation/group/transport keys. Access and late validation never renew receipt age. Hints guide selection only; expiry or eviction triggers no HTTP, probe or authority renewal. |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours; the separate 300-second margin remains pending the provider contract. |
 | Refund shielding local 24-hour deadline | Persisted authorization lifetime of that prepared operation, alongside consensus block expiry; never renewed during recovery. |
 | x402 authorization validity | Signed payment authority and canonical expiry recovery, independent of HTTP progress. |

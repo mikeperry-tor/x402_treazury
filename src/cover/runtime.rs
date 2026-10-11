@@ -725,3 +725,7 @@ fn header_list_size(request: &reqwest::Request) -> u64 {
     }
     total
 }
+
+#[cfg(test)]
+#[path = "retention_tests.rs"]
+mod retention_tests;

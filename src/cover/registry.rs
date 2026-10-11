@@ -30,6 +30,7 @@ pub enum Capability {
 }
 pub struct OwnerState {
     pub config: Arc<Config>,
+    last_used: std::time::Instant,
     pub session: Option<Arc<super::runtime::Session>>,
     pub capability: Capability,
     pub using_fallback: bool,
@@ -37,6 +38,22 @@ pub struct OwnerState {
     pub episode: Option<Arc<Mutex<Episode>>>,
 }
 impl OwnerState {
+    fn cleanup_complete(&self) -> bool {
+        // Calls, task futures and range guards all own the existing session Arc.
+        // Their drops may run after the episode counters reach zero. Only the
+        // registry's sole ownership proves those callbacks can no longer run.
+        self.session
+            .as_ref()
+            .is_none_or(|session| Arc::strong_count(session) == 1)
+    }
+    fn reclaimable(&self, now: Instant) -> bool {
+        self.cleanup_complete()
+            && self.episode.as_ref().is_none_or(|episode| {
+                let e = episode.lock().expect("cover episode poisoned");
+                e.calls == 0 && e.streams == 0 && e.exhausted(now)
+            })
+    }
+
     /// Only the first eligible caller may qualify; other calls remain uncovered.
     pub fn begin_qualification(&mut self) -> bool {
         if matches!(self.capability, Capability::Unknown) {
@@ -102,7 +119,9 @@ impl Registry {
         now: Instant,
         rng: &mut impl Rng,
     ) -> Result<(Arc<Mutex<Episode>>, bool)> {
-        if let Some(state) = self.owners.get(&owner) {
+        let mut eviction = None;
+        if let Some(state) = self.owners.get_mut(&owner) {
+            state.last_used = std::time::Instant::now();
             ensure!(
                 *state.config == *config,
                 "cover_owner_configuration_conflict"
@@ -115,20 +134,28 @@ impl Registry {
                     return Ok((episode.clone(), false));
                 }
             }
-        } else {
-            ensure!(
-                self.owners.len() < self.limits.max_owners,
-                "cover_owner_limit"
-            );
+            ensure!(state.cleanup_complete(), "cover_owner_draining");
+        } else if self.owners.len() >= self.limits.max_owners {
+            let oldest = self
+                .owners
+                .iter()
+                .filter(|(_, state)| state.reclaimable(now))
+                .min_by_key(|(_, state)| state.last_used)
+                .map(|(owner, _)| owner.clone());
+            let Some(oldest) = oldest else {
+                anyhow::bail!("cover_owner_limit");
+            };
+            eviction = Some(oldest);
         }
         let active = self
             .owners
             .values()
             .filter(|state| {
-                state.episode.as_ref().is_some_and(|e| {
-                    let e = e.lock().unwrap();
-                    e.calls > 0 || e.streams > 0 || !e.exhausted(now)
-                })
+                !state.cleanup_complete()
+                    || state.episode.as_ref().is_some_and(|e| {
+                        let e = e.lock().unwrap();
+                        e.calls > 0 || e.streams > 0 || !e.exhausted(now)
+                    })
             })
             .count();
         ensure!(
@@ -136,8 +163,12 @@ impl Registry {
             "cover_active_episode_limit"
         );
         let e = Arc::new(Mutex::new(Episode::new(&config, now, rng)?));
+        if let Some(oldest) = eviction {
+            self.owners.remove(&oldest);
+        }
         let state = self.owners.entry(owner).or_insert_with(|| OwnerState {
             config,
+            last_used: std::time::Instant::now(),
             session: None,
             capability: Capability::Unknown,
             using_fallback: false,
@@ -218,6 +249,7 @@ mod tests {
             config.fallback_url = Some("https://api.example.com/llms.txt".into());
             let mut state = OwnerState {
                 config: Arc::new(config),
+                last_used: std::time::Instant::now(),
                 session: None,
                 capability: Capability::Checking,
                 using_fallback: false,
