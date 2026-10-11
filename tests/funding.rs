@@ -798,6 +798,7 @@ fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
             s.reconcile_pool(
                 &pool,
                 ChainView {
+                    observations: Default::default(),
                     admission_valid_until: u64::MAX,
                     anchor: Anchor {
                         height: 1,
@@ -932,6 +933,7 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
                 s.reconcile_pool(
                     &p,
                     ChainView {
+                        observations: Default::default(),
                         admission_valid_until: u64::MAX,
                         anchor: Anchor {
                             height: 3,

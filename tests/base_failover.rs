@@ -5,7 +5,7 @@ use x402_treazury::rotation::base::{Anchor, BaseRpc};
 #[tokio::test]
 async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_view() {
     let (address, logs, server) = fixture::fixture().await;
-    for mode in ["403", "429", "503", "limited"] {
+    for mode in ["403", "429", "503", "limited", "malformed"] {
         logs.lock().unwrap().clear();
         let rpc = BaseRpc::with_fallbacks(
             &[
@@ -44,7 +44,7 @@ async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_
 #[tokio::test]
 async fn invalid_evidence_never_shops_for_a_more_favorable_provider() {
     let (address, logs, server) = fixture::fixture().await;
-    for mode in ["wrong-chain", "malformed", "conflict", "401"] {
+    for mode in ["wrong-chain", "conflict", "401"] {
         logs.lock().unwrap().clear();
         let rpc = BaseRpc::with_fallbacks(
             &[
@@ -174,5 +174,31 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
     // reads and three canonical anchor rechecks (historical, stable, latest).
     assert_eq!(calls.len(), 12);
     assert!(calls.iter().all(|(mode, _)| mode == "slow"));
+    server.abort();
+}
+
+#[tokio::test]
+async fn exact_balance_evidence_preserves_both_anchors_amounts_and_original_lifetime() {
+    use alloy_primitives::U256;
+    let (address, _, server) = fixture::fixture().await;
+    let view = BaseRpc::new(&format!("http://{address}/exact"), 12, 120)
+        .unwrap()
+        .view(fixture::query())
+        .await
+        .unwrap();
+    assert_eq!(view.observations.len(), 2);
+    for (wallet, observation) in &view.observations {
+        assert_eq!(&observation.wallet, wallet);
+        assert_eq!(observation.confirmed.anchor.height, 88);
+        assert_eq!(observation.latest.anchor.height, 100);
+        assert_eq!(observation.confirmed.amount, U256::from(9));
+        assert_eq!(observation.latest.amount, U256::from(4));
+        assert_eq!(observation.available(), U256::from(4));
+        assert_eq!(observation.remainder(), U256::from(9));
+        assert_eq!(view.balances[wallet], observation.available());
+        assert_eq!(observation.valid_until, view.admission_valid_until);
+        assert_eq!(observation.endpoint.len(), 64);
+        assert!(!observation.endpoint.contains(&address.to_string()));
+    }
     server.abort();
 }

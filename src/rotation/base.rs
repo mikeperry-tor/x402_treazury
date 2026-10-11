@@ -8,6 +8,7 @@ use std::{
     collections::BTreeMap,
     time::{SystemTime, UNIX_EPOCH},
 };
+pub mod evidence;
 mod receipt;
 mod transport;
 pub use receipt::{TransferExpectation, TransferProof};
@@ -27,6 +28,9 @@ pub fn safe_diagnostic(error: &anyhow::Error) -> String {
     format!("{stage}: {}", safe_reason(error))
 }
 fn safe_reason(error: &anyhow::Error) -> String {
+    if let Some(failure) = error.downcast_ref::<evidence::EvidenceFailure>() {
+        return failure.to_string();
+    }
     if let Some(rpc) = error.downcast_ref::<RpcFailure>() {
         return rpc.to_string();
     }
@@ -92,7 +96,7 @@ impl ViewProgress {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct Anchor {
     pub height: u64,
     pub hash: String,
@@ -131,6 +135,8 @@ pub struct ChainView {
     pub admission_valid_until: u64,
     pub anchor: Anchor,
     pub balances: BTreeMap<String, U256>,
+    /// Complete exact reads, retained separately from the conservative balance.
+    pub observations: BTreeMap<String, evidence::BalanceObservation>,
     pub released: Vec<String>,
     pub resolutions: BTreeMap<String, AuthorizationResolution>,
 }
@@ -211,14 +217,15 @@ impl BaseRpc {
         let v = self
             .rpc("eth_getBlockByNumber", json!([tag, false]))
             .await?;
-        let height = quantity(&v["number"])?;
-        let timestamp = quantity(&v["timestamp"])?;
-        let hash = v["hash"].as_str().context("missing block hash")?;
-        hash.parse::<B256>().context("invalid block hash")?;
+        let malformed = || RpcFailure::malformed("eth_getBlockByNumber");
+        let height = quantity(&v["number"]).map_err(|_| malformed())?;
+        let timestamp = quantity(&v["timestamp"]).map_err(|_| malformed())?;
+        let hash = v["hash"].as_str().ok_or_else(malformed)?;
+        let hash = hash.parse::<B256>().map_err(|_| malformed())?;
         Ok((
             Anchor {
                 height,
-                hash: hash.into(),
+                hash: hash.to_string(),
             },
             timestamp,
         ))
@@ -231,19 +238,21 @@ impl BaseRpc {
                 json!([{"to":USDC,"data":data},{"blockHash":block.hash,"requireCanonical":true}]),
             )
             .await?;
-        let s = v.as_str().context("invalid contract result")?;
+        let s = v
+            .as_str()
+            .ok_or_else(|| RpcFailure::malformed("eth_call"))?;
         ensure!(
             s.len() == 66 && s.starts_with("0x"),
-            "invalid contract result length"
+            RpcFailure::malformed("eth_call")
         );
-        Ok(U256::from_str_radix(&s[2..], 16)?)
+        U256::from_str_radix(&s[2..], 16).map_err(|_| RpcFailure::malformed("eth_call").into())
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
         self.view_with_policy(query, false).await
     }
     /// Nonce read outages cannot erase liability or veto spending of unrelated
-    /// remaining capacity. Malformed evidence, chain/balance/anchor failures and
-    /// ordinary background reconciliation retain their strict failure behavior.
+    /// remaining capacity. Demonstrated contradictions and required balance/anchor
+    /// failures still reject the view; fallback reacquires a complete view.
     pub(crate) async fn payment_view(&self, query: ChainQuery) -> Result<ChainView> {
         self.view_with_policy(query, true).await
     }
@@ -426,11 +435,16 @@ impl BaseRpc {
             "invalid admission block"
         );
         use futures_util::{StreamExt, TryStreamExt};
-        let balances: BTreeMap<_, _> =
+        let endpoint = {
+            use sha2::{Digest, Sha256};
+            alloy_primitives::hex::encode(Sha256::digest(self.url.as_str().as_bytes()))
+        };
+        let observations: BTreeMap<_, _> =
             futures_util::stream::iter(query.wallets.clone().into_iter().map(|(id, address)| {
                 let confirmed = confirmed.clone();
                 let latest = latest.clone();
                 let rpc = self.clone();
+                let endpoint = endpoint.clone();
                 async move {
                     let address: Address = address.parse()?;
                     let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
@@ -443,7 +457,24 @@ impl BaseRpc {
                         .step("latest_balance", scoped.call(data, &latest))
                         .await
                         .context(VerificationStage("latest balance"))?;
-                    Ok::<_, anyhow::Error>((id.clone(), stable.min(current)))
+                    let observation = evidence::BalanceObservation {
+                        wallet: id.clone(),
+                        network: "eip155:8453".into(),
+                        asset: USDC.into(),
+                        endpoint,
+                        confirmations: rpc.confirmations,
+                        confirmed: evidence::BalancePoint {
+                            anchor: confirmed,
+                            amount: stable,
+                        },
+                        latest: evidence::BalancePoint {
+                            anchor: latest,
+                            amount: current,
+                        },
+                        valid_until: timestamp.saturating_add(rpc.max_age),
+                    };
+                    observation.validate()?;
+                    Ok::<_, anyhow::Error>((id, observation))
                 }
             }))
             .buffer_unordered(8)
@@ -467,7 +498,11 @@ impl BaseRpc {
         Ok(ChainView {
             admission_valid_until: timestamp.saturating_add(self.max_age),
             anchor: confirmed,
-            balances,
+            balances: observations
+                .iter()
+                .map(|(id, observation)| (id.clone(), observation.available()))
+                .collect(),
+            observations,
             released,
             resolutions,
         })

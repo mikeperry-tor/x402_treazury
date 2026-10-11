@@ -529,6 +529,7 @@ fn expired_admission_evidence_commits_balances_without_promotion_or_reservation(
     }
     let candidate = store.payment_candidate(&pool).unwrap();
     let view = ChainView {
+        observations: Default::default(),
         admission_valid_until: 0,
         anchor: Anchor {
             height: 20,
@@ -664,6 +665,7 @@ async fn accepted_group_job_keeps_ownership_after_waiter_cancellation() {
 fn prepared_payment(store: &mut Store) -> PreparedPayment {
     let pool = store.status().unwrap().pools.remove(0);
     let view = crate::rotation::base::ChainView {
+        observations: Default::default(),
         admission_valid_until: crate::rotation::base::now().unwrap() + 120,
         anchor: crate::rotation::base::Anchor {
             height: 100,

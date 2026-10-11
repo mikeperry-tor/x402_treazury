@@ -847,6 +847,7 @@ fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     let mut status = store.status().unwrap();
     let wallets = status.pools.remove(0).addresses;
     let view = |first: u64, second: u64| ChainView {
+        observations: Default::default(),
         admission_valid_until: u64::MAX,
         anchor: Anchor {
             height: 100,

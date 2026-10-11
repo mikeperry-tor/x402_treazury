@@ -47,15 +47,27 @@ impl Error for RpcFailure {}
 
 impl RpcFailure {
     pub(super) fn can_failover(&self) -> bool {
-        if self.tls || matches!(self.protocol, Some("invalid_http" | "request_error")) {
+        if self.category == "request construction" || self.protocol == Some("request_error") {
             return false;
         }
-        matches!(self.http, Some(403 | 408 | 429 | 500 | 502 | 503 | 504))
+        // Failed TLS and malformed new responses establish no accepted facts.
+        // A different configured endpoint must still acquire a complete view;
+        // neither this predicate nor failover disables TLS verification.
+        self.tls
+            || self.protocol == Some("invalid_http")
+            || matches!(
+                self.category,
+                "invalid JSON body" | "invalid envelope" | "missing result" | "malformed result"
+            )
+            || matches!(self.http, Some(403 | 408 | 429 | 500 | 502 | 503 | 504))
             || matches!(self.code, Some(-32005 | -32016 | -32601))
             || matches!(
                 self.category,
                 "timeout" | "connect" | "transport" | "body transport"
             )
+    }
+    pub(super) fn malformed(method: &'static str) -> Self {
+        Self::new(method, "malformed result", "result", None)
     }
     fn new(
         method: &'static str,

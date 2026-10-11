@@ -292,3 +292,16 @@ async fn progressing_rpc_body_survives_former_total_deadline() {
     assert!(started.elapsed() > Duration::from_secs(15));
     task.await.unwrap();
 }
+
+#[test]
+fn acquisition_only_failures_allow_configured_fallback_but_not_local_errors() {
+    for category in ["invalid JSON body", "invalid envelope", "missing result"] {
+        let failure = RpcFailure::new("eth_chainId", category, "decode", Some(200));
+        assert!(failure.can_failover());
+    }
+    let mut tls = RpcFailure::new("eth_chainId", "connect", "send", None);
+    tls.tls = true;
+    assert!(tls.can_failover());
+    let local = RpcFailure::new("eth_chainId", "request construction", "send", None);
+    assert!(!local.can_failover());
+}

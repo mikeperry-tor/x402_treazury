@@ -2490,6 +2490,16 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   Evidence-race recovery integration remains required before moving RPC outside
   the gate in step 3.
 
+- Step 3 exact acquisition boundary retains confirmed/latest hashes, heights and
+  exact amounts separately, with endpoint identity and original evidence lifetime.
+  Admission takes the minimum; retirement inspection takes the maximum. Typed
+  comparison checks contradictions before supersession. Acquisition-only malformed
+  responses and TLS failures permit complete reacquisition from a configured
+  fallback without weakening TLS or retrying accepted contradictions. Four value
+  tests, a fallback-classifier fixture and six real Base failover fixtures pass.
+  Durable per-wallet verification, invalidation, bounded traversal/exposure and
+  moving RPC outside the gate remain unfinished.
+
 Steps 2–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no

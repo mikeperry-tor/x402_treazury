@@ -326,6 +326,7 @@ mod tests {
                 params![id,pool,wallet.id]).unwrap();
         }
         let view = || ChainView {
+            observations: Default::default(),
             admission_valid_until: u64::MAX,
             anchor: Anchor {
                 height: 10,

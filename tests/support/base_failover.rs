@@ -35,7 +35,10 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
                 }
                 "eth_call" => {
                     assert_eq!(v["params"][1]["requireCanonical"], true);
-                    json!(format!("0x{:064x}", if mode == "ok" {7} else {999}))
+                    let amount = if mode == "exact" {
+                        if v["params"][1]["blockHash"] == format!("0x{:064x}", 88) {9} else {4}
+                    } else if mode == "ok" {7} else {999};
+                    json!(format!("0x{amount:064x}"))
                 }
                 _ => panic!("unexpected non-read RPC"),
             };
