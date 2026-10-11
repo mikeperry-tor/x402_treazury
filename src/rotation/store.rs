@@ -1251,6 +1251,20 @@ impl StoreHandle {
             .map_err(|_| anyhow::anyhow!("group gate registry poisoned"))?;
         Ok(gates.entry(pool.to_owned()).or_default().clone())
     }
+    /// Keep group ownership with an accepted store job even if its response
+    /// waiter is cancelled. The caller may retain the same guard through signing
+    /// and journal acknowledgement; no second lock is acquired here.
+    pub(crate) async fn call_with_guard<T: Send + 'static>(
+        &self,
+        guard: std::sync::Arc<tokio::sync::OwnedMutexGuard<()>>,
+        f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.call(move |store| {
+            let _guard = guard;
+            f(store)
+        })
+        .await
+    }
     pub async fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,

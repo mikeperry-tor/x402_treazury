@@ -665,3 +665,39 @@ async fn abandoned_lease_cleanup_follows_accepted_work_and_shared_gate() {
     drop(store);
     worker.await.unwrap();
 }
+
+#[tokio::test]
+async fn accepted_group_job_keeps_ownership_after_waiter_cancellation() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = populated(dir.path());
+    let pool = state.status().unwrap().pools.remove(0).id;
+    let (store, worker) = StoreHandle::spawn(state);
+    let gate = store.group_gate(&pool).unwrap();
+    let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
+    let (started, accepted) = tokio::sync::oneshot::channel();
+    let (release, paused) = std::sync::mpsc::channel();
+    let waiter = tokio::spawn({
+        let store = store.clone();
+        async move {
+            store
+                .call_with_guard(guard, move |s| {
+                    started.send(()).unwrap();
+                    paused.recv().unwrap();
+                    s.clear_abandoned_admissions(&pool)
+                })
+                .await
+        }
+    });
+    accepted.await.unwrap();
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    assert!(
+        gate.try_lock().is_err(),
+        "accepted work still owns the group"
+    );
+    release.send(()).unwrap();
+    store.call(|_| Ok(())).await.unwrap();
+    assert!(gate.try_lock().is_ok(), "finished work releases the group");
+    drop(store);
+    worker.await.unwrap();
+}

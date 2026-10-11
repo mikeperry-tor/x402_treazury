@@ -75,11 +75,11 @@ impl ManagedPool {
         self
     }
     pub async fn reconcile(&self) -> Result<()> {
-        let _gate = self.gate.lock().await;
+        let _gate = Arc::new(self.gate.clone().lock_owned().await);
         let pool = self.pool.clone();
         let query = self
             .store
-            .call(move |s| {
+            .call_with_guard(_gate.clone(), move |s| {
                 s.clear_abandoned_admissions(&pool)?;
                 s.chain_query(&pool)
             })
@@ -88,7 +88,7 @@ impl ManagedPool {
         let view = self.base.view(query).await?;
         let pool = self.pool.clone();
         self.store
-            .call(move |s| {
+            .call_with_guard(_gate.clone(), move |s| {
                 // Keep the RPC anchor and refreshed wallet set distinct from persisted
                 // balances of retired wallets not included in this chain query.
                 let evidence = observation.as_ref().map(|_| serde_json::json!({
@@ -186,11 +186,11 @@ impl ManagedPool {
         let qualification = crate::qualification::payment_context()?;
         let admission_context = qualification.clone();
         let (headers, attempt_id) = {
-            let _guard = self.gate.lock().await;
+            let _guard = Arc::new(self.gate.clone().lock_owned().await);
             let pool = self.pool.clone();
             let query = self
                 .store
-                .call(move |s| {
+                .call_with_guard(_guard.clone(), move |s| {
                     s.clear_abandoned_admissions(&pool)?;
                     s.payment_chain_query(&pool)
                 })
@@ -202,7 +202,7 @@ impl ManagedPool {
             let payment_limit = self.payment_limit;
             let lease = self
                 .store
-                .call(move |s| {
+                .call_with_guard(_guard.clone(), move |s| {
                     let lease = s.admit_for_limit(
                         &pool,
                         amount,
@@ -258,7 +258,9 @@ impl ManagedPool {
             // commits after its caller disappears. Signed bytes never leave before this.
             progress.mark_possible();
             self.store
-                .call(move |s| s.journal_authorization(&id, &wallet, generation, &hash, auth))
+                .call_with_guard(_guard.clone(), move |s| {
+                    s.journal_authorization(&id, &wallet, generation, &hash, auth)
+                })
                 .await?;
             // The journal now reserves exposure across cancellation, concurrent
             // admission, reconciliation and rotation. Do not hold the pool gate

@@ -351,34 +351,44 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         })
         .await
         .unwrap();
-    backend.credit(&job).await.unwrap();
-    let pool = job.pool_id.clone();
-    let query = store.call(move |s| s.chain_query(&pool)).await.unwrap();
-    let view = backend.base.view(query).await.unwrap();
-    let pool = job.pool_id.clone();
-    store
-        .call(move |s| s.reconcile_pool(&pool, view))
-        .await
-        .unwrap();
-    store
-        .call(move |s| {
-            s.journal_authorization(
-                &lease.id,
-                &lease.wallet,
-                lease.generation,
-                "lease-race",
-                crate::rotation::store::Authorization {
-                    payer: lease.address,
-                    payee: format!("0x{:040x}", 1),
-                    nonce: format!("0x{:064x}", 1),
-                    valid_after: 0,
-                    valid_before: now()? + 100,
-                },
-            )
-        })
-        .await
-        .unwrap();
-    drop(guard);
+    {
+        let base = backend.base.clone();
+        let credit = backend.credit(&job);
+        tokio::pin!(credit);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut credit)
+                .await
+                .is_err()
+        );
+        let pool = job.pool_id.clone();
+        let query = store.call(move |s| s.chain_query(&pool)).await.unwrap();
+        let view = base.view(query).await.unwrap();
+        let pool = job.pool_id.clone();
+        store
+            .call(move |s| s.reconcile_pool(&pool, view))
+            .await
+            .unwrap();
+        store
+            .call(move |s| {
+                s.journal_authorization(
+                    &lease.id,
+                    &lease.wallet,
+                    lease.generation,
+                    "lease-race",
+                    crate::rotation::store::Authorization {
+                        payer: lease.address,
+                        payee: format!("0x{:040x}", 1),
+                        nonce: format!("0x{:064x}", 1),
+                        valid_after: 0,
+                        valid_before: now()? + 100,
+                    },
+                )
+            })
+            .await
+            .unwrap();
+        drop(guard);
+        credit.await.unwrap();
+    }
     assert!(commands.test_is_empty());
     server.abort();
     drop(backend);

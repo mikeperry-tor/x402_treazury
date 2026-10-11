@@ -582,8 +582,11 @@ impl FundingBackend for Backend {
             .context("missing candidate balance")?
             .to_string();
         let wallet = job.wallet_id.clone();
+        // Acquisition remains unsigned and independent; publication shares the
+        // payment owner's gate through the accepted store job's completion.
+        let guard = std::sync::Arc::new(self.store.group_gate(&job.pool_id)?.lock_owned().await);
         self.store
-            .call(move |s| {
+            .call_with_guard(guard, move |s| {
                 s.record_credit(
                     &wallet,
                     &balance,

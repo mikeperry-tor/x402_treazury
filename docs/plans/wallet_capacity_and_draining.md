@@ -2464,7 +2464,15 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   independent handles and exclusive reopen. Network fixtures require localhost access.
   Temporary cleanup remains only until step 2 replaces the two-step admission path.
 
-Steps 2–9 remain unfinished, apart from the shared-gate factory described above.
+- **Step 2 — shared ownership portion:** accepted payment/reconciliation store jobs
+  retain their group guard after waiter cancellation. Actual funding-credit
+  publication uses the same group gate; its unsigned acquisition remains read-only.
+  Focused default-Zcash validation: accepted-job cancellation fixture, concrete
+  funding-backend fixture, four managed concurrency fixtures, all-target Clippy
+  with warnings denied and formatting checks passed. Atomic signed admission and
+  its cancellation/recovery fixtures remain unfinished.
+
+Steps 2–9 remain unfinished except for the ownership portions described above.
 
 ### Remaining delivery order
 
