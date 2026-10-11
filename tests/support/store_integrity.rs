@@ -138,7 +138,7 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
         assert_eq!(
             s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
                 .unwrap(),
-            12
+            13
         );
         assert_eq!(s.snapshot().unwrap().0, revision);
         assert_eq!(
@@ -407,14 +407,14 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
             format!("prepared-{i}").as_bytes()
         );
     }
-    s.db.execute_batch("PRAGMA user_version=13;").unwrap();
+    s.db.execute_batch("PRAGMA user_version=14;").unwrap();
     drop(s);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err());
     let db = Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap(),
-        13
+        14
     );
     assert_eq!(
         db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
@@ -615,55 +615,14 @@ fn unsigned_queries_preserve_leases_and_exclusive_reopen_cleans_only_unsigned() 
         .unwrap()
     };
     assert_eq!(count(&store), 2);
+    store
+        .db
+        .execute_batch("DROP TABLE payment_admission_evidence; PRAGMA user_version=12;")
+        .unwrap();
     drop(store);
     let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(count(&store), 1);
     assert_eq!(store.chain_query(&pool).unwrap().pending[0].id, "payment");
-}
-
-#[tokio::test]
-async fn abandoned_lease_cleanup_follows_accepted_work_and_shared_gate() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = populated(dir.path());
-    let pool = store.status().unwrap().pools.remove(0).id;
-    let (store, worker) = StoreHandle::spawn(store);
-    let gate = store.group_gate(&pool).unwrap();
-    let other = store.clone().group_gate(&pool).unwrap();
-    assert!(std::sync::Arc::ptr_eq(&gate, &other));
-    let guard = gate.lock().await;
-    assert!(other.try_lock().is_err());
-    let (started, accepted) = tokio::sync::oneshot::channel();
-    let (release, paused) = std::sync::mpsc::channel();
-    let waiter = tokio::spawn({
-        let store = store.clone();
-        async move {
-            store.call(move |s| {
-                started.send(()).unwrap();
-                paused.recv().unwrap();
-                s.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'abandoned',pool_id,wallet_id,generation,amount,requirements_hash,'ADMITTED' FROM payment_attempts WHERE id='payment'", [])?;
-                Ok(())
-            }).await
-        }
-    });
-    accepted.await.unwrap();
-    waiter.abort();
-    assert!(waiter.await.unwrap_err().is_cancelled());
-    drop(guard);
-    let _next_owner = other.lock().await;
-    release.send(()).unwrap();
-    store
-        .call(move |s| {
-            s.clear_abandoned_admissions(&pool)?;
-            let rows: i64 =
-                s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))?;
-            assert_eq!(rows, 1);
-            assert_eq!(s.chain_query(&pool)?.pending[0].id, "payment");
-            Ok(())
-        })
-        .await
-        .unwrap();
-    drop(store);
-    worker.await.unwrap();
 }
 
 #[tokio::test]
@@ -683,7 +642,7 @@ async fn accepted_group_job_keeps_ownership_after_waiter_cancellation() {
                 .call_with_guard(guard, move |s| {
                     started.send(()).unwrap();
                     paused.recv().unwrap();
-                    s.clear_abandoned_admissions(&pool)
+                    s.chain_query(&pool).map(|_| ())
                 })
                 .await
         }
@@ -700,4 +659,166 @@ async fn accepted_group_job_keeps_ownership_after_waiter_cancellation() {
     assert!(gate.try_lock().is_ok(), "finished work releases the group");
     drop(store);
     worker.await.unwrap();
+}
+
+fn prepared_payment(store: &mut Store) -> PreparedPayment {
+    let pool = store.status().unwrap().pools.remove(0);
+    let view = crate::rotation::base::ChainView {
+        admission_valid_until: crate::rotation::base::now().unwrap() + 120,
+        anchor: crate::rotation::base::Anchor {
+            height: 100,
+            hash: "base-block".into(),
+        },
+        balances: pool
+            .addresses
+            .iter()
+            .map(|w| (w.id.clone(), U256::from(5_000_000)))
+            .collect(),
+        released: vec![],
+        resolutions: Default::default(),
+    };
+    store
+        .prepare_payment(
+            &pool.id,
+            U256::from(11),
+            "atomic-offer",
+            view,
+            None,
+            U256::from(5_000_000),
+        )
+        .unwrap()
+}
+fn prepared_authorization(prepared: &PreparedPayment) -> Authorization {
+    Authorization {
+        payer: prepared.address.clone(),
+        payee: format!("0x{:040x}", 2),
+        nonce: format!("0x{:064x}", 2),
+        valid_after: 0,
+        valid_before: crate::rotation::base::now().unwrap() + 100,
+    }
+}
+fn assert_atomic_counts(store: &Store, signed: i64, evidence: i64) {
+    let count: i64 = store
+        .db
+        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, signed);
+    let unsigned: i64 = store
+        .db
+        .query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state='ADMITTED'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unsigned, 0);
+    let count: i64 = store
+        .db
+        .query_row("SELECT COUNT(*) FROM payment_admission_evidence", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, evidence);
+}
+
+#[test]
+fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
+    for failure in [
+        "none",
+        "evidence",
+        "expiry",
+        "signature_expiry",
+        "ownership",
+        "capacity",
+        "cap",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = populated(dir.path());
+        let mut prepared = prepared_payment(&mut store);
+        assert_atomic_counts(&store, 1, 0);
+        store.chain_query(&prepared.pool).unwrap();
+        store.payment_chain_query(&prepared.pool).unwrap();
+        let mut auth = prepared_authorization(&prepared);
+        match failure {
+            "evidence" => store.db.execute_batch("CREATE TRIGGER fail_evidence BEFORE INSERT ON payment_admission_evidence BEGIN SELECT RAISE(ABORT,'injected support failure'); END;").unwrap(),
+            "expiry" => prepared.valid_until = 0,
+            "signature_expiry" => auth.valid_before = 1,
+            "ownership" => store.disable_pool("fixture").unwrap(),
+            "capacity" => { store.db.execute("UPDATE payment_attempts SET amount='4999999' WHERE id='payment'", []).unwrap(); },
+            "cap" => prepared.payment_limit = U256::from(10),
+            _ => {}
+        }
+        let result = store.journal_authorization(&prepared, auth, None);
+        if failure == "none" {
+            result.unwrap();
+            assert_atomic_counts(&store, 2, 1);
+            let saved: (String, String) = store
+                .db
+                .query_row(
+                    "SELECT balance,reserved_before FROM payment_admission_evidence",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(saved, ("5000000".into(), "7".into()));
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.is::<AdmissionExpired>(),
+                matches!(failure, "expiry" | "signature_expiry")
+            );
+            assert_atomic_counts(&store, 1, 0);
+        }
+        let id = store.id().to_owned();
+        drop(store);
+        let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+        assert_atomic_counts(
+            &store,
+            if failure == "none" { 2 } else { 1 },
+            i64::from(failure == "none"),
+        );
+    }
+}
+
+#[tokio::test]
+async fn cancelled_atomic_commit_keeps_complete_signed_liability_and_support() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = populated(dir.path());
+    let id = state.id().to_owned();
+    let prepared = prepared_payment(&mut state);
+    let auth = prepared_authorization(&prepared);
+    let pool = prepared.pool.clone();
+    let (store, worker) = StoreHandle::spawn(state);
+    let gate = store.group_gate(&pool).unwrap();
+    let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
+    let (started, accepted) = tokio::sync::oneshot::channel();
+    let (release, paused) = std::sync::mpsc::channel();
+    let waiter = tokio::spawn({
+        let store = store.clone();
+        async move {
+            store
+                .call_with_guard(guard, move |s| {
+                    started.send(()).unwrap();
+                    paused.recv().unwrap();
+                    s.journal_authorization(&prepared, auth, None)
+                })
+                .await
+        }
+    });
+    accepted.await.unwrap();
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    assert!(gate.try_lock().is_err());
+    release.send(()).unwrap();
+    store
+        .call(|s| {
+            assert_atomic_counts(s, 2, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    worker.await.unwrap();
+    let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert_atomic_counts(&store, 2, 1);
 }

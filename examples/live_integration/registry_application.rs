@@ -102,7 +102,7 @@ impl Registry {
         let receipts = self.receipt_evidence(run, payment_attempts)?;
         let debits = self.verified_debits(run)?;
         Ok(
-            json!({"verified_debits":debits,"seller_receipts":receipts,"claims":claims.len(),"finished":finished.len(),"without_completion":pending,"payment_attempts_correlated":payment_attempts,"scope":"application acceptance/completion, pre-signing admission correlation and canonical receipt debit proofs; settlement status and Tor isolation are reported separately"}),
+            json!({"verified_debits":debits,"seller_receipts":receipts,"claims":claims.len(),"finished":finished.len(),"without_completion":pending,"payment_attempts_correlated":payment_attempts,"scope":"application acceptance/completion, versioned admission-intent correlation and canonical receipt debit proofs; intent alone does not prove financial commit, settlement or Tor isolation"}),
         )
     }
     fn receipt_evidence(&self, run: &str, admissions: usize) -> Result<Value> {
@@ -206,7 +206,8 @@ impl Registry {
             ensure!(
                 !reviewed.unsigned
                     && claim["session"] == event["session"]
-                    && event["stage"] == "admitted_before_signing",
+                    && ((event["stage"] == "admitted_before_signing" && event.get("admission_evidence_version").is_none())
+                        || (event["stage"] == "signed_admission_pending" && event["admission_evidence_version"] == 2)),
                 "payment differs from accepted case"
             );
             let amount: u64 = event["amount"]

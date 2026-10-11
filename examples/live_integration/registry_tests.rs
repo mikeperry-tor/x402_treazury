@@ -644,6 +644,7 @@ fn funding_reservations_survive_reopen_and_authority_cannot_erase_them() {
 
 #[test]
 fn managed_application_report_distinguishes_admission_from_settlement_and_refuses_duplicates() {
+    for version in [0, 2, 3] {
     let f = Fixture::new();
     let mut registry = f.open();
     f.prepare(&mut registry);
@@ -652,10 +653,18 @@ fn managed_application_report_distinguishes_admission_from_settlement_and_refuse
         .unwrap();
     registry.dispatching("test_run", "call").unwrap();
     registry.event("test_run", "application_claim", &json!({"case":"call","session":"session","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}), 10).unwrap();
-    let event = json!({"case":"call","session":"session","stage":"admitted_before_signing","amount":"1","attempt_id":"attempt"});
+    let mut event = json!({"case":"call","session":"session","stage":"admitted_before_signing","amount":"1","attempt_id":"attempt"});
+    if version != 0 {
+        event["stage"] = json!("signed_admission_pending");
+        event["admission_evidence_version"] = json!(version);
+    }
     registry
         .event("test_run", "application_payment", &event, 10)
         .unwrap();
+    if version == 3 {
+        assert!(registry.application_evidence("test_run").is_err());
+        continue;
+    }
     let evidence = registry.application_evidence("test_run").unwrap();
     assert_eq!(evidence["payment_attempts_correlated"], 1);
     assert!(evidence["scope"].as_str().unwrap().contains("settlement"));
@@ -663,6 +672,7 @@ fn managed_application_report_distinguishes_admission_from_settlement_and_refuse
         .event("test_run", "application_payment", &event, 10)
         .unwrap();
     assert!(registry.application_evidence("test_run").is_err());
+    }
 }
 
 #[test]

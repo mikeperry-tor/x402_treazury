@@ -124,6 +124,7 @@ pub struct AuthorizationResolution {
     pub outcome: AuthorizationOutcome,
     pub block_time: u64,
 }
+#[derive(Clone)]
 pub struct ChainView {
     /// Admission authority expires independently of retained canonical evidence.
     /// Derived from the balance block timestamp, never from completion time.

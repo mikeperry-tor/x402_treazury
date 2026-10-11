@@ -1,4 +1,4 @@
-//! One shared gate per pool; signer leases are acquired only after a valid challenge.
+//! Shared pool ownership and atomic signed admission after a valid challenge.
 use super::error::AdmissionError;
 use super::{
     base::{BaseRpc, now},
@@ -14,8 +14,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use x402_chain_eip155::V2Eip155ExactClient;
-use x402_reqwest::X402Client;
-use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
+use x402_types::scheme::client::{PaymentCandidate, PaymentSelector, X402SchemeClient};
 
 pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised x402 extensions; the provider may require them. A submitted authorization may still settle and remains reserved until chain reconciliation. Do not automatically retry";
 
@@ -79,10 +78,7 @@ impl ManagedPool {
         let pool = self.pool.clone();
         let query = self
             .store
-            .call_with_guard(_gate.clone(), move |s| {
-                s.clear_abandoned_admissions(&pool)?;
-                s.chain_query(&pool)
-            })
+            .call_with_guard(_gate.clone(), move |s| s.chain_query(&pool))
             .await?;
         let observation = crate::qualification::pool_observation(&self.pool).await;
         let view = self.base.view(query).await?;
@@ -150,7 +146,7 @@ impl ManagedPool {
         http: &reqwest::Client,
         expected: PaymentCandidateHandle,
         mut retry: reqwest::Request,
-        mut response: reqwest::Response,
+        response: reqwest::Response,
         cover: Option<&crate::cover::runtime::Call>,
         progress: &crate::payment::SubmissionProgress,
     ) -> Result<(reqwest::Response, bool)> {
@@ -173,99 +169,97 @@ impl ManagedPool {
             }
             *desc = Value::String(text.chars().take(500).collect());
         }
-        response.headers_mut().insert(
-            "payment-required",
-            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
-        );
-        // Validate the SDK envelope before admission; malformed resource metadata
-        // must not cause a promotion followed by an SDK parse failure.
-        let _: x402_types::proto::v2::PaymentRequired<x402_types::proto::OriginalJson> =
-            serde_json::from_value(challenge.clone())
+        // Parse once; the SDK signs this exact selected envelope on each
+        // permitted unpublished attempt, without reconstructing HTTP responses.
+        let envelope: x402_types::proto::v2::PaymentRequired<x402_types::proto::OriginalJson> =
+            serde_json::from_value(challenge)
                 .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
+        let challenge = x402_types::proto::PaymentRequired::V2(envelope);
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
         let qualification = crate::qualification::payment_context()?;
-        let admission_context = qualification.clone();
         let (headers, attempt_id) = {
-            let _guard = Arc::new(self.gate.clone().lock_owned().await);
+            let guard = Arc::new(self.gate.clone().lock_owned().await);
             let pool = self.pool.clone();
             let query = self
                 .store
-                .call_with_guard(_guard.clone(), move |s| {
-                    s.clear_abandoned_admissions(&pool)?;
-                    s.payment_chain_query(&pool)
-                })
+                .call(move |s| s.payment_chain_query(&pool))
                 .await?;
-            let view = self.base.payment_view(query).await?;
-            let pool = self.pool.clone();
-            let hash = requirements_hash.clone();
-            let amount = offer.amount;
-            let payment_limit = self.payment_limit;
-            let lease = self
-                .store
-                .call_with_guard(_guard.clone(), move |s| {
-                    let lease = s.admit_for_limit(
-                        &pool,
-                        amount,
-                        &hash,
-                        view,
-                        Some(&expected),
-                        payment_limit,
-                    )?;
-                    if let Some(context) = admission_context {
-                        context.record(&s.qualification_payment(&lease.id)?)?;
+            let mut view = self.base.payment_view(query).await?;
+            let mut recovery_commit = false;
+            loop {
+                let pool = self.pool.clone();
+                let hash = requirements_hash.clone();
+                let amount = offer.amount;
+                let payment_limit = self.payment_limit;
+                let expected = expected.clone();
+                let evidence = view.clone();
+                let prepared = self
+                    .store
+                    .call_with_guard(guard.clone(), move |s| {
+                        s.prepare_payment(
+                            &pool,
+                            amount,
+                            &hash,
+                            evidence,
+                            Some(&expected),
+                            payment_limit,
+                        )
+                    })
+                    .await?;
+                let signer = PrivateKeySigner::from_slice(&prepared.key)
+                    .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
+                ensure!(
+                    signer.address().to_string() == prepared.address,
+                    "stored signer identity mismatch"
+                );
+                let candidates = V2Eip155ExactClient::new(Arc::new(signer)).accept(&challenge);
+                let candidate = offer
+                    .select(&candidates)
+                    .context("managed SDK rejected selected requirements")?;
+                let signature = candidate.sign().await.context("managed signing failed")?;
+                let payload: Value = serde_json::from_slice(&STANDARD.decode(&signature)?)?;
+                ensure!(
+                    payload
+                        .get("extensions")
+                        .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
+                    "managed signer unexpectedly emitted extensions"
+                );
+                let auth = validate_payload(&payload, &offer, &prepared.address)?;
+                let attempt_id = prepared.id.clone();
+                let context = qualification.clone();
+                // Mark before enqueueing: cancelled/lost acknowledgements never
+                // permit relay retry, dispatch or replacement signing.
+                progress.mark_possible();
+                let committed = self
+                    .store
+                    .call_with_guard(guard.clone(), move |s| {
+                        s.journal_authorization(&prepared, auth, context.as_ref())
+                    })
+                    .await;
+                match committed {
+                    Ok(()) => {
+                        let mut headers = reqwest::header::HeaderMap::new();
+                        headers.insert("payment-signature", signature.parse()?);
+                        break (headers, attempt_id);
                     }
-                    Ok(lease)
-                })
-                .await?;
-            let signer = PrivateKeySigner::from_slice(&lease.key)
-                .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
-            ensure!(
-                signer.address().to_string() == lease.address,
-                "stored signer identity mismatch"
-            );
-            let client = X402Client::new()
-                .register(V2Eip155ExactClient::new(Arc::new(signer)))
-                .with_selector(Offer {
-                    raw: offer.raw.clone(),
-                    amount: offer.amount,
-                    payee: offer.payee,
-                });
-            let headers = client
-                .make_payment_headers(response)
-                .await
-                .context("managed signing failed")?;
-            let payload: Value = serde_json::from_slice(
-                &STANDARD.decode(
-                    headers
-                        .get("payment-signature")
-                        .context("missing payment signature")?
-                        .as_bytes(),
-                )?,
-            )?;
-            ensure!(
-                payload
-                    .get("extensions")
-                    .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
-                "managed signer unexpectedly emitted extensions"
-            );
-            let auth = validate_payload(&payload, &offer, &lease.address)?;
-            let attempt_id = lease.id;
-            let id = attempt_id.clone();
-            let wallet = lease.wallet;
-            let generation = lease.generation;
-            let hash = requirements_hash;
-            // Cancellation here retains the row, even if the accepted store operation
-            // commits after its caller disappears. Signed bytes never leave before this.
-            progress.mark_possible();
-            self.store
-                .call_with_guard(_guard.clone(), move |s| {
-                    s.journal_authorization(&id, &wallet, generation, &hash, auth)
-                })
-                .await?;
-            // The journal now reserves exposure across cancellation, concurrent
-            // admission, reconciliation and rotation. Do not hold the pool gate
-            // while the seller establishes a connection or returns its response.
-            (headers, attempt_id)
+                    Err(error)
+                        if error.is::<super::store::AdmissionExpired>() && !recovery_commit =>
+                    {
+                        // This typed rejection proves rollback and the bytes are
+                        // still private. Discard them and sign once more.
+                        recovery_commit = true;
+                        if now()? > view.admission_valid_until {
+                            let pool = self.pool.clone();
+                            let query = self
+                                .store
+                                .call(move |s| s.payment_chain_query(&pool))
+                                .await?;
+                            view = self.base.payment_view(query).await?;
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
         };
         retry.headers_mut().extend(headers);
         let mut padding = cover.and_then(|c| c.pad(&mut retry, true));
@@ -459,7 +453,7 @@ fn validate_payload(payload: &Value, offer: &Offer, payer: &str) -> Result<Autho
         address("from")? == payer.parse::<Address>()?
             && address("to")? == offer.payee
             && atomic(&auth["value"])? == offer.amount,
-        "payment payload lease mismatch"
+        "payment payload payer or amount mismatch"
     );
     let nonce: B256 = auth["nonce"].as_str().context("missing nonce")?.parse()?;
     let after = u64::try_from(atomic(&auth["validAfter"])?)?;

@@ -92,7 +92,12 @@ Single-run reports include `fee_observations`: observed challenge offers, sample
 admitted Base USDC amounts and independently verified canonical debits, with
 separate strict `> 10000` atomic ($0.01) flags. Challenge observations precede
 selection and therefore include rejected or unselected offers; they grant no
-payment authority. Admission is pre-signing evidence, not proof of spending.
+payment authority. Historical admission events describe validation before signing.
+Version 2 admission evidence uses `signed_admission_pending`: local signing and
+validation occurred, but the separate financial transaction may not have committed.
+Neither event proves submission or spending; missing correlation or canonical
+proof remains incomplete. Case charges survive a failed or uncertain financial
+commit and never authorize replay.
 Missing observations remain null; invalid application correlation withholds offer
 and admission amounts. These samples neither establish provider-wide maxima nor
 prescribe a minimum wallet size. Markdown uses anonymous case numbers.

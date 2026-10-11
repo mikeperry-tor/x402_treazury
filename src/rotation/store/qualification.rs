@@ -26,48 +26,7 @@ impl Store {
         ))
     }
     pub fn qualification_payment(&self, attempt: &str) -> Result<Value> {
-        let mut payment: Value = self.db.query_row("SELECT a.id,a.pool_id,p.name,a.wallet_id,a.generation,a.amount,a.requirements_hash,w.address,w.balance,w.block_height,w.block_hash FROM payment_attempts a JOIN pools p ON p.id=a.pool_id JOIN wallets w ON w.id=a.wallet_id WHERE a.id=?1 AND a.state='ADMITTED'", [attempt], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"pool_name":r.get::<_,String>(2)?,"wallet":r.get::<_,String>(3)?,"generation":r.get::<_,i64>(4)?,"amount":r.get::<_,String>(5)?,"requirements_hash":r.get::<_,String>(6)?,"address":r.get::<_,String>(7)?,"balance_evidence":{"confirmed_balance_atomic":r.get::<_,String>(8)?,"block_height":r.get::<_,Option<i64>>(9)?,"block_hash":r.get::<_,Option<String>>(10)?}})))?;
-        // Called synchronously in the same store-worker command as admission,
-        // with the pool gate still held. Include this ADMITTED reservation and
-        // every earlier unresolved authorization; never read this after signing.
-        let wallet = payment["wallet"]
-            .as_str()
-            .context("admitted wallet missing")?;
-        let mut query = self.db.prepare(
-            "SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'",
-        )?;
-        let after = query
-            .query_map([wallet], |r| r.get::<_, String>(0))?
-            .try_fold(U256::ZERO, |sum, value| -> Result<U256> {
-                sum.checked_add(amount(&value?)?)
-                    .context("admission accounting reservation overflow")
-            })?;
-        let cost = amount(
-            payment["amount"]
-                .as_str()
-                .context("admitted amount missing")?,
-        )?;
-        let balance = amount(
-            payment["balance_evidence"]["confirmed_balance_atomic"]
-                .as_str()
-                .context("admitted balance missing")?,
-        )?;
-        payment["balance_evidence"]["reserved_before_atomic"] = json!(
-            after
-                .checked_sub(cost)
-                .context("admission accounting missing current reservation")?
-                .to_string()
-        );
-        payment["balance_evidence"]["reserved_after_atomic"] = json!(after.to_string());
-        payment["balance_evidence"]["available_after_atomic"] = json!(
-            balance
-                .checked_sub(after)
-                .context("admission accounting exceeds confirmed balance")?
-                .to_string()
-        );
-        crate::qualification::validate_admission_balance(&payment)?;
-        payment["lifecycle"] = self.qualification_lifecycle()?;
-        Ok(payment)
+        payment_evidence(&self.db, attempt)
     }
     /// Public structural state for case-correlated lifecycle observations. No
     /// seeds, signatures, quote bodies, upstream error prose or wallet bytes.
@@ -77,6 +36,49 @@ impl Store {
     pub fn qualification_state(&self) -> Result<Value> {
         read(&self.db)
     }
+}
+pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> {
+    let mut payment: Value = db.query_row("SELECT a.id,a.pool_id,p.name,a.wallet_id,a.generation,a.amount,a.requirements_hash,w.address,w.balance,w.block_height,w.block_hash FROM payment_attempts a JOIN pools p ON p.id=a.pool_id JOIN wallets w ON w.id=a.wallet_id WHERE a.id=?1 AND a.state='POSSIBLY_SUBMITTED' AND EXISTS (SELECT 1 FROM payment_admission_evidence e WHERE e.attempt_id=a.id)", [attempt], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"pool_name":r.get::<_,String>(2)?,"wallet":r.get::<_,String>(3)?,"generation":r.get::<_,i64>(4)?,"amount":r.get::<_,String>(5)?,"requirements_hash":r.get::<_,String>(6)?,"address":r.get::<_,String>(7)?,"balance_evidence":{"confirmed_balance_atomic":r.get::<_,String>(8)?,"block_height":r.get::<_,Option<i64>>(9)?,"block_hash":r.get::<_,Option<String>>(10)?}})))?;
+    // Called synchronously in the same store-worker command as admission,
+    // with the pool gate still held. Include this committed reservation and
+    // every earlier unresolved authorization; capture before releasing the group gate.
+    let wallet = payment["wallet"]
+        .as_str()
+        .context("admitted wallet missing")?;
+    let mut query =
+        db.prepare("SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'")?;
+    let after = query
+        .query_map([wallet], |r| r.get::<_, String>(0))?
+        .try_fold(U256::ZERO, |sum, value| -> Result<U256> {
+            sum.checked_add(amount(&value?)?)
+                .context("admission accounting reservation overflow")
+        })?;
+    let cost = amount(
+        payment["amount"]
+            .as_str()
+            .context("admitted amount missing")?,
+    )?;
+    let balance = amount(
+        payment["balance_evidence"]["confirmed_balance_atomic"]
+            .as_str()
+            .context("admitted balance missing")?,
+    )?;
+    payment["balance_evidence"]["reserved_before_atomic"] = json!(
+        after
+            .checked_sub(cost)
+            .context("admission accounting missing current reservation")?
+            .to_string()
+    );
+    payment["balance_evidence"]["reserved_after_atomic"] = json!(after.to_string());
+    payment["balance_evidence"]["available_after_atomic"] = json!(
+        balance
+            .checked_sub(after)
+            .context("admission accounting exceeds confirmed balance")?
+            .to_string()
+    );
+    crate::qualification::validate_admission_balance(&payment)?;
+    payment["lifecycle"] = lifecycle(&read_status(db)?)?;
+    Ok(payment)
 }
 fn lifecycle(status: &Status) -> Result<Value> {
     let jobs: Vec<_> = status
@@ -234,11 +236,18 @@ mod tests {
             .unwrap();
         for (id, cost, state) in [
             ("pending", "10", "POSSIBLY_SUBMITTED"),
-            ("new", "7", "ADMITTED"),
+            ("new", "7", "POSSIBLY_SUBMITTED"),
             ("resolved", "50", "RESOLVED"),
         ] {
             store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES(?1,?2,?3,0,?4,'requirements',?5)",params![id,pool,wallet,cost,state]).unwrap();
         }
+        store
+            .db
+            .execute(
+                "INSERT INTO payment_admission_evidence VALUES ('new',12,?1,'100','10','1000')",
+                [&hash],
+            )
+            .unwrap();
         let snapshot = store.qualification_state().unwrap();
         let saved = snapshot["wallet_observations"]
             .as_array()

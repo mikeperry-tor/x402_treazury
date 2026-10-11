@@ -226,13 +226,24 @@ promotion. Existing pending operations retain their original identities.
 The signer/transport candidate captures the actual EVM address and generation.
 If promotion occurs before signing, GET/HEAD can obtain one new challenge under
 the new identity; other methods return an actionable payer-change error. Once a
-payment is signed, its authorization is durably journaled before network submission.
+payment is signed locally, its bytes remain private until one transaction commits
+the authorization, exposure and supporting balance evidence. Provisional validation
+creates no unsigned reservation. The transaction rechecks eligibility, capacity,
+the group cap, evidence freshness and signed validity. A definite expiry rollback
+permits one unpublished replacement signature, with fresh evidence when needed;
+other rejections or a missing commit acknowledgement permit no dispatch or retry.
+Schema 13 retains the admission evidence separately from later wallet observations.
+Legacy unsigned rows are removed only during the exclusive schema upgrade; signed
+journals are preserved.
+
+All handles for a store/group share one gate. Accepted store jobs keep that gate
+after waiter cancellation, and funding-credit publication uses the same owner.
 The pool gate releases before awaiting the signed HTTP response, allowing other
 admissible calls to progress without hiding the in-flight liability.
 
 ## Payment reconciliation
 
-A logical paid request has one signed attempt. A final 402, upstream error,
+A logical paid request has at most one signed submission. A final 402, upstream error,
 connection timeout or response-body loss does not authorize replay on another
 wallet. A missing response is not proof that settlement failed. Retired addresses
 remain under reconciliation and accept no new payments.

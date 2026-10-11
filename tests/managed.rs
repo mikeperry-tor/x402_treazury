@@ -729,7 +729,7 @@ async fn cancellation_after_submission_retains_liability() {
 async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
     let h = Harness::new().await;
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_journal BEFORE UPDATE OF state ON payment_attempts WHEN NEW.state='POSSIBLY_SUBMITTED' BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
+    db.execute_batch("CREATE TRIGGER fail_journal BEFORE INSERT ON payment_attempts WHEN NEW.state='POSSIBLY_SUBMITTED' BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
     assert!(h.client.execute(h.route()).await.is_err());
     assert!(h.f.signed.lock().unwrap().is_empty());
     db.execute_batch("DROP TRIGGER fail_journal;").unwrap();

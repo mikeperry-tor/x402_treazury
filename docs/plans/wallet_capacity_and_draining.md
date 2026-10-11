@@ -2472,7 +2472,26 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   with warnings denied and formatting checks passed. Atomic signed admission and
   its cancellation/recovery fixtures remain unfinished.
 
-Steps 2–9 remain unfinished except for the ownership portions described above.
+- **Step 2 — atomic journal portion:** provisional validation no longer creates
+  unsigned leases. The pinned SDK accepts the parsed challenge and signs locally;
+  one transaction rechecks eligibility, cap, capacity, exact evidence and expiry,
+  then writes the signed journal and its audit evidence (additive schema 13).
+  A typed expiry rollback permits one unpublished replacement; unknown outcomes
+  never do. Runtime unsigned cleanup is removed; exclusive schema upgrade clears
+  legacy unsigned rows. Qualification records versioned pending-commit intent,
+  preserves historical reading and checks its own expiry before financial commit.
+  Validation: 232 default-Zcash unit tests, 38 managed-payment and 18 rotation
+  integration tests, the old/new qualification report fixture and all-target
+  Clippy passed. Targeted fixtures cover support-write rollback, final predicates,
+  cancellation/lost delivery after accepted commit, restart and absence of unsigned
+  rows. Further owner panic/process-exit fixtures and the evidence-race recovery
+  integration remain required before moving RPC outside the gate in step 3.
+
+Steps 2–9 remain unfinished except for the portions described above. The known
+operator source inspected read-only for step 8 is schema 12 with three funded
+active/ready pairs, six completed jobs and five resolved payment attempts; no
+conversion has been performed. Detailed conversion preconditions remain to be
+established against relevant source accounting and canonical metadata.
 
 ### Remaining delivery order
 

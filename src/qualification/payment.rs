@@ -150,10 +150,11 @@ impl PaymentContext {
         tx.commit()?;
         Ok(())
     }
-    /// Invoked synchronously by the exclusive store worker after durable
-    /// admission, before constructing a signer. A crash between databases leaves
-    /// only ADMITTED (unsigned) state, never an uncorrelated outgoing signature.
-    pub fn record(&self, attempt: &Value) -> Result<()> {
+    /// Invoked synchronously by the exclusive store worker after local signing
+    /// and admission validation, before its financial transaction commits.
+    /// A crash between databases can leave an attempted case without a committed
+    /// payment; it cannot dispatch an uncorrelated signature or authorize replay.
+    pub fn record(&self, attempt: &Value) -> Result<i64> {
         ensure!(
             !self.unsigned && self.guard.managed,
             "qualification_payment_denied: unsigned case cannot sign"
@@ -205,7 +206,8 @@ impl PaymentContext {
             .clone();
         event.insert("case".into(), json!(self.case));
         event.insert("session".into(), json!(self.guard.binding.session));
-        event.insert("stage".into(), json!("admitted_before_signing"));
+        event.insert("stage".into(), json!("signed_admission_pending"));
+        event.insert("admission_evidence_version".into(), json!(2));
         event.insert("admitted_micros".into(), json!(self.elapsed_micros()));
         // At most one authorization attempt per reviewed case. Failure consumes
         // the case reservation; no automatic re-admission after signing failure.
@@ -215,7 +217,7 @@ impl PaymentContext {
         )
         .context("qualification payment already recorded or evidence journal unavailable")?;
         tx.commit()?;
-        Ok(())
+        Ok(end.min(self.guard.binding.expires_at))
     }
 }
 
@@ -332,7 +334,7 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn accepted_store_work_retains_case_context_and_journals_once_before_signing() {
+    async fn accepted_store_work_retains_case_context_and_journals_once_before_commit() {
         let (_dir, guard, db) = fixture(true);
         let claim = claim(guard).await;
         claim
@@ -362,7 +364,8 @@ mod tests {
         let event: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(event["case"], "case");
         assert_eq!(event["amount"], "1");
-        assert_eq!(event["stage"], "admitted_before_signing");
+        assert_eq!(event["stage"], "signed_admission_pending");
+        assert_eq!(event["admission_evidence_version"], 2);
         assert!(event["admitted_micros"].as_u64().is_some());
         claim.finish(false, None).await.unwrap();
     }

@@ -498,8 +498,11 @@ All declared managed pools initialize, including those unused by selected tools.
   against retained preparation. Refund shielding charges only its fee, not returned
   principal twice. Reorgs quarantine accounting instead of silently repairing it.
 - Double buffering promotes once under the pool gate, retains old liabilities and
-  queues a fresh recipient. Admission reserves before signing and requires current
-  balance/block/generation. Late credit must not overwrite newer roles/evidence;
+  queues a fresh recipient. Local signing creates no unsigned reservation; atomic
+  signed admission rechecks current balance/block/generation and commits exposure
+  with supporting evidence before dispatch. Shared group guards outlive cancelled
+  store waiters. Only definite expiry rollback permits one unpublished replacement;
+  lost acknowledgement never permits dispatch or retry. Late credit must not overwrite newer roles/evidence;
   completed funding credit is idempotent. Retired balances are not active capacity.
 - `PreparationDeferred` alone certifies that preparation never began; only this
   typed result plus no outgoing/budget record can rewind PREPARING. Missing bytes
