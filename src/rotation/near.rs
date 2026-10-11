@@ -63,11 +63,16 @@ fn bridge_minimum(value: &Value) -> Option<u64> {
     }
     digits.parse::<u64>().ok().filter(|v| *v > 0)
 }
+#[derive(Clone)]
 pub struct NearClient {
     headers: reqwest::header::HeaderMap,
     origin: String,
 }
 impl NearClient {
+    #[cfg(test)]
+    pub(crate) fn test_at(origin: &str) -> Result<Self> {
+        Self::at(origin, None, None)
+    }
     pub fn new(key: Option<&str>) -> Result<Self> {
         Self::with_session(key, None)
     }

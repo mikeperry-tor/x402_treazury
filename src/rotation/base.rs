@@ -12,13 +12,14 @@ pub mod evidence;
 pub(crate) mod historical;
 mod receipt;
 mod resources;
+mod shared;
 mod transport;
 mod verification;
 pub use receipt::{TransferExpectation, TransferProof};
 pub(crate) use transport::RpcFailure;
 pub use verification::{BalanceCertificate, EvidenceCapture, ResolutionCertificate};
 pub(crate) use verification::{EndpointMismatch, EvidenceConflict};
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct VerificationStage(pub &'static str);
 impl std::fmt::Display for VerificationStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -112,7 +113,7 @@ pub struct Anchor {
     pub height: u64,
     pub hash: String,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PendingAuthorization {
     pub id: String,
     pub wallet: String,
@@ -120,7 +121,7 @@ pub struct PendingAuthorization {
     pub nonce: String,
     pub valid_before: u64,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ChainQuery {
     pub wallets: Vec<(String, String)>,
     pub pending: Vec<PendingAuthorization>,
@@ -432,7 +433,15 @@ impl BaseRpc {
         self.view_with_policy(query, true).await
     }
     async fn view_with_policy(&self, query: ChainQuery, payment: bool) -> Result<ChainView> {
-        let _owner = resources::query()?;
+        let owner = resources::query()?;
+        self.view_with_owner(query, payment, &owner).await
+    }
+    async fn view_with_owner(
+        &self,
+        query: ChainQuery,
+        payment: bool,
+        _owner: &tokio::sync::SemaphorePermit<'static>,
+    ) -> Result<ChainView> {
         // Process-local correlation only; never derived from wallet/pool identities.
         static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let view_sequence = NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

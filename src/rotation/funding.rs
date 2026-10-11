@@ -12,7 +12,18 @@ use anyhow::{Context, Result, ensure};
 use std::future::Future;
 use tokio_util::sync::CancellationToken;
 
-pub trait FundingBackend {
+pub(crate) mod scheduler;
+
+pub trait FundingObservations: Clone + Send + Sync + 'static {
+    type QuoteRequest: Clone + Send + Sync + 'static;
+    fn quote(&self, request: Self::QuoteRequest) -> impl Future<Output = Result<Quote>> + Send;
+    fn status(&self, quote: Quote) -> impl Future<Output = Result<SwapStatus>> + Send;
+    fn credit(&self, job: FundingJob) -> impl Future<Output = Result<()>> + Send;
+}
+
+pub trait FundingBackend: Send + 'static {
+    type Observations: FundingObservations;
+    fn observations(&self) -> Self::Observations;
     fn recover(
         &mut self,
         _job: &FundingJob,
@@ -31,7 +42,16 @@ pub trait FundingBackend {
     ) -> impl Future<Output = Result<()>> + Send {
         async { Ok(()) }
     }
-    fn quote(&mut self, job: &FundingJob) -> impl Future<Output = Result<Quote>> + Send;
+    fn quote_prerequisite(
+        &mut self,
+        job: &FundingJob,
+    ) -> impl Future<Output = Result<<Self::Observations as FundingObservations>::QuoteRequest>> + Send;
+    fn quote(&mut self, job: &FundingJob) -> impl Future<Output = Result<Quote>> + Send {
+        async move {
+            let request = self.quote_prerequisite(job).await?;
+            self.observations().quote(request).await
+        }
+    }
     fn prepare(
         &mut self,
         job: &FundingJob,
@@ -39,8 +59,16 @@ pub trait FundingBackend {
     ) -> impl Future<Output = Result<()>> + Send;
     fn submit(&mut self, job: &FundingJob) -> impl Future<Output = Result<()>> + Send;
     fn reconcile(&mut self, job: &FundingJob) -> impl Future<Output = Result<bool>> + Send;
-    fn status(&mut self, quote: &Quote) -> impl Future<Output = Result<SwapStatus>> + Send;
-    fn credit(&mut self, job: &FundingJob) -> impl Future<Output = Result<()>> + Send;
+    fn status(&mut self, quote: &Quote) -> impl Future<Output = Result<SwapStatus>> + Send {
+        let reader = self.observations();
+        let quote = quote.clone();
+        async move { reader.status(quote).await }
+    }
+    fn credit(&mut self, job: &FundingJob) -> impl Future<Output = Result<()>> + Send {
+        let reader = self.observations();
+        let job = job.clone();
+        async move { reader.credit(job).await }
+    }
     fn max_attempts(&self, job: &FundingJob) -> u32;
 }
 // Scheduling tests supply an epoch; elapsed work advances that same clock.
@@ -57,103 +85,32 @@ impl TickClock {
 
 pub struct FundingWorker<B> {
     pub store: StoreHandle,
-    pub backend: B,
+    pub backend: std::sync::Arc<tokio::sync::Mutex<B>>,
     pub poll_seconds: u64,
 }
+impl<B> Clone for FundingWorker<B> {
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            backend: self.backend.clone(),
+            poll_seconds: self.poll_seconds,
+        }
+    }
+}
 impl<B: FundingBackend> FundingWorker<B> {
-    pub async fn run(mut self, stop: CancellationToken) -> Result<()> {
-        while !stop.is_cancelled() {
-            // Do not cancel an accepted mutation. Backend requests are bounded;
-            // the treasury owner independently observes shutdown during sync/send.
-            self.tick(now()?).await?;
-            tokio::select! { _=stop.cancelled()=>break, _=tokio::time::sleep(std::time::Duration::from_secs(self.poll_seconds))=>{} }
+    pub fn new(store: StoreHandle, backend: B, poll_seconds: u64) -> Self {
+        Self {
+            store,
+            backend: std::sync::Arc::new(tokio::sync::Mutex::new(backend)),
+            poll_seconds,
         }
-        Ok(())
     }
-    pub async fn tick(&mut self, instant: u64) -> Result<()> {
-        let clock = TickClock {
-            epoch: instant,
-            started: std::time::Instant::now(),
-        };
-        let Some(mut job) = self
-            .store
-            .call(move |s| s.next_funding_job(instant))
-            .await?
-        else {
-            return Ok(());
-        };
-        if job.started_at.is_some_and(|started| {
-            instant.saturating_sub(started) >= self.backend.swap_timeout_seconds()
-        }) && !job.timed_out
-        {
-            let id = job.id.clone();
-            self.store
-                .call(move |s| s.mark_funding_timeout(&id))
-                .await?;
-            job.timed_out = true;
-            tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase,
-                "funding exceeded swap delay warning threshold; reconciliation continues with at least 60 seconds between polls and no replacement deposit");
-        }
-        let result = self.step(&job, &clock).await;
-        self.finish_step(&job, clock.now(), result).await?;
-        // Read committed state: backend credit/preparation can advance phases too.
-        let id = job.id.clone();
-        let current = self.store.call(move |s| s.funding_job(&id)).await?;
-        if let Some(current) = current
-            && current.phase != job.phase
-        {
-            tracing::info!(
-                job_id = %job.id,
-                pool_id = %job.pool_id,
-                from = ?job.phase,
-                to = ?current.phase,
-                "funding phase changed"
-            );
-        }
-        Ok(())
+    pub async fn run(self, stop: CancellationToken) -> Result<()> {
+        self.schedule(now()?, stop, false).await
     }
-    async fn finish_step(&self, job: &FundingJob, instant: u64, result: Result<()>) -> Result<()> {
-        let wait = result
-            .as_ref()
-            .err()
-            .and_then(|error| waiting_reason(error, &job.phase));
-        if let Some(reason) = wait {
-            tracing::debug!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase,
-                reason, "funding awaiting chain confirmation; polling automatically");
-        }
-        let error = result
-            .as_ref()
-            .err()
-            .filter(|_| wait.is_none())
-            .map(|error| safe_error(error, &job.phase));
-        if let Some(category) = &error {
-            tracing::warn!(job_id = %job.id, pool_id = %job.pool_id, phase = ?job.phase, category, "funding check failed; backing off and retaining reservations");
-        }
-        let streak = if error.is_some() {
-            job.error_streak.saturating_add(1)
-        } else {
-            0
-        };
-        let delay = self
-            .poll_seconds
-            .saturating_mul(1u64 << streak.min(6))
-            .min(300)
-            .max(if job.timed_out { 60 } else { 1 });
-        let jitter =
-            job.id.bytes().map(u64::from).sum::<u64>() % self.poll_seconds.saturating_add(1).max(1);
-        let next = instant.saturating_add(delay).saturating_add(jitter);
-        // Allocated failures cannot represent transaction preparation or a send.
-        // One quote read per pass plus capped exponential backoff bounds outages
-        // without consuming durable preparation/recovery authority.
-        let id = job.id.clone();
-        let operation = job.operation_id.clone();
-        self.store
-            .call(move |s| {
-                s.defer_funding_result(&id, Some(&operation), next, error.as_deref(), false)
-            })
-            .await
+    pub async fn tick(&self, instant: u64) -> Result<()> {
+        self.schedule(instant, CancellationToken::new(), true).await
     }
-
     async fn transition(&self, job: &FundingJob, next: FundingPhase) -> Result<()> {
         let id = job.id.clone();
         let expected = job.phase.clone();
@@ -176,23 +133,16 @@ impl<B: FundingBackend> FundingWorker<B> {
             .call(move |s| s.finish_funding_if_proven(&id, &operation))
             .await
     }
-    async fn step(&mut self, job: &FundingJob, clock: &TickClock) -> Result<()> {
+    async fn source_step(
+        &self,
+        job: &FundingJob,
+        clock: &TickClock,
+    ) -> Result<Option<<B::Observations as FundingObservations>::QuoteRequest>> {
         use FundingPhase::*;
         let facts = self.facts(job).await?;
         let mut observation_error = None;
-        if (!facts.readiness_recorded || facts.readiness_disputed)
-            && let Err(error) = self.backend.credit(job).await
-        {
-            observation_error = Some(error.context("base_credit_unverified"));
-        }
-        let facts = self.facts(job).await?;
-        if facts.status_needed()
-            && let Err(error) = self.reconcile_swap(job).await
-        {
-            observation_error.get_or_insert(error);
-        }
         if facts.source_reconciliation_needed() {
-            match self.backend.reconcile(job).await {
+            match self.backend.lock().await.reconcile(job).await {
                 Ok(_) => {
                     let id = job.id.clone();
                     let operation = job.operation_id.clone();
@@ -206,7 +156,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             }
         }
         if self.finish_if_proven(job).await? {
-            return Ok(());
+            return Ok(None);
         }
         let id = job.id.clone();
         let current = self
@@ -232,36 +182,37 @@ impl<B: FundingBackend> FundingWorker<B> {
                 self.finish_if_proven(&current).await?,
                 "closed destination lacks completion proof"
             );
-            return Ok(());
+            return Ok(None);
         }
         if crate::treasury::recovery::needs_recovery(&current) && current.phase != RefundPending {
-            match self.backend.recover(&current).await? {
+            match self.backend.lock().await.recover(&current).await? {
                 Some(crate::treasury::recovery::RecoveryOutcome::OperatorRequired(reason)) => {
-                    return Err(anyhow::anyhow!(RecoveryBlocked(reason)));
+                    let error = anyhow::anyhow!(RecoveryBlocked(reason));
+                    let diagnostic = safe_error(&error, &current.phase);
+                    let (id, operation) = (current.id.clone(), current.operation_id.clone());
+                    self.store
+                        .call(move |s| {
+                            s.record_source_operator_requirement(&id, &operation, &diagnostic)
+                        })
+                        .await?;
+                    return Err(error);
                 }
-                Some(crate::treasury::recovery::RecoveryOutcome::Recovered) => return Ok(()),
+                Some(crate::treasury::recovery::RecoveryOutcome::Recovered) => return Ok(None),
                 Some(crate::treasury::recovery::RecoveryOutcome::Waiting(_)) => {
-                    return observation_error.map_or(Ok(()), Err);
+                    return observation_error.map_or(Ok(None), Err);
                 }
                 None => {}
             }
         }
         match current.phase {
             Allocated if !facts.readiness_recorded && facts.enabled => {
-                let quote = self.backend.quote(&current).await?;
-                ensure!(quote.deposit.is_some(), "cannot fund from dry quote");
-                let id = current.id.clone();
-                let target = quote.request["amount"]
-                    .as_str()
-                    .context("funding quote missing output target")?
-                    .to_owned();
-                let bytes = serde_json::to_vec(&quote)?;
-                let operation = current.operation_id.clone();
-                self.store
-                    .call(move |s| {
-                        s.save_funding_quote_for_operation(&id, &operation, &bytes, &target)
-                    })
-                    .await?;
+                return self
+                    .backend
+                    .lock()
+                    .await
+                    .quote_prerequisite(&current)
+                    .await
+                    .map(Some);
             }
             Quoted if !facts.readiness_recorded && facts.enabled => {
                 self.prepare_quoted(&current, clock).await?
@@ -278,10 +229,23 @@ impl<B: FundingBackend> FundingWorker<B> {
                 if operation.facts.deadline.saturating_sub(clock.now())
                     < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
                 {
-                    self.transition(&current, RecoveryRequired).await?;
-                    anyhow::bail!("prepared_quote_window_exhausted");
+                    let error = anyhow::anyhow!("prepared_quote_window_exhausted");
+                    let diagnostic = safe_error(&error, &current.phase);
+                    let (id, operation) = (current.id.clone(), current.operation_id.clone());
+                    let instant = clock.now();
+                    self.store
+                        .call(move |s| {
+                            s.mark_prepared_quote_window_exhausted(
+                                &id,
+                                &operation,
+                                instant,
+                                &diagnostic,
+                            )
+                        })
+                        .await?;
+                    return Err(error);
                 }
-                let result = self.backend.submit(&current).await;
+                let result = self.backend.lock().await.submit(&current).await;
                 let id = current.id.clone();
                 let operation = current.operation_id.clone();
                 self.store
@@ -294,11 +258,11 @@ impl<B: FundingBackend> FundingWorker<B> {
         if let Some(error) = observation_error {
             return Err(error);
         }
-        Ok(())
+        Ok(None)
     }
     // Readiness and quote refresh precede PREPARING; once that phase commits,
     // only saved-byte recovery may proceed after an interrupted preparation.
-    async fn prepare_quoted(&mut self, job: &FundingJob, clock: &TickClock) -> Result<()> {
+    async fn prepare_quoted(&self, job: &FundingJob, clock: &TickClock) -> Result<()> {
         let instant = now()?;
         if !self
             .store
@@ -308,7 +272,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             return Ok(());
         }
         let quote = self.quote(job).await?;
-        self.backend.ready(job, &quote).await?;
+        self.backend.lock().await.ready(job, &quote).await?;
         if quote.deadline.saturating_sub(clock.now())
             < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
         {
@@ -321,25 +285,8 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
         // The treasury owner accepts PREPARING after its read-only preflight.
         // A queued command cannot outrun a destination-readiness commit.
-        self.backend.prepare(job, &quote).await?;
+        self.backend.lock().await.prepare(job, &quote).await?;
         Ok(())
-    }
-
-    // The adapter validates the original deposit and complete request echo.
-    // Persisted facts accumulate; source confirmation never overwrites them.
-    async fn reconcile_swap(&mut self, job: &FundingJob) -> Result<()> {
-        let quote = self.quote(job).await?;
-        let status = self
-            .backend
-            .status(&quote)
-            .await
-            .context("funding_status_unavailable")?;
-        let id = job.id.clone();
-        let operation = job.operation_id.clone();
-        let observed = now()?;
-        self.store
-            .call(move |s| s.record_provider_outcome(&id, &operation, &status, observed))
-            .await
     }
 
     async fn quote(&self, job: &FundingJob) -> Result<Quote> {
@@ -420,6 +367,14 @@ impl Backend {
     }
 }
 impl FundingBackend for Backend {
+    type Observations = Observations;
+    fn observations(&self) -> Observations {
+        Observations {
+            store: self.store.clone(),
+            near: self.near.clone(),
+            base: self.base.clone(),
+        }
+    }
     async fn recover(
         &mut self,
         job: &FundingJob,
@@ -460,7 +415,7 @@ impl FundingBackend for Backend {
             })
             .await
     }
-    async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
+    async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {
         self.require_auto_funding()?;
         let (limits, max_attempts) = self.policy(job)?;
         let super::config::WalletConfig::ZcashRotation {
@@ -485,28 +440,16 @@ impl FundingBackend for Backend {
             })
             .await?;
         let refund = self.treasury.refund_address(job.id.clone()).await?;
-        let assets = self
-            .near
-            .assets()
-            .await
-            .context(NearStage("asset catalog"))?;
-        let instant = now()?;
-        let request = super::near::request(
-            &assets,
-            &job.recipient,
-            &refund,
-            &target,
-            &self.funding.confidentiality,
-            self.funding.slippage_bps,
-            instant
-                .checked_add(self.funding.quote_deadline_seconds)
-                .context("deadline overflow")?,
-            false,
-        )?;
-        self.near
-            .quote_with_minimum(request, &limits, instant)
-            .await
-            .context(NearStage("quote"))
+        Ok(QuoteRequest {
+            job: job.clone(),
+            refund,
+            target,
+            limits,
+            max_attempts,
+            confidentiality: self.funding.confidentiality.clone(),
+            slippage_bps: self.funding.slippage_bps,
+            deadline_seconds: self.funding.quote_deadline_seconds,
+        })
     }
     async fn prepare(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()
@@ -614,10 +557,86 @@ impl FundingBackend for Backend {
             super::transaction::TransactionPresence::Confirmed { .. }
         ))
     }
-    async fn status(&mut self, quote: &Quote) -> Result<SwapStatus> {
-        self.near.status(quote).await
+    fn max_attempts(&self, job: &FundingJob) -> u32 {
+        self.policy(job).map(|(_, n)| n).unwrap_or(1)
     }
-    async fn credit(&mut self, job: &FundingJob) -> Result<()> {
+}
+
+/// Immutable unsigned input captured after the treasury-owned refund-address
+/// prerequisite. It is not a funding permit and cannot authorize preparation.
+#[derive(Clone)]
+pub struct QuoteRequest {
+    job: FundingJob,
+    refund: String,
+    target: String,
+    limits: super::near::Limits,
+    max_attempts: u32,
+    confidentiality: String,
+    slippage_bps: u32,
+    deadline_seconds: u64,
+}
+
+#[derive(Clone)]
+pub struct Observations {
+    store: StoreHandle,
+    near: super::near::NearClient,
+    base: super::base::BaseRpc,
+}
+impl FundingObservations for Observations {
+    type QuoteRequest = QuoteRequest;
+    async fn quote(&self, request: QuoteRequest) -> Result<Quote> {
+        let (job, operation, max_attempts) = (
+            request.job.id.clone(),
+            request.job.operation_id.clone(),
+            request.max_attempts,
+        );
+        // Recheck before outbound acquisition: a completed prerequisite cannot
+        // revive a closed operation or bypass a newly installed funding pause.
+        self.store
+            .call(move |s| {
+                s.require_funding_attempt(&job, max_attempts)?;
+                let current = s.funding_job(&job)?.context("funding job missing")?;
+                let facts = s.funding_facts(&job, &operation)?;
+                ensure!(
+                    current.operation_id == operation
+                        && current.phase == FundingPhase::Allocated
+                        && facts.enabled
+                        && !facts.readiness_recorded
+                        && !facts.accepted_quote
+                        && !facts.archived
+                        && facts.source_submission.is_none(),
+                    "funding quote boundary changed"
+                );
+                Ok(())
+            })
+            .await?;
+        let assets = self
+            .near
+            .assets()
+            .await
+            .context(NearStage("asset catalog"))?;
+        let instant = now()?;
+        let quote_request = super::near::request(
+            &assets,
+            &request.job.recipient,
+            &request.refund,
+            &request.target,
+            &request.confidentiality,
+            request.slippage_bps,
+            instant
+                .checked_add(request.deadline_seconds)
+                .context("deadline overflow")?,
+            false,
+        )?;
+        self.near
+            .quote_with_minimum(quote_request, &request.limits, instant)
+            .await
+            .context(NearStage("quote"))
+    }
+    async fn status(&self, quote: Quote) -> Result<SwapStatus> {
+        self.near.status(&quote).await
+    }
+    async fn credit(&self, job: FundingJob) -> Result<()> {
         let pool = job.pool_id.clone();
         let candidate = job.wallet_id.clone();
         let gate = self.store.group_gate(&job.pool_id)?;
@@ -662,7 +681,11 @@ impl FundingBackend for Backend {
             })
             .await
             .context(super::base::VerificationStage("funding credit query"))?;
-        let view = match self.base.view(query).await {
+        let view = match self
+            .base
+            .shared_balance_view(query, self.store.clone())
+            .await
+        {
             Ok(view) => view,
             Err(error) => {
                 let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
@@ -692,9 +715,6 @@ impl FundingBackend for Backend {
             })
             .await
             .context(super::base::VerificationStage("funding credit persistence"))
-    }
-    fn max_attempts(&self, job: &FundingJob) -> u32 {
-        self.policy(job).map(|(_, n)| n).unwrap_or(1)
     }
 }
 
@@ -897,3 +917,6 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
 #[cfg(test)]
 #[path = "../../tests/support/funding_backend.rs"]
 mod tests;
+
+#[cfg(test)]
+mod scheduler_tests;

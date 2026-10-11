@@ -2,7 +2,7 @@
 use super::{Anchor, AuthorizationOutcome, PendingAuthorization, evidence::BalanceObservation};
 use std::collections::BTreeMap;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct EvidenceCapture {
     pub(crate) namespace: uuid::Uuid,
     pub(crate) wallet: String,
@@ -129,7 +129,7 @@ impl ResolutionCertificate {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct EvidenceConflict {
     pub wallet: String,
     pub endpoint: String,
@@ -171,7 +171,7 @@ mod tests {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct EndpointMismatch {
     pub endpoint: String,
 }

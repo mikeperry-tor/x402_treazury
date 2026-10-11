@@ -580,3 +580,142 @@ fn only_expected_confirmation_and_credit_waits_are_classified_as_progress() {
         None
     );
 }
+
+#[tokio::test]
+async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
+    use axum::{
+        Json, Router,
+        routing::{get, post},
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut owner = crate::treasury::Treasury::create(
+        dir.path().join("state"), dir.path().join("key"), 2_000_000,
+        Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
+    ).await.unwrap();
+    owner.configure_sync(
+        crate::treasury::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
+    );
+    owner.ensure_pool("pool".into(), "5".into()).await.unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new().route("/v0/tokens", get({
+        let calls = calls.clone();
+        move || { let calls = calls.clone(); async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Json(serde_json::from_str::<serde_json::Value>(include_str!("../fixtures/near/tokens.json")).unwrap())
+        }}
+    })).route("/v0/quote", post({
+        let calls = calls.clone();
+        move |Json(request): Json<serde_json::Value>| { let calls = calls.clone(); async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Json(json!({"quoteRequest":request,"quote":{"amountIn":"100000","amountOut":request["amount"],"amountInUsd":"5.25","depositAddress":"t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F","deadline":request["deadline"]}}))
+        }}
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (treasury, commands) = actor::channel();
+    let backend = Backend {
+        treasury, store: store.clone(), near: super::super::near::NearClient::test_at(&origin).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1",12,120).unwrap(),
+        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","funding_amount_usdc":"5","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())].into(),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public","daily_funding_limit_usdc":"10"})).unwrap(),
+        daily_limit: 1_000_000, max_network_fee: 30_000,
+    };
+    let expected = job.clone();
+    let prerequisite = tokio::spawn(async move {
+        let mut backend = backend;
+        let request = backend.quote_prerequisite(&job).await.unwrap();
+        (backend, request)
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while commands.test_is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!prerequisite.is_finished());
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "quote cannot bypass its treasury prerequisite"
+    );
+    let stop = CancellationToken::new();
+    let actor = tokio::spawn(
+        owner.run_commands(
+            commands,
+            crate::treasury::submission::GrpcSubmission::new(
+                "http://127.0.0.1:1".into(),
+                "http://127.0.0.1:1".into(),
+            )
+            .unwrap(),
+            stop.clone(),
+        ),
+    );
+    let (backend, request) = prerequisite.await.unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "prerequisite has no unsigned HTTP work"
+    );
+    let observations = backend.observations();
+    let backend = tokio::sync::Mutex::new(backend);
+    let source_owner = backend.lock().await;
+    let quote = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        observations.quote(request.clone()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(quote.request["recipient"], expected.recipient);
+    assert_eq!(quote.request["amount"], expected.target);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "one asset read and one quote while source backend remains owned"
+    );
+    let (id, operation) = (expected.id.clone(), expected.operation_id.clone());
+    let encoded = serde_json::to_vec(&quote).unwrap();
+    let target = expected.target.clone();
+    store
+        .call(move |s| s.save_funding_quote_for_operation(&id, &operation, &encoded, &target))
+        .await
+        .unwrap();
+    assert!(
+        observations.quote(request).await.is_err(),
+        "completed prerequisite cannot replay quote acquisition after acceptance"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let status = store.call(|s| s.status()).await.unwrap();
+    assert!(status.treasury_operations.is_empty());
+    assert!(!status.outgoing_pending);
+    let db = rusqlite::Connection::open_with_flags(
+        dir.path().join("state/state.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    drop(db);
+    drop(source_owner);
+    drop(backend);
+    drop(observations);
+    drop(store);
+    stop.cancel();
+    actor.await.unwrap().unwrap();
+    server.abort();
+}

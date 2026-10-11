@@ -718,11 +718,11 @@ impl Deployment {
                     funding_runtime = Some((
                         commands,
                         sender,
-                        crate::rotation::funding::FundingWorker {
-                            store: store.clone(),
+                        crate::rotation::funding::FundingWorker::new(
+                            store.clone(),
                             backend,
-                            poll_seconds: f.poll_seconds,
-                        },
+                            f.poll_seconds,
+                        ),
                     ));
                 }
                 treasury = Some(owner);

@@ -124,7 +124,9 @@ impl ManagedPool {
         let result = if payment {
             self.base.payment_view(query).await
         } else {
-            self.base.view(query).await
+            self.base
+                .shared_balance_view(query, self.store.clone())
+                .await
         };
         match result {
             Ok(view) => Ok(view),

@@ -101,12 +101,26 @@ fn complete(status: &Status, names: &BTreeSet<String>) -> Result<bool> {
             continue;
         }
         let automatic = !blocked.is_empty()
-            && blocked
-                .iter()
-                .all(|job| crate::treasury::recovery::can_recover(status, job));
+            && blocked.iter().all(|job| {
+                crate::treasury::recovery::can_recover_facts(
+                    job,
+                    status
+                        .treasury_operations
+                        .iter()
+                        .find(|operation| operation.operation_id == job.operation_id),
+                )
+            });
         let manual: Vec<_> = blocked
             .into_iter()
-            .filter(|job| !crate::treasury::recovery::can_recover(status, job))
+            .filter(|job| {
+                !crate::treasury::recovery::can_recover_facts(
+                    job,
+                    status
+                        .treasury_operations
+                        .iter()
+                        .find(|operation| operation.operation_id == job.operation_id),
+                )
+            })
             .collect();
         if !manual.is_empty() {
             let details = manual
@@ -179,7 +193,7 @@ async fn supervise(
         .and_then(|s| {
             let recovering = s.funding_jobs.iter().filter(|job| names.contains(&job.pool_name)
                 && crate::treasury::recovery::needs_recovery(job)
-                && crate::treasury::recovery::can_recover(&s, job)).count();
+                && crate::treasury::recovery::can_recover_facts(job, s.treasury_operations.iter().find(|operation| operation.operation_id == job.operation_id))).count();
             if recovering > 0 {
                 tracing::info!(jobs = recovering, "Recovering existing funding before bootstrap; waiting for verified transaction expiry where required; no manual recovery command needed");
             }

@@ -3,7 +3,7 @@
 use super::*;
 use anyhow::Result;
 use x402_treazury::rotation::{
-    funding::{FundingBackend, FundingWorker},
+    funding::{FundingBackend, FundingObservations, FundingWorker},
     near::{Quote, SwapStatus},
     store::{
         SyncObservation, SyncPhase,
@@ -45,7 +45,39 @@ fn synced(s: &mut Store) -> Result<()> {
     )?;
     Ok(())
 }
+impl FundingObservations for Funding {
+    type QuoteRequest = Quote;
+    async fn quote(&self, quote: Quote) -> Result<Quote> {
+        Ok(quote)
+    }
+
+    async fn status(&self, quote: Quote) -> Result<SwapStatus> {
+        if self.refund_pool.as_deref() == quote.request["pool"].as_str() {
+            return Ok(SwapStatus::Refunded);
+        }
+        self.fake.balances.lock().unwrap().insert(
+            quote.request["recipient"].as_str().unwrap().into(),
+            quote.request["target"].as_str().unwrap().parse()?,
+        );
+        Ok(SwapStatus::Success)
+    }
+    async fn credit(&self, job: FundingJob) -> Result<()> {
+        let pool = job.pool_id.clone();
+        let query = self.store.call(move |s| s.chain_query(&pool)).await?;
+        let view = BaseRpc::new(&format!("{}/rpc", self.base), 12, 120)?
+            .view(query)
+            .await?;
+        let wallet = job.wallet_id.clone();
+        self.store
+            .call(move |s| s.record_verified_credit(&wallet, view).map(|_| ()))
+            .await
+    }
+}
 impl FundingBackend for Funding {
+    type Observations = Self;
+    fn observations(&self) -> Self {
+        self.clone()
+    }
     fn swap_timeout_seconds(&self) -> u64 {
         u64::MAX
     }
@@ -61,7 +93,7 @@ impl FundingBackend for Funding {
             .call(|s| s.check_funding_capacity(now()?, 100, 10000))
             .await
     }
-    async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
+    async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         let id = job.id.clone();
         let operation = job.operation_id.clone();
         let target = job.target.clone();
@@ -139,35 +171,14 @@ impl FundingBackend for Funding {
             .await?;
         Ok(true)
     }
-    async fn status(&mut self, quote: &Quote) -> Result<SwapStatus> {
-        if self.refund_pool.as_deref() == quote.request["pool"].as_str() {
-            return Ok(SwapStatus::Refunded);
-        }
-        self.fake.balances.lock().unwrap().insert(
-            quote.request["recipient"].as_str().unwrap().into(),
-            quote.request["target"].as_str().unwrap().parse()?,
-        );
-        Ok(SwapStatus::Success)
-    }
-    async fn credit(&mut self, job: &FundingJob) -> Result<()> {
-        let pool = job.pool_id.clone();
-        let query = self.store.call(move |s| s.chain_query(&pool)).await?;
-        let view = BaseRpc::new(&format!("{}/rpc", self.base), 12, 120)?
-            .view(query)
-            .await?;
-        let wallet = job.wallet_id.clone();
-        self.store
-            .call(move |s| s.record_verified_credit(&wallet, view).map(|_| ()))
-            .await
-    }
 }
 fn funder(
     h: &Harness,
     sends: Arc<Mutex<std::collections::BTreeSet<String>>>,
 ) -> FundingWorker<Funding> {
-    FundingWorker {
-        store: h.store.clone(),
-        backend: Funding {
+    FundingWorker::new(
+        h.store.clone(),
+        Funding {
             store: h.store.clone(),
             fake: h.f.clone(),
             base: h.base.clone(),
@@ -175,8 +186,8 @@ fn funder(
             available: Arc::new(AtomicBool::new(true)),
             refund_pool: None,
         },
-        poll_seconds: 1,
-    }
+        1,
+    )
 }
 async fn tick(worker: &mut FundingWorker<Funding>, instant: &mut u64) {
     worker.tick(*instant).await.unwrap();
@@ -357,7 +368,7 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
         .unwrap();
     let sends = Arc::default();
     let mut worker = funder(&h, Arc::clone(&sends));
-    worker.backend.refund_pool = Some("refund".into());
+    worker.backend.lock().await.refund_pool = Some("refund".into());
     let mut instant = now().unwrap();
     for _ in 0..35 {
         tick(&mut worker, &mut instant).await;

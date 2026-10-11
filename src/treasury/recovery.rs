@@ -34,7 +34,10 @@ fn safely_unprepared(job: &FundingJob) -> bool {
             }))
 }
 
-pub(crate) fn can_recover(status: &Status, job: &FundingJob) -> bool {
+pub(crate) fn can_recover_facts(
+    job: &FundingJob,
+    operation: Option<&crate::rotation::transaction::OperationStatus>,
+) -> bool {
     if job
         .last_error
         .as_deref()
@@ -48,10 +51,7 @@ pub(crate) fn can_recover(status: &Status, job: &FundingJob) -> bool {
     if job.phase != FundingPhase::RecoveryRequired {
         return true;
     }
-    status
-        .treasury_operations
-        .iter()
-        .find(|op| op.operation_id == job.operation_id)
+    operation
         .map(|op| op.submission != "CONFIRMED")
         .unwrap_or_else(|| safely_unprepared(job))
 }

@@ -7,7 +7,7 @@ use tokio::time::Instant;
 const BACKOFF: Duration = Duration::from_millis(200);
 
 /// Fixed labels and numeric codes only; never display URLs, payloads or causes.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct RpcFailure {
     method: &'static str,
     category: &'static str,

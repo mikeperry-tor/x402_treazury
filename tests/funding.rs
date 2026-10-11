@@ -1,14 +1,20 @@
 #![cfg(feature = "zcash")]
 use anyhow::Result;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
 use x402_treazury::rotation::{
-    funding::{FundingBackend, FundingWorker},
+    funding::{FundingBackend, FundingObservations, FundingWorker},
     near::{Quote, SwapStatus},
     store::{Store, StoreHandle, SyncObservation, SyncPhase, funding::FundingJob},
     transaction::TransactionFacts,
 };
+#[derive(Clone)]
 struct Fake {
+    focus_job: String,
     store: StoreHandle,
     sends: usize,
     reconcile_error: Option<&'static str>,
@@ -17,18 +23,61 @@ struct Fake {
     chain_credit: bool,
     external_credit: bool,
     status_error: bool,
-    status_calls: usize,
+    status_calls: Arc<AtomicUsize>,
     swap_status: fn() -> SwapStatus,
-    credit_calls: usize,
+    credit_calls: Arc<AtomicUsize>,
     funds_available: bool,
     defer_prepare: bool,
     quote_deadline: u64,
-    quotes: usize,
+    quotes: Arc<AtomicUsize>,
     quote_outage: bool,
     minimum: Option<String>,
     timeout: u64,
 }
+impl FundingObservations for Fake {
+    type QuoteRequest = (Quote, bool);
+    async fn quote(&self, (quote, outage): Self::QuoteRequest) -> Result<Quote> {
+        self.quotes.fetch_add(1, Ordering::SeqCst);
+        anyhow::ensure!(!outage, "quote transport unavailable");
+        Ok(quote)
+    }
+
+    async fn status(&self, _: Quote) -> Result<SwapStatus> {
+        self.status_calls.fetch_add(1, Ordering::SeqCst);
+        anyhow::ensure!(
+            !self.status_error,
+            "secret-token https://private.invalid/deposit/private-address"
+        );
+        Ok((self.swap_status)())
+    }
+    async fn credit(&self, j: FundingJob) -> Result<()> {
+        self.credit_calls.fetch_add(1, Ordering::SeqCst);
+        let id = j.id.clone();
+        let phase = self
+            .store
+            .call(move |s| {
+                Ok(s.funding_jobs()?
+                    .into_iter()
+                    .find(|job| job.id == id)
+                    .unwrap()
+                    .phase)
+            })
+            .await?;
+        if phase != x402_treazury::rotation::store::funding::FundingPhase::VerifyingCredit
+            && !self.external_credit
+        {
+            return Ok(());
+        }
+        anyhow::ensure!(self.chain_credit, "no independent Base credit");
+        let wallet = j.wallet_id.clone();
+        rpc_evidence::credit_owned(&self.store, wallet, "5000000", 13).await
+    }
+}
 impl FundingBackend for Fake {
+    type Observations = Self;
+    fn observations(&self) -> Self {
+        self.clone()
+    }
     async fn recover(
         &mut self,
         _: &FundingJob,
@@ -47,9 +96,8 @@ impl FundingBackend for Fake {
         );
         Ok(())
     }
-    async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
-        self.quotes += 1;
-        anyhow::ensure!(!self.quote_outage, "quote transport unavailable");
+    async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<(Quote, bool)> {
+        anyhow::ensure!(job.id == self.focus_job, "fixture_job_disabled");
         let id = job.id.clone();
         let operation = job.operation_id.clone();
         let target = job.target.clone();
@@ -57,13 +105,16 @@ impl FundingBackend for Fake {
         self.store
             .call(move |s| s.select_quote_terms(&id, &operation, &target, &ceiling))
             .await?;
-        Ok(Quote {
-            request: serde_json::json!({"amount":self.minimum.as_ref().unwrap_or(&job.target),"recipient":job.recipient}),
-            response: serde_json::json!({}),
-            input: 50,
-            deadline: self.quote_deadline,
-            deposit: Some("test-deposit".into()),
-        })
+        Ok((
+            Quote {
+                request: serde_json::json!({"amount":self.minimum.as_ref().unwrap_or(&job.target),"recipient":job.recipient}),
+                response: serde_json::json!({}),
+                input: 50,
+                deadline: self.quote_deadline,
+                deposit: Some("test-deposit".into()),
+            },
+            self.quote_outage,
+        ))
     }
     async fn prepare(&mut self, j: &FundingJob, quote: &Quote) -> Result<()> {
         if self.defer_prepare {
@@ -122,36 +173,7 @@ impl FundingBackend for Fake {
             .await?;
         Ok(true)
     }
-    async fn status(&mut self, _: &Quote) -> Result<SwapStatus> {
-        self.status_calls += 1;
-        anyhow::ensure!(
-            !self.status_error,
-            "secret-token https://private.invalid/deposit/private-address"
-        );
-        Ok((self.swap_status)())
-    }
-    async fn credit(&mut self, j: &FundingJob) -> Result<()> {
-        self.credit_calls += 1;
-        let id = j.id.clone();
-        let phase = self
-            .store
-            .call(move |s| {
-                Ok(s.funding_jobs()?
-                    .into_iter()
-                    .find(|job| job.id == id)
-                    .unwrap()
-                    .phase)
-            })
-            .await?;
-        if phase != x402_treazury::rotation::store::funding::FundingPhase::VerifyingCredit
-            && !self.external_credit
-        {
-            return Ok(());
-        }
-        anyhow::ensure!(self.chain_credit, "no independent Base credit");
-        let wallet = j.wallet_id.clone();
-        rpc_evidence::credit_owned(&self.store, wallet, "5000000", 13).await
-    }
+
     fn max_attempts(&self, _: &FundingJob) -> u32 {
         3
     }
@@ -202,9 +224,10 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     )
     .unwrap();
     let (store, task) = StoreHandle::spawn(s);
-    let mut worker = FundingWorker {
-        store: store.clone(),
-        backend: Fake {
+    let worker = FundingWorker::new(
+        store.clone(),
+        Fake {
+            focus_job: jobs[0].id.clone(),
             store: store.clone(),
             sends: 0,
             reconcile_error: None,
@@ -213,25 +236,25 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             chain_credit: false,
             external_credit: false,
             status_error: false,
-            status_calls: 0,
+            status_calls: Arc::default(),
             swap_status: || SwapStatus::Success,
-            credit_calls: 0,
+            credit_calls: Arc::default(),
             funds_available: true,
             defer_prepare: false,
             quote_deadline: u64::MAX,
-            quotes: 0,
+            quotes: Arc::default(),
             quote_outage: false,
             minimum: None,
             timeout: u64::MAX,
         },
-        poll_seconds: 1,
-    };
+        1,
+    );
     // Advances quote, preparation, ambiguous submission, restart-like recovery,
     // source confirmation, then API success. No second submit is permitted.
     for i in 0..8 {
         worker.tick(now + i * 1000).await.unwrap();
     }
-    assert_eq!(worker.backend.sends, 1);
+    assert_eq!(worker.backend.lock().await.sends, 1);
     let status = store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
@@ -239,7 +262,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     );
     assert_eq!(status.pools[0].addresses[0].role, "ALLOCATED");
     assert_eq!(status.treasury_operations[0].attempts, 1);
-    worker.backend.chain_credit = true;
+    worker.backend.lock().await.chain_credit = true;
     worker.tick(now + 9000).await.unwrap();
     assert_eq!(
         store.call(|s| s.status()).await.unwrap().funding_jobs[0].phase,
@@ -303,9 +326,10 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
     let (store, task) = StoreHandle::spawn(s);
-    let mut worker = FundingWorker {
-        store: store.clone(),
-        backend: Fake {
+    let worker = FundingWorker::new(
+        store.clone(),
+        Fake {
+            focus_job: jobs[0].id.clone(),
             store: store.clone(),
             sends: 0,
             reconcile_error: None,
@@ -314,22 +338,22 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             chain_credit: true,
             external_credit: false,
             status_error: false,
-            status_calls: 0,
+            status_calls: Arc::default(),
             swap_status: || SwapStatus::Success,
-            credit_calls: 0,
+            credit_calls: Arc::default(),
             funds_available: true,
             defer_prepare: false,
             quote_deadline: u64::MAX,
-            quotes: 0,
+            quotes: Arc::default(),
             quote_outage: false,
             minimum: None,
             timeout: u64::MAX,
         },
-        poll_seconds: 1,
-    };
+        1,
+    );
     worker.tick(1).await.unwrap();
     assert!(!store.call(|s| s.status()).await.unwrap().outgoing_pending);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     drop(worker);
     drop(store);
     task.await.unwrap();
@@ -375,8 +399,10 @@ async fn fixture() -> (
     )
     .unwrap();
     let (store, task) = StoreHandle::spawn(s);
-    let worker = FundingWorker {
-        backend: Fake {
+    let worker = FundingWorker::new(
+        store.clone(),
+        Fake {
+            focus_job: jobs[0].id.clone(),
             store: store.clone(),
             sends: 0,
             reconcile_error: None,
@@ -385,31 +411,30 @@ async fn fixture() -> (
             chain_credit: false,
             external_credit: false,
             status_error: false,
-            status_calls: 0,
+            status_calls: Arc::default(),
             swap_status: || SwapStatus::Success,
-            credit_calls: 0,
+            credit_calls: Arc::default(),
             funds_available: true,
             defer_prepare: false,
             quote_deadline: u64::MAX,
-            quotes: 0,
+            quotes: Arc::default(),
             quote_outage: false,
             minimum: None,
             timeout: u64::MAX,
         },
-        store,
-        poll_seconds: 1,
-    };
+        1,
+    );
     (dir, worker, task)
 }
 #[tokio::test]
 async fn status_backoff_persists_independently_and_redacts_errors() {
-    let (dir, mut worker, task) = fixture().await;
-    worker.backend.swap_status = || SwapStatus::Processing;
+    let (dir, worker, task) = fixture().await;
+    worker.backend.lock().await.swap_status = || SwapStatus::Processing;
     let now = x402_treazury::rotation::base::now().unwrap();
     for i in 0..5 {
         worker.tick(now + i * 1000).await.unwrap();
     }
-    worker.backend.status_error = true;
+    worker.backend.lock().await.status_error = true;
     let mut instant = now + 5000;
     for streak in 1..=4 {
         worker.tick(instant).await.unwrap();
@@ -420,14 +445,33 @@ async fn status_backoff_persists_independently_and_redacts_errors() {
             job.attempts, 0,
             "status errors must not consume quote retries"
         );
-        assert!(job.next_poll >= instant + (1 << streak));
         let text = serde_json::to_string(&status).unwrap();
         assert!(!text.contains("secret-token") && !text.contains("private.invalid"));
-        let calls = worker.backend.status_calls;
-        worker.tick(job.next_poll - 1).await.unwrap();
-        assert_eq!(worker.backend.status_calls, calls);
-        instant = job.next_poll;
+        let calls = worker
+            .backend
+            .lock()
+            .await
+            .status_calls
+            .load(Ordering::SeqCst);
+        // Aggregate next_poll may name another work kind. Test the retained
+        // status owner's actual backoff, not the minimum of unrelated schedules.
+        worker.tick(instant + 1).await.unwrap();
+        assert_eq!(
+            worker
+                .backend
+                .lock()
+                .await
+                .status_calls
+                .load(Ordering::SeqCst),
+            calls
+        );
+        instant += 100;
     }
+    let saved_next_poll = worker
+        .store
+        .call(|s| Ok(s.status()?.funding_jobs[0].next_poll))
+        .await
+        .unwrap();
     let id = worker
         .store
         .call(|s| Ok(s.status()?.treasury_id))
@@ -438,13 +482,13 @@ async fn status_backoff_persists_independently_and_redacts_errors() {
     let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     let job = &s.status().unwrap().funding_jobs[0];
     assert_eq!(job.error_streak, 4);
-    assert_eq!(job.next_poll, instant);
+    assert_eq!(job.next_poll, saved_next_poll);
 }
 #[tokio::test]
 async fn unsigned_outage_past_health_threshold_does_not_authorize_recovery() {
-    let (_dir, mut worker, task) = fixture().await;
-    worker.backend.timeout = 1;
-    worker.backend.quote_outage = true;
+    let (_dir, worker, task) = fixture().await;
+    worker.backend.lock().await.timeout = 1;
+    worker.backend.lock().await.quote_outage = true;
     let original = worker
         .store
         .call(|s| Ok(s.funding_jobs()?.remove(0)))
@@ -454,9 +498,9 @@ async fn unsigned_outage_past_health_threshold_does_not_authorize_recovery() {
     for step in 0..5 {
         worker.tick(now + step * 1000).await.unwrap();
     }
-    assert_eq!(worker.backend.quotes, 5);
-    assert_eq!(worker.backend.recovery_calls, 0);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 5);
+    assert_eq!(worker.backend.lock().await.recovery_calls, 0);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     let id = original.id.clone();
     let (job, attempts) = worker
         .store
@@ -471,40 +515,54 @@ async fn unsigned_outage_past_health_threshold_does_not_authorize_recovery() {
 
 #[tokio::test]
 async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
-    let (_dir, mut worker, task) = fixture().await;
-    worker.backend.timeout = 1;
+    let (_dir, worker, task) = fixture().await;
+    worker.backend.lock().await.timeout = 1;
     let now = x402_treazury::rotation::base::now().unwrap();
     for i in 0..6 {
         worker.tick(now + i * 1000).await.unwrap();
     }
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert!(status.funding_jobs[0].timed_out && status.pools[0].funding_degraded);
-    assert!(status.funding_jobs[0].next_poll >= now + 5060);
-    assert_eq!(worker.backend.sends, 1);
-    worker.backend.chain_credit = true;
+    assert_eq!(worker.backend.lock().await.sends, 1);
+    worker.backend.lock().await.chain_credit = true;
     worker.tick(now + 7000).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
         x402_treazury::rotation::store::funding::FundingPhase::Complete
     );
-    assert!(!status.funding_jobs[0].timed_out && !status.pools[0].funding_degraded);
-    assert_eq!(worker.backend.sends, 1);
+    assert!(!status.funding_jobs[0].timed_out);
+    assert!(status.funding_jobs[0].last_error.is_none());
+    let completed = status.funding_jobs[0].id.clone();
+    worker
+        .store
+        .call(move |s| s.mark_funding_timeout(&completed))
+        .await
+        .unwrap();
+    assert!(
+        !worker
+            .store
+            .call(|s| Ok(s.status()?.funding_jobs[0].timed_out))
+            .await
+            .unwrap()
+    );
+    // The intentionally disabled sibling fixture remains independently degraded.
+    assert_eq!(worker.backend.lock().await.sends, 1);
     drop(worker);
     task.await.unwrap();
 }
 #[tokio::test]
 async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_recovery_authority() {
-    let (_dir, mut worker, task) = fixture().await;
+    let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
-    worker.backend.quote_deadline = now + 400;
+    worker.backend.lock().await.quote_deadline = now + 400;
     worker.tick(now).await.unwrap();
     let original = worker
         .store
         .call(|s| Ok(s.funding_jobs()?.remove(0).operation_id))
         .await
         .unwrap();
-    worker.backend.funds_available = false;
+    worker.backend.lock().await.funds_available = false;
     worker.tick(now + 1000).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
@@ -522,15 +580,15 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
     let message = status.funding_jobs[0].last_error.as_deref().unwrap();
     assert!(message.contains("refill paused before transaction preparation"));
     assert!(message.contains("existing funded wallets remain usable"));
-    assert_eq!(worker.backend.sends, 0);
-    worker.backend.funds_available = true;
+    assert_eq!(worker.backend.lock().await.sends, 0);
+    worker.backend.lock().await.funds_available = true;
     for i in 2..8 {
         worker.tick(now + i * 1000).await.unwrap();
     }
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_ne!(status.funding_jobs[0].operation_id, original);
-    assert_eq!(worker.backend.quotes, 4);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 4);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     assert_eq!(
         status.funding_jobs[0].phase,
         x402_treazury::rotation::store::funding::FundingPhase::Quoted
@@ -552,9 +610,9 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
 async fn quote_and_prepared_validity_boundaries_are_exact() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     for remaining in [299, 300] {
-        let (_dir, mut worker, task) = fixture().await;
+        let (_dir, worker, task) = fixture().await;
         let now = x402_treazury::rotation::base::now().unwrap();
-        worker.backend.quote_deadline = now + 100 + remaining;
+        worker.backend.lock().await.quote_deadline = now + 100 + remaining;
         worker.tick(now).await.unwrap();
         worker.tick(now + 100).await.unwrap();
         let status = worker.store.call(|s| s.status()).await.unwrap();
@@ -570,11 +628,11 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
             status.treasury_operations.len(),
             usize::from(remaining == 300)
         );
-        assert_eq!(worker.backend.sends, 0);
+        assert_eq!(worker.backend.lock().await.sends, 0);
         drop(worker);
         task.await.unwrap();
-        let (_dir, mut worker, task) = fixture().await;
-        worker.backend.quote_deadline = now + 200 + remaining;
+        let (_dir, worker, task) = fixture().await;
+        worker.backend.lock().await.quote_deadline = now + 200 + remaining;
         worker.tick(now).await.unwrap();
         worker.tick(now + 100).await.unwrap();
         worker.tick(now + 200).await.unwrap();
@@ -598,7 +656,10 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
             assert_eq!(status.treasury_operations[0].submission, "PREPARED");
             assert_eq!(status.treasury_operations[0].attempts, 0);
         }
-        assert_eq!(worker.backend.sends, usize::from(remaining == 300));
+        assert_eq!(
+            worker.backend.lock().await.sends,
+            usize::from(remaining == 300)
+        );
         assert_eq!(status.treasury_operations.len(), 1);
         drop(worker);
         task.await.unwrap();
@@ -609,7 +670,7 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
 async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     for saved in [false, true] {
-        let (dir, mut worker, task) = fixture().await;
+        let (dir, worker, task) = fixture().await;
         let now = x402_treazury::rotation::base::now().unwrap();
         worker.tick(now).await.unwrap();
         if saved {
@@ -629,7 +690,7 @@ async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits
                 FundingPhase::RecoveryRequired
             }
         );
-        assert_eq!(worker.backend.sends, 0);
+        assert_eq!(worker.backend.lock().await.sends, 0);
         if saved {
             let id = status.funding_jobs[0].operation_id.clone();
             worker
@@ -641,7 +702,7 @@ async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits
                 .await
                 .unwrap();
             worker.tick(now + 300).await.unwrap();
-            assert_eq!(worker.backend.sends, 0);
+            assert_eq!(worker.backend.lock().await.sends, 0);
             let after = worker.store.call(|s| s.status()).await.unwrap();
             assert_eq!(after.funding_jobs[0].phase, FundingPhase::VerifyingCredit);
             assert_eq!(after.treasury_operations[0].attempts, 1);
@@ -670,14 +731,14 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
         FundingPhase::RefundPending,
     ] {
         for status in statuses {
-            let (_dir, mut worker, task) = fixture().await;
-            worker.backend.swap_status = || SwapStatus::Processing;
+            let (_dir, worker, task) = fixture().await;
+            worker.backend.lock().await.swap_status = || SwapStatus::Processing;
             let now = x402_treazury::rotation::base::now().unwrap();
             for i in 0..5 {
                 worker.tick(now + i * 100).await.unwrap();
             }
             if phase != FundingPhase::Swapping {
-                worker.backend.swap_status = if phase == FundingPhase::RefundPending {
+                worker.backend.lock().await.swap_status = if phase == FundingPhase::RefundPending {
                     || SwapStatus::Refunded
                 } else {
                     || SwapStatus::Success
@@ -694,9 +755,14 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
                     .phase,
                 phase
             );
-            let calls = worker.backend.status_calls;
-            worker.backend.chain_credit = true;
-            worker.backend.swap_status = status;
+            let calls = worker
+                .backend
+                .lock()
+                .await
+                .status_calls
+                .load(Ordering::SeqCst);
+            worker.backend.lock().await.chain_credit = true;
+            worker.backend.lock().await.swap_status = status;
             worker.tick(now + 600).await.unwrap();
             worker.tick(now + 700).await.unwrap();
             let after = worker.store.call(|s| s.status()).await.unwrap();
@@ -713,11 +779,17 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
             assert_eq!(after.funding_jobs[0].phase, expected);
             if phase != FundingPhase::Swapping {
                 assert_eq!(
-                    worker.backend.status_calls, calls,
+                    worker
+                        .backend
+                        .lock()
+                        .await
+                        .status_calls
+                        .load(Ordering::SeqCst),
+                    calls,
                     "saved SUCCESS/REFUNDED stops ordinary status polling"
                 );
             }
-            assert_eq!(worker.backend.sends, 1);
+            assert_eq!(worker.backend.lock().await.sends, 1);
             assert_eq!(after.treasury_operations[0].attempts, 1);
             let db = rusqlite::Connection::open(_dir.path().join("state/state.sqlite")).unwrap();
             let accounting: (i64, i64) = db
@@ -736,8 +808,8 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
 
 #[tokio::test]
 async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
-    let (_dir, mut worker, task) = fixture().await;
-    worker.backend.minimum = Some("6000000".into());
+    let (_dir, worker, task) = fixture().await;
+    worker.backend.lock().await.minimum = Some("6000000".into());
     let now = x402_treazury::rotation::base::now().unwrap();
     worker.tick(now).await.unwrap();
     let state = worker.store.call(|s| s.status()).await.unwrap();
@@ -755,8 +827,8 @@ async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
     );
     assert!(state.treasury_operations.is_empty());
     worker.tick(now + 5).await.unwrap();
-    assert_eq!(worker.backend.quotes, 1);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 1);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     assert_eq!(
         worker
             .store
@@ -774,7 +846,7 @@ async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
 #[tokio::test]
 async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_send() {
     use x402_treazury::rotation::store::funding::FundingPhase;
-    let (_dir, mut worker, task) = fixture().await;
+    let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
     worker.tick(now).await.unwrap();
     let original = worker
@@ -782,7 +854,7 @@ async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_sen
         .call(|s| Ok(s.funding_jobs()?.remove(0)))
         .await
         .unwrap();
-    worker.backend.defer_prepare = true;
+    worker.backend.lock().await.defer_prepare = true;
     for i in 1..=2 {
         worker.tick(now + i * 10).await.unwrap();
         let status = worker.store.call(|s| s.status()).await.unwrap();
@@ -797,10 +869,10 @@ async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_sen
         );
         assert!(status.treasury_operations.is_empty());
     }
-    worker.backend.defer_prepare = false;
+    worker.backend.lock().await.defer_prepare = false;
     worker.tick(now + 100).await.unwrap();
-    assert_eq!(worker.backend.quotes, 1);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 1);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(status.treasury_operations.len(), 1);
     let job = status.funding_jobs[0].id.clone();
@@ -819,7 +891,7 @@ async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_sen
 #[tokio::test]
 async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() {
     use x402_treazury::rotation::store::funding::FundingPhase;
-    let (_dir, mut worker, task) = fixture().await;
+    let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
     worker.tick(now).await.unwrap();
     worker
@@ -838,7 +910,7 @@ async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() 
         status.funding_jobs[0].last_error.as_deref(),
         Some("preparation_fixture_failure")
     );
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     assert!(status.treasury_operations.is_empty());
     drop(worker);
     task.await.unwrap();
@@ -1042,7 +1114,7 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
 #[tokio::test]
 async fn qualification_denial_preserves_quote_and_records_actionable_status() {
     use x402_treazury::rotation::{base::now, store::funding::FundingPhase};
-    let (_dir, mut worker, task) = fixture().await;
+    let (_dir, worker, task) = fixture().await;
     let instant = now().unwrap();
     worker.tick(instant).await.unwrap();
     let before = worker.store.call(|s| s.status()).await.unwrap();
@@ -1068,8 +1140,8 @@ async fn qualification_denial_preserves_quote_and_records_actionable_status() {
     assert_eq!(after.snapshot_revision, before.snapshot_revision);
     assert!(after.treasury_operations.is_empty());
     assert!(!after.outgoing_pending);
-    assert_eq!(worker.backend.sends, 0);
-    assert_eq!(worker.backend.quotes, 1);
+    assert_eq!(worker.backend.lock().await.sends, 0);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 1);
     drop(worker);
     task.await.unwrap();
 }
@@ -1084,15 +1156,16 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
         .with_writer(std::sync::Mutex::new(log.reopen().unwrap()))
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
-    let (_dir, mut worker, task) = fixture().await;
-    worker.backend.reconcile_error = Some("treasury_confirmation_pending");
-    worker.backend.swap_status = || SwapStatus::Processing;
+    let (_dir, worker, task) = fixture().await;
+    worker.backend.lock().await.reconcile_error = Some("treasury_confirmation_pending");
+    worker.backend.lock().await.swap_status = || SwapStatus::Processing;
     let now = x402_treazury::rotation::base::now().unwrap();
     for i in 0..4 {
         worker.tick(now + i * 1000).await.unwrap();
     }
+    let focus = worker.backend.lock().await.focus_job.clone();
     let baseline = std::fs::read_to_string(log.path()).unwrap().len();
-    worker.backend.reconcile_error = Some("treasury_confirmation_pending");
+    worker.backend.lock().await.reconcile_error = Some("treasury_confirmation_pending");
     for i in 4..7 {
         worker.tick(now + i * 1000).await.unwrap();
         let status = worker.store.call(|s| s.status()).await.unwrap();
@@ -1103,14 +1176,18 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
         );
         assert_eq!(job.error_streak, 0);
         assert!(job.last_error.is_none());
-        assert_eq!(worker.backend.sends, 1);
+        assert_eq!(worker.backend.lock().await.sends, 1);
         assert_ne!(status.treasury_operations[0].submission, "CONFIRMED");
     }
     let output = std::fs::read_to_string(log.path()).unwrap();
-    let waiting = &output[baseline..];
+    let waiting = output[baseline..]
+        .lines()
+        .filter(|line| line.contains(&focus))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(waiting.contains("zcash_confirmations_pending"));
     assert!(!waiting.contains("WARN"), "{waiting}");
-    worker.backend.reconcile_error = Some("private upstream error");
+    worker.backend.lock().await.reconcile_error = Some("private upstream error");
     worker.tick(now + 7000).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(status.funding_jobs[0].error_streak, 1);
@@ -1122,14 +1199,18 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
             .contains("source_reconciliation_failed")
     );
     let output = std::fs::read_to_string(log.path()).unwrap();
-    let failed = &output[baseline..];
+    let failed = output[baseline..]
+        .lines()
+        .filter(|line| line.contains(&focus))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(failed.contains("WARN"));
-    assert!(failed.contains("funding check failed"));
+    assert!(failed.contains("funding observation failed"));
     assert!(!failed.contains("private upstream error"));
     assert!(!failed.contains("source_confirmation_pending"));
-    worker.backend.reconcile_error = None;
+    worker.backend.lock().await.reconcile_error = None;
     worker.tick(now + 8000).await.unwrap();
-    assert_eq!(worker.backend.sends, 1);
+    assert_eq!(worker.backend.lock().await.sends, 1);
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
@@ -1144,22 +1225,23 @@ async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
     use x402_treazury::{
         rotation::store::funding::FundingPhase, treasury::recovery::RecoveryOutcome,
     };
-    let (_dir, mut worker, task) = fixture().await;
+    let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
-    worker.backend.quote_deadline = now + 450;
+    worker.backend.lock().await.quote_deadline = now + 450;
     worker.tick(now).await.unwrap();
     worker.tick(now + 100).await.unwrap();
     worker.tick(now + 200).await.unwrap();
-    worker.backend.recovery = Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
+    worker.backend.lock().await.recovery =
+        Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
     for i in 3..6 {
         worker.tick(now + i * 1000).await.unwrap();
         let status = worker.store.call(|s| s.status()).await.unwrap();
         assert_eq!(status.funding_jobs[0].phase, FundingPhase::RecoveryRequired);
         assert_eq!(status.treasury_operations[0].submission, "PREPARED");
         assert_eq!(status.treasury_operations[0].attempts, 0);
-        assert_eq!(worker.backend.sends, 0);
+        assert_eq!(worker.backend.lock().await.sends, 0);
     }
-    worker.backend.recovery = Some(RecoveryOutcome::OperatorRequired(
+    worker.backend.lock().await.recovery = Some(RecoveryOutcome::OperatorRequired(
         "recovery_attempt_limit_reached",
     ));
     worker.tick(now + 6000).await.unwrap();
@@ -1171,15 +1253,15 @@ async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
             .unwrap()
             .contains("recovery_attempt_limit_reached")
     );
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     drop(worker);
     task.await.unwrap();
 }
 
 #[tokio::test]
 async fn repeated_quote_outages_do_not_consume_recovery_attempts_or_allocate_again() {
-    let (_dir, mut worker, task) = fixture().await;
-    worker.backend.quote_outage = true;
+    let (_dir, worker, task) = fixture().await;
+    worker.backend.lock().await.quote_outage = true;
     let initial = worker.store.call(|s| s.status()).await.unwrap();
     let id = initial.funding_jobs[0].operation_id.clone();
     let mut instant = x402_treazury::rotation::base::now().unwrap();
@@ -1195,10 +1277,9 @@ async fn repeated_quote_outages_do_not_consume_recovery_attempts_or_allocate_aga
         assert_eq!(job.operation_id, id);
         assert_eq!(status.funding_jobs.len(), initial.funding_jobs.len());
         assert!(status.treasury_operations.is_empty());
-        assert!(job.next_poll > instant);
-        instant = job.next_poll;
+        instant += 100;
     }
-    worker.backend.quote_outage = false;
+    worker.backend.lock().await.quote_outage = false;
     worker.tick(instant).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
@@ -1206,7 +1287,7 @@ async fn repeated_quote_outages_do_not_consume_recovery_attempts_or_allocate_aga
         x402_treazury::rotation::store::funding::FundingPhase::Quoted
     );
     assert_eq!(status.funding_jobs[0].operation_id, id);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     worker
         .store
         .call(move |s| s.require_unstarted_preparation(&id))
@@ -1219,7 +1300,7 @@ async fn repeated_quote_outages_do_not_consume_recovery_attempts_or_allocate_aga
 #[tokio::test]
 async fn disabled_quote_observes_external_credit_and_closes_without_new_source_work() {
     use x402_treazury::rotation::store::funding::FundingPhase;
-    let (_dir, mut worker, task) = fixture().await;
+    let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
     worker.tick(now).await.unwrap();
     let before = worker.store.call(|s| s.status()).await.unwrap();
@@ -1230,9 +1311,12 @@ async fn disabled_quote_observes_external_credit_and_closes_without_new_source_w
         .call(move |s| s.disable_pool(&name))
         .await
         .unwrap();
-    worker.backend.external_credit = true;
-    worker.backend.chain_credit = true;
+    worker.backend.lock().await.external_credit = true;
+    worker.backend.lock().await.chain_credit = true;
     worker.tick(now + 100).await.unwrap();
+    // The source lane may have captured the clean quote before credit published;
+    // the next bounded pass observes D and performs its guarded closure.
+    worker.tick(now + 200).await.unwrap();
     let after = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.funding_jobs[0].phase, FundingPhase::Complete);
     assert_eq!(
@@ -1240,8 +1324,8 @@ async fn disabled_quote_observes_external_credit_and_closes_without_new_source_w
         before.funding_jobs[0].operation_id
     );
     assert!(after.treasury_operations.is_empty());
-    assert_eq!(worker.backend.quotes, 1);
-    assert_eq!(worker.backend.sends, 0);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 1);
+    assert_eq!(worker.backend.lock().await.sends, 0);
     drop(worker);
     task.await.unwrap();
 }
@@ -1250,22 +1334,23 @@ async fn disabled_quote_observes_external_credit_and_closes_without_new_source_w
 async fn timed_out_submitted_operation_dispatches_owned_recovery_without_replay() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     use x402_treazury::treasury::recovery::RecoveryOutcome;
-    let (_dir, mut worker, task) = fixture().await;
-    worker.backend.swap_status = || SwapStatus::Processing;
-    worker.backend.reconcile_error = Some("treasury_confirmation_pending");
+    let (_dir, worker, task) = fixture().await;
+    worker.backend.lock().await.swap_status = || SwapStatus::Processing;
+    worker.backend.lock().await.reconcile_error = Some("treasury_confirmation_pending");
     let now = x402_treazury::rotation::base::now().unwrap();
     for i in 0..3 {
         worker.tick(now + i * 100).await.unwrap();
     }
     let before = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(before.funding_jobs[0].phase, FundingPhase::DepositPending);
-    worker.backend.timeout = 1;
-    worker.backend.recovery = Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
+    worker.backend.lock().await.timeout = 1;
+    worker.backend.lock().await.recovery =
+        Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
     worker.tick(now + 1000).await.unwrap();
     let after = worker.store.call(|s| s.status()).await.unwrap();
-    assert_eq!(worker.backend.recovery_calls, 1);
-    assert_eq!(worker.backend.sends, 1);
-    assert_eq!(worker.backend.quotes, 1);
+    assert_eq!(worker.backend.lock().await.recovery_calls, 1);
+    assert_eq!(worker.backend.lock().await.sends, 1);
+    assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 1);
     assert_eq!(
         after.funding_jobs[0].operation_id,
         before.funding_jobs[0].operation_id

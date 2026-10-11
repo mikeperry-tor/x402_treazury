@@ -10,6 +10,7 @@ pub mod funding;
 pub(crate) mod history;
 mod ownership;
 pub mod refunds;
+pub(crate) mod scheduling;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
 use alloy_primitives::U256;
@@ -1280,6 +1281,7 @@ type GroupGates = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<Str
 pub struct StoreHandle {
     sender: tokio::sync::mpsc::Sender<Work>,
     group_gates: GroupGates,
+    funding_owner: std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>>,
 }
 impl StoreHandle {
     pub fn spawn(store: Store) -> (Self, tokio::task::JoinHandle<()>) {
@@ -1294,9 +1296,15 @@ impl StoreHandle {
             Self {
                 sender,
                 group_gates: Default::default(),
+                funding_owner: Default::default(),
             },
             task,
         )
+    }
+    pub(crate) fn funding_owner(
+        &self,
+    ) -> std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>> {
+        self.funding_owner.clone()
     }
     /// All independently constructed payment owners for this store/group share
     /// the same gate, including while an accepted SQL job outlives its waiter.
@@ -1442,6 +1450,7 @@ PRAGMA user_version=13; COMMIT;")?;
         }
         db.execute_batch("PRAGMA user_version=15; COMMIT")?;
     }
+    scheduling::initialize(db)?;
     Ok(())
 }
 pub(crate) struct PreparedPayment {

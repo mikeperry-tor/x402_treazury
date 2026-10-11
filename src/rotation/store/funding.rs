@@ -1232,7 +1232,19 @@ impl Store {
         Ok(())
     }
     pub fn mark_funding_timeout(&mut self, id: &str) -> Result<()> {
-        self.db.execute("INSERT INTO funding_health(job_id,timed_out) VALUES (?1,1) ON CONFLICT(job_id) DO UPDATE SET timed_out=1",[id])?;
+        let operation: String = self.db.query_row(
+            "SELECT operation_id FROM funding_progress WHERE job_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        self.mark_funding_operation_timeout(id, &operation)
+    }
+    pub(crate) fn mark_funding_operation_timeout(
+        &mut self,
+        id: &str,
+        operation: &str,
+    ) -> Result<()> {
+        self.db.execute("INSERT INTO funding_health(job_id,timed_out) SELECT ?1,1 WHERE EXISTS(SELECT 1 FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE') ON CONFLICT(job_id) DO UPDATE SET timed_out=1",params![id,operation])?;
         Ok(())
     }
     /// Check before advancing to PREPARING; the owner still rechecks at reserve.

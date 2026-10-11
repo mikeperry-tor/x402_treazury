@@ -2557,6 +2557,24 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   Independent observation scheduling and final reserve-claim
   integration remain steps 6 and 7 respectively.
 
+- Step 6 independent scheduling uses one retained store-wide funding owner, with
+  separate credit, status and prerequisite-complete unsigned quote reads alongside
+  one serialized source step. Four bounded keyset lanes retain progress without a
+  wallet-count deadline; exact operation/kind retry state survives cancelled waiters.
+  Reopen derives work from committed facts without resetting recovery attempts.
+  Quote prerequisites remain with the treasury owner; completed prerequisites let
+  unsigned HTTP proceed without occupying it. Equivalent in-flight Base reads
+  share exact capture/configuration scope and original freshness, with cancellation
+  and runtime teardown preserving resource ownership. Source-owned expiry/review
+  dispositions remain separate from observation health, preserving unprepared
+  closure proof through pause and re-enable. Focused validation passes 20 funding
+  integrations, three lifecycle fixtures, three scheduling fixtures, three shared
+  Base acquisition fixtures, two recovery-disposition fixtures, and real backend
+  quote-prerequisite/typed-diagnostic checks. The isolated scheduling snapshot
+  passed 282 default-Zcash library tests, 20 funding integrations, all-target
+  Clippy with warnings denied, and formatting checks. Startup continuity is the
+  next separately reviewed portion of this milestone.
+
 Steps 6–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
