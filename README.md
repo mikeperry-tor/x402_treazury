@@ -15,17 +15,7 @@ You can also optionally grant your agent a set of tools to discover and add x402
 
 ## How it works
 
-```mermaid
-flowchart TB
-    Z[Shielded Zcash treasury] --> N[NEAR Intents swaps]
-    N --> A[Active USDC wallet]
-    N --> B[Small and optional large reserves]
-    B -. First signed payment .-> A
-    A -. Previous active .-> R[Retained wallets]
-    A --> T[Wallet-isolated Tor]
-    R --> T
-    T --> P[API provider group]
-```
+![Wallet funding and payment flow, with Low Balance Wallets stacked beside the Active USDC Wallet](docs/wallet-flow.svg)
 
 > **NOTE:**
 >
