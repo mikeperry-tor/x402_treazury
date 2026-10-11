@@ -87,7 +87,13 @@ mod tests {
             1,
             b"initial",
         )?;
-        let pool = s.ensure_pool("a", "5")?;
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            s,
+            "a",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )?;
         let job = s.funding_jobs()?.remove(0);
         s.save_funding_quote(
             &job.id,
@@ -100,7 +106,7 @@ mod tests {
             funding::FundingPhase::Quoted,
             funding::FundingPhase::Preparing,
         )?;
-        s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)?;
+        s.reserve(&job.operation_id, Some(&pool), 1, 100)?;
         s.prepare_with_facts(
             &job.operation_id,
             1,

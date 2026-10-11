@@ -1,5 +1,5 @@
 //! Pure wallet assignment: inspectable without keys, state, catalogs or networking.
-use super::config::{WalletConfig, positive_usdc};
+use super::config::WalletConfig;
 use crate::deployment::MetaConfig;
 use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
@@ -40,8 +40,8 @@ pub struct GeneratedWallet {
 pub struct WalletSummary {
     pub managed_pool_count: usize,
     pub generated_pool_count: usize,
-    pub active_and_standby_target_atomic: String,
-    pub active_and_standby_target_usdc: String,
+    pub initial_inventory_target_atomic: String,
+    pub initial_inventory_target_usdc: String,
 }
 pub struct Resolution {
     pub wallets: BTreeMap<String, WalletConfig>,
@@ -138,18 +138,9 @@ pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
     let mut total = U256::ZERO;
     let mut count = 0;
     for wallet in wallets.values() {
-        if let WalletConfig::ZcashRotation {
-            funding_amount_usdc,
-            ..
-        } = wallet
-        {
-            let target = positive_usdc(funding_amount_usdc)?;
+        if let WalletConfig::ZcashRotation { reserves, .. } = wallet {
             total = total
-                .checked_add(
-                    target
-                        .checked_mul(U256::from(2))
-                        .context("combined funding target overflow")?,
-                )
+                .checked_add(reserves.initial_inventory_target_atomic()?)
                 .context("combined funding target overflow")?;
             count += 1;
         }
@@ -158,8 +149,8 @@ pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
     let summary = WalletSummary {
         managed_pool_count: count,
         generated_pool_count: generated.len(),
-        active_and_standby_target_atomic: total.to_string(),
-        active_and_standby_target_usdc: format!(
+        initial_inventory_target_atomic: total.to_string(),
+        initial_inventory_target_usdc: format!(
             "{}.{:06}",
             total / scale,
             u64::try_from(total % scale)?

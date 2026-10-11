@@ -196,7 +196,14 @@ async fn paid_fixture() {
         b"fixture",
     )
     .unwrap();
-    let pool = store.ensure_pool("cover", "0.01").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        store,
+        "cover",
+        crate::rotation::test_capacity::small_reserve("0.01"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let state = store.status().unwrap();
     let addresses = &state.pools[0].addresses;
     let active = addresses[0].address.clone();
@@ -217,7 +224,6 @@ async fn paid_fixture() {
             store.clone(),
             pool,
             crate::rotation::base::BaseRpc::new("https://api.example.com/rpc", 12, 120).unwrap(),
-            "0.01",
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),
@@ -236,7 +242,16 @@ async fn paid_fixture() {
     assert_eq!(result.bytes, b"paid");
     assert!(result.paid_submission);
     let after = store.call(|s| s.status()).await.unwrap();
-    assert_eq!(after.pools[0].generation, 1);
+    assert_eq!(after.pools[0].addresses.len(), 2);
+    assert_eq!(after.pools[0].addresses[0].role, "RETAINED");
+    assert_eq!(after.pools[0].addresses[1].role, "ACTIVE");
+    let small = after.pools[0]
+        .reserve_claims
+        .iter()
+        .find(|c| c.slot == "small")
+        .unwrap();
+    assert_eq!(small.generation, 1);
+    assert!(small.wallet_id.is_none());
     drop(managed);
     drop(store);
     worker.await.unwrap();

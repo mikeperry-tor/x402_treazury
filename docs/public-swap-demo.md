@@ -82,7 +82,10 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    never overwrites it. An explicit `--birthday HEIGHT` keeps new initialization
    offline. Seed imports require `--mnemonic-file FILE --birthday HEIGHT`, using a
    height at or before the original wallet's first use. Lookup failure creates no
-   wallet state. Local copies are gitignored. Keep `auto_fund = false`.
+   wallet state. Local copies are gitignored. Keep `auto_fund = false` and the
+   reviewed retirement tolerance at zero. Pausing new funding does not disable
+   independently eligible automatic retirement; zero tolerance requires exact
+   confirmed and latest zero balances plus cleared financial obligations.
 
    This demo defaults to direct networking. For Tor, add the `[network]` table from
    `examples/network/tor.toml` to the local deployment before initialization or sync,
@@ -101,12 +104,13 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    material. Never run the original and restored copy concurrently.
 4. Provide the printed **shielded** receive address to the operator. Agree on the
    ZEC amount using a fresh quote for two $5 USDC deposits, including source fees.
-   The example permits at most **0.006 ZEC per funding transfer including its network fee**, **0.012 ZEC of
-   daily treasury spending (including unresolved reservations)**, **5% quoted conversion overhead**, and **0.0003 ZEC
-   per refund-shielding fee**. These are ceilings, not a price estimate or a guarantee
-   that a route fits. The USDC daily and total allocation budgets are both 10 USDC,
-   enough for the initial pair; replacements require an explicit budget increase.
-   Do not increase limits automatically when a quote fails.
+   The example permits at most **0.006 ZEC per transfer including its fee**,
+   **5% quoted conversion overhead**, and **0.0003 ZEC per shielding fee**.
+   These are per-operation ceilings, not a price estimate or a promise that a
+   route fits. Actual spendable treasury funds govern production funding. The
+   separate reviewed qualification manifest/registry controls this run's cumulative
+   authority; retain `auto_fund=false` unless that explicit run authorization permits
+   funding. Do not increase per-operation safeguards automatically after quote failure.
 5. After the operator transfers ZEC, sync and inspect the treasury:
 
    ```sh
@@ -129,15 +133,17 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 
    Start with no MCP clients issuing tool calls. Observe the two funding jobs,
    source confirmations and independent Base credit through `wallet status`.
-   Bootstrap is ready only with one ACTIVE and one READY wallet, each initially
-   funded to 5,000,000 atomic USDC. NEAR SUCCESS alone is insufficient.
+   For this demo, wait for complete configured inventory: one ACTIVE and one READY
+   wallet, each satisfying its 5,000,000 atomic USDC target. Ordinary serving can
+   begin with one eligible funded payer; that does not satisfy this stronger demo
+   inventory gate. NEAR SUCCESS alone is insufficient.
 7. Connect an MCP client to `http://127.0.0.1:8000/mcp` using the bearer token.
    Initialize and list tools first. Make **one** approved profile lookup with
    `socialfetch_twitter_profiles_handle` and a `handle` argument. The per-payment
    cap is **$0.05**. Record seller acceptance and verify the payment authorization
    later reconciles against Base. A tool response alone is not a settlement proof.
-8. Stop with SIGINT/SIGTERM, inspect status, and make a new backup. Complete the
-   bounded test within one UTC day; the daily spend budget is not a lifetime cap.
+8. Stop with SIGINT/SIGTERM, inspect status, and make a new backup. Keep the test
+   within its separately reviewed run authority; UTC rollover grants no new authority.
    Do not leave automated clients or unattended funding running after the test.
 
 The first test funds two slots and proves one paid call. It does not deliberately
@@ -162,7 +168,7 @@ This qualification cannot substitute for the treasury-funded test.
 | Observation | Action |
 | --- | --- |
 | Quote rejected, route unavailable or rate limited | Inspect the sanitized job error. Bounded retries/backoff are automatic; do not silently relax caps or select a confidential mode. |
-| Insufficient shielded balance or daily budget | Keep the active EVM wallet usable; fund/sync or wait for budget. No signed operation is created by this wait. |
+| Insufficient spendable shielded balance | Keep the active EVM wallet usable; fund/sync under the reviewed run authority. No signed operation is created by this wait. |
 | Swap timeout | Pool status becomes degraded; slower reconciliation continues with the same operation. Do not issue another deposit. |
 | Ambiguous source submission | Stop serving before `wallet reconcile --config FILE --operation-id UUID`. `--rebroadcast` explicitly permits only the same bytes while still valid. |
 | Expired source transaction | Use `wallet recover-expired`; it requires canonical synced unspent-input evidence. Refused recovery keeps the reservation. Never delete its journal. |

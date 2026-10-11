@@ -133,9 +133,6 @@ impl Treasury {
             if job.last_error.as_deref().is_some_and(|reason| {
                 [
                     "treasury_insufficient_spendable_funds",
-                    "treasury_budget_exceeded",
-                    "daily_funding_limit_exceeded",
-                    "total_funding_limit_exceeded",
                     "funding_cost_limit_exceeded",
                     "funding_amount_limit_exceeded",
                     "qualification_funding_denied",
@@ -345,7 +342,15 @@ mod tests {
         let key = dir.path().join("key");
         let mut owner = Treasury::create(state.clone(), key.clone(), 2_000_000,
             Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
-        owner.ensure_pool("test".into(), "2".into()).await.unwrap();
+        crate::rotation::test_capacity::treasury_pair(
+            &owner,
+            "test",
+            "2",
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0,
+        )
+        .await
+        .unwrap();
         let job = owner.status().await.unwrap().funding_jobs.remove(0);
         let id = job.id.clone();
         owner

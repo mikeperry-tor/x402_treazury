@@ -458,12 +458,12 @@ state_dir="state"
 key_file="NEVER_READ_KEY"
 indexer_url_env="UNSET_INDEXER"
 submission_url_env="UNSET_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [funding]
 confidentiality="public"
 [wallets.pool]
 mode="zcash_rotation"
+reserves={{small={{funding_amount_usdc="2"}}}}
 max_api_payment_usdc="0.02"
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
@@ -645,33 +645,33 @@ fn funding_reservations_survive_reopen_and_authority_cannot_erase_them() {
 #[test]
 fn managed_application_report_distinguishes_admission_from_settlement_and_refuses_duplicates() {
     for version in [0, 2, 3] {
-    let f = Fixture::new();
-    let mut registry = f.open();
-    f.prepare(&mut registry);
-    registry
-        .reserve_batch("test_run", "batch", &["call".into()], 10)
-        .unwrap();
-    registry.dispatching("test_run", "call").unwrap();
-    registry.event("test_run", "application_claim", &json!({"case":"call","session":"session","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}), 10).unwrap();
-    let mut event = json!({"case":"call","session":"session","stage":"admitted_before_signing","amount":"1","attempt_id":"attempt"});
-    if version != 0 {
-        event["stage"] = json!("signed_admission_pending");
-        event["admission_evidence_version"] = json!(version);
-    }
-    registry
-        .event("test_run", "application_payment", &event, 10)
-        .unwrap();
-    if version == 3 {
+        let f = Fixture::new();
+        let mut registry = f.open();
+        f.prepare(&mut registry);
+        registry
+            .reserve_batch("test_run", "batch", &["call".into()], 10)
+            .unwrap();
+        registry.dispatching("test_run", "call").unwrap();
+        registry.event("test_run", "application_claim", &json!({"case":"call","session":"session","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}), 10).unwrap();
+        let mut event = json!({"case":"call","session":"session","stage":"admitted_before_signing","amount":"1","attempt_id":"attempt"});
+        if version != 0 {
+            event["stage"] = json!("signed_admission_pending");
+            event["admission_evidence_version"] = json!(version);
+        }
+        registry
+            .event("test_run", "application_payment", &event, 10)
+            .unwrap();
+        if version == 3 {
+            assert!(registry.application_evidence("test_run").is_err());
+            continue;
+        }
+        let evidence = registry.application_evidence("test_run").unwrap();
+        assert_eq!(evidence["payment_attempts_correlated"], 1);
+        assert!(evidence["scope"].as_str().unwrap().contains("settlement"));
+        registry
+            .event("test_run", "application_payment", &event, 10)
+            .unwrap();
         assert!(registry.application_evidence("test_run").is_err());
-        continue;
-    }
-    let evidence = registry.application_evidence("test_run").unwrap();
-    assert_eq!(evidence["payment_attempts_correlated"], 1);
-    assert!(evidence["scope"].as_str().unwrap().contains("settlement"));
-    registry
-        .event("test_run", "application_payment", &event, 10)
-        .unwrap();
-    assert!(registry.application_evidence("test_run").is_err());
     }
 }
 
@@ -858,6 +858,41 @@ fn rotation_states(treasury: &str) -> (Value, Value) {
     let after = json!({"treasury_id":treasury,"pools":[{"id":"p","name":"pool","generation":1,"addresses":[wallet("a",1,"RETIRED"),wallet("b",2,"ACTIVE"),wallet("c",3,"ALLOCATED")]}],"funding_jobs":[{"id":"job","pool_id":"p","wallet_id":"c","recipient":format!("0x{:040x}",3),"target":"2000000","phase":"ALLOCATED"}]});
     (before, after)
 }
+#[test]
+fn capacity_consumption_vacancy_durably_stops_depletion_before_refill_allocation() {
+    let f = rotation_fixture();
+    let mut r = f.open();
+    f.prepare(&mut r);
+    let run = &f.manifest.run_id;
+    let (mut before, mut after) = rotation_states(&f.manifest.treasury_id);
+    before["schema_version"] = json!(2);
+    after["schema_version"] = json!(2);
+    before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
+    before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":0,"wallet_id":"b","destination_ready":true}]);
+    after["pools"][0]["generation"] = json!(0);
+    after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
+    after["pools"][0]["addresses"].as_array_mut().unwrap().pop();
+    after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":1,"wallet_id":null,"destination_ready":false}]);
+    after["funding_jobs"] = json!([]);
+    r.reserve_batch(run, "first", &["call".into()], 10).unwrap();
+    r.dispatching(run, "call").unwrap();
+    r.finish_managed(run, "call", Some(b"{}"), true).unwrap();
+    assert_eq!(
+        r.stop_depletion(run, "smoke", 0, &before, &after, 10)
+            .unwrap(),
+        vec!["extra"]
+    );
+    assert_eq!(reserved(&r), 20000);
+    drop(r);
+    let mut r = Registry::open(&f.state, false).unwrap();
+    assert!(r.validated_skips(run).unwrap().contains("extra"));
+    assert!(
+        r.reserve_batch(run, "replay", &["extra".into()], 11)
+            .is_err()
+    );
+    assert_eq!(r.execution_state(run, "service").unwrap(), "UNATTEMPTED");
+}
+
 #[test]
 fn rotation_boundary_durably_skips_only_unused_tail_without_refunding_attempts() {
     let f = rotation_fixture();

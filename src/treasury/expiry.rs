@@ -87,7 +87,7 @@ impl Treasury {
                 ))
             })
             .await?;
-        let status = self.status().await?;
+        let status = self.store.call(|s| s.treasury_sync_state()).await?;
         let sync = status.sync.context("treasury not synced")?;
         freshness::require_current_tip(&sync)?;
         let height = sync.height.context("missing sync height")?;
@@ -113,7 +113,7 @@ impl Treasury {
         // that result Unknown; establish non-inclusion from fresh chain-scanned
         // unspent nullifiers/outpoints instead of interpreting server prose.
         self.sync_once(stop).await?;
-        let status = self.status().await?;
+        let status = self.store.call(|s| s.treasury_sync_state()).await?;
         let sync = status.sync.context("treasury not synced")?;
         freshness::require_current_tip(&sync)?;
         let height = sync.height.context("missing recovery height")?;

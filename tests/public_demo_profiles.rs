@@ -18,9 +18,16 @@ async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
             );
             assert_eq!(shown["funding"]["auto_fund"], false);
             assert_eq!(shown["funding"]["confidentiality"], "public");
-            assert_eq!(shown["wallets"]["demo"]["funding_amount_usdc"], "5.00");
+            assert_eq!(
+                shown["wallets"]["demo"]["reserves"]["small"]["funding_amount_usdc"],
+                "5.00"
+            );
             assert_eq!(shown["wallets"]["demo"]["max_funding_spend_zec"], "0.006");
-            assert_eq!(shown["treasury"]["daily_treasury_spend_limit_zec"], "0.012");
+            assert!(
+                shown["treasury"]
+                    .get("daily_treasury_spend_limit_zec")
+                    .is_none()
+            );
             assert!(shown["funding"]["near_api_key_env"].is_null());
             assert!(shown["funding"]["near_user_session_env"].is_null());
         }

@@ -314,7 +314,7 @@ pub fn markdown(report: &Value) -> Result<String> {
                 )?;
             }
             out.push_str("\n| Wallet role | Wallets | Anchored observations | Unobserved | Saved balance (USDC atomic) |\n| --- | ---: | ---: | ---: | ---: |\n");
-            for role in ["ACTIVE", "READY", "ALLOCATED", "RETIRED"] {
+            for role in ["ACTIVE", "READY", "RETAINED", "ALLOCATED", "RETIRED"] {
                 let row = &summary["wallet_roles"][role];
                 if row.is_null() {
                     continue;

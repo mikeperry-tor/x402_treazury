@@ -4,11 +4,6 @@ use super::*;
 
 pub(crate) const PAGE_SIZE: usize = 64;
 
-pub(super) fn initialize(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE INDEX IF NOT EXISTS funding_actionable_inventory ON funding_jobs(id) WHERE state!='COMPLETE' OR readiness_disputed IS NOT NULL;")?;
-    Ok(())
-}
-
 impl Store {
     /// Rows are never deleted. Capture committed insertion order independently
     /// from the indexed ID cursor so later UUIDs cannot join this pass.
@@ -160,7 +155,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        store.ensure_pool("pool", "5").unwrap();
+        crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "pool",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         store
             .advance_funding(
@@ -260,7 +262,14 @@ mod source_disposition_tests {
             b"fixture",
         )
         .unwrap();
-        store.ensure_pool("pool", "5").unwrap();
+        crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "pool",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         store
             .close_unprepared_funding_for_operation(&job.id, &job.operation_id)
@@ -288,7 +297,14 @@ mod source_disposition_tests {
             assert_eq!(diagnostic.matches("; source_operator: ").count(), 1);
             assert!(crate::treasury::recovery::can_recover_facts(&current, None));
         }
-        store.ensure_pool("pool", "5").unwrap();
+        crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "pool",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         store
             .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
             .unwrap();

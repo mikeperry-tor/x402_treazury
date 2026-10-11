@@ -184,7 +184,6 @@ impl Treasury {
     pub async fn shield_refund(
         &mut self,
         job: String,
-        daily_limit: u64,
         max_fee: u64,
         stop: &CancellationToken,
     ) -> Result<PreparedTransaction> {
@@ -193,10 +192,7 @@ impl Treasury {
             .store
             .call(move |s| {
                 let funding = s
-                    .status()?
-                    .funding_jobs
-                    .into_iter()
-                    .find(|j| j.id == job)
+                    .funding_job(&job)?
                     .context("network_identity_missing: refund job")?;
                 let address = s.refund_address(&job)?.context("unknown refund address")?;
                 let accounting = s.return_accounting()?;
@@ -214,9 +210,13 @@ impl Treasury {
                 Ok((address, funding.recipient))
             })
             .await?;
-        let status = self.status().await?;
+        let status = self.store.call(|s| s.treasury_sync_state()).await?;
         ensure!(
-            status.sync_fresh && !status.outgoing_pending,
+            status
+                .sync
+                .as_ref()
+                .is_some_and(|s| now().is_ok_and(|at| s.fresh(at, status.snapshot_revision)))
+                && !status.outgoing_pending,
             "treasury not ready for shielding"
         );
         let operation = uuid::Uuid::new_v4().to_string();
@@ -296,7 +296,6 @@ impl Treasury {
                         None,
                         u32::try_from(now()? / 86400)?,
                         i64::try_from(fee)?,
-                        i64::try_from(daily_limit)?,
                     )
                 })
                 .await?;

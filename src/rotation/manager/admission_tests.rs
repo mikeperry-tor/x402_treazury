@@ -15,6 +15,9 @@ use std::sync::{
 
 #[derive(Clone)]
 struct Fixture {
+    holding: u64,
+    debit: u64,
+    price: Arc<AtomicU64>,
     head: Arc<AtomicU64>,
     calls: Arc<AtomicUsize>,
     unsigned: Arc<AtomicUsize>,
@@ -52,7 +55,7 @@ async fn rpc(State(f): State<Fixture>, Json(request): Json<Value>) -> Json<Value
                 .unwrap()
                 .starts_with("0x70a08231")
             {
-                5_000_000u64 - u64::from(used)
+                f.holding - if used { f.debit } else { 0 }
             } else {
                 u64::from(used)
             };
@@ -80,7 +83,7 @@ async fn seller(State(f): State<Fixture>, headers: HeaderMap) -> axum::response:
         return "paid".into_response();
     }
     f.unsigned.fetch_add(1, Ordering::SeqCst);
-    let challenge = serde_json::json!({"x402Version":2,"resource":{"url":"http://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":2,"extra":{"name":"USD Coin","version":"2"}}]});
+    let challenge = serde_json::json!({"x402Version":2,"resource":{"url":"http://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":f.price.load(Ordering::SeqCst).to_string(),"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":2,"extra":{"name":"USD Coin","version":"2"}}]});
     (
         StatusCode::PAYMENT_REQUIRED,
         [(
@@ -119,7 +122,14 @@ async fn race(race: Race) {
         b"fixture",
     )
     .unwrap();
-    let pool = state.ensure_pool("combined", "5").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        state,
+        "combined",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(crate::rotation::config::positive_usdc("5").unwrap()),
+        0
+    )
+    .unwrap();
     for job in state.funding_jobs().unwrap() {
         state
             .record_credit(&job.wallet_id, "5000000", &format!("0x{:064x}", 88), 88)
@@ -135,6 +145,9 @@ async fn race(race: Race) {
     )
     .unwrap();
     let fixture = Fixture {
+        holding: 5_000_000,
+        debit: 1,
+        price: Arc::new(AtomicU64::new(1)),
         head: Arc::new(AtomicU64::new(100)),
         calls: Arc::default(),
         unsigned: Arc::default(),
@@ -163,7 +176,6 @@ async fn race(race: Race) {
         store.clone(),
         pool.clone(),
         base_rpc.clone(),
-        "5",
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
@@ -323,4 +335,209 @@ async fn race(race: Race) {
     drop(store);
     worker.await.unwrap();
     server.abort();
+}
+
+#[path = "ownership_tests.rs"]
+mod ownership_tests;
+
+#[tokio::test]
+async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused() {
+    use crate::{
+        catalog::RoutedRequest,
+        payment::PaidClient,
+        rotation::store::{AllocationKind, Store, StoreHandle},
+    };
+    for used in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = state
+            .ensure_capacity_group(
+                "debit_expiry",
+                &crate::rotation::test_capacity::small_reserve("10"),
+                Some(U256::from(20_000_000)),
+                0,
+            )
+            .unwrap();
+        let job = state
+            .allocate_capacity_kind(&pool, AllocationKind::Initial, true)
+            .unwrap()
+            .unwrap();
+        let wallet = state.funding_job(&job).unwrap().unwrap().wallet_id;
+        let fixture = Fixture {
+            holding: 10_000_000,
+            debit: 4_000_000,
+            price: Arc::new(AtomicU64::new(4_000_000)),
+            head: Arc::new(AtomicU64::new(100)),
+            calls: Arc::default(),
+            unsigned: Arc::default(),
+            sent: Arc::default(),
+            timestamps: Arc::new(StdMutex::new(
+                (1..=100).map(|h| (h, now().unwrap())).collect(),
+            )),
+            used: Arc::default(),
+            db: dir.path().join("state/state.sqlite"),
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let app = Router::new()
+            .route("/rpc", post(rpc))
+            .route("/pay", get(seller))
+            .with_state(fixture.clone());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let base = BaseRpc::new(&format!("{url}/rpc"), 12, 120).unwrap();
+        let query = state
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        let original = base.view(query).await.unwrap();
+        let certificate = original.balance_certificates[&wallet].clone();
+        let original_observation = certificate.observation().clone();
+        state
+            .record_verified_credit(&wallet, original.clone())
+            .unwrap();
+        let (store, owner) = StoreHandle::spawn(state);
+        let manager = ManagedPool::new(
+            store.clone(),
+            pool.clone(),
+            base.clone(),
+            SpendPolicy::dollars("20").unwrap(),
+        )
+        .unwrap();
+        let client = PaidClient::managed(Arc::new(manager));
+        let route = || RoutedRequest {
+            method: "GET".into(),
+            url: format!("{url}/pay"),
+            query: Default::default(),
+            body: None,
+        };
+        assert_eq!(client.execute(route()).await.unwrap(), "paid");
+        let db = rusqlite::Connection::open(&fixture.db).unwrap();
+        let expiry: i64 = db
+            .query_row("SELECT valid_before FROM payment_attempts", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+                [&wallet],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "4000000"
+        );
+        fixture.price.store(8_000_000, Ordering::SeqCst);
+        assert!(
+            client.execute(route()).await.is_err(),
+            "ten balance minus four unresolved cannot authorize eight"
+        );
+        assert_eq!(fixture.sent.lock().unwrap().len(), 1);
+        while now().unwrap() <= u64::try_from(expiry).unwrap() {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        fixture.used.store(used, Ordering::SeqCst);
+        fixture.head.store(200, Ordering::SeqCst);
+        fixture
+            .timestamps
+            .lock()
+            .unwrap()
+            .extend((101..=200).map(|h| (h, now().unwrap())));
+        let p = pool.clone();
+        let history = store
+            .call(move |s| {
+                let mut query = s.chain_query(&p)?;
+                query.wallets.clear();
+                Ok(query)
+            })
+            .await
+            .unwrap();
+        let proof = base.view(history).await.unwrap();
+        let p = pool.clone();
+        store
+            .call(move |s| s.publish_scoped_evidence(&p, proof))
+            .await
+            .unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+                [&wallet],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "0"
+        );
+        let w = wallet.clone();
+        let capture = store.call(move |s| s.capture_evidence(&w)).await.unwrap();
+        let rechecked = base.recheck_balance(certificate, capture).await;
+        if used {
+            let mut stale = original.clone();
+            stale
+                .balance_certificates
+                .insert(wallet.clone(), rechecked.unwrap());
+            let (p, w) = (pool.clone(), wallet.clone());
+            let rejected = store
+                .call(move |s| s.publish_candidate_evidence(&p, &w, stale))
+                .await;
+            assert_eq!(
+                rejected
+                    .err()
+                    .unwrap()
+                    .downcast_ref::<super::super::base::evidence::EvidenceFailure>(),
+                Some(&super::super::base::evidence::EvidenceFailure::BeforeDebit)
+            );
+        } else {
+            let rechecked = rechecked.unwrap();
+            assert_eq!(
+                rechecked.observation(),
+                &original_observation,
+                "canonical expiry never relabels or renews original balance"
+            );
+            let mut saved = original;
+            saved.balance_certificates.insert(wallet.clone(), rechecked);
+            let (p, w) = (pool.clone(), wallet.clone());
+            store
+                .call(move |s| s.publish_candidate_evidence(&p, &w, saved))
+                .await
+                .unwrap();
+        }
+        fixture.price.store(8_000_000, Ordering::SeqCst);
+        let result = client.execute(route()).await;
+        if used {
+            assert!(result.is_err(), "six after debit cannot pay eight");
+            let (p, w) = (pool.clone(), wallet.clone());
+            let fresh = store
+                .call(move |s| Ok(s.cached_payment_view(&p, &w)?.unwrap().balances[&w]))
+                .await
+                .unwrap();
+            assert_eq!(fresh, U256::from(6_000_000));
+            assert_eq!(fixture.sent.lock().unwrap().len(), 1);
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        } else {
+            assert_eq!(result.unwrap(), "paid");
+            assert_eq!(fixture.sent.lock().unwrap().len(), 2);
+            assert_eq!(
+                db.query_row(
+                    "SELECT balance FROM payment_admission_evidence ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "10000000"
+            );
+        }
+        drop(client);
+        drop(store);
+        owner.await.unwrap();
+        server.abort();
+    }
 }

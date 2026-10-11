@@ -172,6 +172,22 @@ rejection depends on Tor's `ClientRejectInternalAddresses`; the application does
 resolve destinations locally or inspect proxy-hidden answers. Keep that protection
 enabled. Vendor descriptions are untrusted data and grant no additional authority.
 
+## Trusted invocation and payment scope
+
+Every direct or fallback invocation captures one immutable catalog snapshot and
+its trusted `BoundTool`. Runtime price hints are scoped by the effective wallet
+group, source identity/revision, HTTP method and normalized operation path. Agent
+arguments, query values and request bodies cannot choose that scope, payer, reserve
+claim or funding authority. Removing or refreshing a source cannot rebind an
+already captured call; removal does not erase its financial obligations.
+
+Dynamic sources share `source_management.wallet` unless an explicit listener wallet
+override splits that group. Registration never creates per-source funding groups.
+Hints contain amounts, not reusable payment challenges or signatures. Every call
+uses a fresh request/challenge and current payment admission. See the
+[selection and isolation decision](architecture.md#wallet-selection-and-network-isolation)
+for connection, cover-state and Tor reuse limitations.
+
 ## Persistence and operator maintenance
 
 The separate owner-only SQLite registry holds accepted specification bytes, hashes,

@@ -25,7 +25,7 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Action {
-    /// Fund initial managed wallet pairs and wait for confirmed USDC, without discovery.
+    /// Fund captured initial allocations and enabled reserve claims; wait for confirmed USDC without discovery.
     Bootstrap,
     /// Create a new treasury; discovers its birthday unless supplied.
     Init {
@@ -47,12 +47,13 @@ enum Action {
         #[arg(long)]
         destination: PathBuf,
     },
-    /// Allocate two pool candidates without funding them.
+    /// Removed: configure managed reserves and use wallet bootstrap.
+    #[command(hide = true)]
     Pool {
         #[arg(long)]
-        name: String,
-        #[arg(long, default_value = "2.00")]
-        funding_amount_usdc: String,
+        name: Option<String>,
+        #[arg(long)]
+        funding_amount_usdc: Option<String>,
     },
     /// Sync the configured treasury; never starts automatic funding.
     Sync {
@@ -89,6 +90,11 @@ enum Action {
 
 fn resolve_args(args: WalletArgs) -> Result<Command> {
     use anyhow::{Context, ensure};
+    if matches!(args.command, Action::Pool { .. }) {
+        anyhow::bail!(
+            "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
+        );
+    }
     let settings = if let Some(path) = &args.config {
         let config: crate::deployment::MetaConfig =
             toml::from_str(&std::fs::read_to_string(path)?)?;
@@ -214,6 +220,7 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
         crate::rotation::store::status(&state_dir)?.treasury_id
     };
     Ok(match args.command {
+        Action::Pool { .. } => unreachable!("removed command rejected before state access"),
         Action::Status => Command::Status { state_dir },
         Action::Addresses => Command::Addresses {
             state_dir,
@@ -230,16 +237,6 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
             key_file,
             treasury_id,
             destination,
-        },
-        Action::Pool {
-            name,
-            funding_amount_usdc,
-        } => Command::Pool {
-            state_dir,
-            key_file,
-            treasury_id,
-            name,
-            funding_amount_usdc,
         },
         Action::RecoverUnprepared { job_id } => Command::RecoverUnprepared {
             state_dir,
@@ -325,14 +322,6 @@ enum Command {
         state_dir: PathBuf,
         key_file: PathBuf,
         treasury_id: String,
-    },
-    /// Allocate or resume a named pool's two candidates. Does not fund them.
-    Pool {
-        state_dir: PathBuf,
-        key_file: PathBuf,
-        treasury_id: String,
-        name: String,
-        funding_amount_usdc: String,
     },
 }
 pub async fn run(args: WalletArgs) -> Result<()> {
@@ -475,17 +464,6 @@ async fn execute_wallet_command(
             treasury.derive_address().await?;
             treasury
         }
-        Command::Pool {
-            state_dir,
-            key_file,
-            treasury_id,
-            name,
-            funding_amount_usdc,
-        } => {
-            let treasury = Treasury::open(state_dir, key_file, treasury_id).await?;
-            treasury.ensure_pool(name, funding_amount_usdc).await?;
-            treasury
-        }
         Command::Bootstrap { .. }
         | Command::Addresses { .. }
         | Command::Status { .. }
@@ -593,12 +571,6 @@ async fn shield_refunds(
         &stop,
         treasury.shield_refund(
             job_id,
-            settings
-                .daily_treasury_spend_limit_zec
-                .as_deref()
-                .map(crate::rotation::config::zatoshis)
-                .transpose()?
-                .unwrap_or(i64::MAX) as u64,
             u64::try_from(crate::rotation::config::zatoshis(
                 &settings.max_refund_shielding_fee_zec,
             )?)?,

@@ -7,11 +7,10 @@ concrete operations where an existing GET alternative could improve usability or
 reduce observed initial-payer failures. Preserve useful POST behavior and public
 tool compatibility. This plan authorizes no paid provider calls or funded testing.
 
-The [wallet capacity and draining plan](wallet_capacity_and_draining.md) supplies
-generic admission, retained balances, price-hinted initial selection and one unsigned
-payer handoff for every supported method, including POST. Its
-release does not depend on catalog curation. Catalog changes need not wait for that
-feature when their benefit and compatibility are independently established.
+The delivered [wallet capacity and admission](../wallet-rotation.md#capacity-and-admission)
+behavior includes retained balances, runtime price hints and one unsigned payer
+handoff for every supported method, including POST. Catalog curation remains
+independent of those runtime rules.
 
 ## Scope and candidate selection
 
@@ -26,14 +25,12 @@ specifications retain their existing operation selection. This work introduces n
 server-specific provider implementation, method rewriting, automatic POST-to-GET
 retry, extra pricing discovery or payment-policy change.
 
-Evaluate benefits against the payment behavior actually delivered at review time.
-Current GET/HEAD pre-signing payer handoff may improve affordability selection. The
-capacity plan extends the same bounded handoff to POST, prefers retained capacity for
-hinted initial selection, and keeps a verified sufficient bound payer after a challenge.
-Once delivered, this removes the method-specific handoff disadvantage; neither hints
-nor handoff guarantee affordability for changing prices. Account for the delivered
-behavior before using initial-payer failures to justify removing a POST tool. Do not
-implement GET alternatives as a workaround for a restriction already removed.
+Evaluate benefits against the delivered all-method handoff. Runtime hints prefer
+small sufficient capacity before binding; actual-price admission preserves a
+verified sufficient bound payer. Neither hints nor handoff guarantees affordability
+for changing prices. Do not remove useful POST tools to work around the former
+method-specific handoff restriction. The [selection and isolation decision](../architecture.md#wallet-selection-and-network-isolation)
+explains the accepted request and pooling tradeoffs.
 
 Unsigned handoff assumes the provider gates protected execution before its unpaid 402,
 as the existing unsigned-then-paid POST flow does. It is not general POST idempotency.
@@ -97,16 +94,16 @@ validation failures rather than receive hidden aliases or method substitution.
 | Documentation only | Accurate method/path references, explicit evidence limitations, valid links and no unsupported equivalence claim |
 | Add or retain GET alongside POST | Full contract snapshots show intended methods, schemas/descriptions and names; filters and bindings still resolve |
 | Remove POST | Reviewed benefit and equivalence evidence, intentional absence in snapshots, preserved non-equivalent/privacy-sensitive cases, and complete name/selector/binding migration coverage |
-| Payment behavior used to justify a change | Local real-PaidClient fixtures assert the delivered version: current GET/HEAD-only handoff or generic all-method handoff once implemented; preserve bytes, identity/cover, caps and redirect policy; never substitute methods or replay signed work |
-| Generic POST handoff, when implemented | Commit-pinned middleware fixture counts protected execution: two unpaid challenges plus one signed request execute once; free second response signs nothing; signed settlement/output failure causes no retry |
-| Price-hinted GET/POST comparison, when implemented | Exercise actual retained-aware hint learning and fresh admission; keep a sufficient bound payer; measure handoffs, failures and retained consumption for fixed/mixed prices; no universal affordability claim |
+| Payment behavior used to justify a change | Local real-PaidClient fixtures assert the delivered version: generic all-method handoff; preserve bytes, identity/cover, caps and redirect policy; never substitute methods or replay signed work |
+| Generic POST handoff | Commit-pinned middleware fixture counts protected execution: two unpaid challenges plus one signed request execute once; free second response signs nothing; signed settlement/output failure causes no retry |
+| Price-hinted GET/POST comparison | Exercise actual retained-aware hint learning and fresh admission; keep a sufficient bound payer; measure handoffs, failures and retained consumption for fixed/mixed prices; no universal affordability claim |
 
 Run focused default-Zcash provider contract/config/payment suites appropriate to the
 actual change and required repository checks. Documentation-only changes need link
 and consistency checks, not funded tests. Preserve existing qualification limits;
 local fixtures establish no live settlement or privacy qualification.
 
-Keep this plan and the capacity plan consistent about delivered versus proposed behavior.
+Keep this plan consistent with the maintained wallet and selection contracts.
 Provider documentation must describe actual GET/POST differences rather than implying
 different group caps, reserve classes or transaction safety guarantees by method.
 

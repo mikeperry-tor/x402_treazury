@@ -149,6 +149,7 @@ impl Manager {
             .get(wallet)
             .context("directory wallet unavailable")?
             .clone()
+            .with_source_identity("builtin:x402-list")
             .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
             .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes);
         let base = directory::BASE.to_owned();

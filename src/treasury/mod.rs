@@ -288,13 +288,35 @@ impl Treasury {
         self.healthy = true;
         Ok(address)
     }
-    pub async fn ensure_pool(&self, name: String, funding_amount_usdc: String) -> Result<String> {
+    /// Declare configured capacity without allocating wallets or funding work.
+    pub async fn ensure_capacity_group(
+        &self,
+        name: String,
+        reserves: crate::rotation::config::ReservesConfig,
+        cap: Option<alloy_primitives::U256>,
+        retirement_atomic: u64,
+    ) -> Result<String> {
         ensure!(
             self.healthy,
             "treasury requires reopen after failed persistence"
         );
         self.store
-            .call(move |s| s.ensure_pool(&name, &funding_amount_usdc))
+            .call(move |s| s.ensure_capacity_group(&name, &reserves, cap, retirement_atomic))
+            .await
+    }
+    /// Allocate one exact vacancy under current funding authority.
+    pub async fn allocate_capacity_kind(
+        &self,
+        pool: String,
+        kind: crate::rotation::store::AllocationKind,
+        auto_fund: bool,
+    ) -> Result<Option<String>> {
+        ensure!(
+            self.healthy,
+            "treasury requires reopen after failed persistence"
+        );
+        self.store
+            .call(move |s| s.allocate_capacity_kind(&pool, kind, auto_fund))
             .await
     }
     pub fn configure_sync(&mut self, settings: SyncSettings) {
@@ -334,28 +356,35 @@ impl Treasury {
             .await
             .wallet_settings
             .min_confirmations = settings.confirmations;
-        let mut observation = self.status().await?.sync.unwrap_or(SyncObservation {
-            phase: SyncPhase::Syncing,
-            last_error: None,
-            snapshot_revision: self.revision,
-            checked_at: None,
-            checkpoint_at: 0,
-            scanned_blocks: 0,
-            target_height: None,
-            observed_tip_height: None,
-            height: None,
-            confirmations: settings.confirmations.get(),
-            max_age_seconds: settings.max_age_seconds,
-            confirmed_pool_balances_zatoshis: None,
-            confirmed_shielded_zatoshis: 0,
-            spendable_shielded_zatoshis: 0,
-        });
+        let mut observation = self
+            .store
+            .call(|s| s.treasury_sync_state())
+            .await?
+            .sync
+            .unwrap_or(SyncObservation {
+                phase: SyncPhase::Syncing,
+                last_error: None,
+                snapshot_revision: self.revision,
+                checked_at: None,
+                checkpoint_at: 0,
+                scanned_blocks: 0,
+                target_height: None,
+                observed_tip_height: None,
+                height: None,
+                confirmations: settings.confirmations.get(),
+                max_age_seconds: settings.max_age_seconds,
+                confirmed_pool_balances_zatoshis: None,
+                confirmed_shielded_zatoshis: 0,
+                spendable_shielded_zatoshis: 0,
+            });
         observation.phase = SyncPhase::Syncing;
         observation.confirmations = settings.confirmations.get();
         observation.max_age_seconds = settings.max_age_seconds;
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
-            identity: crate::network::IsolationId::treasury(&self.status().await?.treasury_id),
+            identity: crate::network::IsolationId::treasury(
+                &self.store.call(|s| Ok(s.id().to_owned())).await?,
+            ),
             network: self.network,
             client: self
                 .client
@@ -586,57 +615,46 @@ impl SyncSession {
         // accounted. Keep that cost consumed and fail closed until the same
         // transaction regains the required depth; never make it spendable again
         // merely because its outgoing journal entry was resolved earlier.
-        let confirmed = self
-            .store
-            .call(|s| {
-                Ok(s.status()?
-                    .treasury_operations
-                    .into_iter()
-                    .filter(|op| op.submission == "CONFIRMED")
-                    .map(|op| op.facts.txid)
-                    .collect::<Vec<_>>())
-            })
-            .await?;
+        let boundary = self.store.call(|s| s.source_recheck_boundary()).await?;
         let wallet = self.client.wallet();
         let wallet = wallet.read().await;
-        for txid in confirmed {
-            let txid = zcash_primitives::transaction::TxId::from_hex(&txid)
-                .context("invalid confirmed transaction identity")?;
-            let confirmed_height = wallet
-                .wallet_transactions
-                .get(&txid)
-                .and_then(|record| record.status().get_confirmed_height())
-                .map(|h| u64::from(u32::from(h)));
-            ensure!(
-                confirmed_height.is_some_and(|h| h > 0
-                    && height >= h
-                    && height - h + 1 >= u64::from(settings.confirmations.get())),
-                "treasury_confirmed_spend_reorg: source spend requires recovery"
-            );
-        }
-        let expired = self
-            .store
-            .call(|s| {
-                Ok(s.status()?
-                    .treasury_operations
-                    .into_iter()
-                    .filter(|o| o.submission == "EXPIRED")
-                    .collect::<Vec<_>>())
-            })
-            .await?;
-        for operation in expired {
-            let txid = zcash_primitives::transaction::TxId::from_hex(&operation.facts.txid)
-                .context("invalid transaction identity")?;
-            ensure!(
-                height
-                    >= u64::from(operation.facts.expiry_height)
-                        + u64::from(settings.confirmations.get())
-                    && !wallet
-                        .wallet_transactions
-                        .get(&txid)
-                        .is_some_and(|r| r.status().is_confirmed()),
-                "treasury_expiry_reorg: recovered source requires review"
-            );
+        let mut cursor = String::new();
+        loop {
+            let after = cursor.clone();
+            let operations = self
+                .store
+                .call(move |s| s.source_recheck_page(&after, boundary))
+                .await?;
+            let Some(last) = operations.last() else { break };
+            cursor = last.operation_id.clone();
+            for operation in operations {
+                let txid = zcash_primitives::transaction::TxId::from_hex(&operation.facts.txid)
+                    .context(if operation.submission == "EXPIRED" {
+                        "invalid transaction identity"
+                    } else {
+                        "invalid confirmed transaction identity"
+                    })?;
+                let record = wallet.wallet_transactions.get(&txid);
+                if operation.submission == "EXPIRED" {
+                    ensure!(
+                        height
+                            >= u64::from(operation.facts.expiry_height)
+                                + u64::from(settings.confirmations.get())
+                            && !record.is_some_and(|r| r.status().is_confirmed()),
+                        "treasury_expiry_reorg: recovered source requires review"
+                    );
+                } else {
+                    let confirmed_height = record
+                        .and_then(|r| r.status().get_confirmed_height())
+                        .map(|h| u64::from(u32::from(h)));
+                    ensure!(
+                        confirmed_height.is_some_and(|h| h > 0
+                            && height >= h
+                            && height - h + 1 >= u64::from(settings.confirmations.get())),
+                        "treasury_confirmed_spend_reorg: source spend requires recovery"
+                    );
+                }
+            }
         }
         let balance = wallet
             .account_balance(zip32::AccountId::ZERO)

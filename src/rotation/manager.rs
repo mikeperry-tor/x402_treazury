@@ -2,7 +2,6 @@
 use super::error::AdmissionError;
 use super::{
     base::{BaseRpc, now},
-    config::positive_usdc,
     store::{Authorization, StoreHandle},
 };
 use crate::payment::{SpendPolicy, USDC};
@@ -24,9 +23,34 @@ pub struct PaymentCandidateHandle {
     pub address: String,
     pub generation: i64,
 }
+#[derive(Debug)]
+pub(crate) struct PayerHandoff(pub PaymentCandidateHandle);
+impl std::fmt::Display for PayerHandoff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unsigned payer handoff required")
+    }
+}
+impl std::error::Error for PayerHandoff {}
+/// Direct Rust callers retain this value while consuming the response body.
+/// Mark its cover lease complete only after successful output consumption.
+pub struct ManagedResponse {
+    pub response: reqwest::Response,
+    pub extensions_omitted: bool,
+    pub cover: Option<crate::cover::runtime::Call>,
+}
+pub(crate) struct AdmissionObservation<'a> {
+    pub fixed_payer: bool,
+    pub progress: &'a crate::payment::SubmissionProgress,
+    pub recovery: &'a mut RecoveryAllowance,
+    pub hint: Option<(
+        crate::pricing::runtime::OperationKey,
+        crate::pricing::runtime::Receipt,
+    )>,
+}
 #[cfg(test)]
 mod admission_tests;
 mod maintenance;
+mod selection;
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -41,10 +65,10 @@ type AdmissionTestHook =
 
 #[derive(Clone)]
 pub struct ManagedPool {
+    direct_work: crate::server::work::Work,
     store: StoreHandle,
     pool: String,
     base: BaseRpc,
-    payment_limit: U256,
     policy: SpendPolicy,
     gate: Arc<Mutex<()>>,
     reconciliation: Arc<Mutex<()>>,
@@ -52,7 +76,7 @@ pub struct ManagedPool {
     test_admission_hook: Option<AdmissionTestHook>,
 }
 #[derive(Default)]
-struct RecoveryAllowance {
+pub(crate) struct RecoveryAllowance {
     evidence_used: bool,
     signature_replacement_used: bool,
 }
@@ -87,10 +111,10 @@ impl ManagedPool {
         store: StoreHandle,
         pool: String,
         base: BaseRpc,
-        deposit: &str,
         policy: SpendPolicy,
     ) -> Result<Self> {
         Ok(Self {
+            direct_work: Default::default(),
             gate: store.group_gate(&pool)?,
             reconciliation: store.reconciliation_gate(&pool)?,
             #[cfg(test)]
@@ -98,7 +122,6 @@ impl ManagedPool {
             store,
             pool,
             base,
-            payment_limit: positive_usdc(deposit)?.min(policy.max_atomic.unwrap_or(U256::MAX)),
             policy,
         })
     }
@@ -108,12 +131,9 @@ impl ManagedPool {
             hook(stage).await;
         }
     }
-    /// Explicit operator opt-out of the historical funding-target payment ceiling.
-    pub fn with_funding_target_limit(mut self, enabled: bool) -> Self {
-        if !enabled {
-            self.payment_limit = self.policy.max_atomic.unwrap_or(U256::MAX);
-        }
-        self
+    /// Runtime-only group scope for estimates, never payment authority.
+    pub(crate) fn hint_group_scope(&self) -> (uuid::Uuid, &str) {
+        (self.store.runtime_namespace(), &self.pool)
     }
     async fn acquire_view(
         &self,
@@ -145,8 +165,50 @@ impl ManagedPool {
         }
     }
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
+        self.candidate_for(None).await
+    }
+    pub(crate) async fn candidate_for(&self, hint: Option<U256>) -> Result<PaymentCandidateHandle> {
         let pool = self.pool.clone();
-        self.store.call(move |s| s.payment_candidate(&pool)).await
+        let guard = Arc::new(self.gate.clone().lock_owned().await);
+        self.store
+            .call_with_guard(guard, move |s| {
+                if let Some(cost) = hint
+                    && let Some(candidate) = s.cached_payment_candidate(&pool, cost, None)?
+                {
+                    return Ok(candidate);
+                }
+                s.payment_candidate(&pool)
+            })
+            .await
+    }
+    async fn acquire_fixed_payer(
+        &self,
+        expected: &PaymentCandidateHandle,
+    ) -> Result<(
+        super::base::ChainView,
+        Arc<tokio::sync::OwnedMutexGuard<()>>,
+    )> {
+        let guard = Arc::new(self.gate.clone().lock_owned().await);
+        let (pool, wallet) = (self.pool.clone(), expected.wallet.clone());
+        if let Some(view) = self
+            .store
+            .call_with_guard(guard.clone(), move |s| {
+                s.cached_payment_view(&pool, &wallet)
+            })
+            .await?
+        {
+            return Ok((view, guard));
+        }
+        let (pool, wallet) = (self.pool.clone(), expected.wallet.clone());
+        let query = self
+            .store
+            .call_with_guard(guard.clone(), move |s| {
+                s.scoped_chain_query(&pool, vec![wallet], vec![])
+            })
+            .await?;
+        drop(guard);
+        let view = self.acquire_view(query, true, None).await?;
+        Ok((view, Arc::new(self.gate.clone().lock_owned().await)))
     }
     pub async fn pay(
         &self,
@@ -155,8 +217,10 @@ impl ManagedPool {
         retry: reqwest::Request,
         response: reqwest::Response,
     ) -> Result<(reqwest::Response, bool)> {
-        self.pay_with_cover(http, expected, retry, response, None)
-            .await
+        let owned = self
+            .pay_with_cover(http, expected, retry, response, None)
+            .await?;
+        Ok((owned.response, owned.extensions_omitted))
     }
     pub async fn pay_with_cover(
         &self,
@@ -164,17 +228,44 @@ impl ManagedPool {
         expected: PaymentCandidateHandle,
         retry: reqwest::Request,
         response: reqwest::Response,
-        cover: Option<&crate::cover::runtime::Call>,
-    ) -> Result<(reqwest::Response, bool)> {
-        self.pay_with_cover_observed(
-            http,
-            expected,
-            retry,
-            response,
-            cover,
-            &crate::payment::SubmissionProgress::default(),
-        )
-        .await
+        mut cover: Option<crate::cover::runtime::Call>,
+    ) -> Result<ManagedResponse> {
+        let pool = self.clone();
+        let http = http.clone();
+        crate::payment::ownership::run(&self.direct_work, async move {
+            let mut recovery = RecoveryAllowance::default();
+            let (response, extensions_omitted) = pool
+                .pay_with_cover_observed(
+                    &http,
+                    expected,
+                    retry,
+                    response,
+                    cover.as_ref(),
+                    AdmissionObservation {
+                        progress: &crate::payment::SubmissionProgress::default(),
+                        recovery: &mut recovery,
+                        hint: None,
+                        fixed_payer: false,
+                    },
+                )
+                .await?;
+            if let Some(call) = &mut cover {
+                call.protocol(response.version());
+                call.rejected_padding(response.status());
+                call.response_headers();
+            }
+            Ok(ManagedResponse {
+                response,
+                extensions_omitted,
+                cover,
+            })
+        })
+        .await?
+    }
+    /// Close direct payment admission and retain its accepted signing/dispatch
+    /// work through completion. PaidClient owns its encompassing output lifecycle.
+    pub async fn drain_direct_payments(&self) {
+        self.direct_work.drain().await;
     }
     pub(crate) async fn pay_with_cover_observed(
         &self,
@@ -183,21 +274,28 @@ impl ManagedPool {
         mut retry: reqwest::Request,
         response: reqwest::Response,
         cover: Option<&crate::cover::runtime::Call>,
-        progress: &crate::payment::SubmissionProgress,
+        observation: AdmissionObservation<'_>,
     ) -> Result<(reqwest::Response, bool)> {
+        let AdmissionObservation {
+            progress,
+            recovery,
+            hint,
+            fixed_payer,
+        } = observation;
         // Bound foreground owners, including callers awaiting the group gate.
         // The permit lives through the one signed dispatch and cannot cancel it.
-        static FOREGROUND: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(128);
-        let _foreground = FOREGROUND
-            .try_acquire()
-            .context("managed payment queue capacity unavailable")?;
+        let _foreground = crate::payment::ownership::foreground()?;
         let header = response
             .headers()
             .get("payment-required")
             .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
         let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
         let omitted = strip_extensions(&mut challenge)?;
-        let offer = select_offer(&challenge, &self.policy, self.payment_limit)?;
+        let offer = select_offer(
+            &challenge,
+            &self.policy,
+            self.policy.max_atomic.unwrap_or(U256::MAX),
+        )?;
         challenge["accepts"] = serde_json::json!([offer.raw.clone()]);
         if let Some(desc) = challenge.pointer_mut("/resource/description")
             && let Some(text) = desc.as_str()
@@ -216,48 +314,55 @@ impl ManagedPool {
             serde_json::from_value(challenge)
                 .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
         let challenge = x402_types::proto::PaymentRequired::V2(envelope);
+        let guard = Arc::new(self.gate.clone().lock_owned().await);
+        let pool = self.pool.clone();
+        let amount = offer.amount;
+        self.store
+            .call_with_guard(guard, move |s| s.validate_payment_price(&pool, amount))
+            .await?;
+        // Learning follows complete envelope validation, before financial admission.
+        // An insufficient balance does not erase a valid observed price.
+        if let Some((key, receipt)) = hint {
+            crate::pricing::runtime::process_hints().learn(key, offer.amount, receipt);
+        }
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
         let qualification = crate::qualification::payment_context()?;
         let (headers, attempt_id) = {
-            let mut guard = Arc::new(self.gate.clone().lock_owned().await);
-            let pool = self.pool.clone();
-            let query = self
-                .store
-                .call_with_guard(guard.clone(), move |s| {
-                    let boundary = s.wallet_boundary(&pool)?;
-                    let wallets = s
-                        .priority_wallets(&pool, boundary)?
-                        .into_iter()
-                        .map(|(_, id, _)| id)
-                        .collect();
-                    s.scoped_chain_query(&pool, wallets, vec![])
-                })
-                .await?;
-            drop(guard);
-            let mut view = self.acquire_view(query, true, None).await?;
+            let (mut view, mut guard) = if fixed_payer {
+                self.acquire_fixed_payer(&expected).await?
+            } else {
+                match self.acquire_candidate(&expected, offer.amount).await? {
+                    selection::CandidatePassResult::Selected(selected) => {
+                        if selected.candidate.wallet != expected.wallet {
+                            return Err(PayerHandoff(selected.candidate).into());
+                        }
+                        (selected.view, selected.guard)
+                    }
+                    selection::CandidatePassResult::CompleteNegative => {
+                        anyhow::bail!(AdmissionError::FundingUnavailable(
+                            "no individually sufficient wallet in completed captured inventory; no payment signed"
+                        ))
+                    }
+                    selection::CandidatePassResult::Incomplete => {
+                        anyhow::bail!(AdmissionError::WalletNotReady(
+                            "candidate evidence acquisition incomplete; no payment signed"
+                        ))
+                    }
+                }
+            };
             #[cfg(test)]
             self.admission_test_stage(AdmissionTestStage::Acquired)
                 .await;
-            guard = Arc::new(self.gate.clone().lock_owned().await);
-            let mut recovery = RecoveryAllowance::default();
             loop {
                 let pool = self.pool.clone();
                 let hash = requirements_hash.clone();
                 let amount = offer.amount;
-                let payment_limit = self.payment_limit;
                 let bound_payer = expected.clone();
                 let evidence = view.clone();
                 let prepared = self
                     .store
                     .call_with_guard(guard.clone(), move |s| {
-                        s.prepare_payment(
-                            &pool,
-                            amount,
-                            &hash,
-                            evidence,
-                            Some(&bound_payer),
-                            payment_limit,
-                        )
+                        s.prepare_payment(&pool, amount, &hash, evidence, Some(&bound_payer))
                     })
                     .await;
                 let prepared = match prepared {
@@ -314,20 +419,15 @@ impl ManagedPool {
                             Some(
                                 super::base::evidence::EvidenceFailure::Expired
                                     | super::base::evidence::EvidenceFailure::BeforeDebit
-                                    | super::base::evidence::EvidenceFailure::Invalidated
                             )
                         ) && recovery.take_evidence() =>
                     {
                         let pool = self.pool.clone();
+                        let wallet = expected.wallet.clone();
                         let query = self
                             .store
                             .call_with_guard(guard.clone(), move |store| {
-                                let boundary = store.wallet_boundary(&pool)?;
-                                let wallets = store
-                                    .priority_wallets(&pool, boundary)?
-                                    .into_iter()
-                                    .map(|(_, id, _)| id)
-                                    .collect();
+                                let wallets = vec![wallet];
                                 store.scoped_chain_query(&pool, wallets, vec![])
                             })
                             .await?;
@@ -395,15 +495,11 @@ impl ManagedPool {
                                 )
                             );
                             let pool = self.pool.clone();
+                            let wallet = expected.wallet.clone();
                             let query = self
                                 .store
                                 .call_with_guard(guard.clone(), move |s| {
-                                    let boundary = s.wallet_boundary(&pool)?;
-                                    let wallets = s
-                                        .priority_wallets(&pool, boundary)?
-                                        .into_iter()
-                                        .map(|(_, id, _)| id)
-                                        .collect();
+                                    let wallets = vec![wallet];
                                     s.scoped_chain_query(&pool, wallets, vec![])
                                 })
                                 .await?;
@@ -488,6 +584,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
         AdmissionError::UnsupportedPayment("extensions require explicit support")
     );
     let mut price_rejected = false;
+    let mut selected: Option<Offer> = None;
     for raw in challenge["accepts"]
         .as_array()
         .context(AdmissionError::UnsupportedPayment("missing offers"))?
@@ -578,8 +675,17 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
                 price_rejected = true;
                 continue;
             }
-            return Ok(offer);
+            // Keep the original exact offer, and retain challenge order on ties.
+            if selected
+                .as_ref()
+                .is_none_or(|old| offer.amount < old.amount)
+            {
+                selected = Some(offer);
+            }
         }
+    }
+    if let Some(offer) = selected {
+        return Ok(offer);
     }
     anyhow::bail!(if price_rejected {
         AdmissionError::PriceLimit("no offer fits configured API payment ceiling")
@@ -641,6 +747,83 @@ fn validate_payload(payload: &Value, offer: &Offer, payer: &str) -> Result<Autho
 }
 
 #[cfg(test)]
+mod offer_tests {
+    use super::*;
+    fn offer(amount: &str, payee: u8) -> Value {
+        serde_json::json!({"scheme":"exact","network":"eip155:8453","asset":USDC,
+            "amount":amount,"payTo":format!("0x{payee:040x}"),"maxTimeoutSeconds":60,
+            "extra":{"name":"USD Coin","version":"2"},"annotation":{"opaque":true}})
+    }
+    #[test]
+    fn lowest_supported_offer_wins_and_equal_prices_keep_exact_challenge_order() {
+        let first = offer("100", 1);
+        let second = offer("20", 2);
+        let equal = offer("20", 3);
+        let challenge = serde_json::json!({"x402Version":2,"accepts":[first,second,equal]});
+        let selected = select_offer(
+            &challenge,
+            &SpendPolicy {
+                max_atomic: Some(U256::from(100)),
+            },
+            U256::from(100),
+        )
+        .unwrap();
+        assert_eq!(selected.amount, U256::from(20));
+        assert_eq!(selected.raw, challenge["accepts"][1]);
+        assert_eq!(
+            selected.payee,
+            format!("0x{:040x}", 2).parse::<Address>().unwrap()
+        );
+    }
+    #[test]
+    fn unsupported_and_over_cap_offers_cannot_teach_an_affordable_price() {
+        let mut unsupported = offer("1", 1);
+        unsupported["scheme"] = serde_json::json!("upto");
+        let challenge = serde_json::json!({"x402Version":2,"accepts":[unsupported,offer("101",2)]});
+        let error = select_offer(
+            &challenge,
+            &SpendPolicy {
+                max_atomic: Some(U256::from(100)),
+            },
+            U256::from(100),
+        );
+        assert!(matches!(
+            error.err().unwrap().downcast_ref::<AdmissionError>(),
+            Some(AdmissionError::PriceLimit(_))
+        ));
+        let mut challenge = challenge;
+        challenge["accepts"]
+            .as_array_mut()
+            .unwrap()
+            .push(offer("50", 3));
+        assert_eq!(
+            select_offer(
+                &challenge,
+                &SpendPolicy {
+                    max_atomic: Some(U256::from(100))
+                },
+                U256::from(100)
+            )
+            .unwrap()
+            .raw,
+            challenge["accepts"][2]
+        );
+    }
+    #[test]
+    fn malformed_cheaper_or_equal_offer_does_not_hide_valid_exact_terms() {
+        let mut cheap = offer("1", 1);
+        cheap["extra"]["name"] = serde_json::json!("wrong domain");
+        let mut equal = offer("20", 2);
+        equal["maxTimeoutSeconds"] = serde_json::json!(0);
+        let expected = offer("20", 3);
+        let challenge = serde_json::json!({"x402Version":2,"accepts":[cheap,equal,expected]});
+        let selected =
+            select_offer(&challenge, &SpendPolicy { max_atomic: None }, U256::MAX).unwrap();
+        assert_eq!(selected.raw, challenge["accepts"][2]);
+    }
+}
+
+#[cfg(test)]
 mod ownership_tests {
     use super::*;
 
@@ -654,14 +837,20 @@ mod ownership_tests {
             b"fixture",
         )
         .unwrap();
-        let pool = state.ensure_pool("shared", "5").unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "shared",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(crate::rotation::config::positive_usdc("5").unwrap()),
+            0
+        )
+        .unwrap();
         let (store, worker) = StoreHandle::spawn(state);
         let make = || {
             ManagedPool::new(
                 store.clone(),
                 pool.clone(),
                 BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
-                "5",
                 SpendPolicy::dollars("5").unwrap(),
             )
             .unwrap()

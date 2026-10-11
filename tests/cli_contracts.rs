@@ -1,4 +1,6 @@
 //! Offline executable boundaries, with synthetic stores and no real wallet material.
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 #[path = "support/funding_quote.rs"]
 mod quote_fixture;
 #[path = "support/rpc_evidence.rs"]
@@ -49,7 +51,14 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     let key = dir.join("key");
     let mut store = Store::create(&state, &key, 1, b"synthetic snapshot").unwrap();
     let id = store.id().to_owned();
-    let pool = store.ensure_pool("fixture", "5").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "fixture",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let jobs = store.funding_jobs().unwrap();
     let pending = &jobs[1];
     store
@@ -62,7 +71,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
         .advance_funding(&pending.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
     store
-        .reserve(&pending.operation_id, Some(&pool), 1, 100, 1000)
+        .reserve(&pending.operation_id, Some(&pool), 1, 100)
         .unwrap();
     store
         .prepare(
@@ -442,7 +451,6 @@ async fn bootstrap_is_catalog_free_requires_policy_and_resumes_completed_pairs()
     let config = r#"version=1
 [treasury]
 state_dir="state"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 indexer_url="https://127.0.0.1:1"
 [funding]
@@ -451,6 +459,8 @@ base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.web]
 mode="zcash_rotation"
+max_api_payment_usdc="1"
+reserves={small={funding_amount_usdc="1"}}
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.static_unused]
@@ -495,7 +505,14 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         .unwrap()
         .treasury_id;
     let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
-    store.ensure_pool("web", "2").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "web",
+        crate::capacity_fixture::small_reserve("2"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let recovery_job = store.funding_jobs().unwrap().remove(0);
     store
         .advance_funding(
@@ -556,14 +573,14 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     .unwrap();
     for _ in 0..2 {
         let summary = good(run(dir, &args, &[("BASE", "https://127.0.0.1:1")]).await);
-        assert_eq!(summary["bootstrapped_wallets"], json!(["web"]));
+        assert_eq!(summary["captured_completed_groups"], json!(["web"]));
         // Closed ownership is immediately available and no new jobs were queued.
         let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
         assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
     }
     let serving = ["serve", "--config", "deployment.toml"];
-    // Serving validates auth before bootstrap, then completes bootstrap before
-    // trying the deliberately missing catalog. No listener or network starts.
+    // Serving validates auth before bootstrap, then recognizes the funded
+    // identity before trying the deliberately missing catalog. No listener starts.
     let error = bad(run(dir, &serving, &[("BASE", "https://127.0.0.1:1")]).await);
     assert!(error.contains("UNSET_LISTENER_TOKEN"), "{error}");
     assert!(!error.contains("bootstrap already complete"));
@@ -572,10 +589,10 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         ("UNSET_LISTENER_TOKEN", "fixture-token"),
     ];
     let error = bad(run(dir, &serving, &env).await);
-    assert!(error.contains("bootstrap already complete"), "{error}");
+    assert!(error.contains("catalog local_read failed"), "{error}");
     std::fs::write(dir.join("deployment.toml"), config).unwrap();
     let error = bad(run(dir, &serving, &env).await);
-    assert!(!error.contains("bootstrap already complete"), "{error}");
+    assert!(error.contains("catalog local_read failed"), "{error}");
     let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
     assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
 }
@@ -583,18 +600,11 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
 #[tokio::test]
 async fn payment_and_wallet_funding_help_use_explicit_usdc_names() {
     let dir = tempfile::tempdir().unwrap();
-    for (args, current, obsolete) in [
-        (
-            vec!["serve", "--help"],
-            "--max-api-payment-usdc",
-            "--max-price-usd",
-        ),
-        (
-            vec!["wallet", "pool", "--help"],
-            "--funding-amount-usdc",
-            "--deposit-size",
-        ),
-    ] {
+    for (args, current, obsolete) in [(
+        vec!["serve", "--help"],
+        "--max-api-payment-usdc",
+        "--max-price-usd",
+    )] {
         let output = run(dir.path(), &args, &[]).await;
         assert!(
             output.status.success(),
@@ -633,4 +643,26 @@ async fn source_maintenance_has_explicit_operator_commands() {
         )
         .await);
     }
+}
+
+#[tokio::test]
+async fn removed_wallet_pool_fails_before_opening_state_with_migration_guidance() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = run(
+        dir.path(),
+        &[
+            "wallet",
+            "pool",
+            "--name",
+            "old",
+            "--funding-amount-usdc",
+            "2",
+        ],
+        &[],
+    )
+    .await;
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("wallet pool was removed"), "{error}");
+    assert!(error.contains("wallet bootstrap --config FILE"), "{error}");
 }

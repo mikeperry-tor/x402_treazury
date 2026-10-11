@@ -1,4 +1,6 @@
 #![cfg(feature = "zcash")]
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 use axum::{
     body::Bytes,
     extract::State,
@@ -352,10 +354,10 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         let error = treasury
             .prepare(PrepareRequest {
                 managed_funding: None,
-                allocation_limits: None,
+
                 operation_id: uuid::Uuid::new_v4().to_string(),
                 pool_id: None,
-                daily_limit_zatoshis: 1_000_000,
+
                 deadline: x402_treazury::rotation::base::now().unwrap() + 600,
                 recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
                 amount_zatoshis: 50_000,
@@ -416,7 +418,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
@@ -560,10 +561,15 @@ async fn treasury_command_owner_serializes_and_releases_exclusive_lock() {
 async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let treasury = wallet(dir.path()).await;
-    treasury
-        .ensure_pool("refunds".into(), "5".into())
-        .await
-        .unwrap();
+    crate::capacity_fixture::treasury_pair(
+        &treasury,
+        "refunds",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0,
+    )
+    .await
+    .unwrap();
     let id = treasury.status().await.unwrap().treasury_id;
     treasury.close().await.unwrap();
     // Materialize journal jobs without network or a funding worker.
@@ -656,7 +662,6 @@ servers={{}}
 [treasury]
 state_dir="wallet"
 indexer_url="{endpoint}"
-daily_treasury_spend_limit_zec="0.01"
 max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
@@ -795,10 +800,10 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
     let error = handle
         .prepare(PrepareRequest {
             managed_funding: None,
-            allocation_limits: None,
+
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
-            daily_limit_zatoshis: 1_000_000,
+
             deadline: x402_treazury::rotation::base::now().unwrap() + 1000,
             recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
             amount_zatoshis: 50_000,
@@ -865,7 +870,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [sources.unloaded]
 spec="nonexistent.json"

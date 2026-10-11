@@ -81,7 +81,7 @@ impl Store {
         through: i64,
     ) -> Result<Vec<(i64, String, String)>> {
         let mut statement = self.db.prepare(
-            "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND (role IN ('ACTIVE','READY') OR (role='ALLOCATED' AND EXISTS (SELECT 1 FROM pools WHERE id=?1 AND bootstrapped=0))) AND sequence<=?2 ORDER BY CASE role WHEN 'ACTIVE' THEN 0 ELSE 1 END,sequence LIMIT 3",
+            "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND (role='ACTIVE' OR (role='READY' AND EXISTS(SELECT 1 FROM reserve_claims r WHERE r.pool_id=?1 AND r.wallet_id=wallets.id AND r.enabled=1))) AND sequence<=?2 ORDER BY CASE role WHEN 'ACTIVE' THEN 0 ELSE 1 END,sequence LIMIT 3",
         )?;
         Ok(statement
             .query_map(params![pool, through], |row| {
@@ -105,7 +105,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = store.ensure_pool("pages", "1").unwrap();
+        let pool = crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "pages",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let tx = store.db.transaction().unwrap();
         for sequence in 2..1026 {
             tx.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES(?1,?2,?3,?4,X'00','1000000','ALLOCATED')", params![format!("wallet-{:08}", 2048-sequence),pool,sequence,format!("0x{sequence:040x}")]).unwrap();
@@ -152,7 +159,14 @@ mod tests {
         let key = dir.path().join("key");
         let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
         let identity = store.id().to_owned();
-        let pool = store.ensure_pool("pages", "1").unwrap();
+        let pool = crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "pages",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let wallet = store.wallet_page(&pool, -1, 1, 1).unwrap().remove(0).1;
         let tx = store.db.transaction().unwrap();
         for sequence in 1..=2048 {

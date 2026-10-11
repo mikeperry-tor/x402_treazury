@@ -165,8 +165,9 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
         } else {
             let pool = pool.context("selected funded pool missing; bootstrap must be explicit")?;
             ensure!(
-                pool["bootstrapped"] == true,
-                "selected pool is not bootstrapped"
+                pool["serving_ready"] == true
+                    && (existing_funds_only || pool["inventory_ready"] == true),
+                "selected pool lacks required funded capacity"
             );
             if !resumed {
                 let wallets = array(pool, "addresses")?;
@@ -183,7 +184,16 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
         if profile["mode"] == "zcash_rotation"
             && !pools.values().any(|pool| pool["name"] == *pool_name)
         {
+            // Sequence-bound qualification permits remain independent of ordinary
+            // capital policy. Reserve every configured initial inventory claim.
+            ensure!(
+                profile["reserves"]["small"].is_object(),
+                "pinned small reserve missing"
+            );
             bootstrap.extend([(pool_name.as_str(), 0), (pool_name.as_str(), 1)]);
+            if profile["reserves"]["large"].is_object() {
+                bootstrap.push((pool_name.as_str(), 2));
+            }
         }
     }
     if !bootstrap.is_empty() {
@@ -376,7 +386,7 @@ mod tests {
         let (dir, guard, db) = super::super::tests::fixture();
         let state = json!({
             "treasury_status": {"treasury_id":"treasury","snapshot_revision":1,
-                "pools":[{"id":"p","name":"pool","bootstrapped":true,"addresses":[
+                "pools":[{"id":"p","name":"pool","serving_ready":true,"inventory_ready":true,"addresses":[
                     {"id":"a","address":"0xa","role":"ACTIVE"},
                     {"id":"b","address":"0xb","role":"READY"}]}],
                 "funding_jobs":[
@@ -493,7 +503,7 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(json!({
-            "id":"q","name":"other","bootstrapped":true,"addresses":[
+            "id":"q","name":"other","serving_ready":true,"inventory_ready":true,"addresses":[
                 {"id":"x","address":"0xx","role":"ACTIVE"},
                 {"id":"y","address":"0xy","role":"READY"}]}));
         baseline(&db, &state);
@@ -569,6 +579,8 @@ mod tests {
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
         pins["resolved_config"]["resolved_wallets"]["second"] =
             pins["resolved_config"]["resolved_wallets"]["pool"].clone();
+        pins["resolved_config"]["resolved_wallets"]["second"]["reserves"]["large"] =
+            json!({"funding_amount_usdc":"10"});
         let raw = pins.to_string();
         guard.binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
         db.execute(
@@ -593,36 +605,36 @@ mod tests {
             0,
             "first pool must not consume authority when the second cannot fit"
         );
-        db.execute("UPDATE authorizations SET jobs=4,source=400", [])
+        db.execute("UPDATE authorizations SET jobs=5,source=500", [])
             .unwrap();
-        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',4,'$.limits.source_exposure_zec','0.000003')", []).unwrap();
+        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',5,'$.limits.source_exposure_zec','0.000003')", []).unwrap();
         assert!(guard.validate_state(&state).is_err());
         assert_eq!(count(), 0, "source exposure refusal is also atomic");
         db.execute(
-            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000004')",
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000005')",
             [],
         )
         .unwrap();
         guard.validate_state(&state).unwrap();
-        assert_eq!(count(), 4);
+        assert_eq!(count(), 5);
         let first = guard
             .reserve_allocations("treasury", "pool", &[0, 1])
             .unwrap();
         let second = guard
-            .reserve_allocations("treasury", "second", &[0, 1])
+            .reserve_allocations("treasury", "second", &[0, 1, 2])
             .unwrap();
         assert_ne!(first, second);
         let restarted = RegistryPermits::new(guard.binding.clone());
         restarted.validate_state(&state).unwrap();
         assert_eq!(
             restarted
-                .reserve_allocations("treasury", "second", &[0, 1])
+                .reserve_allocations("treasury", "second", &[0, 1, 2])
                 .unwrap(),
             second
         );
         assert_eq!(
             count(),
-            4,
+            5,
             "orphan reservations survive and are reused without a second charge"
         );
     }

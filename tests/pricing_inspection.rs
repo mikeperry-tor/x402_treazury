@@ -157,7 +157,6 @@ async fn inspection_discovery_is_opt_in_unsigned_and_respects_source_policy() {
         r#"version=1
 [treasury]
 state_dir='must-not-exist'
-daily_treasury_spend_limit_zec='0.01'
 max_refund_shielding_fee_zec='0.001'
 [funding]
 confidentiality='public'

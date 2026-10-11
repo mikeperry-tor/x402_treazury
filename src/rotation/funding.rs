@@ -24,6 +24,10 @@ pub trait FundingObservations: Clone + Send + Sync + 'static {
 pub trait FundingBackend: Send + 'static {
     type Observations: FundingObservations;
     fn observations(&self) -> Self::Observations;
+    /// Explicit configured groups whose vacancies may be filled ahead of demand.
+    fn allocation_groups(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn recover(
         &mut self,
         _job: &FundingJob,
@@ -263,6 +267,25 @@ impl<B: FundingBackend> FundingWorker<B> {
     // Readiness and quote refresh precede PREPARING; once that phase commits,
     // only saved-byte recovery may proceed after an interrupted preparation.
     async fn prepare_quoted(&self, job: &FundingJob, clock: &TickClock) -> Result<()> {
+        let quote = self.quote(job).await?;
+        let id = job.id.clone();
+        let operation = job.operation_id.clone();
+        let max_attempts = self.backend.lock().await.max_attempts(job);
+        let suitable = self
+            .store
+            .call(move |s| {
+                s.require_funding_attempt(&id, max_attempts)?;
+                s.accepted_quote_suits_current_claim(&id, &operation)
+            })
+            .await?;
+        if !suitable {
+            let id = job.id.clone();
+            let operation = job.operation_id.clone();
+            return self
+                .store
+                .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
+                .await;
+        }
         let instant = now()?;
         if !self
             .store
@@ -271,7 +294,6 @@ impl<B: FundingBackend> FundingWorker<B> {
         {
             return Ok(());
         }
-        let quote = self.quote(job).await?;
         self.backend.lock().await.ready(job, &quote).await?;
         if quote.deadline.saturating_sub(clock.now())
             < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
@@ -319,7 +341,6 @@ pub struct Backend {
     pub base: super::base::BaseRpc,
     pub wallets: std::collections::BTreeMap<String, super::config::WalletConfig>,
     pub funding: super::config::FundingConfig,
-    pub daily_limit: u64,
     pub max_network_fee: u64,
 }
 impl Backend {
@@ -330,8 +351,6 @@ impl Backend {
     fn policy(&self, job: &FundingJob) -> Result<(super::near::Limits, u32)> {
         let super::config::WalletConfig::ZcashRotation {
             max_funding_spend_zec,
-            funding_amount_usdc,
-            max_funding_amount_usdc,
             max_conversion_overhead_percent,
             max_attempts,
             ..
@@ -351,11 +370,9 @@ impl Backend {
         // after quoting, and preparation tightens it to the actual ZIP-317 fee.
         Ok((
             super::near::Limits {
-                max_output: super::config::usdc_amount(
-                    max_funding_amount_usdc
-                        .as_deref()
-                        .unwrap_or(funding_amount_usdc),
-                )?,
+                // Only quote/preparation use this field; they supply the exact
+                // current claim's output ceiling before validating any quote.
+                max_output: u64::MAX,
                 max_input,
                 max_fee: 0,
                 max_fee_bps: max_conversion_overhead_percent
@@ -368,6 +385,18 @@ impl Backend {
 }
 impl FundingBackend for Backend {
     type Observations = Observations;
+    fn allocation_groups(&self) -> Vec<String> {
+        if !self.funding.auto_fund {
+            return Vec::new();
+        }
+        self.wallets
+            .iter()
+            .filter_map(|(name, config)| {
+                matches!(config, super::config::WalletConfig::ZcashRotation { .. })
+                    .then_some(name.clone())
+            })
+            .collect()
+    }
     fn observations(&self) -> Observations {
         Observations {
             store: self.store.clone(),
@@ -395,10 +424,7 @@ impl FundingBackend for Backend {
     async fn ready(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()?;
         let (limits, _) = self.policy(job)?;
-        let daily = self.daily_limit;
         let job_id = job.id.clone();
-        let operation = job.operation_id.clone();
-        let allocation_limits = self.funding.allocation_limits()?;
         // The exact fee is checked and reserved by the serialized owner before signing.
         let reserve = quote.input;
         ensure!(reserve < limits.max_input, "funding_cost_limit_exceeded");
@@ -406,39 +432,32 @@ impl FundingBackend for Backend {
             .call(move |s| {
                 s.check_job_permit(&job_id, reserve)?;
                 let instant = now()?;
-                s.check_funding_allocation(
-                    &operation,
-                    u32::try_from(instant / 86400)?,
-                    allocation_limits,
-                )?;
-                s.check_funding_capacity(instant, reserve, daily)
+                s.check_funding_capacity(instant, reserve)
             })
             .await
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {
         self.require_auto_funding()?;
-        let (limits, max_attempts) = self.policy(job)?;
-        let super::config::WalletConfig::ZcashRotation {
-            funding_amount_usdc,
-            ..
-        } = self
-            .wallets
-            .get(&job.pool_name)
-            .context("funding pool disabled")?
-        else {
-            anyhow::bail!("funding pool disabled");
-        };
-        let target = super::config::usdc_amount(funding_amount_usdc)?.to_string();
-        let selected = target.clone();
-        let ceiling = limits.max_output.to_string();
+        let (mut limits, max_attempts) = self.policy(job)?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
-        self.store
+        let claim = self
+            .store
             .call(move |s| {
                 s.require_funding_attempt(&id, max_attempts)?;
-                s.select_quote_terms(&id, &operation, &selected, &ceiling)
+                let claim = s.current_funding_claim(&id)?;
+                s.select_quote_terms(
+                    &id,
+                    &operation,
+                    &claim.target.to_string(),
+                    &claim.maximum_output.to_string(),
+                )?;
+                Ok(claim)
             })
             .await?;
+        let target = claim.target.to_string();
+        limits.max_output = u64::try_from(claim.maximum_output)
+            .context("funding output exceeds route amount range")?;
         let refund = self.treasury.refund_address(job.id.clone()).await?;
         Ok(QuoteRequest {
             job: job.clone(),
@@ -454,18 +473,25 @@ impl FundingBackend for Backend {
     async fn prepare(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()
             .map_err(|error| error.context(super::transaction::PreparationDeferred))?;
-        let (limits, max_attempts) = self.policy(job)?;
+        let (mut limits, max_attempts) = self.policy(job)?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
         let supplied = serde_json::to_value(quote)?;
-        self.store
+        let claim = self
+            .store
             .call(move |s| {
                 let stored: serde_json::Value =
                     serde_json::from_slice(&s.funding_quote_for_operation(&id, &operation)?)?;
                 ensure!(stored == supplied, "persisted funding quote mismatch");
-                Ok(())
+                ensure!(
+                    s.accepted_quote_suits_current_claim(&id, &operation)?,
+                    "funding quote unsuitable for current claim"
+                );
+                s.current_funding_claim(&id)
             })
             .await?;
+        limits.max_output = u64::try_from(claim.maximum_output)
+            .context("funding output exceeds route amount range")?;
         let checked = super::near::validate_quote(
             quote.request.clone(),
             quote.response.clone(),
@@ -493,10 +519,10 @@ impl FundingBackend for Backend {
                     auto_fund: self.funding.auto_fund,
                     max_attempts,
                 }),
-                allocation_limits: Some(self.funding.allocation_limits()?),
+
                 operation_id: job.operation_id.clone(),
                 pool_id: Some(job.pool_id.clone()),
-                daily_limit_zatoshis: self.daily_limit,
+
                 deadline: checked.deadline,
                 recipient: checked.deposit.context("missing deposit")?,
                 amount_zatoshis: checked.input,
@@ -857,15 +883,6 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
             "funding_amount_limit_exceeded" => {
                 return "funding_amount_limit_exceeded; bridge minimum exceeds max_funding_amount_usdc (defaults to funding_amount_usdc); no funds submitted";
             }
-            "daily_funding_limit_exceeded" => {
-                return "daily_funding_limit_exceeded; new funding paused; review daily_funding_limit_usdc and unresolved funding; existing funded wallets remain usable";
-            }
-            "total_funding_limit_exceeded" => {
-                return "total_funding_limit_exceeded; new funding paused; review total_funding_limit_usdc; allowance does not reset on restart or refund";
-            }
-            "funding_allocation_evidence_missing" | "funding_allocation_evidence_invalid" => {
-                return "funding_allocation_evidence_invalid; new funding paused; retained allocation history must be complete";
-            }
             "near_http_401" | "near_http_403" => {
                 return "near_authentication_required; check selected mode and configured credentials";
             }
@@ -876,9 +893,6 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "funding_input_cap_exceeded; bridge quote exceeds max_funding_spend_zec; no funds submitted";
             }
             "near_http_429" => return "near_rate_limited; backing off",
-            "treasury_budget_exceeded" => {
-                return "treasury_budget_exceeded; wait for budget or review daily_treasury_spend_limit_zec";
-            }
             "treasury_insufficient_spendable_funds" => {
                 return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
             }

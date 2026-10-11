@@ -24,7 +24,122 @@ impl std::fmt::Display for HttpFailure {
 }
 impl std::error::Error for HttpFailure {}
 
+#[cfg(test)]
+mod handoff_tests;
+#[cfg(test)]
+mod hint_tests;
+
 pub const USDC: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+#[cfg(test)]
+mod hint_binding_tests {
+    use super::*;
+    use crate::rotation::{
+        base::BaseRpc,
+        manager::ManagedPool,
+        store::{Store, StoreHandle},
+    };
+
+    #[tokio::test]
+    async fn trusted_binding_distinguishes_sources_revisions_groups_and_store_lifetimes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let identity = state.id().to_owned();
+        let first = crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "first",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(crate::rotation::config::positive_usdc("5").unwrap()),
+            0
+        )
+        .unwrap();
+        let second = crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "second",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(crate::rotation::config::positive_usdc("5").unwrap()),
+            0
+        )
+        .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let client = |group: String| {
+            PaidClient::managed(Arc::new(
+                ManagedPool::new(
+                    store.clone(),
+                    group,
+                    BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
+                    SpendPolicy::dollars("5").unwrap(),
+                )
+                .unwrap(),
+            ))
+            .with_source_identity("source-a")
+        };
+        let a = client(first.clone());
+        let same = client(first.clone());
+        let other_group = client(second);
+        let key = |client: &PaidClient, source| {
+            client
+                .operation_key(source, "GET", "/items/{id}", "https://example.com")
+                .unwrap()
+        };
+        let original = key(&a, None);
+        assert_eq!(original, key(&same, None));
+        assert_ne!(original, key(&other_group, None));
+        assert_ne!(
+            original,
+            key(&a.clone().with_source_identity("source-b"), None)
+        );
+        assert_eq!(
+            key(&a, Some(("dynamic", 1))),
+            key(&same, Some(("dynamic", 1)))
+        );
+        assert_ne!(key(&a, Some(("dynamic", 1))), key(&a, Some(("dynamic", 2))));
+        assert_ne!(original, key(&a.clone().public_destinations(), None));
+        assert_ne!(
+            original,
+            a.operation_key(None, "GET", "/items/{id}", "https://other.example.com")
+                .unwrap()
+        );
+        assert!(
+            PaidClient::unsigned()
+                .operation_key(None, "GET", "/items/{id}", "https://example.com")
+                .is_none()
+        );
+        drop(a);
+        drop(same);
+        drop(other_group);
+        drop(store);
+        worker.await.unwrap();
+        // Reopening the exact same group must not acquire the previous runtime's hints.
+        let independent = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &identity,
+        )
+        .unwrap();
+        let group = first;
+        let (independent, independent_worker) = StoreHandle::spawn(independent);
+        let separate = PaidClient::managed(Arc::new(
+            ManagedPool::new(
+                independent.clone(),
+                group,
+                BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
+                SpendPolicy::dollars("5").unwrap(),
+            )
+            .unwrap(),
+        ))
+        .with_source_identity("source-a");
+        assert_ne!(original, key(&separate, None));
+        drop(separate);
+        drop(independent);
+        independent_worker.await.unwrap();
+    }
+}
 #[derive(Clone)]
 pub struct SpendPolicy {
     pub max_atomic: Option<U256>,
@@ -89,8 +204,14 @@ impl SubmissionProgress {
     }
 }
 
+pub(crate) mod ownership;
+#[cfg(test)]
+mod ownership_tests;
+
 #[derive(Clone)]
 pub struct PaidClient {
+    work: crate::server::work::Work,
+    source_identity: Arc<str>,
     cover: Option<(Arc<crate::cover::Config>, crate::cover::Scope)>,
     unsigned_only: bool,
     transport: crate::network::HttpPolicy,
@@ -104,6 +225,8 @@ pub struct PaidClient {
 impl PaidClient {
     pub fn new(payer: Payer) -> Self {
         Self {
+            work: Default::default(),
+            source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: false,
             transport: Default::default(),
@@ -117,6 +240,8 @@ impl PaidClient {
     }
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
         Self {
+            work: Default::default(),
+            source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: false,
             transport: Default::default(),
@@ -131,6 +256,8 @@ impl PaidClient {
     /// Keyless qualification client. Challenges are never parsed for signing or retried.
     pub fn unsigned() -> Self {
         Self {
+            work: Default::default(),
+            source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: true,
             transport: Default::default(),
@@ -151,6 +278,48 @@ impl PaidClient {
             self.cover = Some((Arc::new(config), scope));
         }
         self
+    }
+    /// Trusted runtime identity, separate from reusable provider tool metadata.
+    pub(crate) fn with_source_identity(mut self, source: &str) -> Self {
+        self.source_identity = Arc::from(source);
+        self
+    }
+    pub(crate) fn operation_key(
+        &self,
+        source: Option<(&str, u64)>,
+        method: &str,
+        template: &str,
+        base: &str,
+    ) -> Option<crate::pricing::runtime::OperationKey> {
+        use sha2::{Digest, Sha256};
+        let (namespace, group) = self.managed.as_ref()?.hint_group_scope();
+        let (source, revision) = source.unwrap_or((&self.source_identity, 0));
+        // The fixed digest separates store lifetimes, configured network policy,
+        // destination binding and provider transport choices. No URL or network
+        // credential is retained in the cache, and arguments never enter this key.
+        let mut transport = Sha256::new();
+        let policy = serde_json::to_vec(&crate::network::global().policy).ok()?;
+        for field in [
+            namespace.as_bytes().as_slice(),
+            policy.as_slice(),
+            base.as_bytes(),
+        ] {
+            transport.update((field.len() as u64).to_be_bytes());
+            transport.update(field);
+        }
+        transport.update([
+            u8::from(self.transport.allow_http1),
+            u8::from(self.transport.allow_tls12),
+            u8::from(self.public_only),
+        ]);
+        Some(crate::pricing::runtime::OperationKey::new(
+            source,
+            revision,
+            method,
+            template,
+            group,
+            &transport.finalize(),
+        ))
     }
     pub fn with_transport(mut self, transport: crate::network::HttpPolicy) -> Self {
         self.transport = transport;
@@ -213,6 +382,34 @@ impl PaidClient {
         route: RoutedRequest,
         progress: &SubmissionProgress,
     ) -> Result<crate::output::HttpOutput> {
+        self.execute_response_scoped(route, progress, None).await
+    }
+    /// Stop accepting calls and wait for already accepted response/output work.
+    /// Clones share the same lifecycle; cancellation of a waiter does not stop it.
+    pub async fn drain(&self) {
+        self.work.drain().await;
+    }
+    pub(crate) async fn execute_response_scoped(
+        &self,
+        route: RoutedRequest,
+        progress: &SubmissionProgress,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+    ) -> Result<crate::output::HttpOutput> {
+        let client = self.clone();
+        let progress = progress.clone();
+        ownership::run(&self.work, async move {
+            client
+                .execute_response_owned(route, &progress, operation)
+                .await
+        })
+        .await?
+    }
+    async fn execute_response_owned(
+        &self,
+        route: RoutedRequest,
+        progress: &SubmissionProgress,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+    ) -> Result<crate::output::HttpOutput> {
         // Pin static signer before any I/O; replacement affects only later calls.
         let payer = self
             .payer
@@ -220,17 +417,22 @@ impl PaidClient {
             .map(|p| p.read().expect("payer lock poisoned").clone());
         let request = build_request(route)?;
         let unsigned_only = self.unsigned_only || crate::qualification::unsigned_case();
-        let idempotent = matches!(request.method().as_str(), "GET" | "HEAD");
         let mut attempt = 0;
+        let mut recovery = crate::rotation::manager::RecoveryAllowance::default();
         let mut paid_submission = false;
         let mut extensions_omitted = false;
         // Only a pre-signing managed identity change can restart this loop.
         // The new unsigned challenge must use the new identity-bound transport.
+        let mut candidate = match &self.managed {
+            Some(pool) if !unsigned_only => Some(
+                pool.candidate_for(
+                    operation.and_then(|key| crate::pricing::runtime::process_hints().get(key)),
+                )
+                .await?,
+            ),
+            _ => None,
+        };
         let (response, mut cover) = loop {
-            let candidate = match &self.managed {
-                Some(pool) if !unsigned_only => Some(pool.candidate().await?),
-                _ => None,
-            };
             let identity = if unsigned_only {
                 crate::network::IsolationId::discovery(request.url().as_str())?
             } else {
@@ -284,6 +486,7 @@ impl PaidClient {
                 .execute(unsigned)
                 .await
                 .map_err(reqwest::Error::without_url)?;
+            let receipt = crate::pricing::runtime::received();
             drop(padding);
             if let Some(c) = &cover {
                 c.protocol(response.version());
@@ -306,11 +509,16 @@ impl PaidClient {
                     match pool
                         .pay_with_cover_observed(
                             &http,
-                            candidate.expect("managed candidate"),
+                            candidate.clone().expect("managed candidate"),
                             retry,
                             response,
                             cover.as_ref(),
-                            progress,
+                            crate::rotation::manager::AdmissionObservation {
+                                progress,
+                                recovery: &mut recovery,
+                                hint: operation.zip(receipt),
+                                fixed_payer: attempt > 0,
+                            },
                         )
                         .await
                     {
@@ -320,11 +528,17 @@ impl PaidClient {
                             response = paid;
                         }
                         Err(error)
-                            if error.downcast_ref::<crate::rotation::error::AdmissionError>()
-                                == Some(&crate::rotation::error::AdmissionError::PayerChanged)
-                                && idempotent
-                                && attempt == 0 =>
+                            if error.is::<crate::rotation::manager::PayerHandoff>()
+                                && attempt == 0
+                                && !progress.possible() =>
                         {
+                            candidate = Some(
+                                error
+                                    .downcast_ref::<crate::rotation::manager::PayerHandoff>()
+                                    .expect("typed handoff")
+                                    .0
+                                    .clone(),
+                            );
                             attempt += 1;
                             continue;
                         }

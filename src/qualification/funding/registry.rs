@@ -271,7 +271,7 @@ mod tests {
             .query_row("SELECT payload FROM pins", [], |r| r.get(0))
             .unwrap();
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
-        pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_funding_spend_zec":"0.000001"}}});
+        pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}},"max_funding_spend_zec":"0.000001"}}});
         let raw = pins.to_string();
         binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
         db.execute(

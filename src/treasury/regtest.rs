@@ -360,10 +360,10 @@ async fn run() -> Result<()> {
     let prepared = treasury
         .prepare(PrepareRequest {
             managed_funding: None,
-            allocation_limits: None,
+
             operation_id: op.clone(),
             pool_id: None,
-            daily_limit_zatoshis: 1_000_000,
+
             deadline: now()? + 3600,
             recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
             amount_zatoshis: 50_000,
@@ -495,9 +495,14 @@ async fn refunds_run(cli: bool) -> Result<()> {
     .await?;
     let id = treasury.status().await?.treasury_id;
     for n in 0..16 {
-        treasury
-            .ensure_pool(format!("refund_{n}"), "5.00".into())
-            .await?;
+        crate::rotation::test_capacity::treasury_pair(
+            &treasury,
+            &format!("refund_{n}"),
+            "5.00",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .await?;
     }
     let jobs = treasury.store.call(|s| s.funding_jobs()).await?;
     let mut addresses = vec![];
@@ -563,10 +568,10 @@ async fn refunds_run(cli: bool) -> Result<()> {
                     auto_fund: true,
                     max_attempts: 0,
                 }),
-                allocation_limits: None,
+
                 operation_id: job.operation_id.clone(),
                 pool_id: Some(job.pool_id),
-                daily_limit_zatoshis: 1_000_000,
+
                 deadline,
                 recipient: addresses[n].clone(),
                 amount_zatoshis: 50_000,
@@ -610,7 +615,6 @@ async fn refunds_run(cli: bool) -> Result<()> {
         let error = treasury
             .shield_refund(
                 jobs[30].id.clone(),
-                1_000_000,
                 if fail_commit { 30_000 } else { 1 },
                 &stop,
             )
@@ -694,7 +698,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
                 .await?
         } else {
             treasury
-                .shield_refund(jobs[n].id.clone(), 1_000_000, 30_000, &stop)
+                .shield_refund(jobs[n].id.clone(), 30_000, &stop)
                 .await?
         };
         let tx = submission::decode(prepared.bytes())?;
@@ -825,10 +829,10 @@ async fn expiry_run(cli: bool) -> Result<()> {
     let prepared = treasury
         .prepare(PrepareRequest {
             managed_funding: None,
-            allocation_limits: None,
+
             operation_id: op.clone(),
             pool_id: None,
-            daily_limit_zatoshis: 1_000_000,
+
             deadline: now()? + 3600,
             recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
             amount_zatoshis: 50_000,
@@ -1044,7 +1048,7 @@ impl RecoveryCli {
         std::fs::write(
             directory.join("recovery.toml"),
             format!(
-                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\ndaily_treasury_spend_limit_zec = '0.01'\nmax_refund_shielding_fee_zec = '0.0003'\nconfirmations = 2\nmax_sync_age_seconds = 300\n"
+                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\nmax_refund_shielding_fee_zec = '0.0003'\nconfirmations = 2\nmax_sync_age_seconds = 300\n"
             ),
         )?;
         Ok(Self {

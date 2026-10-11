@@ -187,7 +187,7 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
     store
         .bind_operation_recipient("op", "0x0000000000000000000000000000000000000001")
         .unwrap();
-    store.reserve("op", None, 0, 100, 100).unwrap();
+    store.reserve("op", None, 0, 100).unwrap();
     let facts = TransactionFacts {
         txid: tx.txid().to_string(),
         expiry_height: 500,

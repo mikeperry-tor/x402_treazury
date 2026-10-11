@@ -2590,7 +2590,27 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   formatting checks. Final enabled-claim and default-identity behavior belongs to
   step 7.
 
-Steps 7–9 remain unfinished except for the portions described above. The known
+- Step 7 capacity core implements the explicit small/optional-large configuration,
+  schema-16 roles and exact reserve claims, atomic claim consumption, bounded
+  selection, receipt-ordered runtime hints, all-method unsigned handoff and
+  independently authorized automatic retirement. Accepted request ownership extends
+  through response/output handling. Funding uses current claims and actual spendable
+  treasury capacity; operational source checks use scoped reads and captured keyset
+  pages. Versioned status/configuration/bootstrap and qualification outputs distinguish
+  historical readiness, current inventory, consumption and later refill. Maintained
+  guides and examples publish the working syntax and selection/isolation decision.
+  Focused default-Zcash validation passed 336 library cases, 51 managed-payment
+  cases, 18 rotation cases, 14 parser cases and seven assignment cases; the prior
+  frozen checkout passed all 161 active integration-preparation cases. Concrete
+  expensive-only, mixed-cost, cold-cache, draining and seeded conservation fixtures
+  use actual payment/funding paths. Dependent role, selection and retirement changes
+  share this boundary so no intermediate model admits unowned reserve payments.
+  The isolated core snapshot also passed all-target Clippy, 18 scoped treasury
+  fixtures and the durable qualification-vacancy regression.
+  Network/cover retention remains a separate step-7 commit; conversion and final
+  integration remain steps 8 and 9.
+
+The remaining portions of steps 7–9 are unfinished. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
 conversion has been performed. The source lacks immutable destination-readiness

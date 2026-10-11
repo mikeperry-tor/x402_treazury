@@ -33,10 +33,10 @@ pub struct ManagedFundingAuthority {
 
 pub struct PrepareRequest {
     pub managed_funding: Option<ManagedFundingAuthority>,
-    pub allocation_limits: Option<super::config::FundingBudgetLimits>,
+
     pub operation_id: String,
     pub pool_id: Option<String>,
-    pub daily_limit_zatoshis: u64,
+
     pub deadline: u64,
     pub recipient: String,
     pub amount_zatoshis: u64,

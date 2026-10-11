@@ -34,6 +34,9 @@ fn role<'a>(wallets: &BTreeMap<&str, &'a Value>, role: &str) -> Result<&'a Value
 }
 /// Verify exactly one natural promotion and return its unique replacement job ID.
 pub fn promotion(before: &Value, after: &Value, pool: &str) -> Result<String> {
+    if before["schema_version"] == 2 || after["schema_version"] == 2 {
+        return capacity_consumption(before, after, pool)?.context("replacement not yet allocated");
+    }
     ensure!(
         before["treasury_id"].is_string() && before["treasury_id"] == after["treasury_id"],
         "lifecycle treasury mismatch"
@@ -143,6 +146,205 @@ pub fn promotion(before: &Value, after: &Value, pool: &str) -> Result<String> {
     );
     Ok((*id).to_owned())
 }
+/// Current reports correlate reserve consumption with its exact replacement slot.
+/// Old immutable reports retain their original schema-specific interpretation.
+pub fn consumed_reserve(before: &Value, after: &Value, pool: &str) -> Result<Option<String>> {
+    if before["schema_version"] == 2 || after["schema_version"] == 2 {
+        capacity_consumption(before, after, pool)
+    } else {
+        promotion(before, after, pool).map(Some)
+    }
+}
+fn capacity_consumption(before: &Value, after: &Value, pool: &str) -> Result<Option<String>> {
+    ensure!(
+        before["schema_version"] == 2
+            && after["schema_version"] == 2
+            && before["treasury_id"].is_string()
+            && before["treasury_id"] == after["treasury_id"],
+        "capacity lifecycle schema/treasury mismatch"
+    );
+    let old_pools = indexed(before, "pools")?;
+    let new_pools = indexed(after, "pools")?;
+    let old = old_pools.get(pool).context("previous pool missing")?;
+    let new = new_pools.get(pool).context("current pool missing")?;
+    ensure!(
+        old["name"] == new["name"] && old["generation"] == new["generation"],
+        "capacity group identity changed"
+    );
+    let old_wallets = indexed(old, "addresses")?;
+    let new_wallets = indexed(new, "addresses")?;
+    let payer = role(&new_wallets, "ACTIVE")?;
+    let previous = old_wallets
+        .get(payer["id"].as_str().context("payer identity missing")?)
+        .context("new payer was not existing inventory")?;
+    ensure!(
+        previous["role"] == "READY" && previous["destination_recorded"] == true,
+        "new payer did not consume funded reserve inventory"
+    );
+    let claims = |value: &Value| -> Result<BTreeMap<String, Value>> {
+        let mut result = BTreeMap::new();
+        for claim in value["reserve_claims"]
+            .as_array()
+            .context("reserve claims missing")?
+        {
+            let slot = claim["slot"]
+                .as_str()
+                .filter(|s| matches!(*s, "small" | "large"))
+                .context("invalid reserve slot")?;
+            ensure!(
+                result.insert(slot.to_owned(), claim.clone()).is_none(),
+                "duplicate reserve slot"
+            );
+        }
+        Ok(result)
+    };
+    let old_claims = claims(old)?;
+    let new_claims = claims(new)?;
+    let (slot, claim) = old_claims
+        .iter()
+        .find(|(_, c)| c["wallet_id"] == payer["id"])
+        .context("consumed payer has no original claim")?;
+    ensure!(
+        claim["enabled"] == true && claim["destination_ready"] == true,
+        "consumed reserve was not ready"
+    );
+    let replacement_claim = new_claims
+        .get(slot)
+        .context("consumed reserve slot disappeared")?;
+    ensure!(
+        claim["generation"].as_u64().and_then(|g| g.checked_add(1))
+            == replacement_claim["generation"].as_u64()
+            && replacement_claim["enabled"] == true,
+        "replacement claim generation mismatch"
+    );
+    for (other, saved) in &old_claims {
+        if other != slot {
+            ensure!(
+                new_claims.get(other) == Some(saved),
+                "unrelated reserve changed during measured consumption"
+            );
+        }
+    }
+    for (id, wallet) in &old_wallets {
+        let saved = new_wallets.get(id).context("consumption lost wallet")?;
+        ensure!(
+            saved["address"] == wallet["address"] && saved["target"] == wallet["target"],
+            "consumption changed immutable wallet identity"
+        );
+        let expected = if wallet["id"] == payer["id"] {
+            "ACTIVE"
+        } else if wallet["role"] == "ACTIVE" {
+            "RETAINED"
+        } else {
+            wallet["role"].as_str().context("wallet role missing")?
+        };
+        let later_retirement = if expected == "RETAINED" && saved["role"] == "RETIRED" {
+            let record = &saved["retirement"];
+            let amount = |field: &str| -> Result<alloy_primitives::U256> {
+                Ok(record[field]
+                    .as_str()
+                    .context("retirement support missing")?
+                    .parse()?)
+            };
+            let remainder = amount("confirmed_amount")?.max(amount("latest_amount")?);
+            ensure!(
+                remainder == amount("observed_bound")? && remainder <= amount("accepted_maximum")?,
+                "retirement remainder support mismatch"
+            );
+            true
+        } else {
+            false
+        };
+        ensure!(
+            saved["role"] == expected || later_retirement,
+            "unexpected consumption role transition"
+        );
+    }
+    if replacement_claim["wallet_id"].is_null() {
+        ensure!(
+            new_wallets.len() == old_wallets.len(),
+            "vacant consumption changed inventory"
+        );
+        let old_jobs = indexed(before, "funding_jobs")?;
+        let new_jobs = indexed(after, "funding_jobs")?;
+        ensure!(
+            !new_jobs
+                .iter()
+                .any(|(id, job)| !old_jobs.contains_key(*id) && job["pool_id"] == pool),
+            "vacant consumption unexpectedly allocated selected inventory"
+        );
+        for (id, job) in &old_jobs {
+            let saved = new_jobs
+                .get(id)
+                .context("vacant consumption lost funding history")?;
+            for field in ["pool_id", "wallet_id", "recipient", "target"] {
+                ensure!(
+                    job[field] == saved[field],
+                    "vacant consumption changed funding identity"
+                );
+            }
+        }
+        return Ok(None);
+    }
+    let replacement_id = replacement_claim["wallet_id"]
+        .as_str()
+        .context("replacement not yet allocated")?;
+    let replacement = new_wallets
+        .get(replacement_id)
+        .context("replacement wallet missing")?;
+    ensure!(
+        !old_wallets.contains_key(replacement_id) && new_wallets.len() == old_wallets.len() + 1,
+        "consumption did not retain inventory and allocate exactly its replacement"
+    );
+    let address: alloy_primitives::Address = replacement["address"]
+        .as_str()
+        .context("replacement address missing")?
+        .parse()?;
+    for previous_pool in old_pools.values() {
+        for wallet in indexed(previous_pool, "addresses")?.values() {
+            ensure!(
+                wallet["address"]
+                    .as_str()
+                    .context("previous address missing")?
+                    .parse::<alloy_primitives::Address>()?
+                    != address,
+                "replacement reused an address"
+            );
+        }
+    }
+    let old_jobs = indexed(before, "funding_jobs")?;
+    let new_jobs = indexed(after, "funding_jobs")?;
+    for (id, job) in &old_jobs {
+        let saved = new_jobs.get(id).context("consumption lost funding job")?;
+        for field in ["pool_id", "wallet_id", "recipient", "target"] {
+            ensure!(job[field] == saved[field], "funding identity changed");
+        }
+    }
+    let mut additions = new_jobs
+        .iter()
+        .filter(|(id, j)| !old_jobs.contains_key(*id) && j["pool_id"] == pool);
+    let (id, job) = additions
+        .next()
+        .context("replacement funding job missing")?;
+    ensure!(
+        additions.next().is_none()
+            && job["wallet_id"] == replacement_id
+            && job["recipient"] == replacement["address"]
+            && job["target"] == replacement["target"],
+        "replacement funding correlation differs"
+    );
+    ensure!(
+        matches!(replacement["role"].as_str(), Some("ALLOCATED" | "READY")),
+        "invalid replacement role"
+    );
+    ensure!(
+        (replacement["role"] == "READY") == (replacement["destination_recorded"] == true)
+            && (replacement["role"] != "READY" || replacement_claim["destination_ready"] == true),
+        "replacement readiness lacks exact destination support"
+    );
+    Ok(Some((*id).to_owned()))
+}
+
 fn pending(job: &Value) -> bool {
     matches!(
         job["phase"].as_str(),
@@ -265,6 +467,34 @@ mod tests {
         ]);
         after["funding_jobs"] = json!([{"id":"replacement","pool_id":"p","wallet_id":"new","recipient":format!("0x{:040x}",3),"target":"2000000","operation_id":"op","phase":"ALLOCATED"}]);
         (before, after)
+    }
+    #[test]
+    fn capacity_consumption_uses_exact_slot_and_destination_not_source_completion() {
+        let (mut before, mut after) = promoted();
+        before["schema_version"] = json!(2);
+        after["schema_version"] = json!(2);
+        after["pools"][0]["generation"] = json!(0);
+        after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
+        before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
+        before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":4,"wallet_id":"ready","destination_ready":true}]);
+        after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":5,"wallet_id":"new","destination_ready":false}]);
+        let mut vacant = after.clone();
+        vacant["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .pop();
+        vacant["pools"][0]["reserve_claims"][0]["wallet_id"] = Value::Null;
+        vacant["funding_jobs"] = json!([]);
+        assert_eq!(consumed_reserve(&before, &vacant, "p").unwrap(), None);
+        assert!(promotion(&before, &vacant, "p").is_err());
+        assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
+        after["pools"][0]["addresses"][2]["role"] = json!("READY");
+        after["pools"][0]["addresses"][2]["destination_recorded"] = json!(true);
+        after["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(true);
+        after["funding_jobs"][0]["phase"] = json!("SWAPPING");
+        assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
+        after["pools"][0]["reserve_claims"][0]["generation"] = json!(4);
+        assert!(promotion(&before, &after, "p").is_err());
     }
     #[test]
     fn exactly_one_promotion_preserves_old_identity_and_binds_new_recipient() {

@@ -36,7 +36,32 @@ pub fn depletion_estimate(
         .as_array()
         .context("observed wallets missing")?;
     let active = wallet(wallets, "ACTIVE")?;
-    let ready = wallet(wallets, "READY")?;
+    let ready = if state["schema_version"] == 2 {
+        let claims = pool["reserve_claims"]
+            .as_array()
+            .context("depletion reserve claims missing")?;
+        let mut candidates = wallets
+            .iter()
+            .filter(|wallet| {
+                wallet["role"] == "READY"
+                    && claims.iter().any(|claim| {
+                        claim["enabled"] == true
+                            && claim["destination_ready"] == true
+                            && claim["wallet_id"] == wallet["id"]
+                    })
+            })
+            .map(|wallet| Ok((available_balance(&observation["balances"], wallet)?, wallet)))
+            .collect::<Result<Vec<_>>>()?;
+        candidates.retain(|(amount, _)| *amount >= price);
+        candidates
+            .sort_by_key(|(amount, wallet)| (*amount, wallet["id"].as_str().unwrap_or_default()));
+        candidates
+            .first()
+            .context("no current funded reserve covers reviewed price")?
+            .1
+    } else {
+        wallet(wallets, "READY")?
+    };
     ensure!(
         active["id"] != ready["id"],
         "active and standby identities coincide"
@@ -56,9 +81,26 @@ pub fn depletion_estimate(
         standby >= price,
         "funded standby cannot cover the reviewed depletion price"
     );
+    let retained_calls = if state["schema_version"] == 2 {
+        wallets
+            .iter()
+            .filter(|wallet| wallet["role"] == "RETAINED")
+            .try_fold(U256::ZERO, |sum, wallet| -> Result<U256> {
+                ensure!(
+                    wallet["destination_recorded"] == true,
+                    "retained readiness support missing"
+                );
+                sum.checked_add(available_balance(balances, wallet)? / price)
+                    .context("retained call estimate overflow")
+            })?
+    } else {
+        U256::ZERO
+    };
     let needed = available
         .checked_div(price)
         .context("invalid depletion price")?
+        .checked_add(retained_calls)
+        .context("depletion call count overflow")?
         .checked_add(U256::from(1))
         .context("depletion call count overflow")?;
     ensure!(
@@ -121,6 +163,27 @@ mod tests {
     use super::*;
     fn observation() -> Value {
         json!({"pool":"p","pool_name":"pool","state":{"pools":[{"id":"p","name":"pool","generation":3,"addresses":[{"id":"a","role":"ACTIVE"},{"id":"b","role":"READY"}]}]},"balances":{"block_height":12,"block_hash":format!("0x{:064x}",1),"confirmed":{"a":"80","b":"200"},"unresolved":{}}})
+    }
+    #[test]
+    fn current_inventory_estimate_includes_retained_capacity_and_multiple_reserves() {
+        let mut value = observation();
+        value["state"]["schema_version"] = json!(2);
+        value["state"]["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .extend([
+                json!({"id":"r","role":"RETAINED","destination_recorded":true}),
+                json!({"id":"large","role":"READY"}),
+            ]);
+        value["balances"]["confirmed"]["r"] = json!("40");
+        value["balances"]["confirmed"]["large"] = json!("500");
+        value["state"]["pools"][0]["reserve_claims"] = json!([
+            {"slot":"small","enabled":true,"destination_ready":true,"wallet_id":"b"},
+            {"slot":"large","enabled":true,"destination_ready":true,"wallet_id":"large"}]);
+        let estimate = depletion_estimate(&value, "20", 7).unwrap();
+        assert_eq!(estimate["estimated_calls"], 7);
+        assert_eq!(estimate["standby"], "b");
+        assert!(depletion_estimate(&value, "20", 6).is_err());
     }
     #[test]
     fn estimate_includes_trigger_reservations_and_exact_division_boundary() {

@@ -5,13 +5,7 @@ use crate::rotation::base::{
     evidence::{BalanceObservation, EvidenceFailure},
 };
 
-pub(super) fn initialize(db: &Connection) -> Result<()> {
-    let tx = db.unchecked_transaction()?;
-    initialize_in_transaction(&tx)?;
-    tx.commit()?;
-    Ok(())
-}
-
+#[cfg(test)]
 pub(super) fn initialize_in_transaction(tx: &Connection) -> Result<()> {
     tx.execute_batch("
 ALTER TABLE wallets ADD COLUMN financial_height INTEGER;
@@ -132,7 +126,14 @@ mod tests {
         let key = dir.path().join("key");
         let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
         let identity = store.id().to_owned();
-        let pool = store.ensure_pool("history", "1").unwrap();
+        let pool = crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "history",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let wallets = store.status().unwrap().pools.remove(0).addresses;
         let cost = U256::from(10).pow(U256::from(30));
         let mut expected = [U256::ZERO; 2];
@@ -244,7 +245,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = store.ensure_pool("first", "1").unwrap();
+        let pool = crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "first",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let wallet = store
             .status()
             .unwrap()
@@ -258,6 +266,47 @@ mod tests {
             .unwrap();
         let first = rpc.view(query).await.unwrap();
         store.publish_scoped_evidence(&pool, first).unwrap();
+        let saved = store.evidence_cache[&wallet].1.observation().clone();
+        let runtime =
+            crate::rotation::store::reporting::runtime_status(&store, saved.valid_until).unwrap();
+        let evidence = runtime.pools[0].addresses[0]
+            .runtime_balance_evidence
+            .as_ref()
+            .unwrap();
+        assert!(evidence.fresh && evidence.compatible);
+        assert_eq!(
+            evidence.confirmed.amount_atomic,
+            saved.confirmed.amount.to_string()
+        );
+        assert_eq!(
+            evidence.latest.amount_atomic,
+            saved.latest.amount.to_string()
+        );
+        assert_eq!(evidence.confirmed.hash, saved.confirmed.anchor.hash);
+        assert_eq!(evidence.latest.hash, saved.latest.anchor.hash);
+        assert!(evidence.confirmed.block_timestamp.is_none());
+        assert_eq!(evidence.valid_until, saved.valid_until);
+        let expired =
+            crate::rotation::store::reporting::runtime_status(&store, saved.valid_until + 1)
+                .unwrap();
+        let evidence = expired.pools[0].addresses[0]
+            .runtime_balance_evidence
+            .as_ref()
+            .unwrap();
+        assert!(!evidence.fresh && evidence.compatible);
+        assert_eq!(
+            evidence.unavailable_reason.as_deref(),
+            Some("evidence_expired")
+        );
+        assert_eq!(evidence.valid_until, saved.valid_until);
+        assert!(
+            crate::rotation::store::status(&dir.path().join("state"))
+                .unwrap()
+                .pools[0]
+                .addresses[0]
+                .runtime_balance_evidence
+                .is_none()
+        );
         let expired_at = now().unwrap() - 1;
         store
             .evidence_cache
@@ -406,7 +455,7 @@ mod tests {
             observation: durable_observation.clone(),
             checkpoint: Some(anchor(120)),
         };
-        store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint) VALUES('history-proof',128,?1,'80','0',?2,?3,140,?4,?5)",params![durable_observation.confirmed.anchor.hash,durable_observation.valid_until.to_string(),serde_json::to_string(&durable_support).unwrap(),durable_observation.latest.anchor.hash,durable_observation.endpoint]).unwrap();
+        store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES('history-proof',128,?1,'80','0',?2,?3,140,?4,?5,'ACTIVE')",params![durable_observation.confirmed.anchor.hash,durable_observation.valid_until.to_string(),serde_json::to_string(&durable_support).unwrap(),durable_observation.latest.anchor.hash,durable_observation.endpoint]).unwrap();
         let identity = store.id().to_owned();
         drop(store);
         let mut store = Store::open(
@@ -493,8 +542,22 @@ mod tests {
         let key = dir.path().join("key");
         let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
         let identity = store.id().to_owned();
-        store.ensure_pool("first", "1").unwrap();
-        store.ensure_pool("second", "1").unwrap();
+        crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "first",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "second",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let wallets: Vec<_> = store
             .status()
             .unwrap()
@@ -552,7 +615,14 @@ mod tests {
         )
         .unwrap();
         let mut store = store;
-        store.ensure_pool("first", "1").unwrap();
+        crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "first",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let wallets = store.status().unwrap().pools.remove(0).addresses;
         let anchor = |height| Anchor {
             height,
@@ -605,7 +675,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        store.ensure_pool("history", "1").unwrap();
+        crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "history",
+            "1",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let wallet = store
             .status()
             .unwrap()
@@ -687,6 +764,41 @@ impl Store {
                     .ok_or(EvidenceFailure::MalformedSupport)?,
             )
             .map_err(|_| EvidenceFailure::MalformedSupport)?;
+            support.observation.validate()?;
+            ensure!(
+                support.observation.wallet == wallet,
+                EvidenceFailure::ScopeMismatch
+            );
+            let address: String =
+                self.db
+                    .query_row("SELECT address FROM wallets WHERE id=?1", [wallet], |row| {
+                        row.get(0)
+                    })?;
+            ensure!(
+                support
+                    .observation
+                    .address
+                    .parse::<alloy_primitives::Address>()?
+                    == address.parse::<alloy_primitives::Address>()?,
+                EvidenceFailure::ScopeMismatch
+            );
+            durable_balance_anchors.push(support.observation.confirmed.anchor);
+            durable_balance_anchors.push(support.observation.latest.anchor);
+            if let Some(anchor) = support.checkpoint {
+                durable_balance_anchors.push(anchor);
+            }
+        }
+        let retired: Option<String> = self
+            .db
+            .query_row(
+                "SELECT support FROM wallet_retirements WHERE wallet_id=?1",
+                [wallet],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(retired) = retired {
+            let support: BalanceSupport =
+                serde_json::from_str(&retired).map_err(|_| EvidenceFailure::MalformedSupport)?;
             support.observation.validate()?;
             ensure!(
                 support.observation.wallet == wallet,
@@ -1021,6 +1133,11 @@ impl Store {
                             "e.wallet_id",
                             1,
                         ),
+                        (
+                            "(SELECT wallet_id,support,confirmed_hash AS block_hash,latest_hash FROM wallet_retirements) e",
+                            "e.wallet_id",
+                            1,
+                        ),
                     ] {
                         let sql = format!(
                             "SELECT COALESCE(e.support,''),CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM {source} WHERE {owner}=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN {missing} WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
@@ -1174,6 +1291,16 @@ impl Store {
                 "chain_repair_required"
             },
         )?;
+        super::capacity::dispute_support(
+            &tx,
+            wallet,
+            &anchor.hash,
+            if amount_conflict {
+                "evidence_repair_required"
+            } else {
+                "chain_repair_required"
+            },
+        )?;
         bump_generation(&tx, "wallet", wallet)?;
         tx.commit()?;
         self.evidence_cache.remove(wallet);
@@ -1188,6 +1315,7 @@ impl Store {
         );
         let tx = self.db.transaction()?;
         super::funding::dispute_endpoint_support(&tx, endpoint)?;
+        super::capacity::dispute_endpoint_support(&tx, endpoint)?;
         bump_generation(&tx, "endpoint", endpoint)?;
         tx.commit()?;
         self.evidence_cache
@@ -1352,3 +1480,6 @@ impl Store {
 
 #[cfg(test)]
 mod funding_tests;
+
+#[cfg(test)]
+mod retirement_tests;

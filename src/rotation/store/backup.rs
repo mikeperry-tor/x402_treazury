@@ -9,6 +9,7 @@ enum Boundary {
     DatabaseSync,
     KeyWrite,
     KeySync,
+    OwnerSync,
     ManifestWrite,
     ManifestPartial,
     ManifestSync,
@@ -49,6 +50,11 @@ impl Store {
         key.write_all(self.key.as_slice())?;
         boundary(Boundary::KeySync)?;
         key.sync_all()?;
+        // A restored store must acquire an existing private owner file before
+        // its read-only source preflight; rejection creates no source sidecars.
+        let owner = private_file(&destination.join("owner.lock"), true)?;
+        boundary(Boundary::OwnerSync)?;
+        owner.sync_all()?;
         // Only a complete, synced manifest is ever visible under the final name.
         // A failed destination remains reserved; retry must use a new directory.
         let temporary = destination.join("backup.json.tmp");
@@ -86,6 +92,7 @@ mod tests {
             Boundary::DatabaseSync,
             Boundary::KeyWrite,
             Boundary::KeySync,
+            Boundary::OwnerSync,
             Boundary::ManifestWrite,
             Boundary::ManifestPartial,
             Boundary::ManifestSync,
@@ -101,7 +108,7 @@ mod tests {
                 b"initial",
             )
             .unwrap();
-            source.reserve("pending", None, 1, 100, 1000).unwrap();
+            source.reserve("pending", None, 1, 100).unwrap();
             source
                 .prepare("pending", 1, b"prepared", b"signed bytes")
                 .unwrap();

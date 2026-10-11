@@ -19,9 +19,11 @@ You can also optionally grant your agent a set of tools to discover and add x402
 flowchart TB
     Z[Shielded Zcash treasury] --> N[NEAR Intents swaps]
     N --> A[Active USDC wallet]
-    N --> B[Funded standby]
-    B -. Insufficient funds: promote .-> A
+    N --> B[Small and optional large reserves]
+    B -. First signed payment .-> A
+    A -. Previous active .-> R[Retained wallets]
     A --> T[Wallet-isolated Tor]
+    R --> T
     T --> P[API provider group]
 ```
 
@@ -34,21 +36,23 @@ flowchart TB
 > calls before rotation. Identifying request contents across these rotations can
 > also link activity.
 
-Each managed provider pool has an active Base USDC wallet, and a funded
-standby USDC wallet. When the active wallet cannot cover an admitted payment,
-`x402_treazury` can promote the standby and fund a new replacement address.
-Calls continue on the promoted wallet while its replacement is being filled.
+Each managed wallet group has an active Base USDC wallet, a small reserve and an
+optional large reserve. Funded retained wallets remain available for payments.
+Validated recent price estimates can choose the smallest sufficient wallet before
+the ordinary request. A reserve's first journaled payment makes it active and
+leaves its slot vacant; the previous active becomes retained. Ordinary authorized
+funding fills each vacancy independently of payment and retirement.
 Funding, confirmation and payment uncertainty are persisted across restarts.
 
-The default allocation target is **$2 USDC per address**, raised when NEAR's
-current bridge minimum requires more, within your configured spending limits.
-Each provider pool needs two allocations, to bootstrap the active
-and standby wallets, costing roughly $4 USDC plus swap and network fees.
-Separate wallet groups each need their own active and standby funding.
+Configure each reserve's target explicitly. A group with a $2 small reserve and
+no large reserve starts with $4 across its initial active and small reserve, plus
+swap and network fees. An optional large reserve adds its configured target.
+Bridge-minimum increases require explicit per-slot headroom. Actual spendable
+Zcash treasury funds govern enabled funding; the API payment cap is separate.
 
 Payment requests, wallet-specific balance checks and swap jobs use the current
-source wallet address as the Tor circuit isolation identity. An active to
-standby USDC wallet rotation gets a new Tor circuit identity. API catalog
+payer wallet address as the Tor circuit isolation identity. Switching payers
+changes the Tor isolation identity. API catalog
 retrieval, llm help text, and pricing queries use separate Tor identities
 grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
 uses remote DNS and has no direct-network fallback.
@@ -158,7 +162,7 @@ target/release/x402_treazury wallet addresses \
 ```
 
 Send ZEC to the treasury's **shielded receive address**. The privacy example conf defines
-**three wallet pools**, each requiring an active and standby address:
+**three wallet groups**, each configured with an initial allocation and a small reserve:
 **3 x 2 x $2 = $12 USDC** for initial allocations. The treasury therefore needs
 **at least $12 worth of ZEC before fees; about $15 is a practical starting preload**.
 
@@ -184,15 +188,15 @@ target/release/x402_treazury wallet status --config examples/deployments/privacy
 ```
 
 Once `wallet status` shows sufficient confirmed spendable ZEC, fund the initial
-active and standby USDC wallets:
+initial USDC allocations and configured reserves:
 
 ```sh
 target/release/x402_treazury wallet bootstrap \
   --config examples/deployments/privacy.local.toml
 ```
 
-Bootstrap uses the configured funding limits and waits for confirmed USDC credit.
-Repeating it skips completed initial pairs and resumes unfinished funding work,
+Bootstrap uses actual spendable treasury funds under per-operation safeguards and waits for confirmed USDC credit to its captured initial and reserve claims.
+Repeating it observes current configured inventory and resumes unfinished funding work,
 including eligible automatic recovery. Prepared deposits that missed their quote
 window wait for verified transaction expiry before funding retries. For a single
 recovery pass with serving stopped, use `wallet recover --config FILE`; it reports
@@ -235,16 +239,41 @@ target/release/x402_treazury config show \
   --config examples/deployments/privacy.local.toml
 ```
 
-The example funds each new wallet with **2 USDC**, allows a bridge minimum up to
-**3 USDC**, and limits new allocations across all pools to **20 USDC per UTC day**.
-There is no lifetime funding cap; available funds in the Zcash treasury bound total
-funding. Individual API payments are capped separately at
-**0.05 USDC for web/social** and **0.10 USDC for company**. Conversion overhead is
-limited to **5%**; standard Zcash network fees are checked separately.
-These are wallet-funding allowances, not API-spending budgets. Pending transfers
-remain reserved across UTC days and restarts.
-See [funding limits](docs/wallet-rotation.md#funding-limits-and-fees) for the exact
-accounting and optional ZEC safeguards.
+The example requests **2 USDC** for initial active/small-reserve wallets and
+permits accepted bridge minimums up to **3 USDC**. Ordinary enabled funding uses
+actual spendable Zcash treasury funds after confirmations, reservations and fees;
+there is no daily or cumulative allocation setting. Individual payments remain
+capped at **0.05 USDC for web/social** and **0.10 USDC for company**.
+Conversion overhead is limited to **5%**, with separate per-transfer and network
+fee safeguards. Reservations and accepted transaction bytes survive restarts.
+
+Each group can optionally configure a larger reserve. Initial requested capital
+is `2*S + L` (or `2*S` without large), not total current holdings. Small-funded
+wallets offer cheap-call rotation opportunities; large reserves support occasional
+expensive calls. Retained balances remain usable, but cannot be combined for one
+payment. Larger wallets can still pay cheap calls, and reuse/network observations
+can link activity; reserve sizing does not guarantee privacy.
+
+Size the large reserve to at least twice the largest expected payment, preferably
+four times when prices vary. A $10 wallet paying $6 leaves $4 that cannot combine
+with other addresses for another $6 payment. With small $2/large $10, nine such
+calls and eight refills spend $54 from $94 gross allocation, leaving $40 spread
+across addresses. Valid learned prices can route cheap calls to smaller usable
+remainders; cold calls or unavailable evidence may stay on a sufficient large payer.
+No hint reuses a payment challenge or grants spending authority.
+
+Changes apply on reopen. A partially funded allocation stays unavailable for
+payments until its readiness requirement is satisfied, including while funding is
+paused. Explicit bootstrap waits for its captured initial and reserve jobs;
+ordinary serving requires one funded eligible payer. See [configuration and startup
+outcomes](docs/configuration.md) for claim ownership and accepted-operation limits.
+
+The default retirement tolerance is zero. `auto_fund=false` pauses new funding,
+not independently eligible retirement. Read [funding and retirement configuration](docs/configuration.md)
+before updating a local deployment. Old target/budget fields are rejected; wallet
+state conversion is separate from configuration. The inspected legacy source lacks
+immutable readiness proof and cannot be converted under the strict contract.
+Ordinary startup rejects legacy schemas before loading keys or mutating state.
 
 Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 
@@ -253,8 +282,8 @@ target/release/x402_treazury serve --config examples/deployments/privacy.local.t
 ```
 
 Serving handles discovery and subsequent wallet replacement funding automatically.
-If you skipped the explicit bootstrap command, serving also completes initial
-wallet funding before discovery.
+If you skipped explicit bootstrap, ordinary enabled serving waits for one funded
+eligible payer before discovery while the same owner continues reserve funding.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
@@ -291,10 +320,13 @@ pools from one template, avoiding repeated wallet definitions:
 ```toml
 [wallet_templates.small]
 mode = "zcash_rotation"
-funding_amount_usdc = "2.00"
 max_api_payment_usdc = "0.05"
+max_retirement_remainder_usdc = "0"
 max_funding_spend_zec = "0.006"
 max_conversion_overhead_percent = 5
+
+[wallet_templates.small.reserves.small]
+funding_amount_usdc = "2.00"
 
 [wallet_assignment]
 scope = "source" # deployment, server, source, or binding
@@ -304,7 +336,7 @@ template = "small"
 This is an alternative to explicit wallet assignments in the quickstart. Remove
 those assignments where you want the automatic policy to apply; explicit references
 retain priority. `config show` displays the resolved bindings and combined
-active-plus-standby target before allocating anything. That target excludes fees
+initial-inventory target before allocating anything. That target excludes fees
 and bridge-minimum increases.
 
 See [automatic wallets](examples/deployments/servers-auto-wallets.toml),
@@ -515,7 +547,7 @@ automated lifecycle/restart and combined funded cover qualification remain defer
 | --- | --- |
 | [Configuration](docs/configuration.md) | Sources, listeners, filters, pricing and transport options |
 | [Wallet CLI](docs/wallet-cli.md) | Treasury operations, funding limits and recovery |
-| [Wallet rotation](docs/wallet-rotation.md) | Admission, double buffering and durable accounting |
+| [Wallet rotation](docs/wallet-rotation.md) | Admission, reserve claims, retained capacity and durable accounting |
 | [Network isolation](docs/network-egress.md) | Tor identities, connection pools and egress boundaries |
 | [Development](docs/development.md) | Tests, coverage and complexity tools |
 | [Documentation index](docs/README.md) | Architecture, demos, plans and further references |

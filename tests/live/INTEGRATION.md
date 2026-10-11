@@ -12,6 +12,8 @@ directory read and 40 help fetch/hit calls. Provider failures are valid observat
 Full automated lifecycle/restart and combined cover/payment qualification are
 [deferred](../../docs/plans/deferred/live_integration_acceptance.md).
 
+Current lifecycle evidence uses schema 2: payment admission records the exact payer role and reserve claim, and READY consumption is separate from later refill allocation. Stable group generations do not count rotations; consumed slot generations do. Missing replacement or settlement observations remain incomplete. Historical reports remain readable and observation-only; they never authorize replay.
+
 ## 1. Build and review inputs
 
 Build the application and runner together; preparation pins their build identity.

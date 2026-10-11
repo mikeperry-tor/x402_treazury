@@ -19,7 +19,7 @@ fn binding(
     index: usize,
     before: &Value,
     after: &Value,
-) -> Result<String> {
+) -> Result<Option<String>> {
     let round = round(phase, index)?;
     ensure!(
         before["treasury_id"] == m.treasury_id,
@@ -32,7 +32,7 @@ fn binding(
         .filter(|p| p["name"] == round.pool);
     let pool = pools.next().context("selected rotation pool missing")?;
     ensure!(pools.next().is_none(), "ambiguous rotation pool name");
-    x402_treazury::qualification::lifecycle::promotion(
+    x402_treazury::qualification::lifecycle::consumed_reserve(
         before,
         after,
         pool["id"].as_str().context("rotation pool ID missing")?,
@@ -135,6 +135,7 @@ fn validate(db: &Connection, m: &Manifest, run: &str) -> Result<BTreeSet<String>
     let mut boundaries = BTreeSet::new();
     let mut skipped = BTreeSet::new();
     let mut jobs = BTreeSet::new();
+    let mut consumed = BTreeSet::new();
     let mut generations = std::collections::BTreeMap::new();
     for raw in rows {
         let event: Value = serde_json::from_str(&raw)?;
@@ -175,16 +176,38 @@ fn validate(db: &Connection, m: &Manifest, run: &str) -> Result<BTreeSet<String>
             (
                 pool["id"].clone(),
                 generation
-                    .checked_add(1)
+                    .checked_add(u64::from(event["before"]["schema_version"] != 2))
                     .context("rotation generation overflow")?,
             ),
         );
+        if let Some(job) = &job {
+            ensure!(
+                jobs.insert(job.clone()),
+                "replacement job reused across rotation boundaries"
+            );
+        }
+        if event["before"]["schema_version"] == 2 {
+            let after_pool = event["after"]["pools"]
+                .as_array()
+                .context("consumption pools missing")?
+                .iter()
+                .find(|p| p["id"] == pool["id"])
+                .context("consumption pool missing")?;
+            let payer = after_pool["addresses"]
+                .as_array()
+                .context("consumption inventory missing")?
+                .iter()
+                .find(|w| w["role"] == "ACTIVE")
+                .context("consumed payer missing")?["id"]
+                .as_str()
+                .context("consumed identity missing")?;
+            ensure!(
+                consumed.insert((round.pool.clone(), payer.to_owned())),
+                "reserve consumption reused across boundaries"
+            );
+        }
         ensure!(
-            jobs.insert(job.clone()),
-            "replacement job reused across rotation boundaries"
-        );
-        ensure!(
-            event["replacement_job"] == job,
+            event["replacement_job"] == json!(job),
             "promotion replacement evidence changed"
         );
         let ids: Vec<String> = serde_json::from_value(event["skipped"].clone())?;

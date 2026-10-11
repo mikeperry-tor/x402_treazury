@@ -32,11 +32,30 @@ fn selected<'a>(state: &'a Value, pool: &str, job: &str) -> Result<(&'a Value, &
             && wallet["target"] == selected_job["target"],
         "restart funding wallet binding differs"
     );
-    ensure!(
-        (wallet["role"] == "READY" && selected_job["phase"] == "COMPLETE")
-            || (wallet["role"] == "ALLOCATED" && pending(selected_job)),
-        "restart funding role/phase differs"
-    );
+    if state["schema_version"] == 2 {
+        ensure!(
+            (wallet["role"] == "READY" && wallet["destination_recorded"] == true)
+                || (wallet["role"] == "ALLOCATED" && pending(selected_job)),
+            "restart destination readiness differs"
+        );
+        let claim = selected_pool["reserve_claims"]
+            .as_array()
+            .context("restart reserve claims missing")?
+            .iter()
+            .find(|claim| claim["wallet_id"] == wallet["id"])
+            .context("restart replacement claim missing")?;
+        ensure!(
+            claim["enabled"] == true
+                && (wallet["role"] != "READY" || claim["destination_ready"] == true),
+            "restart claim not ready"
+        );
+    } else {
+        ensure!(
+            (wallet["role"] == "READY" && selected_job["phase"] == "COMPLETE")
+                || (wallet["role"] == "ALLOCATED" && pending(selected_job)),
+            "restart funding role/phase differs"
+        );
+    }
     Ok((selected_pool, selected_job))
 }
 

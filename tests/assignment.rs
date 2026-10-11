@@ -9,16 +9,17 @@ scope="{scope}"
 template="small"
 [wallet_templates.small]
 mode="zcash_rotation"
-funding_amount_usdc="5.000001"
+max_api_payment_usdc="1.00"
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
+[wallet_templates.small.reserves.small]
+funding_amount_usdc="5.000001"
 [treasury]
 id="11111111-1111-4111-8111-111111111111"
 state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [funding]
 base_rpc_url_env="BASE"
@@ -59,7 +60,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
         assert_eq!(shown["wallet_summary"]["managed_pool_count"], count);
         assert_eq!(shown["wallet_summary"]["generated_pool_count"], count);
         assert_eq!(
-            shown["wallet_summary"]["active_and_standby_target_usdc"],
+            shown["wallet_summary"]["initial_inventory_target_usdc"],
             capital
         );
         assert_eq!(
@@ -81,7 +82,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
         );
         let name = b["one"]["a"]["wallet"].as_str().unwrap();
         assert_eq!(
-            shown["resolved_wallets"][name]["funding_amount_usdc"],
+            shown["resolved_wallets"][name]["reserves"]["small"]["funding_amount_usdc"],
             "5.000001"
         );
         assert!(!dir.path().join("state").exists());
@@ -123,7 +124,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     assert!(
         String::from_utf8(output.stdout)
             .unwrap()
-            .contains("4 managed pools (4 automatic); active + standby target: 40.000008 USDC")
+            .contains("4 managed pools (4 automatic); initial inventory target: 40.000008 USDC")
     );
     assert!(!dir.path().join("state").exists());
 }
@@ -142,14 +143,18 @@ mode='static'
 private_key_env='SERVER_KEY'
 [wallets.unused_managed]
 mode='zcash_rotation'
-funding_amount_usdc='3'
+max_api_payment_usdc='1'
 max_funding_spend_zec='0.01'
 max_conversion_overhead_percent=1
+[wallets.unused_managed.reserves.small]
+funding_amount_usdc='3'
 [wallet_templates.unused]
 mode='zcash_rotation'
-funding_amount_usdc='100'
+max_api_payment_usdc='1'
 max_funding_spend_zec='0.1'
 max_conversion_overhead_percent=1
+[wallet_templates.unused.reserves.small]
+funding_amount_usdc='100'
 "#;
     let shown = show(dir.path(), &text).await;
     assert_eq!(
@@ -167,7 +172,7 @@ max_conversion_overhead_percent=1
     assert_eq!(shown["wallet_summary"]["generated_pool_count"], 1);
     assert_eq!(shown["wallet_summary"]["managed_pool_count"], 2);
     assert_eq!(
-        shown["wallet_summary"]["active_and_standby_target_usdc"],
+        shown["wallet_summary"]["initial_inventory_target_usdc"],
         "16.000002"
     );
     let text = config("source")
@@ -192,7 +197,11 @@ async fn identities_ignore_template_edits_paths_order_and_avoid_binding_collisio
     let other = tempfile::tempdir().unwrap();
     let first = show(dir.path(), &config("source")).await;
     let edited = config("source")
-        .replace("small", "renamed_template")
+        .replace(
+            "wallet_templates.small",
+            "wallet_templates.renamed_template",
+        )
+        .replace("template=\"small\"", "template=\"renamed_template\"")
         .replace("5.000001", "7")
         .replace("sources=[\"a\",\"b\"]", "sources=[\"b\",\"a\"]");
     let next = show(other.path(), &edited).await;
@@ -246,6 +255,48 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
 }
 
 #[cfg(feature = "zcash")]
+async fn seed_managed_inventory(
+    shown: &Value,
+    state: &std::path::Path,
+    key: &std::path::Path,
+    id: &str,
+    rpc: Option<&str>,
+) {
+    use x402_treazury::rotation::{
+        base::BaseRpc,
+        config::ReservesConfig,
+        store::{AllocationKind, Store},
+    };
+    let mut store = Store::open(state, key, id).unwrap();
+    for (name, profile) in shown["resolved_wallets"].as_object().unwrap() {
+        if profile["mode"] != "zcash_rotation" {
+            continue;
+        }
+        let reserves: ReservesConfig = serde_json::from_value(profile["reserves"].clone()).unwrap();
+        let cap = x402_treazury::payment::SpendPolicy::dollars(
+            profile["max_api_payment_usdc"].as_str().unwrap(),
+        )
+        .unwrap()
+        .max_atomic;
+        let pool = store
+            .ensure_capacity_group(name, &reserves, cap, 0)
+            .unwrap();
+        for kind in [AllocationKind::Initial, AllocationKind::Small] {
+            store.allocate_capacity_kind(&pool, kind, true).unwrap();
+        }
+        if let Some(rpc) = rpc {
+            let query = store.chain_query(&pool).unwrap();
+            let view = BaseRpc::new(rpc, 12, 120)
+                .unwrap()
+                .view(query)
+                .await
+                .unwrap();
+            store.reconcile_pool(&pool, view).unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
     use x402_treazury::{rotation::store::status, treasury::Treasury};
@@ -258,10 +309,16 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
         r#"{"servers":[{"url":"https://example.invalid"}],"paths":{"/pay":{"get":{}}}}"#,
     )
     .unwrap();
-    let base = config("source").replace("11111111-1111-4111-8111-111111111111", &id);
+    let base = config("source")
+        .replace("11111111-1111-4111-8111-111111111111", &id)
+        .replace("[funding]", "[funding]\nauto_fund=false");
     let edited = base
         .replace("5.000001", "7")
-        .replace("small", "another_template");
+        .replace(
+            "wallet_templates.small",
+            "wallet_templates.another_template",
+        )
+        .replace("template=\"small\"", "template=\"another_template\"");
     let added = edited.replace("sources=[\"a\",\"b\"]", "sources=[\"a\",\"b\",\"c\"]")
         + "\n[sources.c]\nspec='spec.json'\nprobe_pricing=false\n";
     let scopes = [
@@ -282,11 +339,28 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
     let mut addresses = Vec::new();
     for (phase, text) in scopes.iter().enumerate() {
         std::fs::write(&path, text).unwrap();
+        if phase == 0 {
+            let shown = Deployment::show_config(&path).await.unwrap();
+            seed_managed_inventory(
+                &shown,
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &id,
+                None,
+            )
+            .await;
+        }
+        let before = status(&dir.path().join("state")).unwrap();
         let deployment = Deployment::load(&path).await.unwrap();
         let expected = [2, 2, 3, 6, 2][phase];
         assert_eq!(deployment.wallet_summary().managed_pool_count, expected);
         let running = deployment.bind(&env).await.unwrap();
         let state = status(&dir.path().join("state")).unwrap();
+        assert_eq!(
+            state.funding_jobs.len(),
+            before.funding_jobs.len(),
+            "paused declaration/reopen cannot allocate"
+        );
         assert_eq!(state.pools.iter().filter(|p| p.enabled).count(), expected);
         let a = state
             .pools
@@ -311,7 +385,14 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
         );
         assert!(a.addresses.iter().all(|a| a.target == "5000001"));
         if phase == 1 {
-            assert_eq!(a.deposit_atomic, "7000000");
+            assert_eq!(
+                a.reserve_claims
+                    .iter()
+                    .find(|c| c.slot == "small")
+                    .unwrap()
+                    .target_atomic,
+                "7000000"
+            );
         }
         if phase == 3 {
             assert!(!a.enabled);
@@ -357,7 +438,12 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
             "eth_chainId" => json!("0x2105"),
             "eth_getBlockByNumber" => {
                 let tag = request["params"][0].as_str().unwrap();
-                json!({"number":if tag=="latest" {"0x100"} else {tag},"timestamp":format!("0x{:x}",now().unwrap()),"hash":format!("0x{:064x}",7)})
+                let height = if tag == "latest" {
+                    256
+                } else {
+                    u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
+                };
+                json!({"number":format!("0x{height:x}"),"timestamp":format!("0x{:x}",now().unwrap()),"hash":format!("0x{height:064x}")})
             }
             "eth_call" => {
                 let data = request["params"][0]["data"].as_str().unwrap();
@@ -430,7 +516,20 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
         };
         let path = dir.path().join("servers.toml");
         std::fs::write(&path, text).unwrap();
+        let paused = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("[funding]", "[funding]\nauto_fund=false");
+        std::fs::write(&path, paused).unwrap();
         let shown = Deployment::show_config(&path).await.unwrap();
+        seed_managed_inventory(
+            &shown,
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &id,
+            Some(&format!("{base}/rpc")),
+        )
+        .await;
+        let seeded = status(&dir.path().join("state")).unwrap();
         let running = Deployment::load(&path)
             .await
             .unwrap()
@@ -445,6 +544,11 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
             .await
             .unwrap();
         let state = status(&dir.path().join("state")).unwrap();
+        assert_eq!(
+            state.funding_jobs.len(),
+            seeded.funding_jobs.len(),
+            "paused bind cannot allocate"
+        );
         let ports = running.addresses();
         let stop = tokio_util::sync::CancellationToken::new();
         let serve = tokio::spawn(running.serve(stop.clone()));
@@ -499,4 +603,33 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
     }
     assert_eq!(signed.lock().unwrap().len(), 20);
     task.abort();
+}
+
+#[tokio::test]
+async fn initial_inventory_summary_includes_optional_large_once_per_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = config("deployment").replace(
+        "[treasury]",
+        "[wallet_templates.small.reserves.large]\nfunding_amount_usdc='10'\n[treasury]",
+    );
+    let shown = show(dir.path(), &text).await;
+    assert_eq!(
+        shown["wallet_summary"]["initial_inventory_target_atomic"],
+        "20000002"
+    );
+    assert_eq!(
+        shown["wallet_summary"]["initial_inventory_target_usdc"],
+        "20.000002"
+    );
+    assert!(
+        shown["wallet_summary"]
+            .get("active_and_standby_target_atomic")
+            .is_none()
+    );
+    assert!(
+        shown["wallet_summary"]
+            .get("active_and_standby_target_usdc")
+            .is_none()
+    );
+    assert!(!dir.path().join("state").exists());
 }

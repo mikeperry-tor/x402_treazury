@@ -912,7 +912,14 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         b"fixture",
     )
     .unwrap();
-    let pool = store.ensure_pool("shared", "5").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        store,
+        "shared",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let before = serde_json::to_value(store.status().unwrap()).unwrap();
     let (store, worker) = StoreHandle::spawn(store);
     let managed = PaidClient::managed(Arc::new(
@@ -920,7 +927,6 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
             store.clone(),
             pool,
             BaseRpc::new("http://127.0.0.1:1/rpc", 12, 120).unwrap(),
-            "5",
             SpendPolicy::dollars("0.01").unwrap(),
         )
         .unwrap(),

@@ -38,44 +38,43 @@ impl Store {
     }
 }
 pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> {
-    let mut payment: Value = db.query_row("SELECT a.id,a.pool_id,p.name,a.wallet_id,a.generation,a.amount,a.requirements_hash,w.address,w.balance,w.block_height,w.block_hash FROM payment_attempts a JOIN pools p ON p.id=a.pool_id JOIN wallets w ON w.id=a.wallet_id WHERE a.id=?1 AND a.state='POSSIBLY_SUBMITTED' AND EXISTS (SELECT 1 FROM payment_admission_evidence e WHERE e.attempt_id=a.id)", [attempt], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"pool_name":r.get::<_,String>(2)?,"wallet":r.get::<_,String>(3)?,"generation":r.get::<_,i64>(4)?,"amount":r.get::<_,String>(5)?,"requirements_hash":r.get::<_,String>(6)?,"address":r.get::<_,String>(7)?,"balance_evidence":{"confirmed_balance_atomic":r.get::<_,String>(8)?,"block_height":r.get::<_,Option<i64>>(9)?,"block_hash":r.get::<_,Option<String>>(10)?}})))?;
-    // Called synchronously in the same store-worker command as admission,
-    // with the pool gate still held. Include this committed reservation and
-    // every earlier unresolved authorization; capture before releasing the group gate.
-    let wallet = payment["wallet"]
-        .as_str()
-        .context("admitted wallet missing")?;
-    let mut query =
-        db.prepare("SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'")?;
-    let after = query
-        .query_map([wallet], |r| r.get::<_, String>(0))?
-        .try_fold(U256::ZERO, |sum, value| -> Result<U256> {
-            sum.checked_add(amount(&value?)?)
-                .context("admission accounting reservation overflow")
-        })?;
+    let mut payment: Value = db.query_row("SELECT a.id,a.pool_id,p.name,a.wallet_id,a.generation,a.amount,a.requirements_hash,w.address,e.balance,e.block_height,e.block_hash,e.reserved_before,e.valid_until,e.support,e.payer_role,e.reserve_slot,e.claim_generation FROM payment_attempts a JOIN pools p ON p.id=a.pool_id JOIN wallets w ON w.id=a.wallet_id JOIN payment_admission_evidence e ON e.attempt_id=a.id WHERE a.id=?1 AND a.state='POSSIBLY_SUBMITTED'", [attempt], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"pool_name":r.get::<_,String>(2)?,"wallet":r.get::<_,String>(3)?,"generation":r.get::<_,i64>(4)?,"amount":r.get::<_,String>(5)?,"requirements_hash":r.get::<_,String>(6)?,"address":r.get::<_,String>(7)?,"balance_evidence":{"confirmed_balance_atomic":r.get::<_,String>(8)?,"block_height":r.get::<_,Option<i64>>(9)?,"block_hash":r.get::<_,Option<String>>(10)?,"reserved_before_atomic":r.get::<_,String>(11)?,"valid_until":r.get::<_,String>(12)?,"support":r.get::<_,Option<String>>(13)?},"payer_role":r.get::<_,String>(14)?,"reserve_slot":r.get::<_,Option<String>>(15)?,"claim_generation":r.get::<_,Option<i64>>(16)?})))?;
+    // The journal captured these exact values under the same group gate. Reading
+    // its keyed record never scans historical liabilities or substitutes a newer
+    // mutable wallet snapshot for the original admission support.
     let cost = amount(
         payment["amount"]
             .as_str()
             .context("admitted amount missing")?,
     )?;
+    let evidence = &mut payment["balance_evidence"];
+    let before = amount(
+        evidence["reserved_before_atomic"]
+            .as_str()
+            .context("admitted prior exposure missing")?,
+    )?;
+    let after = before
+        .checked_add(cost)
+        .context("admission accounting reservation overflow")?;
     let balance = amount(
-        payment["balance_evidence"]["confirmed_balance_atomic"]
+        evidence["confirmed_balance_atomic"]
             .as_str()
             .context("admitted balance missing")?,
     )?;
-    payment["balance_evidence"]["reserved_before_atomic"] = json!(
-        after
-            .checked_sub(cost)
-            .context("admission accounting missing current reservation")?
-            .to_string()
-    );
-    payment["balance_evidence"]["reserved_after_atomic"] = json!(after.to_string());
-    payment["balance_evidence"]["available_after_atomic"] = json!(
+    evidence["reserved_after_atomic"] = json!(after.to_string());
+    evidence["available_after_atomic"] = json!(
         balance
             .checked_sub(after)
-            .context("admission accounting exceeds confirmed balance")?
+            .context("admission accounting exceeds observed balance")?
             .to_string()
     );
+    if let Some(encoded) = evidence["support"].as_str() {
+        let support: super::evidence::BalanceSupport =
+            serde_json::from_str(encoded).context("malformed exact admission support")?;
+        support.observation.validate()?;
+        evidence["support"] = serde_json::to_value(support)?;
+    }
+    payment["ownership_evidence_version"] = json!(1);
     crate::qualification::validate_admission_balance(&payment)?;
     payment["lifecycle"] = lifecycle(&read_status(db)?)?;
     Ok(payment)
@@ -102,7 +101,7 @@ fn lifecycle(status: &Status) -> Result<Value> {
         })
         .collect();
     Ok(
-        json!({"treasury_id":status.treasury_id,"pools":status.pools,
+        json!({"schema_version":status.schema_version,"state_schema_version":status.state_schema_version,"treasury_id":status.treasury_id,"pools":status.pools,
             "funding_jobs":jobs,"source_operations":operations}),
     )
 }
@@ -207,7 +206,7 @@ mod tests {
         assert!(log.contains("qualification snapshot exceeds row limit"));
     }
     #[test]
-    fn admission_evidence_counts_all_unresolved_exposure_and_pins_its_balance() {
+    fn admission_evidence_pins_original_exposure_balance_and_ownership() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::create(
             &dir.path().join("state"),
@@ -216,7 +215,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = store.ensure_pool("pool", "100").unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "pool",
+            crate::rotation::test_capacity::small_reserve("100"),
+            Some(U256::from(100000000u64)),
+            0
+        )
+        .unwrap();
         let wallet = store.status().unwrap().pools[0].addresses[0].id.clone();
         let snapshot = store.qualification_state().unwrap();
         assert!(
@@ -244,7 +250,7 @@ mod tests {
         store
             .db
             .execute(
-                "INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until) VALUES ('new',12,?1,'100','10','1000')",
+                "INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,payer_role) VALUES ('new',12,?1,'100','10','1000','ACTIVE')",
                 [&hash],
             )
             .unwrap();
@@ -259,6 +265,10 @@ mod tests {
         assert_eq!(saved["height"], 12);
         assert_eq!(saved["hash"], hash);
         let evidence = store.qualification_payment("new").unwrap();
+        assert_eq!(evidence["ownership_evidence_version"], 1);
+        assert_eq!(evidence["payer_role"], "ACTIVE");
+        assert!(evidence["reserve_slot"].is_null());
+        assert!(evidence["claim_generation"].is_null());
         assert_eq!(store.qualification_exposure(&pool).unwrap()[&wallet], "17");
         assert_eq!(
             evidence["lifecycle"]["funding_jobs"]
@@ -283,7 +293,7 @@ mod tests {
         );
         assert_eq!(
             evidence["balance_evidence"],
-            json!({"confirmed_balance_atomic":"100","reserved_before_atomic":"10","reserved_after_atomic":"17","available_after_atomic":"83","block_height":12,"block_hash":hash})
+            json!({"confirmed_balance_atomic":"100","reserved_before_atomic":"10","reserved_after_atomic":"17","available_after_atomic":"83","block_height":12,"block_hash":hash,"support":null,"valid_until":"1000"})
         );
         assert!(store.qualification_payment("pending").is_err());
         store
@@ -293,7 +303,10 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(store.qualification_payment("new").is_err());
+        assert_eq!(
+            store.qualification_payment("new").unwrap()["balance_evidence"],
+            evidence["balance_evidence"]
+        );
         store
             .db
             .execute(
@@ -303,14 +316,28 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.qualification_payment("new").unwrap()["balance_evidence"]["available_after_atomic"],
-            "93"
+            "83"
         );
         assert_eq!(store.qualification_exposure(&pool).unwrap()[&wallet], "7");
         store
             .db
             .execute("UPDATE wallets SET block_hash=NULL WHERE id=?1", [wallet])
             .unwrap();
-        assert!(store.qualification_payment("new").is_err());
+        assert_eq!(
+            store.qualification_payment("new").unwrap()["balance_evidence"],
+            evidence["balance_evidence"]
+        );
+        store
+            .db
+            .execute(
+                "UPDATE payment_admission_evidence SET reserved_before='94' WHERE attempt_id='new'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            store.qualification_payment("new").is_err(),
+            "corrupted original support cannot justify the admitted payment"
+        );
     }
     #[test]
     fn canonical_resolution_is_atomic_immutable_and_survives_reopen() {
@@ -319,7 +346,14 @@ mod tests {
         let key = dir.path().join("key");
         let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
         let treasury = store.id().to_owned();
-        let pool = store.ensure_pool("pool", "1").unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "pool",
+            crate::rotation::test_capacity::small_reserve("1"),
+            Some(U256::from(1000000u64)),
+            0
+        )
+        .unwrap();
         let wallets = store.status().unwrap().pools.remove(0).addresses;
         for (id, wallet) in ["used", "expired"].into_iter().zip(&wallets) {
             store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES(?1,?2,?3,0,'1','hash','POSSIBLY_SUBMITTED')",

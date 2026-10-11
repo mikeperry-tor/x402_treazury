@@ -12,6 +12,7 @@ use std::{
 use tokio::sync::{Mutex, OnceCell, Semaphore};
 
 mod evidence;
+pub(crate) mod runtime;
 pub use evidence::{CachePath, Evidence, Outcome, Price, price_map};
 struct CachedProbe {
     created: Instant,

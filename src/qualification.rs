@@ -13,6 +13,7 @@ pub mod funding;
 pub use debit::{receipt_expectation, reconcile_debit};
 mod payment;
 pub(crate) use payment::PaymentContext;
+pub(crate) use payment::{capture_case, inherit_case};
 mod pricing;
 mod receipt;
 pub use payment::{HelpCache, payment_context, record_challenge, record_help, unsigned_case};

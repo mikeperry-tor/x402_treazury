@@ -1,6 +1,13 @@
+# Reserve sizes are funding preferences; the explicit group cap governs every wallet.
+# Initial active funding uses small; refill vacant slots small-first. Retained balances stay usable.
+# auto_fund=false pauses new funding, not eligible automatic retirement.
+# Size optional large to at least 2x expected maximum payment (prefer 4x); this is not a payment cap.
+# Partial allocations cannot pay until full readiness; accepted insufficient work stays owned.
+# Startup accepts any funded eligible payer; explicit bootstrap waits its captured initial/slot jobs.
+# Partial credited allocations retain their claims until full readiness; accepted work stays owned.
 # Initialize the treasury first; build the server with scripts/zcash.sh.
-# This example creates two pools, each targeting 5 USDC active + 5 USDC standby.
-# Serving funds the initial pairs and subsequent replacements within the limits below.
+# This example creates two pools, each targeting 5 USDC active + 5 USDC small reserve.
+# Serving funds the initial inventories and subsequent replacements under actual spendable treasury capacity and per-operation safeguards.
 version = 1
 
 [wallet_assignment]
@@ -9,20 +16,19 @@ template = "small"
 
 [wallet_templates.small]
 mode = "zcash_rotation"
-funding_amount_usdc = "5.00"
+max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
 max_api_payment_usdc = "1.00"
 max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 
+[wallet_templates.small.reserves.small]
+funding_amount_usdc = "5.00"
+
 [treasury]
 state_dir = "../../state/treasury"
-daily_treasury_spend_limit_zec = "0.10"
 max_refund_shielding_fee_zec = "0.001"
 
 [funding]
-# Gross USDC allocated across bootstrap and replacements; not API spending.
-daily_funding_limit_usdc = "30.00"
-total_funding_limit_usdc = "100.00"
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
 base_rpc_url_env = "BASE_RPC_URL"
 confidentiality = "public" # No NEAR signup; public settlement.

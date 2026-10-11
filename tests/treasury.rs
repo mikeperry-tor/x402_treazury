@@ -1,4 +1,6 @@
 #![cfg(feature = "zcash")]
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 use x402_treazury::treasury::Treasury;
 use zeroize::Zeroizing;
 const SEED: &str =
@@ -24,10 +26,15 @@ async fn encrypted_zingolib_treasury_restores_addresses_and_pool_keys_offline() 
         serde_json::json!(["orchard", "ironwood"])
     );
     assert!(before[0].get("has_orchard").is_none());
-    wallet
-        .ensure_pool("research".into(), "5.00".into())
-        .await
-        .unwrap();
+    crate::capacity_fixture::treasury_pair(
+        &wallet,
+        "research",
+        "5.00",
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0,
+    )
+    .await
+    .unwrap();
     let pool = wallet.status().await.unwrap().pools[0].id.clone();
     wallet.close().await.unwrap();
     let mut wallet = Treasury::open(state.clone(), key.clone(), id)
@@ -35,10 +42,15 @@ async fn encrypted_zingolib_treasury_restores_addresses_and_pool_keys_offline() 
         .unwrap();
     assert_eq!(wallet.addresses().await.unwrap(), before);
     assert_eq!(
-        wallet
-            .ensure_pool("research".into(), "5".into())
-            .await
-            .unwrap(),
+        crate::capacity_fixture::treasury_pair(
+            &wallet,
+            "research",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .await
+        .unwrap(),
         pool
     );
     assert_ne!(wallet.derive_address().await.unwrap(), before);

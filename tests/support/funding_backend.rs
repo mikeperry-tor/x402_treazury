@@ -17,12 +17,19 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         b"fixture",
     )
     .unwrap();
-    store.ensure_pool("pool", "5").unwrap();
+    crate::rotation::store::test_support::declare_and_allocate(
+        &mut store,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
     let job = store.funding_jobs().unwrap().remove(0);
     let (store, worker) = StoreHandle::spawn(store);
     let (treasury, mut commands) = actor::channel();
     let policy = || {
-        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","funding_amount_usdc":"5","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap()
+        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap()
     };
     let mut backend = Backend {
         treasury,
@@ -31,10 +38,9 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
         wallets: std::collections::BTreeMap::from([("pool".into(), policy())]),
         funding: serde_json::from_value(
-            json!({"base_rpc_url_env":"BASE","confidentiality":"public", "daily_funding_limit_usdc":"10", "total_funding_limit_usdc":"15"}),
+            json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
         )
         .unwrap(),
-        daily_limit: 1_000_000,
         max_network_fee: 30_000,
     };
     let request = super::super::near::request(
@@ -139,10 +145,6 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert_eq!(prepared.amount_zatoshis, 100000);
     assert_eq!(prepared.max_fee_zatoshis, 30000);
     assert_eq!(prepared.max_input_zatoshis, 130000);
-    assert_eq!(prepared.daily_limit_zatoshis, 1_000_000);
-    let allocation = prepared.allocation_limits.unwrap();
-    assert_eq!(allocation.daily, Some(10_000_000));
-    assert_eq!(allocation.total, Some(15_000_000));
     assert_eq!(
         before,
         serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
@@ -191,7 +193,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .call(move |s| {
             s.save_funding_quote(&j.id, &bytes)?;
             s.advance_funding(&j.id, FundingPhase::Quoted, FundingPhase::Preparing)?;
-            s.reserve(&j.operation_id, Some(&j.pool_id), 1, 200000, 1_000_000)?;
+            s.reserve(&j.operation_id, Some(&j.pool_id), 1, 200000)?;
             let revision = s.snapshot()?.0;
             s.prepare_with_facts(
                 &j.operation_id,
@@ -599,7 +601,27 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     owner.configure_sync(
         crate::treasury::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
     );
-    owner.ensure_pool("pool".into(), "5".into()).await.unwrap();
+    let pool = owner
+        .ensure_capacity_group(
+            "pool".into(),
+            crate::rotation::store::test_support::reserves("5"),
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(
+            pool.clone(),
+            crate::rotation::store::AllocationKind::Initial,
+            true,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, crate::rotation::store::AllocationKind::Small, true)
+        .await
+        .unwrap();
     let store = owner.store_handle();
     let job = store
         .call(|s| Ok(s.funding_jobs()?.remove(0)))
@@ -626,9 +648,9 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     let backend = Backend {
         treasury, store: store.clone(), near: super::super::near::NearClient::test_at(&origin).unwrap(),
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1",12,120).unwrap(),
-        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","funding_amount_usdc":"5","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())].into(),
-        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public","daily_funding_limit_usdc":"10"})).unwrap(),
-        daily_limit: 1_000_000, max_network_fee: 30_000,
+        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())].into(),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
+        max_network_fee: 10000,
     };
     let expected = job.clone();
     let prerequisite = tokio::spawn(async move {

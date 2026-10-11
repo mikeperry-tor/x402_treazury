@@ -177,7 +177,7 @@ serving. Keep these modes in the shared Clap tree; only `serve` accepts listener
 authentication and supervised funding options. Wallet commands
 accept the same deployment file without loading catalogs or requiring listener
 tokens. `wallet bootstrap` also consumes wallet assignments/funding settings and
-funds initial managed pairs; other wallet administration never starts funding
+funds the captured initial allocation and enabled reserve claims; other wallet administration never starts funding
 workers. `wallet recover --config FILE` performs one recovery pass without new
 allocations or submissions. Bootstrap/automatic funding share its eligibility logic:
 known unprepared failures or canonically expired signed operations only; uncertain
@@ -417,7 +417,7 @@ and [the runtime architecture](docs/architecture.md).
   never revalidate through Curl, use outer relay headers or persist challenges.
   Serving initializes wallets before relay catalog I/O; warming denies funding and
   opens only resolved wallets for selected sources. Ordinary managed serving with
-  auto_fund bootstraps initial pairs before discovery via the same supervised path
+  auto_fund establishes a funded eligible payer before discovery via the same supervised path
   as `wallet bootstrap`; qualification restrictions preserve their existing lifecycle.
   Ordinary inspection remains unsigned; qualification cannot invoke paid relays.
 - HTTP MCP is stateless and uses SSE responses with two-second keepalive comments,
@@ -447,21 +447,28 @@ issue tags and must record the exclusions; this does not change runtime selectio
 
 ## Configuration, treasury and financial ownership
 
-Managed profiles use `funding_amount_usdc`, `max_funding_amount_usdc`,
-`max_api_payment_usdc` and integer `max_conversion_overhead_percent`. An omitted
-maximum funding amount permits no increase above the target. Managed profiles
-preserve the historical target payment ceiling by default; explicit
-limit_payments_to_funding_target=false uses the API cap and active confirmed
-capacity minus liabilities. Opaque offer annotations cannot veto valid authority
-fields or change the exact JSON accepted by the signer. The funding-capital policy is
-actual spendable treasury funds after confirmations, reservations/liabilities and fees.
-`daily_funding_limit_usdc`, `total_funding_limit_usdc` and
-`daily_treasury_spend_limit_zec`, including the aggregate-budget requirement, are
-obsolete policy slated for removal wherever still implemented. This guidance settles
-the policy now; it does not claim that runtime/configuration removal has shipped.
-Do not adapt or replace their enforcement for new features. Remove them with explicit
-obsolete-field diagnostics and consistent configuration/documentation updates rather
-than silently ignoring configured values. Preserve original authenticated quotes,
+Managed profiles require explicit `max_api_payment_usdc`, `reserves.small` and
+optional `reserves.large`; each reserve has a target and optional maximum output.
+An omitted maximum permits no increase above target. Targets do not cap payments.
+`max_retirement_remainder_usdc` defaults to zero; eligible retirement is independent
+of new-funding permission. Consult [configuration](docs/configuration.md),
+[wallet lifecycle](docs/wallet-rotation.md) and [wallet recovery](docs/wallet-cli.md)
+for exact claim ownership, evidence, completion and stopped-service repair contracts.
+The removed `wallet pool` command grants no allocation authority. The narrow known-
+source migration preflight rejects missing immutable readiness support before mutation;
+ordinary recovery does not convert state or adopt unexplained obligations.
+
+Before proposing late payer selection, per-invocation network isolation or cached-
+challenge reuse, consult [Wallet selection and network isolation](docs/architecture.md#wallet-selection-and-network-isolation).
+Connection pooling, cover-state reuse and isolated Tor reuse are chosen priorities.
+Runtime hints predict amounts only; fresh challenges and final durable admission
+remain authoritative. Opaque offer annotations cannot change signed authority.
+
+Funding capital is actual spendable treasury funds after confirmations,
+reservations/liabilities and fees. `daily_funding_limit_usdc`,
+`total_funding_limit_usdc` and `daily_treasury_spend_limit_zec` are removed and
+rejected with migration guidance. Do not reintroduce equivalent aggregate limits.
+Preserve original authenticated quotes,
 source journals, archived operations and exact accounting/reservations. Missing
 history needed to establish actual liabilities fails closed. UTC rollover and gross
 historical allocations do not define funding authority. Canonical completion,

@@ -1,5 +1,7 @@
 #![cfg(feature = "zcash")]
 use anyhow::Result;
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -132,7 +134,7 @@ impl FundingBackend for Fake {
         self.store
             .call(move |s| {
                 s.begin_funding_preparation(&id, Some(&authority))?;
-                s.reserve(&id, Some(&pool), 1, 100, 1000)?;
+                s.reserve(&id, Some(&pool), 1, 100)?;
                 let revision = s.snapshot()?.0;
                 s.prepare_with_facts(
                     &id,
@@ -197,7 +199,14 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
         b"seed",
     )
     .unwrap();
-    s.ensure_pool("a", "5").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0
+    )
+    .unwrap();
     let jobs = s.funding_jobs().unwrap();
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
@@ -288,7 +297,14 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
         b"seed",
     )
     .unwrap();
-    let pool = s.ensure_pool("a", "5").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0
+    )
+    .unwrap();
     let jobs = s.funding_jobs().unwrap();
     let job = &jobs[0];
     s.save_funding_quote(
@@ -305,8 +321,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
         x402_treazury::rotation::store::funding::FundingPhase::Preparing,
     )
     .unwrap();
-    s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
-        .unwrap();
+    s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
     s.prepare_with_facts(
         &job.operation_id,
         1,
@@ -372,7 +387,14 @@ async fn fixture() -> (
         b"seed",
     )
     .unwrap();
-    s.ensure_pool("a", "5").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0
+    )
+    .unwrap();
     let jobs = s.funding_jobs().unwrap();
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
@@ -810,6 +832,21 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
 async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
     let (_dir, worker, task) = fixture().await;
     worker.backend.lock().await.minimum = Some("6000000".into());
+    worker
+        .store
+        .call(|s| {
+            let pool = s.status()?.pools[0].id.clone();
+            let mut reserves = capacity_fixture::small_reserve("5");
+            reserves.small.max_funding_amount_usdc = Some("6".into());
+            s.configure_capacity_group(
+                &pool,
+                Some(alloy_primitives::U256::from(1_000_000)),
+                0,
+                &reserves,
+            )
+        })
+        .await
+        .unwrap();
     let now = x402_treazury::rotation::base::now().unwrap();
     worker.tick(now).await.unwrap();
     let state = worker.store.call(|s| s.status()).await.unwrap();
@@ -927,7 +964,14 @@ async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() 
             b"fixture",
         )
         .unwrap();
-        let pool = s.ensure_pool("a", "5").unwrap();
+        let pool = crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "a",
+            crate::capacity_fixture::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0
+        )
+        .unwrap();
         let jobs = s.funding_jobs().unwrap();
         for j in &jobs {
             s.defer_funding(
@@ -987,7 +1031,14 @@ async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() 
         );
         s.defer_funding(&jobs[0].id, 202, None, false).unwrap();
         assert!(s.funding_jobs().unwrap()[0].last_error.is_none());
-        s.ensure_pool("b", "5").unwrap();
+        crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "b",
+            crate::capacity_fixture::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0
+        )
+        .unwrap();
         let pending = s
             .funding_jobs()
             .unwrap()
@@ -1014,9 +1065,9 @@ async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() 
 }
 
 #[tokio::test]
-async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wallets() {
+async fn in_flight_credit_completion_cannot_overwrite_reconciled_wallets() {
     use x402_treazury::rotation::store::funding::FundingPhase;
-    for promote_again in [false, true] {
+    for disable_group in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Store::create(
             &dir.path().join("state"),
@@ -1025,16 +1076,22 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
             b"fixture",
         )
         .unwrap();
-        let pool = s.ensure_pool("a", "5").unwrap();
+        let pool = crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "a",
+            crate::capacity_fixture::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0
+        )
+        .unwrap();
         for j in s.funding_jobs().unwrap() {
             rpc_evidence::credit(&mut s, &j.wallet_id, "5000000", 13).unwrap();
         }
-        s.promote(&pool, 0).unwrap();
         let job = s
             .funding_jobs()
             .unwrap()
             .into_iter()
-            .find(|j| j.phase != FundingPhase::Complete)
+            .find(|j| j.phase == FundingPhase::Complete)
             .unwrap();
         let (store, worker) = StoreHandle::spawn(s);
         let (started, ready) = tokio::sync::oneshot::channel();
@@ -1068,8 +1125,8 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
         store
             .call(move |s| {
                 s.reconcile_pool(&p, view)?;
-                if promote_again {
-                    s.promote(&p, 1)?;
+                if disable_group {
+                    s.disable_pool("a")?;
                 }
                 Ok(())
             })

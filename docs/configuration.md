@@ -15,7 +15,7 @@ subcommand; running it without arguments displays help and never starts serving.
 | `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
 | `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
 | `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices or funding |
-| `wallet bootstrap --config FILE` | Fund initial managed pairs before discovery, without listeners; requires `auto_fund=true` |
+| `wallet bootstrap --config FILE` | Fund initial managed allocations and captured reserve claims, without listeners; requires `auto_fund=true` |
 | `wallet ...` | Administer the treasury |
 | `sources inspect --config FILE` | Read persisted agent-added source records |
 | `build-info` | Print build identity and provenance |
@@ -34,9 +34,10 @@ Ordinary deployment examples live in `examples/deployments/`, standalone network
 `examples/network/`, and reusable APIs in `providers/`. Paths resolve from the file
 that declares them. Existing user-owned local copies are not moved automatically.
 
-Managed serving confirms initial wallet pairs before discovery, then runs automatic
-replacement funding. `wallet bootstrap --config FILE` performs initial funding
-without catalogs or listeners. Explicitly set
+Ordinary enabled managed serving confirms one eligible funded payer before discovery;
+the same owner continues reserve and replacement funding. `wallet bootstrap --config FILE`
+waits for its captured initial allocations and enabled reserve claims without catalogs
+or listeners. Explicitly set
 `funding.auto_fund = false` to pause it. Merely inspecting a config or compiling
 Zcash support does not spend funds. Source limits remain required. See the
 [wallet defaults and commands](wallet-cli.md#one-configuration-for-wallet-commands).
@@ -227,7 +228,7 @@ isolation, create separate source aliases extending the same provider and assign
 different wallet names; provider files describe APIs, while deployments choose
 payment identities. Sharing scope controls wallet reuse, not a guarantee of
 complete unlinkability. Every additional managed pool requires its own active
-and standby funding. Referencing one profile from more bindings does not create
+and configured reserve funding. Referencing one profile from more bindings does not create
 additional pools or funding jobs.
 
 `config show` includes `wallet_bindings.<server>.<source>` with the effective
@@ -247,12 +248,17 @@ automatic assignment policy. A complete deployment is in
 ```toml
 [wallet_templates.small]
 mode = "zcash_rotation"
-funding_amount_usdc = "5.00"
-max_funding_amount_usdc = "6.00" # explicitly bound bridge-minimum increases
-max_api_payment_usdc = "1.00"
-# limit_payments_to_funding_target = false # opt in to using the API cap alone
+max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
+max_retirement_remainder_usdc = "0" # Default; only eligible empty retained wallets.
 max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
+
+[wallet_templates.small.reserves.small]
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00" # Explicit bridge-minimum headroom, not payment authority.
+
+[wallet_templates.small.reserves.large]
+funding_amount_usdc = "10.00"
 
 [wallet_assignment]
 scope = "source"
@@ -261,7 +267,7 @@ template = "small"
 
 Sources and servers can then omit `wallet`; `[wallets]` may also be omitted.
 See [funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for
-treasury-wide USDC budgets and optional ZEC withdrawal safeguards.
+actual spendable treasury capacity and per-operation ZEC/fee safeguards.
 The singleton `[treasury]` and `[funding]` settings are still required when the
 resolved deployment has managed pools. Explicit source/server wallet references
 continue to take priority and must refer to entries in `[wallets]`, not templates.
@@ -292,30 +298,113 @@ it does not depend on the configuration file path, ordering, template name or
 template contents. Separate deployments require separate initialized treasuries
 as described in the managed-wallet section.
 
-Template changes update settings for existing generated pools. In particular,
-Managed profiles retain `limit_payments_to_funding_target = true` by default,
-preserving the historical effective API ceiling of the smaller funding target and
-`max_api_payment_usdc`. Set it false explicitly to admit payments above the funding
-target when they fit the explicit API cap and confirmed active balance minus
-liabilities. Disabling the API cap too leaves only available capacity; this never
-authorizes extra funding or use of retired funds.
+Configuration changes take effect when the deployment is reopened. Managed
+profiles require an explicit `max_api_payment_usdc`; the static-wallet default
+remains unchanged. The cap applies to every active, reserve and retained wallet,
+independently of original funding size. Explicit unlimited spellings retain their
+existing meaning for payment authority only. A cap above every target is valid,
+and targets above the cap are valid; neither arrangement authorizes extra funding.
 
-`funding_amount_usdc` changes only future address allocations, preserving existing keys
-and their captured targets. Changing scope or renaming a source/server may create
-new pools. Managed startup disables pools absent from the resolved set and keeps
-their keys and history; restoring the previous scope/name resumes them. Static-only
-serving does not unlock or modify treasury state.
+`reserves.small` is required. `reserves.large` is optional and must have a target
+at least as large as small; equal targets are valid. Each slot requires a positive
+exact micro-USDC target. Its optional output ceiling must be at least its target;
+omission permits no increase above target. Initial active funding uses small's
+settings. Vacancies allocate small-first, independently of which wallet can pay.
+Consumed reserve wallets become active, previous active wallets become retained,
+and retained wallets remain usable without automatic top-ups or slot reassignment.
+Partial external credits retain the allocation and its funding claim until full
+readiness; disabling a slot does not discard accepted work or historical liabilities.
+
+`max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
+`"0"`. It authorizes eligible retained-wallet retirement during reconciliation,
+independently of `auto_fund`, vacancies and treasury capacity. Retirement leaves
+funds and keys at their address, stops routine polling/selection, transfers nothing
+and never releases financial obligations. Positive tolerance trades purchasing
+power for less observation work; it does not bound cumulative stranded capital.
+
+Funding capital comes from actual spendable treasury funds after confirmations,
+reservations, liabilities and fees. Displayed total balance is not spendable
+capacity. Adding spendable ZEC restores capacity without another aggregate-budget
+setting. `auto_fund=false` pauses new funding, not eligible retirement. Keep group
+payment caps, per-operation ZEC/output/fee safeguards, explicit funding controls
+and separately authorized qualification-run limits.
+
+The old managed top-level `funding_amount_usdc` and `max_funding_amount_usdc` must
+move into named reserve tables. `limit_payments_to_funding_target` is removed:
+choose an explicit payment cap preserving the intended authority. The aggregate
+settings `daily_funding_limit_usdc`, `total_funding_limit_usdc` and
+`daily_treasury_spend_limit_zec` are rejected with migration guidance. Tier/retention
+aliases and `max_live_wallets` are unsupported. Updating configuration never
+converts wallet state; use the separately reviewed stopped-service conversion for
+the inspected source state. Existing keys, balances, transactions and liabilities
+must survive. There is no general migration/abandonment framework or manual
+retirement command.
+
+Reserve settings change future authorized allocations, not existing accepted
+transactions or captured targets. Changing assignment scope or a source/server
+name may create new groups. Startup disables absent groups while retaining keys
+and history; restoring the prior identity resumes that group. Static-only serving
+does not unlock or modify treasury state.
 
 For automatic bindings, `config show` and inventory additionally report
 `template` and `scope`. Configuration inspection includes `resolved_wallets`
 (explicit plus generated profile settings), `generated_wallets` (generation
 metadata), and `wallet_summary` (distinct managed/generated pool counts and their
-combined active-plus-standby target in atomic units and decimal USDC). `config check`
+combined initial-inventory target in `initial_inventory_target_atomic` and
+`initial_inventory_target_usdc`). `config check`
 also prints that summary. The total counts each managed pool once, including
 explicit unreferenced profiles; it excludes unused templates and static wallets.
 It is a configuration target, not a live balance or a quote for additional funds:
-existing addresses retain their original targets, and fees and retired balances
-are not included. None of these inspection commands allocates keys or funds.
+the fresh-group formula is `2*S + L`, or `2*S` without large, before accepted
+bridge minimum increases. With $2/$10 reserves it is $14. Existing addresses keep
+their captured targets; accumulated retained holdings, fees and retirement amounts
+are separate. Offline inspection cannot infer migration cost or usable capacity.
+None of these inspection commands allocates keys or funds.
+
+Size large to at least twice the largest expected payment, preferably four times
+when prices vary. This is guidance, never an admission restriction. Larger sizes
+reduce some remainders but can keep more calls on one payer address. Small-funded
+wallets provide more frequent rotation opportunities for cheap calls while a large
+reserve supports occasional expensive calls. Selection may still use large-funded
+wallets for cheap calls; retained reuse, request content, funding and network
+observations can link activity. These settings do not promise unlinkability or
+strict price-class separation.
+
+A $10 wallet settles two $4 calls and retains $2; two $3.34 calls retain $3.32.
+A later smaller call can use retained capacity, but fragmented balances cannot be
+summed to authorize one payment. Cold selection uses the default payer before
+learning prices. Valid learned hints can select the smallest sufficient wallet
+before binding; a bound payer that already suffices remains stable. Missing hints
+or observations may therefore keep cheap calls on a large-funded active wallet.
+
+With small $2 and large $10, fresh requested inventory is $14. Repeated $6
+calls can leave $4 at each large-funded address: after nine settled calls and
+eight replacements, $94 gross allocation has funded $54 of calls and leaves $40
+in holdings. Those holdings cannot collectively authorize another $6 payment.
+This illustrates sizing below the recommendation, not a wallet-count limit.
+Learned cheap calls can drain compatible smaller balances; cold calls, expired
+hints or unavailable evidence can keep using a sufficient large active payer.
+Neither case establishes a quantitative privacy guarantee.
+
+Ordinary enabled serving waits for one funded eligible payer before discovery;
+initial and reserve funding may finish in any order. `wallet bootstrap` instead
+captures the initial job and enabled slot generations and waits for those original
+destination obligations, without chasing replacement generations or source-only
+settlement backlog. A stopped or cancelled waiter preserves accepted work.
+`auto_fund=false` still observes accepted operations but cannot allocate or prepare
+new funding. A partial allocation—even $3 toward a $10 target—cannot pay until its
+full readiness requirement is met; disabling it does not detach the claim or free
+its liabilities. Insufficient accepted source work remains owned for reconciliation,
+not automatically abandoned or replaced.
+
+Reopen applies changed caps, targets and slot enablement. Existing accepted terms,
+job identities and original targets remain immutable; current policy is rechecked
+before new quote acceptance/preparation. Configuration edits do not convert state.
+The inspected schema12 privacy-local source lacks immutable destination readiness
+support and is unsupported by the strict conversion contract. Ordinary startup
+rejects legacy schemas without mutation. No successful conversion or incident repair is implied.
+See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for the bounded selector and its accepted limitations.
 
 Rust configuration is TOML-only. [providers/](../providers/README.md) contains
 all 27 reusable provider definitions. AgentUtility, Glassnode, Concordance,
@@ -450,8 +539,8 @@ Authorize agents to register public OpenAPI sources in a running multi-server
 HTTP deployment with `[source_management]` and `source_management = true` on each participating endpoint. The
 [static-wallet example](../examples/deployments/agent-sources.toml) and
 [managed-wallet example](../examples/deployments/agent-sources-managed.toml) use one named
-`agent_shared` wallet for all added APIs. At a $5 managed deposit size, that is
-one $10 active-plus-standby target regardless of how many APIs are registered.
+`agent_shared` wallet for all added APIs. With a $5 small target and no large reserve, that is
+one $10 initial-active-plus-small-reserve allocation regardless of how many APIs are registered.
 Registration does not create wallet pools or trigger funding.
 
 | Arrangement | Configuration | Payment identity sharing |
@@ -938,8 +1027,9 @@ Curl, not the target's TLS policy. Never use it for authenticated discovery URLs
 The provider can also be exposed as ordinary MCP tools by adding it as a source;
 the relay setting alone does not expose a tool to listeners.
 
-With `funding.auto_fund=true`, ordinary managed serving completes initial wallet
-bootstrap before catalogs and pricing, so paid fallback can use the selected wallets.
+With `funding.auto_fund=true`, ordinary managed serving waits for one eligible funded
+payer before catalogs and pricing, so paid fallback can use that group while the
+same owner continues reserve funding.
 Static wallets require external funding. For paid warming, first use
 `wallet bootstrap --config FILE`; warming opens only the wallets resolved for its selected
 sources (including treasury ownership for managed wallets), denies new funding

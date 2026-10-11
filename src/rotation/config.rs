@@ -19,8 +19,8 @@ fn enabled() -> bool {
 fn cap() -> String {
     "1.00".into()
 }
-fn deposit() -> String {
-    "2.00".into()
+fn no_remainder() -> String {
+    "0".into()
 }
 fn network_fee_limit() -> String {
     "0.0003".into()
@@ -55,7 +55,80 @@ fn deadline() -> u64 {
 fn quote_window() -> u64 {
     7200
 }
-#[derive(Clone, Deserialize, Serialize)]
+/// Funding preferences for one reserve slot; never payment authority.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReserveConfig {
+    pub funding_amount_usdc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_funding_amount_usdc: Option<String>,
+}
+impl ReserveConfig {
+    pub fn target_atomic(&self) -> Result<u64> {
+        usdc_amount(&self.funding_amount_usdc).context("invalid reserve funding_amount_usdc")
+    }
+    pub fn maximum_atomic(&self) -> Result<u64> {
+        self.max_funding_amount_usdc
+            .as_deref()
+            .map(usdc_amount)
+            .transpose()
+            .context("invalid reserve max_funding_amount_usdc")?
+            .map_or_else(|| self.target_atomic(), Ok)
+    }
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.maximum_atomic()? >= self.target_atomic()?,
+            "reserve max_funding_amount_usdc is below funding_amount_usdc"
+        );
+        Ok(())
+    }
+}
+/// Named sizing slots. Slot labels are not permanent wallet classifications.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReservesConfig {
+    pub small: ReserveConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large: Option<ReserveConfig>,
+}
+impl ReservesConfig {
+    pub fn validate(&self) -> Result<()> {
+        self.small.validate().context("invalid reserves.small")?;
+        if let Some(large) = &self.large {
+            large.validate().context("invalid reserves.large")?;
+            ensure!(
+                large.target_atomic()? >= self.small.target_atomic()?,
+                "reserves.large funding_amount_usdc is below reserves.small"
+            );
+        }
+        Ok(())
+    }
+    /// Configured initial active plus reserves, not current usable capacity.
+    pub fn initial_inventory_target_atomic(&self) -> Result<U256> {
+        Ok(U256::from(self.small.target_atomic()?) * U256::from(2)
+            + U256::from(
+                self.large
+                    .as_ref()
+                    .map(ReserveConfig::target_atomic)
+                    .transpose()?
+                    .unwrap_or(0),
+            ))
+    }
+}
+/// Explicit finite nonnegative tolerance, including zero. Unlike API caps,
+/// unlimited spellings never grant retirement authority.
+pub fn retirement_remainder(s: &str) -> Result<u64> {
+    let amount = SpendPolicy::dollars(s)?
+        .max_atomic
+        .context("max_retirement_remainder_usdc must be a finite nonnegative USDC decimal")?;
+    ensure!(
+        amount <= U256::from(i64::MAX as u64),
+        "max_retirement_remainder_usdc exceeds accounting limit"
+    );
+    Ok(amount.to::<u64>())
+}
+
+#[derive(Clone, Serialize)]
 #[serde(tag = "mode", deny_unknown_fields)]
 pub enum WalletConfig {
     #[serde(rename = "static")]
@@ -66,15 +139,10 @@ pub enum WalletConfig {
     },
     #[serde(rename = "zcash_rotation")]
     ZcashRotation {
-        #[serde(default = "deposit")]
-        funding_amount_usdc: String,
-        #[serde(default = "cap")]
+        reserves: ReservesConfig,
         max_api_payment_usdc: String,
-        /// Compatibility default; false opts into the explicit API cap and available balance.
-        #[serde(default = "enabled")]
-        limit_payments_to_funding_target: bool,
-        #[serde(default)]
-        max_funding_amount_usdc: Option<String>,
+        #[serde(default = "no_remainder")]
+        max_retirement_remainder_usdc: String,
         #[serde(default)]
         max_funding_spend_zec: Option<String>,
         max_conversion_overhead_percent: u32,
@@ -85,6 +153,41 @@ pub enum WalletConfig {
         max_attempts: u32,
     },
 }
+#[derive(Deserialize)]
+#[serde(remote = "WalletConfig", tag = "mode", deny_unknown_fields)]
+enum WalletConfigFields {
+    #[serde(rename = "static")]
+    Static {
+        private_key_env: String,
+        #[serde(default = "cap")]
+        max_api_payment_usdc: String,
+    },
+    #[serde(rename = "zcash_rotation")]
+    ZcashRotation {
+        reserves: ReservesConfig,
+        max_api_payment_usdc: String,
+        #[serde(default = "no_remainder")]
+        max_retirement_remainder_usdc: String,
+        #[serde(default)]
+        max_funding_spend_zec: Option<String>,
+        max_conversion_overhead_percent: u32,
+        /// Compatibility only: admission no longer has an elapsed-time deadline.
+        #[serde(default, skip_serializing)]
+        wait_seconds: Option<u64>,
+        #[serde(default = "attempts")]
+        max_attempts: u32,
+    },
+}
+impl<'de> Deserialize<'de> for WalletConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        reject_replaced_settings::<D::Error>(&value, "WalletConfig")?;
+        WalletConfigFields::deserialize(value).map_err(serde::de::Error::custom)
+    }
+}
+
 impl WalletConfig {
     pub fn managed(&self) -> bool {
         matches!(self, Self::ZcashRotation { .. })
@@ -100,8 +203,8 @@ impl WalletConfig {
                     .context("invalid max_api_payment_usdc")?;
             }
             Self::ZcashRotation {
-                funding_amount_usdc,
-                max_funding_amount_usdc,
+                reserves,
+                max_retirement_remainder_usdc,
                 max_api_payment_usdc,
                 max_funding_spend_zec,
                 max_conversion_overhead_percent,
@@ -109,14 +212,9 @@ impl WalletConfig {
                 max_attempts,
                 ..
             } => {
-                let target =
-                    usdc_amount(funding_amount_usdc).context("invalid funding_amount_usdc")?;
-                if let Some(max) = max_funding_amount_usdc {
-                    ensure!(
-                        usdc_amount(max).context("invalid max_funding_amount_usdc")? >= target,
-                        "max_funding_amount_usdc is below funding_amount_usdc"
-                    );
-                }
+                reserves.validate()?;
+                retirement_remainder(max_retirement_remainder_usdc)
+                    .context("invalid max_retirement_remainder_usdc")?;
                 SpendPolicy::dollars(max_api_payment_usdc)
                     .context("invalid max_api_payment_usdc")?;
                 if let Some(max) = max_funding_spend_zec {
@@ -195,7 +293,7 @@ fn empty_path(path: &Path) -> bool {
 fn nonempty_path<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<PathBuf, D::Error> {
     nonempty_string(d).map(PathBuf::from)
 }
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TreasuryConfig {
     /// Optional expected identity; empty until resolved from existing state at runtime.
@@ -226,8 +324,6 @@ pub struct TreasuryConfig {
     pub submission_url_env: String,
     pub indexer_url: Option<String>,
     pub submission_url: Option<String>,
-    #[serde(default)]
-    pub daily_treasury_spend_limit_zec: Option<String>,
     #[serde(default = "network_fee_limit")]
     pub max_funding_transaction_fee_zec: String,
     #[serde(default = "network_fee_limit")]
@@ -237,6 +333,56 @@ pub struct TreasuryConfig {
     #[serde(default = "sync_age")]
     pub max_sync_age_seconds: u64,
 }
+#[derive(Deserialize)]
+#[serde(remote = "TreasuryConfig", deny_unknown_fields)]
+struct TreasuryConfigFields {
+    /// Optional expected identity; empty until resolved from existing state at runtime.
+    #[serde(
+        default,
+        deserialize_with = "nonempty_string",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub id: String,
+    pub state_dir: PathBuf,
+    #[serde(
+        default,
+        deserialize_with = "nonempty_path",
+        skip_serializing_if = "empty_path"
+    )]
+    pub key_file: PathBuf,
+    #[serde(
+        default,
+        deserialize_with = "nonempty_string",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub indexer_url_env: String,
+    #[serde(
+        default,
+        deserialize_with = "nonempty_string",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub submission_url_env: String,
+    pub indexer_url: Option<String>,
+    pub submission_url: Option<String>,
+    #[serde(default = "network_fee_limit")]
+    pub max_funding_transaction_fee_zec: String,
+    #[serde(default = "network_fee_limit")]
+    pub max_refund_shielding_fee_zec: String,
+    #[serde(default = "confirmations")]
+    pub confirmations: u64,
+    #[serde(default = "sync_age")]
+    pub max_sync_age_seconds: u64,
+}
+impl<'de> Deserialize<'de> for TreasuryConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        reject_replaced_settings::<D::Error>(&value, "TreasuryConfig")?;
+        TreasuryConfigFields::deserialize(value).map_err(serde::de::Error::custom)
+    }
+}
+
 impl TreasuryConfig {
     pub fn indexer_endpoint(&self, lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
         self.endpoint(self.indexer_url.as_deref(), &self.indexer_url_env, &lookup)
@@ -304,9 +450,6 @@ impl TreasuryConfig {
                 super::base::secure_endpoint(url)?;
             }
         }
-        if let Some(limit) = &self.daily_treasury_spend_limit_zec {
-            zatoshis(limit).context("invalid daily_treasury_spend_limit_zec")?;
-        }
         zatoshis(&self.max_funding_transaction_fee_zec)
             .context("invalid max_funding_transaction_fee_zec")?;
         zatoshis(&self.max_refund_shielding_fee_zec)
@@ -331,14 +474,9 @@ impl TreasuryConfig {
         }
     }
 }
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FundingConfig {
-    /// Gross USDC allocated across all pools. Omission leaves this budget uncapped.
-    #[serde(default)]
-    pub daily_funding_limit_usdc: Option<String>,
-    #[serde(default)]
-    pub total_funding_limit_usdc: Option<String>,
     /// Managed serving funds bootstrap and replacement wallets unless disabled.
     #[serde(default = "enabled")]
     pub auto_fund: bool,
@@ -364,23 +502,45 @@ pub struct FundingConfig {
     #[serde(default = "quote_window")]
     pub quote_deadline_seconds: u64,
 }
-impl FundingConfig {
-    pub fn allocation_limits(&self) -> Result<FundingBudgetLimits> {
-        Ok(FundingBudgetLimits {
-            daily: self
-                .daily_funding_limit_usdc
-                .as_deref()
-                .map(usdc_amount)
-                .transpose()
-                .context("invalid daily_funding_limit_usdc")?,
-            total: self
-                .total_funding_limit_usdc
-                .as_deref()
-                .map(usdc_amount)
-                .transpose()
-                .context("invalid total_funding_limit_usdc")?,
-        })
+#[derive(Deserialize)]
+#[serde(remote = "FundingConfig", deny_unknown_fields)]
+struct FundingConfigFields {
+    /// Managed serving funds bootstrap and replacement wallets unless disabled.
+    #[serde(default = "enabled")]
+    pub auto_fund: bool,
+    pub near_user_session_env: Option<String>,
+    #[serde(default = "base_rpc_env")]
+    pub base_rpc_url_env: String,
+    #[serde(default)]
+    pub base_rpc_fallback_url_envs: Option<Vec<String>>,
+    #[serde(default = "base_confirmations")]
+    pub base_confirmations: u64,
+    #[serde(default = "block_age")]
+    pub base_max_block_age_seconds: u64,
+    #[serde(default = "confidentiality")]
+    pub confidentiality: String,
+    pub near_api_key_env: Option<String>,
+    #[serde(default = "slippage")]
+    pub slippage_bps: u32,
+    #[serde(default = "poll")]
+    pub poll_seconds: u64,
+    /// Health warning only: reconciliation continues with a 60-second polling floor.
+    #[serde(default = "deadline")]
+    pub swap_timeout_seconds: u64,
+    #[serde(default = "quote_window")]
+    pub quote_deadline_seconds: u64,
+}
+impl<'de> Deserialize<'de> for FundingConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        reject_replaced_settings::<D::Error>(&value, "FundingConfig")?;
+        FundingConfigFields::deserialize(value).map_err(serde::de::Error::custom)
     }
+}
+
+impl FundingConfig {
     /// Runtime resolution shared by serving and qualification. Inspection never reads env.
     pub fn base_rpc_urls(
         &self,
@@ -430,7 +590,6 @@ impl FundingConfig {
         })
     }
     pub fn validate(&self) -> Result<()> {
-        self.allocation_limits()?;
         env_name(&self.base_rpc_url_env)?;
         ensure!(
             self.base_rpc_fallback_url_envs
@@ -470,8 +629,39 @@ impl FundingConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FundingBudgetLimits {
-    pub daily: Option<u64>,
-    pub total: Option<u64>,
+fn reject_replaced_settings<E: serde::de::Error>(
+    value: &serde_json::Value,
+    scope: &str,
+) -> std::result::Result<(), E> {
+    let Some(fields) = value.as_object() else {
+        return Ok(());
+    };
+    for name in [
+        "daily_funding_limit_usdc",
+        "total_funding_limit_usdc",
+        "daily_treasury_spend_limit_zec",
+    ] {
+        if fields.contains_key(name) {
+            return Err(E::custom(format!(
+                "{name} was removed; remove this aggregate budget setting. Actual spendable treasury funds govern enabled funding; retain per-operation safeguards and separately authorized qualification limits"
+            )));
+        }
+    }
+    if scope == "WalletConfig"
+        && fields.get("mode").and_then(serde_json::Value::as_str) == Some("zcash_rotation")
+    {
+        for name in ["funding_amount_usdc", "max_funding_amount_usdc"] {
+            if fields.contains_key(name) {
+                return Err(E::custom(format!(
+                    "managed {name} moved to reserves.small (and optional reserves.large); configure explicit max_api_payment_usdc and migrate stopped wallet state separately"
+                )));
+            }
+        }
+        if fields.contains_key("limit_payments_to_funding_target") {
+            return Err(E::custom(
+                "limit_payments_to_funding_target was removed; choose explicit max_api_payment_usdc preserving your intended per-payment authority; reserve targets no longer cap payments",
+            ));
+        }
+    }
+    Ok(())
 }

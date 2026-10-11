@@ -8,8 +8,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Configuration](configuration.md) | TOML composition, tool filters, provider compatibility and pricing |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
 | [Development](development.md) | Local checks, coverage and complexity tooling |
-| [Architecture](architecture.md) | Catalog generation, MCP execution, caching and module boundaries |
-| [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, double buffering, funding and recovery |
+| [Architecture](architecture.md) | Catalog generation, MCP execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
+| [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
 | [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling and evidence |
 | [Agent sources](agent-sources.md) | Endpoint-local APIs, wallet selection, dynamic tools and persistence |

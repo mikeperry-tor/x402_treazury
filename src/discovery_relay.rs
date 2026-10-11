@@ -288,6 +288,7 @@ impl Relay {
         ))?;
         Ok(Arc::new(Self {
             client: client
+                .with_source_identity("builtin:discovery-relay")
                 .with_transport(cfg.transport())
                 .with_timeout(
                     cfg.read_timeout_seconds
@@ -376,7 +377,7 @@ impl Relay {
         let result = async {
             let output = self
                 .client
-                .execute_response_observed(
+                .execute_response_scoped(
                     RoutedRequest {
                         method: "POST".into(),
                         url: self.endpoint.clone(),
@@ -384,6 +385,8 @@ impl Relay {
                         body: Some(serde_json::json!({"url":url,"method":"GET"})),
                     },
                     &progress,
+                    self.client
+                        .operation_key(None, "POST", "/curl", &self.endpoint),
                 )
                 .await
                 .map_err(|error| {

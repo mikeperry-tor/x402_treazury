@@ -22,7 +22,14 @@ fn fixture() -> (tempfile::TempDir, Store, String) {
         b"fixture",
     )
     .unwrap();
-    let pool = s.ensure_pool("fixture", "5").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        s,
+        "fixture",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     (dir, s, pool)
 }
 fn denied<T>(r: Result<T>) {
@@ -33,14 +40,14 @@ fn denied<T>(r: Result<T>) {
     );
 }
 #[test]
-fn restriction_denies_bootstrap_promotion_and_source_work_with_visible_logs() {
+fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
     let (_dir, mut s, pool) = fixture();
     for wallet in s.status().unwrap().pools[0].addresses.iter() {
         s.record_credit(&wallet.id, "5000000", "block", 1).unwrap();
     }
     // A reservation inherited from an older process must not permit new calculation.
-    s.reserve("old", Some(&pool), 1, 100, 1000).unwrap();
-    let before = serde_json::to_value(s.status().unwrap()).unwrap();
+    s.reserve("old", Some(&pool), 1, 100).unwrap();
+    let before_jobs = s.funding_jobs().unwrap().len();
     let logs = Logs::default();
     let sink = logs.clone();
     let subscriber = tracing_subscriber::fmt()
@@ -51,15 +58,31 @@ fn restriction_denies_bootstrap_promotion_and_source_work_with_visible_logs() {
     tracing::subscriber::with_default(subscriber, || {
         s.deny_new_funding();
         s.deny_new_funding(); // Reapplying cannot lift the restriction.
-        assert_eq!(s.ensure_pool("fixture", "5").unwrap(), pool);
-        denied(s.ensure_pool("new_pool", "5"));
-        denied(s.promote(&pool, 0));
-        denied(s.reserve("new", Some(&pool), 1, 100, 1000));
-        denied(s.reserve("shield", None, 1, 100, 1000));
+        assert_eq!(
+            s.ensure_capacity_group(
+                "fixture",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                Some(U256::from(1_000_000)),
+                0
+            )
+            .unwrap(),
+            pool
+        );
+        let declared = s
+            .ensure_capacity_group(
+                "new_pool",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                Some(U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+        denied(s.allocate_capacity_kind(&declared, AllocationKind::Initial, true));
+        denied(s.reserve("new", Some(&pool), 1, 100));
+        denied(s.reserve("shield", None, 1, 100));
         denied(s.require_spend_ready(10, 100));
         denied(s.prepare("old", 1, b"next", b"new bytes"));
     });
-    assert_eq!(before, serde_json::to_value(s.status().unwrap()).unwrap());
+    assert_eq!(before_jobs, s.funding_jobs().unwrap().len());
     assert_eq!(
         s.db.query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
             .get::<_, i64>(0))
@@ -73,8 +96,7 @@ fn restriction_denies_bootstrap_promotion_and_source_work_with_visible_logs() {
     );
     let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     for stage in [
-        "pool_bootstrap",
-        "pool_promotion",
+        "capacity_allocation",
         "source_reservation",
         "treasury_preparation",
         "source_preparation_commit",
@@ -91,7 +113,7 @@ fn restriction_denies_bootstrap_promotion_and_source_work_with_visible_logs() {
 fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
     let (dir, mut s, pool) = fixture();
     let id = s.id().to_owned();
-    s.reserve("accepted", Some(&pool), 1, 100, 1000).unwrap();
+    s.reserve("accepted", Some(&pool), 1, 100).unwrap();
     let facts = TransactionFacts {
         txid: "existing".into(),
         expiry_height: 100,
@@ -104,8 +126,8 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     s.deny_new_funding(); // Supervisor must do this on EVERY launch.
-    s.reserve("accepted", Some(&pool), 1, 100, 1000).unwrap(); // Idempotent, no increase.
-    assert!(s.reserve("accepted", Some(&pool), 1, 101, 1000).is_err());
+    s.reserve("accepted", Some(&pool), 1, 100).unwrap(); // Idempotent, no increase.
+    assert!(s.reserve("accepted", Some(&pool), 1, 101).is_err());
     assert_eq!(
         s.prepare_with_facts("accepted", 1, b"saved", b"saved bytes", Some(facts))
             .unwrap(),
@@ -119,7 +141,7 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
     s.request_broadcast("accepted", 1, 1, false).unwrap();
     assert!(s.request_broadcast("accepted", 1, 1, false).is_err());
     s.confirm_spend("accepted", 100, 1).unwrap();
-    denied(s.reserve("replacement", Some(&pool), 1, 100, 1000));
+    denied(s.reserve("replacement", Some(&pool), 1, 100));
     assert_eq!(s.snapshot().unwrap().0, 2);
 }
 
@@ -244,7 +266,7 @@ impl super::super::restriction::FundingPermits for TestPermits {
     }
 }
 #[test]
-fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
+fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = Store::create(
         &dir.path().join("state"),
@@ -257,14 +279,31 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
     s.install_funding_permits(permits.clone()).unwrap();
     assert!(s.install_funding_permits(permits.clone()).is_err());
     permits.jobs.store(1, std::sync::atomic::Ordering::SeqCst);
-    denied(s.ensure_pool("a", "1"));
-    assert!(s.status().unwrap().pools.is_empty());
+    denied(crate::rotation::test_capacity::declare_and_allocate!(
+        s,
+        "a",
+        crate::rotation::test_capacity::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    ));
+    assert_eq!(s.status().unwrap().pools.len(), 1);
+    assert_eq!(s.funding_jobs().unwrap().len(), 1);
     permits.jobs.store(2, std::sync::atomic::Ordering::SeqCst);
     s.db.execute_batch("CREATE TRIGGER fail_allocation BEFORE INSERT ON wallets BEGIN SELECT RAISE(ABORT,'fixture allocation crash'); END;").unwrap();
-    assert!(s.ensure_pool("a", "1").is_err());
-    assert!(s.status().unwrap().pools.is_empty());
-    // Reservations committed in the other database remain charged. Retrying the
-    // same pool/sequence must reuse them despite the rolled-back random pool ID.
+    assert!(
+        crate::rotation::test_capacity::declare_and_allocate!(
+            s,
+            "a",
+            crate::rotation::test_capacity::small_reserve("1"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .is_err()
+    );
+    assert_eq!(s.status().unwrap().pools.len(), 1);
+    assert_eq!(s.funding_jobs().unwrap().len(), 1);
+    // The first allocation remains committed. The failed second allocation
+    // retains its external permit and reuses it at the same stable sequence.
     assert_eq!(
         permits
             .db
@@ -276,19 +315,25 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
         2
     );
     s.db.execute_batch("DROP TRIGGER fail_allocation").unwrap();
-    let pool = s.ensure_pool("a", "1").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        s,
+        "a",
+        crate::rotation::test_capacity::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let jobs = s.funding_jobs().unwrap();
     assert_eq!(jobs.len(), 2);
     let job = &jobs[0];
-    denied(s.reserve(&job.operation_id, Some(&pool), 1, 101, 1000));
-    assert!(s.reserve("unbound", Some(&pool), 1, 1, 1000).is_err());
+    denied(s.reserve(&job.operation_id, Some(&pool), 1, 101));
+    assert!(s.reserve("unbound", Some(&pool), 1, 1).is_err());
     s.save_funding_quote(
         &job.id,
         &quote_fixture::bound(&job.target, &job.recipient, "fixture quote"),
     )
     .unwrap();
-    s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
-        .unwrap();
+    s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
     s.advance_funding(
         &job.id,
         funding::FundingPhase::Quoted,
@@ -300,33 +345,14 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
         s.record_credit(&job.wallet_id, "1000000", "block", 1)
             .unwrap();
     }
-    let before = serde_json::to_value(s.status().unwrap()).unwrap();
-    denied(s.promote(&pool, 0));
-    assert_eq!(before, serde_json::to_value(s.status().unwrap()).unwrap());
-    let view = super::super::base::ChainView {
-        observations: Default::default(),
-        balance_certificates: Default::default(),
-        resolution_certificates: Default::default(),
-        admission_valid_until: u64::MAX,
-        anchor: super::super::base::Anchor {
-            height: 2,
-            hash: "block2".into(),
-        },
-        balances: [
-            (jobs[0].wallet_id.clone(), U256::ZERO),
-            (jobs[1].wallet_id.clone(), U256::from(1_000_000)),
-        ]
-        .into(),
-        released: vec![],
-        resolutions: Default::default(),
-    };
-    denied(s.admit_for(&pool, U256::from(1), "hash", view, None));
-    let status = s.status().unwrap();
-    assert_eq!(status.pools[0].generation, 0);
-    assert_eq!(status.pools[0].addresses.len(), 2);
-    assert_eq!(status.pools[0].addresses[0].confirmed_balance, "0");
-    assert_eq!(status.pools[0].addresses[0].role, "ACTIVE");
-    assert_eq!(status.pools[0].addresses[1].role, "READY");
+    // Consuming existing inventory is not allocation authority. A full slot is
+    // idempotent under the permit ceiling and does not request a third permit.
+    assert!(
+        s.allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(s.funding_jobs().unwrap().len(), 2);
     assert_eq!(
         s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
             .get::<_, i64>(0))
@@ -338,7 +364,17 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
     let mut reopened =
         Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     reopened.install_funding_permits(permits).unwrap();
-    assert_eq!(reopened.ensure_pool("a", "1").unwrap(), pool);
+    assert_eq!(
+        crate::rotation::test_capacity::declare_and_allocate!(
+            reopened,
+            "a",
+            crate::rotation::test_capacity::small_reserve("1"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap(),
+        pool
+    );
     assert_eq!(reopened.funding_jobs().unwrap()[0].id, job.id);
     assert_eq!(
         reopened
@@ -361,10 +397,17 @@ fn uncertain_preparation_keeps_the_same_operation_and_permit_after_restart() {
     .unwrap();
     let permits = Arc::new(TestPermits::new(store.id()));
     store.install_funding_permits(permits.clone()).unwrap();
-    let pool = store.ensure_pool("a", "1").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        store,
+        "a",
+        crate::rotation::test_capacity::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let job = store.funding_jobs().unwrap().remove(0);
     store
-        .reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
+        .reserve(&job.operation_id, Some(&pool), 1, 100)
         .unwrap();
     assert!(store.recover_unprepared_funding(&job.id).is_err());
     let treasury = store.id().to_owned();

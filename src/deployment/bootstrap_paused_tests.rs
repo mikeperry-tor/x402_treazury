@@ -11,10 +11,15 @@ async fn paused_funding_observer_survives_startup_handoff_and_drains() {
         state.clone(), key.clone(), 2_000_000,
         Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
     ).await.unwrap();
-    owner
-        .ensure_pool("research".into(), "5".into())
-        .await
-        .unwrap();
+    crate::rotation::test_capacity::treasury_pair(
+        &owner,
+        "research",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0,
+    )
+    .await
+    .unwrap();
     let before = owner.status().await.unwrap();
     owner.close().await.unwrap();
 
@@ -41,13 +46,13 @@ indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
 [funding]
 auto_fund=false
-daily_funding_limit_usdc="10"
 poll_seconds=1
 base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.research]
 mode="zcash_rotation"
-funding_amount_usdc="5"
+reserves={{small={{funding_amount_usdc="5"}}}}
+max_api_payment_usdc="1"
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [sources.api]
@@ -124,9 +129,18 @@ sources=["api"]
     assert!(after.treasury_operations.is_empty());
     assert!(
         store
-            .call(|s| Ok(
-                s.ensure_pool("forbidden", "5").unwrap_err().to_string() == "funding_disabled"
-            ))
+            .call(
+                |s| Ok(crate::rotation::test_capacity::declare_and_allocate!(
+                    s,
+                    "forbidden",
+                    crate::rotation::test_capacity::small_reserve("5"),
+                    Some(alloy_primitives::U256::from(1_000_000u64)),
+                    0
+                )
+                .unwrap_err()
+                .to_string()
+                    == "funding_disabled")
+            )
             .await
             .unwrap()
     );

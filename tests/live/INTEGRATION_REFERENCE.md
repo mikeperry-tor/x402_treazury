@@ -329,8 +329,7 @@ Each pass checks one queued receipt per pool; pending receipts rotate to the bac
 and backlog size is logged. Proofs persist against the exact case and attempt.
 Reports reject mismatched or duplicate attribution. A consumed authorization
 without a debit proof cannot qualify a run or unlock dependent phases; a
-successful paid case that never pays likewise cannot qualify a funded test. Startup validation reserves all missing pools' bootstrap pairs in one registry transaction before
-allocation; a rejected batch leaves no partial reservations.
+successful paid case that never pays likewise cannot qualify a funded test. Startup validation reserves the missing initial and enabled reserve-slot jobs in one registry transaction before allocation; a rejected batch leaves no partial reservations.
 Funding-enabled launches additionally require `auto_fund=true`. Treasury-only
 starts wait for production bootstrap before dispatch, with progress logs and the
 phase/run deadline. An adopted bootstrapped pool may have a partly spent active
@@ -390,13 +389,14 @@ overlap assertion. Existing paid cases are never replayed to obtain new timing.
 ## Rotation and lifecycle assertions
 
 Managed admission and receipt events include public lifecycle observations for
-rotation/refill assertions. They contain pool roles/generations, funding-job
+rotation/refill assertions. Schema 2 includes the stable group generation, independent reserve-slot generations, ACTIVE/READY/RETAINED/RETIRED roles, and funding-job
 identities/phases and source-operation submission states, without keys, signed
 bytes, quote bodies or upstream error prose. Response observation failure retains
 the seller receipt with an explicit unavailable marker and warning. Pending-state
 bracketing measures the signed-request future through final headers, not the full
 MCP response-body interval. Rotation and lifecycle execution use these observations;
 lifecycle additionally verifies one graceful application restart during its first refill.
+Current admission events carry `ownership_evidence_version=1`: READY requires the original small/large slot and claim generation; ACTIVE/RETAINED requires no reserve claim. Validation uses the immutable journal-time values. Older unmarked evidence remains readable without inventing ownership facts.
 The phase order is topological: dependencies must name earlier phases. Scenario
 fields live in `[phases.scenario]` and inappropriate fields are rejected.
 Rotation and refill-service scenarios require one `[[phases.scenario.rounds]]`;
@@ -416,17 +416,17 @@ immediately without waiting for refill or the triggering receipt. Uncertain call
 paid dispatch. A partially dispatched rotation is observation-only; the runner
 cannot restart it to replay or manufacture missing evidence.
 
-The registry's promotion boundary atomically records validated before/after pool
-and replacement-job snapshots and marks the unused depletion suffix
+The registry's consumption boundary atomically records validated before/after inventory and the exact consumed reserve claim, then marks the unused depletion suffix
 `SKIPPED_TARGET_REACHED`. Only never-reserved cases qualify. Attempted calls retain
 their charges, including failed or uncertain calls. Reports keep the declared
 `reservation_atomic` and separately show `charged_reservation_atomic`; skipped
 cases are `NOT_EXECUTED`, cannot be replayed, and are never counted as paid successes.
-Reports revalidate the boundary, generation sequence and absence of reservation or
+Consuming READY advances that slot generation and vacates its claim; it does not allocate a replacement or advance the group generation. A replacement job may be absent at this boundary. Reviewed service can proceed, while later observations separately correlate the replacement wallet and job.
+Reports revalidate the boundary, exact slot-generation sequence and absence of reservation or
 application evidence for skipped cases. This durable mechanism alone does not
 qualify restart or exhaustion. Single-rotation reports additionally require exact
-payer/generation bindings and canonical paid service, pending-refill overlap for
-each service wallet, a READY replacement holding its target, and exactly one
+payer and admission-time role/claim bindings and canonical paid service, pending-refill overlap for
+each service wallet, a READY replacement with exact recorded destination support, and exactly one
 confirmed source submission. Fast refill leaves `not_observed` overlap and an
 incomplete run. Dependent phases require these assertions before dispatch.
 Provider failures remain visible as failed cases and an overall failed result,
@@ -457,11 +457,16 @@ unresolved exposure and lifecycle snapshot while still holding the pool gate.
 Only one response is accepted per request and session; a new request is required
 for a new observation. Failures warn and leave the request unanswered, while
 ordinary reconciliation continues. Existing wallet-isolated RPC and Tor policy
-remain in force. The pure depletion estimator requires an active wallet and funded
-standby included in that fresh view, no unresolved authorizations, and enough
-expanded calls for `floor(active_balance / reviewed_price) + 1`. The final call
-triggers promotion; it is not free. Price estimates do not authorize new calls or
-override caps, and the controller must authenticate and consume observations promptly.
+remain in force. For schema 2, the pure depletion estimator requires an ACTIVE
+wallet and at least one funded READY wallet with an enabled current reserve claim
+that covers the reviewed price. The fresh view must include the relevant ACTIVE,
+READY and RETAINED balances, with no unresolved authorizations. The reviewed list
+must cover `floor(active_available / price) + sum(floor(retained_available / price)) + 1`.
+The final term budgets a paid READY-consumption trigger; selection may reach that
+boundary earlier, leaving only a structurally verified untouched suffix skippable.
+Historical schemas retain their original active/standby calculation. Estimates do
+not authorize new calls or override caps, and the controller must authenticate and
+consume observations promptly.
 
 Amounts are decimal strings (USDC six decimal places, ZEC eight), with checked
 integer sums. Zero job/source budgets mean no funding. A paid case must reserve
@@ -647,16 +652,7 @@ restriction before managed pool configuration/allocation, independently of
 `funding.auto_fund`. A missing managed pool fails startup without creating its
 wallets or funding jobs. All declared managed pools receive the restriction.
 
-The store rejects new bootstrap/replacement allocations, promotions, source budget
-reservations and new transaction preparation, including preparation using a
-reservation inherited from an earlier process. Active-wallet calls with sufficient
-available balance still work. A denied promotion preserves wallet roles,
-generation and outbox and does not admit/sign the payment; trusted Base
-reconciliation is retained. Both stderr logs and the tool error carry
-`qualification_funding_denied` and explain the zero limit. Funding-worker denials
-also retain that reason in wallet status and leave the job quoted, before
-`PREPARING`, so refusal cannot masquerade as an interrupted calculation. A cheaper call can
-still use the same active wallet after a denied promotion.
+The store rejects new initial/replacement allocations, source reservations and new transaction preparation, including preparation using an inherited reservation. It also prevents automatic retirement during this restricted observation scope. Existing ACTIVE, RETAINED and eligible READY inventory remains usable under ordinary fresh-evidence admission. Consuming an existing READY claim is a payment transition, independent of later replacement allocation; a denied refill cannot undo its committed payment. Trusted Base reconciliation remains available. Funding denials retain `qualification_funding_denied` without manufacturing a PREPARING transition or source proof. Group declaration alone neither allocates nor grants funding authority.
 
 The restriction lasts for the store owner's lifetime and cannot be relaxed on that
 owner. Every supervised launch/restart must supply it again. Ordinary serving has

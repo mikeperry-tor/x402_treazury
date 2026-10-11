@@ -10,7 +10,7 @@ Commands run from the repository root; `x402_treazury` means the built executabl
 Use the same deployment file for initialization, inspection, backup, sync and
 serving. `--meta-config` remains an alias for `--config`. Wallet commands do not fetch provider catalogs or require listener tokens.
 `wallet bootstrap` also consumes wallet assignments and funding settings to fund
-initial managed pairs; other administration commands do not start funding workers.
+initial managed capacity; other administration commands do not start funding workers.
 
 ```sh
 x402_treazury wallet init --config examples/deployments/privacy.local.toml
@@ -20,8 +20,8 @@ x402_treazury wallet backup --config examples/deployments/privacy.local.toml --d
 x402_treazury wallet sync --config examples/deployments/privacy.local.toml
 ```
 
-Only `treasury.state_dir` is required in the treasury table. The optional
-`daily_treasury_spend_limit_zec` bounds native treasury withdrawals;
+Only `treasury.state_dir` is required in the treasury table.
+Actual spendable funds after reservations, confirmations and fees govern enabled funding;
 `max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` each default to
 `"0.0003"` and reject proposals above that fee. See
 [funding limits](wallet-rotation.md#funding-limits-and-fees).
@@ -59,17 +59,17 @@ After depositing sufficient ZEC into the treasury, run:
 x402_treazury wallet bootstrap --config examples/deployments/privacy.local.toml
 ```
 
-This allocates all declared managed pools, runs the production treasury/funding
-workers, waits until each initial active/standby pair has confirmed USDC credit,
-and closes treasury ownership before exiting. It requires `funding.auto_fund=true`
-and respects existing source, fee, daily and attempt limits. Static wallets are
+This declares configured groups, runs the production treasury/funding workers,
+and waits for confirmed credit on its captured initial allocation and enabled
+reserve generations. It closes treasury ownership before exiting, requires
+`funding.auto_fund=true`, and respects source, fee, attempt and qualification limits. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
 signing keys or MCP listeners are needed. Network traffic follows the deployment
 policy, including Tor.
 
-The JSON result lists `bootstrapped_wallets`: durable completion of initial pairs,
-not a fresh balance or payment-admission guarantee. Repeating the command skips
-completed pairs and resumes incomplete jobs, including eligible recovery. Signed
+The versioned JSON result separates current serving/inventory readiness from
+completion of captured work (see [capacity output](#versioned-capacity-output)).
+Repeating the command resumes current incomplete claims, including eligible recovery. Signed
 transactions are replaced only after the existing canonical expiry and unspent-input
 proof succeeds. Unknown preparation outcomes and conflicting evidence still require
 operator review; cancellation drains
@@ -82,10 +82,11 @@ reservations and continues reconciling during serving.
 
 Ordinary managed `serve` performs the same bootstrap before catalog/pricing
 discovery when `auto_fund=true`, then starts normal serving and replacement funding.
-This allows a new deployment to pay for discovery fallback. It waits for all initial
-pairs, even if discovery would succeed without payment. `auto_fund=false` skips this
-startup step and makes explicit bootstrap fail; qualification funding restrictions
-retain their existing lifecycle. `catalog warm` never starts funding: use this
+This allows a new deployment to pay for discovery fallback. One eligible funded
+payer per group suffices; unfinished reserves keep reconciling through discovery
+and serving under the same retained owner. `auto_fund=false` skips this funding wait
+and makes explicit bootstrap fail, while accepted operations remain observed;
+qualification funding restrictions retain their existing lifecycle. `catalog warm` never starts funding: use this
 command first when warming needs a managed paid relay wallet.
 
 ## Treasury and managed pools
@@ -117,11 +118,8 @@ x402_treazury wallet init --state-dir /private/state/treasury \
 # Status reads persisted metadata and needs neither key nor network access.
 x402_treazury wallet status --state-dir /private/state/treasury
 
-# This allocates two keys and queued jobs;
-# it does not contact NEAR, transfer ZEC, or fund either EVM address.
-x402_treazury wallet pool --state-dir /private/state/treasury \
-  --key-file /private/keys/treasury.key \
-  --name research --funding-amount-usdc 5.00
+# Configure explicit reserves and payment authority, then bootstrap with --config.
+# The removed wallet pool command provides no allocation path.
 
 # Display existing receive addresses without derivation or network access.
 # The treasury UUID is read from state; --treasury-id UUID is an optional check.
@@ -262,8 +260,8 @@ after successful standalone recovery to continue funding.
 
 The wallet profile's `max_attempts` also bounds recovery using archived job history,
 including quote refreshes, across process restarts. Reaching that bound requires
-operator review; repeated bootstrap/recover commands do not reset it. Funding budgets
-still apply to every replacement. Qualification runs require separately authorized
+operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
+source capacity and per-operation safeguards apply to every new preparation. Qualification runs require separately authorized
 recovery; this path does not grant new qualification authority. Missing bytes alone never authorize retry after
 uncertain preparation. Refund handling and confirmed deposits with unresolved swap
 outcomes are reported for operator review. The low-level recovery commands remain
@@ -286,7 +284,7 @@ immutable operation IDs, encrypted quotes, guarded phases and persistent fair
 scheduling; status includes funding progress. Preparing a journaled funding job
 commits its PREPARED phase together with the wallet snapshot and signed bytes.
 Managed serving defaults to `[funding].auto_fund = true`: it funds the initial
-active/standby pair and later replacements within configured limits. Set it false
+initial allocation and configured reserves under per-operation safeguards. Set it false
 to pause automatic funding; reconciliation and treasury sync remain available.
 This default applies only to configured managed serving, not wallet commands or
 static wallets. Bounded qualification examples explicitly opt out. `near_api_key_env` names the partner credential;
@@ -300,7 +298,7 @@ without consuming `max_attempts` for transaction recovery. A quote refresh must
 prove no outgoing or budget record exists; it archives its old bindings, records
 a durable refresh marker and allocates a fresh operation/refund identity.
 Historical unclassified recovery records still count. Signed operations never refresh. Insufficient shielded
-funds or budget leave the job unprepared and retryable.
+spendable funds leave the job unprepared; another attempt still needs current authority.
 
 `swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
 the first durable broadcast intent, not an abort deadline. When exceeded,
@@ -326,7 +324,7 @@ target/debug/x402_treazury wallet shield-refunds \
 
 This calculates and journals one transaction without broadcasting. Submit its
 operation ID with `wallet reconcile --config servers.toml --operation-id UUID
---rebroadcast`. The command enforces `max_refund_shielding_fee_zec` and the daily budget;
+--rebroadcast`. The command enforces `max_refund_shielding_fee_zec` and current source reservations/readiness;
 only the fee counts as new expense. Each proposal selects one address, never
 combining unrelated swaps. Both calculation and submission use the existing
 restart-safe outgoing journal. Refund principal becomes shielded spendable only
@@ -345,7 +343,7 @@ fails treasury readiness closed.
 calculate-only API. It accepts one mainnet transparent recipient, uses account 0's
 shielded inputs, rejects multi-step transactions, and verifies the resulting
 recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
-operation UUID, source/fee limits, aggregate daily limit and quote deadline.
+operation UUID, source/fee safeguards and quote deadline.
 `funding.quote_deadline_seconds` requests a 7,200-second window by default;
 the returned quote can be shorter and remains authoritative. Preparation and the
 first submission still require at least 300 seconds of quote validity, consolidated
@@ -459,22 +457,20 @@ applicable. Keep both state and encryption key: a Zcash seed alone cannot restor
 EVM keys or pending funding work. `wallet backup` preserves both in one consistent backup directory; the database
 and key are not interchangeable backups.
 
-Named pools persist two distinct bootstrap candidates and their USDC funding
-floors. New profiles default to a $2 floor. An unsigned NEAR quote can raise a
-candidate's target to the bridge's current minimum only within an explicit
-`max_funding_amount_usdc` (omission allows no increase). The validated quote and new
-wallet/job target commit atomically before any preparation or transfer. Successful
-quotes freeze that target. Source-input, fee and treasury budget caps still apply;
-an unaffordable minimum leaves funding unavailable rather than raising those caps.
-Minimum hints are accepted only from the specific bridge-minimum error with a
-positive atomic Base USDC amount. Each quote negotiation allows at most three
-requests; other failures do not trigger amount changes or payment retries. Repeating `wallet pool` resumes the existing pool; changing its
-`funding_amount_usdc` affects future allocations only. Transactional promotion retires
-one address, promotes the standby, and creates one new key/funding job. Pools
-have independent generation checks and roles. Shared ZEC budget reservations
-carry unresolved exposure across days; confirmed costs are charged conservatively
-on their confirmation day. A single pending prepared outgoing operation gates
-new preparation, and exact bytes plus its wallet snapshot commit together.
+Managed groups persist an immutable initial allocation and exact enabled small/large
+reserve claims. Reserve targets are explicit funding preferences. An unsigned NEAR
+quote can raise accepted output to a bridge minimum only within that slot's explicit
+maximum (omission permits no increase); original allocation target and identity stay
+immutable. Source-input and fee safeguards still apply, with actual spendable treasury
+funds limiting ordinary funding. Each quote negotiation allows at most three requests;
+other failures do not authorize amount changes or payment retries.
+
+A READY payment atomically retains the prior active, activates its exact payer and
+vacates only the consumed claim generation. Selection allocates nothing. The independent
+funding owner fills enabled vacancies under current authority; retained wallet count
+and retirement never gate refill. Source reservations preserve unresolved liabilities
+across days. One pending prepared outgoing operation gates new preparation, and exact
+bytes plus its wallet snapshot commit together.
 
 A sync failure before the transaction preparer is invoked leaves the same quote
 eligible for a later attempt. Interrupted calculation or durable transaction/budget
@@ -634,18 +630,18 @@ if any view fails. Use the same trusted
 RPC policy as the deployment; choosing another provider discloses those addresses
 to that provider.
 
-Managed `mode = "zcash_rotation"` requires `max_conversion_overhead_percent`
-(an integer percentage from 0 to 100). `max_funding_spend_zec` is an optional
-ceiling on one funding transfer including its network fee. See
-[funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for USDC
-budgets, bridge-minimum headroom, and optional native-ZEC safeguards.
-Small deposits increase refill frequency; validate swap minimums and total fee overhead
-before choosing sub-dollar targets. A payment larger than the configured deposit
-target is refused rather than repeatedly rotating wallets. Explicit sizes in
-existing configurations are unchanged.
+Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc`,
+`max_conversion_overhead_percent` (integer 0–100), and `reserves.small` with a
+positive `funding_amount_usdc`. Optional `reserves.large` must be at least as large.
+Each reserve has its own optional `max_funding_amount_usdc`; omission allows no
+increase above target. `max_funding_spend_zec` caps one transfer including its fee.
+The group payment cap is independent of reserve size; a price above a funding
+target can be paid when one eligible wallet covers it after liabilities.
 
-`funding_amount_usdc` defaults to `"2.00"`, `max_api_payment_usdc` to `"1.00"`,
-and `max_attempts` to 3. Payment admission has no total timeout. Legacy
+`max_retirement_remainder_usdc` defaults to `"0"`; `max_attempts` defaults to 3.
+See [configuration](configuration.md) for exact syntax, rejected aggregate settings,
+reopen-only changes, initial inventory and the scoped stopped-service conversion.
+Static-wallet payment defaults remain unchanged. Payment admission has no total timeout. Legacy
 `wait_seconds` is accepted but ignored with a warning; remove it from wallet
 configuration. Money fields are decimal strings;
 USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
@@ -681,21 +677,22 @@ call. RPC verification checks chain 8453, block freshness, and EIP-1898 canonica
 block-hash queries for USDC balances and `authorizationState`. The RPC must support
 these queries. Admission uses the lower of confirmed and latest balances minus
 unresolved authorizations. The default confirmation depth is 12 and maximum
-latest-block age is 120 seconds. A changed confirmed anchor blocks the pool with
-`chain_recovery_required`; automated reorg recovery is not implemented.
+latest-block age is 120 seconds. Typed contradiction handling distinguishes a bad
+new acquisition from disputed historical readiness and invalidated financial-accounting
+support; an ordinary refresh cannot repair the latter.
 
-Admission, promotion and the replacement key/job commit transactionally. A busy
-wallet returns `payment_pending` instead of rotating. Actual depletion promotes
-only a freshly verified standby able to cover that call. A signed authorization's
-payer, payee, nonce, amount, validity, requirements hash, attempt and generation
-are journaled before its single signed HTTP attempt. Signatures are not persisted.
-A final 402, timeout, cancellation or HTTP success does not release its reservation.
-A subsequent admission reconciles it against a common confirmed block: used
-nonces or expired authorizations verified unused release exposure. This conservative
-accounting can temporarily understate spendable funds. Reconciliation runs on demand
-and every five seconds in the background.
+Admission journals the exact payer's authorization and consumes a READY claim in
+one transaction. ACTIVE and RETAINED payers retain their roles, and selection creates
+no replacement job. Available capacity deducts every unresolved authorization;
+an affordable call can proceed concurrently without rotating a busy wallet merely
+because another payment is pending. Payer, payee, nonce, amount, validity,
+requirements hash and original attempt are journaled before the single signed HTTP
+attempt. Signatures are not persisted. A final 402, timeout, cancellation or HTTP
+success does not release its reservation. Canonical used/expired-unused proofs have
+separate historical anchors from fresh admission balances. Retained bounded
+maintenance completes these proofs without a whole-group scan deadline.
 
-Pools can spend independently verified Base balances and promote funded standbys.
+Pools can spend independently verified Base balances and consume funded reserves.
 Queued replacements are funded only with `funding.auto_fund = true`. Refund shielding
 requires explicit operator handling. Eligible source-expiry recovery runs automatically
 with funding, or through `wallet recover` while serving is stopped.
@@ -717,3 +714,47 @@ offline CLI; two more test managed multi-listener serving and generated-pool
 identity across template edits and scope changes. Local gRPC fixtures exercise
 real zingolib sync, wrong-network rejection, periodic checkpoints, cancellation,
 and encrypted restart/resume without real funds or external indexers.
+
+## Versioned capacity output
+
+Wallet status and bootstrap JSON use `schema_version: 2`. Status additionally
+reports `state_schema_version`. Historical qualification report files retain their
+original interpretation; none of these observations grants payment or retry authority.
+
+Bootstrap reports `serving_ready_groups`, `inventory_ready_groups`, and
+`captured_completed_groups` separately. The captured command waits only for its
+initial allocation and enabled slot generations, including claims vacant when it
+starts. Successful completion has an empty `incomplete_captured_jobs` list;
+obstruction or cancellation remains an error with persisted work retained. Current
+inventory can become incomplete again after a reserve is consumed.
+
+Status replaces the old pool `deposit_atomic` and `bootstrapped` fields with current
+payment authority, retirement tolerance, exact `reserve_claims`, readiness and
+historical initial-credit observations. Original wallet `target` and last saved
+`confirmed_balance` are descriptive history, not fresh available capacity. Signed
+exposure, financial repair blocks, destination discrepancies and retirement
+observations are reported separately. Null authority means unconfigured; explicit
+unlimited authority is represented by the maximum U256 atomic value.
+
+`runtime_balance_evidence` reports the current owner's cached exact confirmed/latest
+amounts, heights and hashes, original `valid_until`, and separate `fresh` and
+`compatible` flags. A fixed `unavailable_reason` explains expired or invalid support.
+Block timestamps are null because the certificate does not retain them. Offline
+status and uncached wallets report null evidence: current capacity is unknown, not
+zero. Status does no RPC and grants no admission authority.
+
+Per-pool `retirement_accounting` sums only exact confirmed amounts recorded at
+automatic retirement, with automatic/manual counts and historical unknowns separate.
+Latest amounts and policy bounds are never added to that sum. These are historical
+recorded balances, not current retired holdings, API costs or destroyed funds.
+Unsupported legacy provenance has null totals/counts rather than invented zeros.
+
+`wallet pool` is removed. Configure managed `reserves.small`, optional
+`reserves.large`, and an explicit `max_api_payment_usdc`, then run
+`wallet bootstrap --config FILE`. Declaration creates no allocation; the funding
+owner fills permitted vacancies under current auto-funding and qualification authority.
+
+Automatic retirement runs during ordinary reconciliation under the configured
+per-wallet tolerance, including with `auto_fund=false`. It preserves keys and funds;
+there is no manual retirement command. See [automatic retirement](wallet-rotation.md#automatic-retirement)
+for dual-balance evidence, pending-work exclusions and qualification restrictions.

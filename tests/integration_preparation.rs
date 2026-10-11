@@ -1,5 +1,9 @@
 //! Real executable, frozen offline catalogs, synthetic registry, no wallet credentials.
 #![allow(dead_code, unused_imports)]
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
+#[path = "support/consume_reserve.rs"]
+mod consume_reserve;
 include!("../examples/live_integration/driver.rs");
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
@@ -24,7 +28,6 @@ state_dir="state"
 key_file="nonexistent-key"
 indexer_url_env="ABSENT_INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [wallets.test]
 mode="static"
@@ -508,7 +511,6 @@ state_dir="state"
 key_file="nonexistent-key"
 indexer_url_env="ABSENT_INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
@@ -618,7 +620,26 @@ bearer_token_env="TOKEN"
 }
 
 #[test]
-fn unsigned_identity_export_keeps_retired_and_replacement_wallets_unpermitted() {
+fn unsigned_identity_export_keeps_retained_and_replacement_wallets_unpermitted() {
+    identity_fixture_child("unsigned_identity_child");
+}
+fn identity_fixture_child(name: &str) {
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .args(["--ignored", "--exact", name, "--nocapture"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+#[test]
+#[ignore = "isolated network owner; invoked by parent"]
+fn unsigned_identity_child() {
     let tmp = tempfile::tempdir().unwrap();
     let (m, state) = fixture(tmp.path());
     let mut store = x402_treazury::rotation::store::Store::open(
@@ -627,11 +648,18 @@ fn unsigned_identity_export_keeps_retired_and_replacement_wallets_unpermitted() 
         &m.treasury_id,
     )
     .unwrap();
-    let pool = store.ensure_pool("history", "1").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "history",
+        crate::capacity_fixture::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     for address in &store.status().unwrap().pools[0].addresses {
         rpc_evidence::credit(&mut store, &address.id, "1000000", 13).unwrap();
     }
-    store.promote(&pool, 0).unwrap();
+    store = consume_reserve::consume_and_replace(store, &state, &tmp.path().join("key"), &pool);
     drop(store);
     std::fs::remove_file(tmp.path().join("key")).unwrap();
     let snapshot = json!({"deployment":{"network":{"mode":"tor","socks_endpoint":"127.0.0.1:19950","isolation_namespace":"identity-test"}},"sources":{"api":{"settings":{"spec":"https://catalog.example/openapi.json","help_url":"https://docs.example/llms.txt","base_url":"https://api.example"},"base_url":"https://api.example"}},"inventory":[{"server":"main","tools":[{"source":"api","name":"api_read","path":"/read"}]}]});
@@ -759,6 +787,11 @@ fn outage_catalog_validation_rejects_different_caches_and_prewarmed_fresh_urls()
 
 #[tokio::test]
 async fn managed_tor_map_preserves_wallet_scope_and_requires_paid_provider_destination() {
+    identity_fixture_child("managed_identity_child");
+}
+#[tokio::test]
+#[ignore = "isolated network owner; invoked by parent"]
+async fn managed_identity_child() {
     let tmp = tempfile::tempdir().unwrap();
     let (mut m, state) = fixture(tmp.path());
     m.start.pools = vec!["alpha".into()];
@@ -769,8 +802,22 @@ async fn managed_tor_map_preserves_wallet_scope_and_requires_paid_provider_desti
         &m.treasury_id,
     )
     .unwrap();
-    let alpha = store.ensure_pool("alpha", "1").unwrap();
-    store.ensure_pool("beta", "1").unwrap();
+    let alpha = crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "alpha",
+        crate::capacity_fixture::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "beta",
+        crate::capacity_fixture::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let wallets = store
         .status()
         .unwrap()
@@ -796,19 +843,20 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMISSION"
-daily_treasury_spend_limit_zec="1"
 max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=false
 confidentiality="public"
 [wallets.alpha]
 mode="zcash_rotation"
-funding_amount_usdc="1"
+reserves={{small={{funding_amount_usdc="1"}}}}
+max_api_payment_usdc="1"
 max_funding_spend_zec="0.01"
 max_conversion_overhead_percent=5
 [wallets.beta]
 mode="zcash_rotation"
-funding_amount_usdc="1"
+reserves={{small={{funding_amount_usdc="1"}}}}
+max_api_payment_usdc="1"
 max_funding_spend_zec="0.01"
 max_conversion_overhead_percent=5
 [sources.api]
@@ -857,7 +905,7 @@ bearer_token_env="TOKEN"
     wrong_bindings["inventory"][0]["wallet_bindings"]["api"]["wallet"] = json!("beta");
     assert!(tor::identities::managed_map(&m, &wrong_bindings, &state, lookup, &[]).is_err());
     assert_eq!(before.values().filter(|i| i.kind == "evm").count(), 4);
-    store.promote(&alpha, 0).unwrap();
+    store = consume_reserve::consume_and_replace(store, &state, &tmp.path().join("key"), &alpha);
     drop(store);
     std::fs::remove_file(tmp.path().join("key")).unwrap();
     let payment =
@@ -981,7 +1029,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [sources.unused]
 spec="missing.json"

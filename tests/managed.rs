@@ -1,4 +1,6 @@
 //! Offline end-to-end admission against a local Base RPC and x402 seller.
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 use alloy_primitives::Address;
 use axum::{
     Json, Router,
@@ -52,6 +54,9 @@ struct Fake {
     rpc_hold: Arc<AtomicBool>,
     nonce_delay: Arc<AtomicBool>,
     balance_delay: Arc<AtomicBool>,
+    balance_unavailable: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    balance_delays: Arc<Mutex<BTreeMap<String, u64>>>,
+    balance_gates: Arc<Mutex<BTreeMap<String, Arc<tokio::sync::Semaphore>>>>,
     chain: Arc<Mutex<ChainHistory>>,
     rpc_fault: Arc<Mutex<Option<String>>>,
     confirmed_reads: Arc<AtomicUsize>,
@@ -76,6 +81,30 @@ async fn rpc(
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     Json(v): Json<Value>,
 ) -> Json<Value> {
+    if v["method"] == "eth_call"
+        && let Some(data) = v["params"][0]["data"]
+            .as_str()
+            .filter(|data| data.starts_with("0x70a08231"))
+    {
+        let wallet = format!("0x{}", &data[data.len() - 40..])
+            .parse::<Address>()
+            .unwrap()
+            .to_string();
+        let unavailable = f.balance_unavailable.lock().unwrap().contains(&wallet);
+        let gate = f.balance_gates.lock().unwrap().get(&wallet).cloned();
+        if let Some(gate) = gate {
+            let _ = gate.acquire().await;
+        }
+        let delay = f.balance_delays.lock().unwrap().get(&wallet).copied();
+        if let Some(delay) = delay {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
+        if unavailable {
+            return Json(
+                json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32005,"message":"fixture wallet unavailable"}}),
+            );
+        }
+    }
     if f.rpc_hold.swap(false, Ordering::SeqCst) {
         f.arrived.notify_one();
         f.release.notified().await;
@@ -315,7 +344,14 @@ impl Harness {
             b"fixture snapshot",
         )
         .unwrap();
-        let pool = store.ensure_pool("research", "5").unwrap();
+        let pool = crate::capacity_fixture::declare_and_allocate!(
+            store,
+            "research",
+            crate::capacity_fixture::small_reserve("5"),
+            Some(alloy_primitives::U256::from(5_000_000u64)),
+            0
+        )
+        .unwrap();
         let f = Fake {
             balances: Arc::default(),
             challenge: Arc::new(Mutex::new(challenge("3000000"))),
@@ -324,6 +360,9 @@ impl Harness {
             rpc_hold: Arc::default(),
             nonce_delay: Arc::default(),
             balance_delay: Arc::default(),
+            balance_unavailable: Arc::default(),
+            balance_delays: Arc::default(),
+            balance_gates: Arc::default(),
             chain: Arc::default(),
             rpc_fault: Arc::default(),
             confirmed_reads: Arc::default(),
@@ -361,6 +400,13 @@ impl Harness {
             .await
             .unwrap()
         });
+        make_pool(store.clone(), pool.clone(), &base)
+            .reconcile()
+            .await
+            .unwrap();
+        f.rpc_calls.store(0, Ordering::SeqCst);
+        f.confirmed_reads.store(0, Ordering::SeqCst);
+        f.traces.lock().unwrap().clear();
         let client = make_client(store.clone(), pool.clone(), &base);
         Self {
             dir,
@@ -388,6 +434,59 @@ impl Harness {
             body: None,
         }
     }
+}
+async fn restart(h: Harness) -> Harness {
+    let Harness {
+        dir,
+        f,
+        store,
+        worker,
+        pool,
+        client,
+        url,
+        base,
+        server,
+    } = h;
+    let id = store.call(|s| Ok(s.id().to_owned())).await.unwrap();
+    client.drain().await;
+    drop(client);
+    drop(store);
+    worker.await.unwrap();
+    let state = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let client = make_client(store.clone(), pool.clone(), &base);
+    Harness {
+        dir,
+        f,
+        store,
+        worker,
+        pool,
+        client,
+        url,
+        base,
+        server,
+    }
+}
+async fn exhaust_ready(h: &Harness) {
+    let status = h.store.call(|s| s.status()).await.unwrap();
+    for wallet in status
+        .pools
+        .iter()
+        .find(|p| p.id == h.pool)
+        .unwrap()
+        .addresses
+        .iter()
+        .filter(|w| w.role == "READY")
+    {
+        h.f.balances
+            .lock()
+            .unwrap()
+            .insert(wallet.address.clone(), 0);
+    }
+    make_pool(h.store.clone(), h.pool.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
 }
 // Independently completed balance reads need not be simultaneously compatible
 // with a history proof committed by another read in this same bounded pass.
@@ -427,7 +526,6 @@ fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {
         store,
         pool,
         BaseRpc::new(&format!("{base}/rpc"), 12, 120).unwrap(),
-        "5",
         SpendPolicy::dollars("none").unwrap(),
     )
     .unwrap();
@@ -437,22 +535,38 @@ fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
     PaidClient::managed(make_pool(store, pool, base))
 }
 #[tokio::test]
-async fn concurrent_calls_reserve_before_send_and_cannot_churn_busy_active() {
+async fn concurrent_calls_reserve_before_send_and_consume_ready_once() {
     let h = Harness::new().await;
     let other = h.client.clone();
     let (a, b) = tokio::join!(h.client.execute(h.route()), other.execute(h.route()));
-    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
-    let error = a.err().or_else(|| b.err()).unwrap().to_string();
-    assert!(error.contains("payment_pending"), "{error}");
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    assert!(a.is_ok() && b.is_ok(), "{a:?} {b:?}");
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     let status = h.store.call(|s| s.status()).await.unwrap();
     assert_eq!(status.pools[0].generation, 0);
     assert_eq!(status.pools[0].addresses.len(), 2);
+    assert_eq!(
+        status.pools[0]
+            .addresses
+            .iter()
+            .filter(|w| w.role == "ACTIVE")
+            .count(),
+        1
+    );
+    assert_eq!(
+        status.pools[0]
+            .addresses
+            .iter()
+            .filter(|w| w.role == "RETAINED")
+            .count(),
+        1
+    );
+    assert!(h.client.execute(h.route()).await.is_err());
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     drop(other);
     h.close().await;
 }
 #[tokio::test]
-async fn confirmed_depletion_promotes_once_and_queues_one_replacement() {
+async fn confirmed_depletion_consumes_ready_independently_of_failed_refill() {
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
@@ -463,21 +577,37 @@ async fn confirmed_depletion_promotes_once_and_queues_one_replacement() {
     reconcile_complete_history(&h).await;
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     db.execute_batch("CREATE TRIGGER fail_replacement BEFORE INSERT ON funding_jobs BEGIN SELECT RAISE(ABORT,'injected replacement failure'); END;").unwrap();
-    assert!(h.client.execute(h.route()).await.is_err());
-    assert_eq!(
-        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
-        0
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    db.execute_batch("DROP TRIGGER fail_replacement;").unwrap();
     h.client.execute(h.route()).await.unwrap();
     let state = h.store.call(|s| s.status()).await.unwrap();
-    assert_eq!(state.pools[0].generation, 1);
-    assert_eq!(state.pools[0].addresses.len(), 3);
+    assert_eq!(state.pools[0].generation, 0);
+    assert_eq!(state.pools[0].addresses.len(), 2);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     let pool = h.pool.clone();
-    let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
-    assert_eq!(query.wallets.len(), 2); // Retired, reconciled address needs no more RPC calls.
-    assert_eq!(query.pending.len(), 1);
+    assert!(
+        h.store
+            .call(move |s| s.allocate_capacity_kind(
+                &pool,
+                x402_treazury::rotation::store::AllocationKind::Small,
+                true
+            ))
+            .await
+            .is_err()
+    );
+    db.execute_batch("DROP TRIGGER fail_replacement;").unwrap();
+    let pool = h.pool.clone();
+    assert!(
+        h.store
+            .call(move |s| s.allocate_capacity_kind(
+                &pool,
+                x402_treazury::rotation::store::AllocationKind::Small,
+                true
+            ))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let state = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(state.pools[0].addresses.len(), 3);
     let signed = h.f.signed.lock().unwrap().clone();
     assert_ne!(
         signed[0]["payload"]["authorization"]["from"],
@@ -730,6 +860,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
 #[tokio::test]
 async fn rejected_payment_remains_reserved_across_restart_and_is_not_replayed() {
     let mut h = Harness::new().await;
+    exhaust_ready(&h).await;
     h.f.reject.store(true, Ordering::SeqCst);
     h.f.challenge.lock().unwrap()["extensions"] = json!({"unknown": {"secret": "not logged"}});
     let error = h.client.execute(h.route()).await.unwrap_err();
@@ -760,14 +891,14 @@ async fn rejected_payment_remains_reserved_across_restart_and_is_not_replayed() 
             .await
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     h.close().await;
 }
 #[tokio::test]
 async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
-    let h = Harness::new().await;
+    let h = restart(Harness::new().await).await;
     h.f.stale.store(true, Ordering::SeqCst);
     assert!(h.client.execute(h.route()).await.is_err());
     h.f.stale.store(false, Ordering::SeqCst);
@@ -776,6 +907,7 @@ async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
     h.f.wrong_chain.store(false, Ordering::SeqCst);
     h.client.execute(h.route()).await.unwrap();
     h.f.reorg.store(true, Ordering::SeqCst);
+    let h = restart(h).await;
     assert!(
         h.client
             .execute(h.route())
@@ -790,6 +922,7 @@ async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
 #[tokio::test]
 async fn cancellation_after_submission_retains_liability() {
     let h = Harness::new().await;
+    exhaust_ready(&h).await;
     h.f.hold.store(true, Ordering::SeqCst);
     let client = h.client.clone();
     let route = h.route();
@@ -804,7 +937,7 @@ async fn cancellation_after_submission_retains_liability() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     h.close().await;
@@ -845,7 +978,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=false
@@ -853,10 +985,14 @@ base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.research]
 mode="zcash_rotation"
+max_api_payment_usdc="5"
+reserves={{small={{funding_amount_usdc="5"}}}}
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.unused]
 mode="zcash_rotation"
+max_api_payment_usdc="5"
+reserves={{small={{funding_amount_usdc="5"}}}}
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.static_wallet]
@@ -965,7 +1101,7 @@ sources=["api"]
         );
     }
     assert_eq!(state.pools.len(), 2);
-    assert_eq!(state.pools[0].addresses.len(), 2);
+    assert_eq!(state.pools[0].addresses.len(), 0);
     assert!(
         Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
             .await
@@ -990,10 +1126,10 @@ sources=["api"]
     let t = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
         .await
         .unwrap();
-    assert_eq!(t.status().await.unwrap().pools[0].addresses.len(), 2);
+    assert_eq!(t.status().await.unwrap().pools[0].addresses.len(), 0);
     t.close().await.unwrap();
-    // Exercise the opt-in owner's shutdown with all quote work deferred. This
-    // must not contact NEAR, and must release every worker's store handle.
+    // A paused observer also resolves an omitted treasury identity and releases
+    // all ownership on shutdown without allocating or contacting NEAR.
     let mut state = x402_treazury::rotation::store::Store::open(
         &dir.path().join("state"),
         &dir.path().join("key"),
@@ -1007,12 +1143,10 @@ sources=["api"]
     }
     let treasury_id = state.id().to_owned();
     drop(state);
-    // Omitted ID resolves from durable state; omitted auto_fund now starts workers.
+    // Omitted ID resolves from durable state.
     std::fs::write(
         &path,
-        config
-            .replace("auto_fund=false\n", "")
-            .replace(&format!("id=\"{treasury_id}\"\n"), ""),
+        config.replace(&format!("id=\"{treasury_id}\"\n"), ""),
     )
     .unwrap();
     let running = Deployment::load(&path)
@@ -1030,46 +1164,75 @@ sources=["api"]
         .unwrap()
         .unwrap()
         .unwrap();
-    let static_config = config.replace(
-        "mode=\"zcash_rotation\"\nmax_funding_spend_zec=\"0.02\"\nmax_conversion_overhead_percent=5",
-        "mode=\"static\"\nprivate_key_env=\"KEY\"",
-    );
-    std::fs::write(&path, static_config).unwrap();
-    let error = match Deployment::load(&path).await.unwrap().bind(&env).await {
-        Ok(_) => panic!("accepted managed-to-static identity change"),
-        Err(e) => e.to_string(),
-    };
-    assert!(error.contains("cannot become static"), "{error}");
+    let before_static_attempts = serde_json::to_value(
+        x402_treazury::rotation::store::status(&dir.path().join("state")).unwrap(),
+    )
+    .unwrap();
+    let mut static_config: toml::Value = toml::from_str(&config).unwrap();
+    for name in ["research", "unused"] {
+        static_config["wallets"][name] = toml::Value::try_from(
+            json!({"mode":"static","private_key_env":"KEY","max_api_payment_usdc":"5"}),
+        )
+        .unwrap();
+        assert_eq!(
+            static_config["wallets"][name]["mode"].as_str(),
+            Some("static")
+        );
+        std::fs::write(&path, toml::to_string(&static_config).unwrap()).unwrap();
+        let error = match Deployment::load(&path).await.unwrap().bind(&env).await {
+            Ok(_) => panic!("accepted managed-to-static identity change"),
+            Err(e) => e.to_string(),
+        };
+        assert!(error.contains("cannot become static"), "{error}");
+        assert_eq!(
+            serde_json::to_value(
+                x402_treazury::rotation::store::status(&dir.path().join("state")).unwrap()
+            )
+            .unwrap(),
+            before_static_attempts
+        );
+    }
     h.close().await;
 }
 
 #[tokio::test]
-async fn free_calls_do_not_touch_admission_and_bootstrap_requires_both_candidates() {
+async fn free_calls_do_not_touch_admission_and_funded_active_serves_independently() {
     let h = Harness::new().await;
-    h.f.balances.lock().unwrap().clear();
+    let before = h.f.rpc_calls.load(Ordering::SeqCst);
     h.f.free.store(true, Ordering::SeqCst);
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "free");
-    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), before);
+    assert!(h.f.signed.lock().unwrap().is_empty());
     h.f.free.store(false, Ordering::SeqCst);
-    let address = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
+    let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
         .address
         .clone();
-    h.f.balances.lock().unwrap().insert(address, 5_000_000);
-    assert!(
-        h.client
-            .execute(h.route())
+    for (address, balance) in h.f.balances.lock().unwrap().iter_mut() {
+        if address != &active {
+            *balance = 0;
+        }
+    }
+    make_pool(h.store.clone(), h.pool.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    assert_eq!(
+        h.store
+            .call(|s| s.status())
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("wallet_not_ready")
+            .unwrap()
+            .funding_jobs
+            .len(),
+        2
     );
-    assert!(!h.store.call(|s| s.status()).await.unwrap().pools[0].bootstrapped);
-    assert!(h.f.signed.lock().unwrap().is_empty());
     h.close().await;
 }
 #[tokio::test]
 async fn unused_expired_authorization_requires_fresh_chain_evidence_to_release() {
     let h = Harness::new().await;
+    exhaust_ready(&h).await;
     // Leave more time than the client's three-second request timeout for signing.
     // A one-second lifetime can expire at a wall-clock boundary before submission.
     h.f.challenge.lock().unwrap()["accepts"][0]["maxTimeoutSeconds"] = json!(5);
@@ -1104,7 +1267,20 @@ async fn unused_expired_authorization_requires_fresh_chain_evidence_to_release()
 #[tokio::test]
 async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
     let h = Harness::new().await;
-    let other_id = h.store.call(|s| s.ensure_pool("other", "5")).await.unwrap();
+    exhaust_ready(&h).await;
+    let other_id = h
+        .store
+        .call(|s| {
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "other",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000u64)),
+                0
+            )
+        })
+        .await
+        .unwrap();
     let status = h.store.call(|s| s.status()).await.unwrap();
     for pool in status.pools {
         if pool.name == "other" {
@@ -1116,6 +1292,10 @@ async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
             }
         }
     }
+    make_pool(h.store.clone(), other_id.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
     let other = make_client(h.store.clone(), other_id, &h.base);
     h.f.hold.store(true, Ordering::SeqCst);
     let client = h.client.clone();
@@ -1124,7 +1304,7 @@ async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
     h.f.arrived.notified().await;
     other.execute(h.route()).await.unwrap();
     let error = h.client.execute(h.route()).await.unwrap_err().to_string();
-    assert!(error.contains("payment_pending"), "{error}");
+    assert!(error.contains("funding_unavailable"), "{error}");
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     task.abort();
     let _ = task.await;
@@ -1143,7 +1323,15 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
     h.f.used.store(true, Ordering::SeqCst);
     reconcile_complete_history(&h).await;
     h.store
-        .call(|s| s.ensure_pool("research", "10"))
+        .call(|s| {
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "research",
+                crate::capacity_fixture::small_reserve("10"),
+                Some(alloy_primitives::U256::from(10_000_000u64)),
+                0
+            )
+        })
         .await
         .unwrap();
     *h.f.challenge.lock().unwrap() = challenge("6000000");
@@ -1152,7 +1340,6 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
             h.store.clone(),
             h.pool.clone(),
             BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
-            "10",
             SpendPolicy::dollars("none").unwrap(),
         )
         .unwrap(),
@@ -1187,7 +1374,6 @@ async fn background_reconciliation_releases_confirmed_payment_without_rotating_o
         h.store.clone(),
         h.pool.clone(),
         BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
-        "5",
         SpendPolicy::dollars("none").unwrap(),
     )
     .unwrap();
@@ -1263,17 +1449,17 @@ fn tor_managed_child() {
         ..Default::default()
     })
     .unwrap();
-    confirmed_depletion_promotes_once_and_queues_one_replacement();
-    concurrent_calls_reserve_before_send_and_cannot_churn_busy_active();
+    confirmed_depletion_consumes_ready_independently_of_failed_refill();
+    concurrent_calls_reserve_before_send_and_consume_ready_once();
     unsupported_and_over_target_offers_have_no_admission_side_effects();
     managed_extensions_are_stripped_logged_and_do_not_change_authorization();
     rejected_payment_remains_reserved_across_restart_and_is_not_replayed();
-    free_calls_do_not_touch_admission_and_bootstrap_requires_both_candidates();
-    post_rotation_returns_before_signing_and_requires_caller_retry();
+    free_calls_do_not_touch_admission_and_funded_active_serves_independently();
+    post_handoff_gets_one_new_challenge_and_signs_once();
 }
 
 #[tokio::test]
-async fn post_rotation_returns_before_signing_and_requires_caller_retry() {
+async fn post_handoff_gets_one_new_challenge_and_signs_once() {
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
@@ -1282,22 +1468,31 @@ async fn post_rotation_returns_before_signing_and_requires_caller_retry() {
     h.f.used.store(true, Ordering::SeqCst);
     h.f.balances.lock().unwrap().insert(active, 0);
     reconcile_complete_history(&h).await;
-    let mut route = h.route();
-    route.method = "POST".into();
-    let error = h.client.execute(route).await.unwrap_err();
-    assert!(error.to_string().contains("payer_changed_before_payment"));
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    assert_eq!(
-        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
-        1
-    );
+    let before =
+        h.f.traces
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, kind, _)| kind == "unsigned")
+            .count();
     let mut route = h.route();
     route.method = "POST".into();
     h.client.execute(route).await.unwrap();
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(
+        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
+        0
+    );
+    let after =
+        h.f.traces
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, kind, _)| kind == "unsigned")
+            .count();
+    assert_eq!(after - before, 2);
     h.close().await;
 }
-
 #[tokio::test]
 async fn promotion_keeps_rpc_and_payment_transport_bound_to_address() {
     let output = tokio::process::Command::new(std::env::current_exe().unwrap())
@@ -1346,23 +1541,10 @@ async fn promotion_identity_child() {
         let mut route = h.route();
         route.method = method.into();
         let result = h.client.execute(route).await;
-        if method == "POST" {
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("payer_changed_before_payment")
-            );
-            assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-            let mut retry = h.route();
-            retry.method = method.into();
-            h.client.execute(retry).await.unwrap();
-        } else {
-            result.unwrap();
-        }
+        result.unwrap();
         let status = h.store.call(|s| s.status()).await.unwrap();
-        assert_eq!(status.pools[0].generation, 1);
-        assert_eq!(status.pools[0].addresses.len(), 3);
+        assert_eq!(status.pools[0].generation, 0);
+        assert_eq!(status.pools[0].addresses.len(), 2);
         assert_eq!(h.f.signed.lock().unwrap().len(), 2);
         let traces = h.f.traces.lock().unwrap().clone();
         let records = proxy.records.lock().unwrap().clone();
@@ -1426,15 +1608,15 @@ async fn malformed_base_evidence_never_applies_a_partial_view() {
         "word_short",
         "word_long",
         "word_invalid",
-        "nonce",
         "final_hash",
     ] {
-        let h = Harness::new().await;
+        let h = restart(Harness::new().await).await;
         h.client.execute(h.route()).await.unwrap();
-        let before = serde_json::to_value(h.store.call(|s| s.status()).await.unwrap()).unwrap();
         let count = h.f.signed.lock().unwrap().len();
         *h.f.rpc_fault.lock().unwrap() = Some(fault.into());
         h.f.used.store(true, Ordering::SeqCst); // Earlier nonce evidence alone must not release.
+        let h = restart(h).await; // Force a new acquisition rather than reuse valid evidence.
+        let before = serde_json::to_value(h.store.call(|s| s.status()).await.unwrap()).unwrap();
         assert!(h.client.execute(h.route()).await.is_err(), "{fault}");
         assert_eq!(h.f.signed.lock().unwrap().len(), count, "{fault}");
         assert_eq!(
@@ -1452,6 +1634,7 @@ mod concurrency;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_signed_response_does_not_block_shared_pool_or_reconciliation() {
     let h = Harness::new().await;
+    exhaust_ready(&h).await;
     let pool = make_pool(h.store.clone(), h.pool.clone(), &h.base);
     let client = PaidClient::managed(pool.clone());
     *h.f.challenge.lock().unwrap() = challenge("1000000");
@@ -1477,7 +1660,7 @@ async fn slow_signed_response_does_not_block_shared_pool_or_reconciliation() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     first.abort();
@@ -1519,8 +1702,8 @@ async fn confirmed_payment_can_rotate_while_original_seller_response_is_pending(
     );
     assert!(!first.is_finished());
     let status = h.store.call(|s| s.status()).await.unwrap();
-    assert_eq!(status.pools[0].generation, 1);
-    assert_eq!(status.pools[0].addresses.len(), 3);
+    assert_eq!(status.pools[0].generation, 0);
+    assert_eq!(status.pools[0].addresses.len(), 2);
     {
         let signed = h.f.signed.lock().unwrap();
         assert_eq!(signed.len(), 2);
@@ -1535,7 +1718,7 @@ async fn confirmed_payment_can_rotate_while_original_seller_response_is_pending(
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     assert_eq!(
         h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
-        1
+        0
     );
     h.close().await;
 }
@@ -1576,7 +1759,7 @@ async fn slow_chain_reconciliation_allows_waiting_admission_without_blocking_oth
 }
 
 #[tokio::test]
-async fn qualification_guard_allows_active_calls_but_blocks_replacement_before_signing() {
+async fn qualification_guard_allows_existing_ready_consumption_but_denies_refill() {
     let h = Harness::new().await;
     h.store
         .call(|s| {
@@ -1590,7 +1773,7 @@ async fn qualification_guard_allows_active_calls_but_blocks_replacement_before_s
     let active = before.pools[0]
         .addresses
         .iter()
-        .find(|a| a.role == "ACTIVE")
+        .find(|w| w.role == "ACTIVE")
         .unwrap();
     h.f.balances
         .lock()
@@ -1598,40 +1781,37 @@ async fn qualification_guard_allows_active_calls_but_blocks_replacement_before_s
         .insert(active.address.clone(), 2_000_000);
     h.f.used.store(true, Ordering::SeqCst);
     reconcile_complete_history(&h).await;
-    // Parallel refusals must not rotate, allocate or sign; confirmed reconciliation survives.
     let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
-    for result in [a, b] {
-        let error = result.unwrap_err().to_string();
-        assert!(error.contains("qualification_funding_denied"), "{error}");
-        assert!(error.contains("limit is zero"), "{error}");
-    }
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     let after = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
     assert_eq!(after.pools[0].generation, 0);
-    assert_eq!(after.pools[0].addresses.len(), 2);
     assert_eq!(
         after.pools[0]
             .addresses
             .iter()
-            .find(|a| a.role == "ACTIVE")
+            .find(|w| w.id == active.id)
             .unwrap()
-            .id,
-        active.id
+            .role,
+        "RETAINED"
     );
-    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
-    let db = rusqlite::Connection::open(&h.f.db).unwrap();
-    let rows: Vec<String> = db
-        .prepare("SELECT state FROM payment_attempts")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<rusqlite::Result<_>>()
-        .unwrap();
-    assert_eq!(rows, ["RESOLVED"]);
-    // A cheaper call still uses the original active wallet after the refusal.
+    let pool = h.pool.clone();
+    let error = h
+        .store
+        .call(move |s| {
+            s.allocate_capacity_kind(
+                &pool,
+                x402_treazury::rotation::store::AllocationKind::Small,
+                true,
+            )
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("qualification_funding_denied"));
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
     h.close().await;
 }
 
@@ -1647,10 +1827,15 @@ async fn qualification_deployment_installs_guard_before_bootstrap_even_with_auto
         let owner = Treasury::create(state.clone(), key.clone(), 2_000_000,
             Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
         if existing {
-            owner
-                .ensure_pool("research".into(), "5".into())
-                .await
-                .unwrap();
+            crate::capacity_fixture::treasury_pair(
+                &owner,
+                "research",
+                "5",
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .await
+            .unwrap();
         }
         let baseline = owner.status().await.unwrap();
         let id = baseline.treasury_id.clone();
@@ -1668,7 +1853,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=true
@@ -1676,7 +1860,8 @@ base_rpc_url_env="BASE"
 base_rpc_fallback_url_envs=[]
 [wallets.research]
 mode="zcash_rotation"
-funding_amount_usdc="5"
+max_api_payment_usdc="5"
+reserves={{small={{funding_amount_usdc="5"}}}}
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [sources.api]
@@ -1702,20 +1887,8 @@ sources=["api"]
             .unwrap()
             .bind_restricted(&env, FundingRestriction::DenyNewFunding)
             .await;
-        match result {
-            Ok(running) => {
-                assert!(existing);
-                drop(running);
-            }
-            Err(e) => {
-                assert!(!existing);
-                assert!(
-                    e.to_string().contains("qualification_funding_denied"),
-                    "{e:#}"
-                );
-            }
-        }
-        // Binding starts no workers; all fixtures are local files/unfunded wallets.
+        drop(result.unwrap());
+        // All fixtures are local files and unfunded wallets.
         // Wait for asynchronous owner teardown, then verify no new allocation survived.
         let reopened = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
@@ -1727,28 +1900,47 @@ sources=["api"]
         })
         .await
         .unwrap();
+        let after = reopened.status().unwrap();
+        assert_eq!(after.funding_jobs.len(), baseline.funding_jobs.len());
         assert_eq!(
-            serde_json::to_value(reopened.status().unwrap().pools).unwrap(),
-            serde_json::to_value(baseline.pools).unwrap()
+            after.pools.iter().map(|p| p.addresses.len()).sum::<usize>(),
+            if existing { 2 } else { 0 }
         );
+        if existing {
+            assert_eq!(
+                serde_json::to_value(&after.pools[0].addresses).unwrap(),
+                serde_json::to_value(&baseline.pools[0].addresses).unwrap()
+            );
+        }
     }
 }
 
 #[tokio::test]
-async fn explicit_target_ceiling_opt_out_uses_api_cap_and_confirmed_capacity() {
+async fn explicit_api_cap_independent_of_funding_target_uses_confirmed_capacity() {
     let mut h = Harness::new().await;
     for balance in h.f.balances.lock().unwrap().values_mut() {
         *balance = 6_000_000;
     }
+    let group = h.pool.clone();
+    h.store
+        .call(move |s| {
+            s.configure_capacity_group(
+                &group,
+                Some(alloy_primitives::U256::from(6_000_000u64)),
+                0,
+                &crate::capacity_fixture::small_reserve("5"),
+            )
+        })
+        .await
+        .unwrap();
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
         BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
-        "5",
         SpendPolicy::dollars("6").unwrap(),
     )
-    .unwrap()
-    .with_funding_target_limit(false);
+    .unwrap();
+    manager.reconcile().await.unwrap();
     h.client = PaidClient::managed(Arc::new(manager));
     *h.f.challenge.lock().unwrap() = challenge("5500000");
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
@@ -1769,7 +1961,6 @@ async fn foreground_admission_does_not_start_historical_authorization_sweep() {
         h.store.clone(),
         h.pool.clone(),
         BaseRpc::new(&format!("{}/rpc", h.base), 12, 1).unwrap(),
-        "5",
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
@@ -1786,6 +1977,7 @@ async fn foreground_admission_does_not_start_historical_authorization_sweep() {
 #[tokio::test]
 async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_restart() {
     let mut h = Harness::new().await;
+    exhaust_ready(&h).await;
     let fallback = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fallback_url = format!("http://{}", fallback.local_addr().unwrap());
     let fallback_calls = Arc::new(AtomicUsize::new(0));
@@ -1800,7 +1992,6 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
             h.store.clone(),
             h.pool.clone(),
             BaseRpc::with_fallbacks(&[format!("{}/rpc", h.base), fallback_url], 12, 120).unwrap(),
-            "5",
             SpendPolicy::dollars("none").unwrap(),
         )
         .unwrap(),
@@ -1838,7 +2029,7 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
             .await
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     // Reconciliation remains an explicitly failed operation while observations
@@ -1891,7 +2082,7 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
             .await
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 3);
     *h.f.rpc_fault.lock().unwrap() = None;
@@ -1914,12 +2105,12 @@ async fn slow_balance_collection_retains_resolution_without_signing_or_looping()
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
     h.f.used.store(true, Ordering::SeqCst);
     h.f.balance_delay.store(true, Ordering::SeqCst);
+    h = restart(h).await;
     let manager = Arc::new(
         ManagedPool::new(
             h.store.clone(),
             h.pool.clone(),
             BaseRpc::new(&format!("{}/rpc", h.base), 12, 1).unwrap(),
-            "5",
             SpendPolicy::dollars("5").unwrap(),
         )
         .unwrap(),
@@ -1933,7 +2124,9 @@ async fn slow_balance_collection_retains_resolution_without_signing_or_looping()
     .expect("completed balance work must return, not restart")
     .unwrap_err();
     assert!(
-        error.to_string().contains("fresh Base balances required"),
+        error
+            .to_string()
+            .contains("candidate evidence acquisition incomplete"),
         "{error:#}"
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
@@ -1978,3 +2171,9 @@ async fn slow_balance_collection_retains_resolution_without_signing_or_looping()
     drop(manager);
     h.close().await;
 }
+
+#[path = "support/consumption.rs"]
+mod consumption;
+
+#[path = "support/draining.rs"]
+mod draining;

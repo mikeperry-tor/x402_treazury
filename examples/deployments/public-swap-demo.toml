@@ -1,3 +1,7 @@
+# Reserve sizes are funding preferences; the explicit group cap governs every wallet.
+# Initial active funding uses small; refill vacant slots small-first. Retained balances stay usable.
+# auto_fund=false pauses new funding, not eligible automatic retirement.
+# Partial credited allocations retain their claims until full readiness; accepted work stays owned.
 # One pool, one listener, one cheap tool. Follow ../../docs/public-swap-demo.md.
 # Copy beside this file as public-swap-demo.local.toml before editing.
 version = 1
@@ -6,15 +10,11 @@ version = 1
 state_dir = "../../state/public-demo"
 # wallet.key lives inside state_dir; the treasury ID is read from existing state.
 # Zcash endpoints use the built-in default unless explicitly overridden.
-daily_treasury_spend_limit_zec = "0.012"
 max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
 max_sync_age_seconds = 300
 
 [funding]
-# Gross USDC allocated across bootstrap and replacements; not API spending.
-daily_funding_limit_usdc = "10.00"
-total_funding_limit_usdc = "10.00"
 auto_fund = false # Change only after explicitly approving the funded test.
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
@@ -27,11 +27,14 @@ quote_deadline_seconds = 1800
 
 [wallets.demo]
 mode = "zcash_rotation"
-funding_amount_usdc = "5.00"
+max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
 max_api_payment_usdc = "0.05"
 max_funding_spend_zec = "0.006"
 max_conversion_overhead_percent = 5
 max_attempts = 3
+
+[wallets.demo.reserves.small]
+funding_amount_usdc = "5.00"
 
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"

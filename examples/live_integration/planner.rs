@@ -271,7 +271,7 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         prerequisites: vec![
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
-            "ready active/standby balances and no unresolved liabilities required for paid calls",
+            "reviewed startup inventory required; treasury-only bootstrap waits for active and configured reserves, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
             "source fees and floating swap minimum must fit funding permits; offline targets are not quotes",
             "all declared pools must be preserved; unused pools receive no new allocation authority",
         ],

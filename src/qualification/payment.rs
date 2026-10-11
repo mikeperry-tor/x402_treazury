@@ -15,6 +15,20 @@ pub struct PaymentContext {
 tokio::task_local! {
     static CASE: PaymentContext;
 }
+/// Moving accepted work to an owned task preserves the exact reviewed case,
+/// including unsigned restrictions. Capturing a context grants no authority.
+pub(crate) fn capture_case() -> Option<PaymentContext> {
+    CASE.try_with(Clone::clone).ok()
+}
+pub(crate) async fn inherit_case<T>(
+    context: Option<PaymentContext>,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    match context {
+        Some(context) => CASE.scope(context, work).await,
+        None => work.await,
+    }
+}
 pub fn unsigned_case() -> bool {
     CASE.try_with(|c| c.unsigned).unwrap_or(false)
 }
@@ -491,6 +505,32 @@ mod tests {
         assert!(!unsigned_case());
     }
     #[tokio::test]
+    async fn direct_owned_task_preserves_unsigned_and_paid_case_identity() {
+        for managed in [false, true] {
+            let (_dir, guard, _) = fixture(managed);
+            let claim = claim(guard).await;
+            claim
+                .invoke(async {
+                    let original = capture_case().unwrap();
+                    let case = original.case.clone();
+                    let guard = original.guard.clone();
+                    let owner = crate::server::work::Work::default();
+                    crate::payment::ownership::run(&owner, async move {
+                        let inherited = capture_case().unwrap();
+                        assert_eq!(inherited.case, case);
+                        assert!(Arc::ptr_eq(&inherited.guard, &guard));
+                        assert_eq!(unsigned_case(), !managed);
+                        assert_eq!(payment_context().is_ok(), managed);
+                    })
+                    .await
+                    .unwrap();
+                    owner.drain().await;
+                })
+                .await;
+        }
+        assert!(capture_case().is_none());
+    }
+    #[tokio::test]
     async fn revocation_between_claim_and_admission_refuses_payment_correlation() {
         let (_dir, guard, db) = fixture(true);
         let claim = claim(guard).await;
@@ -543,7 +583,6 @@ mod tests {
             handle,
             "nonexistent_pool".into(),
             BaseRpc::new("http://127.0.0.1:1", 1, 60).unwrap(),
-            "1",
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap();

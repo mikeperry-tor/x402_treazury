@@ -1,6 +1,6 @@
 # Managed wallet follow-ups
 
-The public-swap treasury, double-buffered pools, admission and Tor integration
+The public-swap treasury, capacity-based wallet groups, admission and Tor integration
 are implemented. Their current contracts are in
 [wallet architecture](../../wallet-rotation.md), the [README](../../../README.md),
 and the [qualification scope](../../testing.md#qualification-status).
@@ -27,8 +27,9 @@ Implement as a commit for the type/parser and offline cases, then a commit for
 journal/report integration with migration/restart coverage. Test a receipt before
 confirmed credit/debit, success without receipt, malformed receipt, paid body loss,
 expiry-unused, reorg contradictions and duplicate observation. Preserve compatibility
-with uncertain historical attempts lacking receipt data. Keep reporting honest when
-`RESOLVED` cannot distinguish used from expired.
+with uncertain historical attempts lacking receipt data. Use the durable canonical `USED` versus `EXPIRED_UNUSED` resolution and immutable
+admission role/claim support. A provider fulfillment report remains separate from
+canonical token-transfer attribution; neither replaces the other.
 
 ## Authenticated confidential swap qualification
 
@@ -54,12 +55,27 @@ separation must not be advertised as financial unlinkability.
 Managed profiles currently reject upto. Supporting it requires each ephemeral
 address to have a confirmed USDC allowance, a gas/approval funding strategy and
 metered settlement accounting. Those costs and permissions become part of readiness,
-rotation and source budgets. Static upto signing is not sufficient qualification.
+reserve readiness and per-operation funding safeguards. Static upto signing is not sufficient qualification.
 
 Define that lifecycle before implementation. Tests must cover approval failure,
 allowance readiness/reorgs, maximum versus settled amounts and outstanding
 liabilities across retirement. Approval failures cannot churn through new wallets.
 Until this work is separately designed and qualified, retain the existing rejection.
+
+## Manual retirement and incident repair
+
+Automatic retirement is implemented under the configured per-wallet tolerance;
+there is no manual retirement CLI. Any future manual command needs explicit
+wallet selection, fresh dual balance evidence, unresolved-liability and destination
+checks, and durable audit support. It must not sweep funds or infer replacement
+funding authority.
+
+Specialized abandonment, contradictory-evidence assessment and fork repair remain
+incident-specific operator work. Ordinary recovery does not clear repair blocks,
+rewrite historical anchors or adopt uncertain liabilities. A future utility needs
+an exact reviewed source shape and preserved original bytes/support; the known
+schema12 privacy-local preflight currently rejects missing immutable destination
+readiness. There is no general-purpose migration or proof override.
 
 ## Related boundaries
 

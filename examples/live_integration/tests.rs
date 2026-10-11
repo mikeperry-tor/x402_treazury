@@ -175,12 +175,12 @@ state_dir="absent_state"
 key_file="absent_key"
 indexer_url_env="UNSET_INDEXER"
 submission_url_env="UNSET_SUBMISSION"
-daily_treasury_spend_limit_zec="0.1"
 max_refund_shielding_fee_zec="0.001"
 [funding]
 confidentiality="public"
 [wallets.pool]
 mode="zcash_rotation"
+reserves={small={funding_amount_usdc="2"}}
 max_api_payment_usdc="0.02"
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5

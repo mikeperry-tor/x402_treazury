@@ -96,8 +96,9 @@ impl FundingFacts {
     }
 }
 
-/// Run before any schema mutation. Legacy job completion has no immutable exact
-/// destination support and must be handled by explicit offline conversion.
+/// Historical conversion preflight fixture. Runtime opens now require schema16
+/// before any mutation; this preserves the original unsupported-proof regression.
+#[cfg(test)]
 pub(super) fn preflight_funding_upgrade(db: &Connection, version: u32) -> Result<()> {
     if version >= 15 {
         return Ok(());
@@ -138,49 +139,6 @@ pub(super) fn preflight_funding_upgrade(db: &Connection, version: u32) -> Result
             ensure!(!occupied, "legacy_financial_state_requires_conversion");
         }
     }
-    Ok(())
-}
-
-/// Extend the existing job and operation journal with independent completion facts.
-/// The caller owns the schema migration transaction and version update.
-pub(super) fn initialize_funding_facts(db: &Connection) -> Result<()> {
-    db.execute_batch(
-        "ALTER TABLE funding_jobs ADD COLUMN readiness_operation TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_requirement TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_capacity TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_hash TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_height INTEGER;
-ALTER TABLE funding_jobs ADD COLUMN readiness_support TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_latest_hash TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_endpoint TEXT;
-ALTER TABLE funding_jobs ADD COLUMN readiness_checkpoint_hash TEXT;
-CREATE INDEX funding_readiness_endpoint ON funding_jobs(readiness_endpoint,id);
-CREATE INDEX funding_readiness_checkpoint ON funding_jobs(readiness_checkpoint_hash,id);
-ALTER TABLE funding_jobs ADD COLUMN readiness_disputed TEXT;
-CREATE INDEX funding_readiness_confirmed ON funding_jobs(readiness_hash,id);
-CREATE INDEX funding_readiness_latest ON funding_jobs(readiness_latest_hash,id);
-ALTER TABLE funding_jobs ADD COLUMN completion_outcome TEXT;
-CREATE INDEX funding_unfinished_jobs ON funding_jobs(id) WHERE state!='COMPLETE';
-CREATE INDEX funding_schedule_turn ON funding_progress(turn);
-ALTER TABLE funding_progress ADD COLUMN provider_success INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_progress ADD COLUMN provider_failed INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_progress ADD COLUMN provider_refunded INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_progress ADD COLUMN provider_incomplete INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_progress ADD COLUMN provider_observed_at INTEGER;
-ALTER TABLE funding_progress ADD COLUMN quote_target TEXT;
-ALTER TABLE funding_progress ADD COLUMN quote_ceiling TEXT;
-ALTER TABLE funding_progress ADD COLUMN accepted_output TEXT;
-ALTER TABLE funding_progress ADD COLUMN accepted_recipient TEXT;
-ALTER TABLE funding_recovery ADD COLUMN provider_success INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_recovery ADD COLUMN provider_failed INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_recovery ADD COLUMN provider_refunded INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_recovery ADD COLUMN provider_incomplete INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE funding_recovery ADD COLUMN provider_observed_at INTEGER;
-ALTER TABLE funding_recovery ADD COLUMN quote_target TEXT;
-ALTER TABLE funding_recovery ADD COLUMN quote_ceiling TEXT;
-ALTER TABLE funding_recovery ADD COLUMN accepted_output TEXT;
-ALTER TABLE funding_recovery ADD COLUMN accepted_recipient TEXT;",
-    )?;
     Ok(())
 }
 
@@ -306,6 +264,36 @@ fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
 }
 
 impl Store {
+    /// One configured group, three independent vacancy commits. Failure in one
+    /// slot never rolls back another or changes an existing operation.
+    pub(crate) fn fill_funding_vacancies(&mut self, name: &str) -> Result<()> {
+        let pool: Option<String> = self
+            .db
+            .query_row(
+                "SELECT id FROM pools WHERE name=?1 AND enabled=1",
+                [name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(pool) = pool else {
+            return Ok(());
+        };
+        let mut failure = None;
+        for kind in [
+            super::AllocationKind::Initial,
+            super::AllocationKind::Small,
+            super::AllocationKind::Large,
+        ] {
+            if let Err(error) = self.allocate_capacity_kind(&pool, kind, true) {
+                failure.get_or_insert(error);
+            }
+        }
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     pub fn funding_facts(&self, job: &str, operation: &str) -> Result<FundingFacts> {
         self.db.query_row(
             "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
@@ -327,6 +315,26 @@ impl Store {
         );
         Ok(())
     }
+    pub(crate) fn current_funding_claim(&self, job: &str) -> Result<super::capacity::FundingClaim> {
+        super::capacity::current_funding_claim(&self.db, job)?
+            .context("funding claim disabled or changed")
+    }
+
+    pub(crate) fn accepted_quote_suits_current_claim(
+        &self,
+        job: &str,
+        operation: &str,
+    ) -> Result<bool> {
+        let claim = self.current_funding_claim(job)?;
+        let output: String = self.db.query_row(
+            "SELECT accepted_output FROM funding_progress WHERE job_id=?1 AND operation_id=?2",
+            params![job, operation],
+            |r| r.get(0),
+        )?;
+        let output = amount(&output)?;
+        Ok(output >= claim.target && output <= claim.maximum_output)
+    }
+
     /// Validate the current process policy at the serialized source owner. Exact
     /// journal binding prevents a queued command from following a replaced attempt.
     pub(crate) fn require_preparation_authority(
@@ -343,7 +351,12 @@ impl Store {
             (Some((job, enabled)), Some(authority)) => {
                 ensure!(job == authority.job_id, "funding operation binding changed");
                 ensure!(enabled && authority.auto_fund, "funding_disabled");
-                self.require_funding_attempt(&job, authority.max_attempts)
+                self.require_funding_attempt(&job, authority.max_attempts)?;
+                ensure!(
+                    self.accepted_quote_suits_current_claim(&job, operation)?,
+                    "funding quote unsuitable for current claim"
+                );
+                Ok(())
             }
             (None, None) => Ok(()),
             _ => anyhow::bail!("funding preparation authority missing or stale"),
@@ -354,19 +367,19 @@ impl Store {
     pub(crate) fn require_preparation_binding(
         &self,
         operation: &str,
+        pool: Option<&str>,
         recipient: &str,
         input: u64,
         deadline: u64,
     ) -> Result<()> {
-        let job: Option<String> = self
-            .db
-            .query_row(
-                "SELECT job_id FROM funding_progress WHERE operation_id=?1",
-                [operation],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(job) = job {
+        let binding: Option<(String,String)> = self.db.query_row(
+            "SELECT j.job_id,w.pool_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1",
+            [operation], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((job, expected_pool)) = binding {
+            ensure!(
+                pool == Some(expected_pool.as_str()),
+                "funding source pool binding mismatch"
+            );
             let quote: crate::rotation::near::Quote =
                 serde_json::from_slice(&self.funding_quote_for_operation(&job, operation)?)?;
             ensure!(
@@ -474,6 +487,11 @@ impl Store {
         self.funding_restriction
             .require_new_funding("funding_quote_start")?;
         self.check_job_permit(job, 1)?;
+        let claim = self.current_funding_claim(job)?;
+        ensure!(
+            amount(target)? == claim.target && amount(ceiling)? == claim.maximum_output,
+            "funding quote policy changed"
+        );
         ensure!(
             amount(target)? > U256::ZERO && amount(ceiling)? >= amount(target)?,
             "invalid funding quote terms"
@@ -652,21 +670,16 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
 }
 
 /// Publication is driven by destination readiness, never financial completion.
-/// Capacity milestone 7 replaces this legacy pair assignment with exact claims.
+/// Exact configured claims govern publication of funded roles.
 pub(crate) fn publish_destination_readiness(db: &Connection, wallet: &str) -> Result<()> {
-    let (job,operation,pool,role,bootstrapped):(String,String,String,String,bool) = db.query_row(
-        "SELECT f.id,j.operation_id,w.pool_id,w.role,p.bootstrapped FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND f.readiness_requirement IS NOT NULL AND f.readiness_disputed IS NULL",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-    if role == "ALLOCATED" {
-        if bootstrapped {
-            db.execute("UPDATE wallets SET role='READY' WHERE id=?1", [wallet])?;
-        } else {
-            let pending: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE w.pool_id=?1 AND (f.readiness_requirement IS NULL OR f.readiness_disputed IS NOT NULL))",[&pool],|r|r.get(0))?;
-            if !pending {
-                db.execute("UPDATE wallets SET role=CASE sequence WHEN 0 THEN 'ACTIVE' ELSE 'READY' END WHERE pool_id=?1 AND role='ALLOCATED'",[&pool])?;
-                db.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [&pool])?;
-            }
-        }
-    }
+    let (job, operation): (String,String) = db.query_row(
+        "SELECT f.id,j.operation_id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1 AND f.readiness_requirement IS NOT NULL AND f.readiness_disputed IS NULL",
+        [wallet], |r| Ok((r.get(0)?,r.get(1)?)))?;
+    ensure!(
+        readiness_supported(db, wallet)?,
+        "destination_readiness_missing"
+    );
+    super::capacity::publish_funded_role(db, &job)?;
     finish_if_proven(db, &job, &operation)?;
     Ok(())
 }
@@ -686,6 +699,19 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
 /// Historical D is immutable evidence, not a current balance requirement. Every
 /// financial consumer validates its full tuple and persisted correlation indexes.
 pub(crate) fn readiness_supported(db: &Connection, wallet: &str) -> Result<bool> {
+    if !readiness_recorded_valid(db, wallet)? {
+        return Ok(false);
+    }
+    Ok(db.query_row(
+        "SELECT readiness_disputed IS NULL FROM funding_jobs WHERE wallet_id=?1",
+        [wallet],
+        |r| r.get(0),
+    )?)
+}
+
+/// Structural historical D validity is distinct from whether its original support
+/// remains undisputed. Fresh payment evidence can establish current capacity.
+pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<bool> {
     type Saved = (
         String,
         String,
@@ -713,7 +739,7 @@ pub(crate) fn readiness_supported(db: &Connection, wallet: &str) -> Result<bool>
         latest,
         endpoint,
         checkpoint,
-        dispute,
+        _dispute,
         correlation,
         operation,
         address,
@@ -762,7 +788,7 @@ pub(crate) fn readiness_supported(db: &Connection, wallet: &str) -> Result<bool>
             "external readiness requirement mismatch"
         );
     }
-    Ok(dispute.is_none())
+    Ok(true)
 }
 
 /// Destination disposition is separate from source-accounting completion. A
@@ -942,6 +968,10 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        ensure!(
+            super::capacity::current_funding_claim(&tx, job)?.is_some(),
+            "funding claim disabled or changed"
+        );
         let operation: String = tx.query_row(
             "SELECT j.operation_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1 AND j.phase='\"RECOVERY_REQUIRED\"' AND EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id)",
             params![job,expected_operation], |r| r.get(0))?;
@@ -974,6 +1004,10 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        ensure!(
+            super::capacity::current_funding_claim(&tx, job)?.is_some(),
+            "funding claim disabled or changed"
+        );
         let (operation, phase): (String, String) = tx.query_row("SELECT j.operation_id,j.phase FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.job_id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND EXISTS(SELECT 1 FROM pools p WHERE p.id=w.pool_id AND p.enabled=1)", params![job,expected_operation], |r| Ok((r.get(0)?,r.get(1)?)))?;
         let parsed: FundingPhase = serde_json::from_str(&phase)?;
         let attempts: u32 = tx.query_row(
@@ -1066,8 +1100,8 @@ impl Store {
     pub fn save_funding_quote(&mut self, id: &str, quote: &[u8]) -> Result<()> {
         self.save_quote(id, quote, None, None)
     }
-    /// A provisional allocation can grow to the validated bridge minimum only
-    /// when its first quote commits; wallet and job targets change atomically.
+    /// Persist the accepted bridge output separately from the immutable original
+    /// allocation target, after validating the current claim's allowed range.
     #[cfg(feature = "zcash")]
     pub fn save_funding_quote_with_target(
         &mut self,
@@ -1117,6 +1151,8 @@ impl Store {
                 "funding_quote_conflict"
             );
         } else {
+            self.funding_restriction
+                .require_new_funding("funding_quote_acceptance")?;
             ensure!(
                 serde_json::from_str::<FundingPhase>(&phase)? == FundingPhase::Allocated,
                 "funding phase conflict"
@@ -1144,6 +1180,12 @@ impl Store {
                 recipient.parse::<alloy_primitives::Address>()?
                     == address.parse::<alloy_primitives::Address>()?,
                 "accepted destination binding mismatch"
+            );
+            let claim = super::capacity::current_funding_claim(&tx, id)?
+                .context("funding claim disabled or changed")?;
+            ensure!(
+                amount(output)? >= claim.target && amount(output)? <= claim.maximum_output,
+                "funding quote outside current terms"
             );
             let (selected, ceiling): (Option<String>, Option<String>) = tx.query_row(
                 "SELECT quote_target,quote_ceiling FROM funding_progress WHERE job_id=?1",
@@ -1248,16 +1290,8 @@ impl Store {
         Ok(())
     }
     /// Check before advancing to PREPARING; the owner still rechecks at reserve.
-    pub fn check_funding_capacity(&self, instant: u64, input: u64, limit: u64) -> Result<()> {
-        self.require_spend_ready(instant, input)?;
-        let used: i64 = self.db.query_row("SELECT COALESCE(SUM(reserved),0)+COALESCE(SUM(CASE WHEN day=?1 THEN MAX(0,consumed-COALESCE((SELECT SUM(credited) FROM refund_outputs r WHERE r.operation_id=budget_entries.id),0)) ELSE 0 END),0) FROM budget_entries",[i64::try_from(instant/86400)?],|r|r.get(0))?;
-        ensure!(
-            u64::try_from(used)?
-                .checked_add(input)
-                .is_some_and(|n| n <= limit),
-            "treasury_budget_exceeded"
-        );
-        Ok(())
+    pub fn check_funding_capacity(&self, instant: u64, input: u64) -> Result<()> {
+        self.require_spend_ready(instant, input)
     }
     /// Fair persistent ordering: every selected job moves behind all other jobs,
     /// including siblings in the same pool. Disabled pools may only be recovered.
@@ -1405,9 +1439,60 @@ mod completion_tests {
             b"fixture",
         )
         .unwrap();
-        store.ensure_pool("pool", "10").unwrap();
+        super::super::test_support::declare_and_allocate(
+            &mut store,
+            "pool",
+            "0.000010",
+            Some(U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         (dir, store, job)
+    }
+
+    #[test]
+    fn vacancy_owner_commits_siblings_independently_and_rechecks_denial() {
+        let (_dir, mut store, _) = fixture();
+        let reserves = crate::rotation::config::ReservesConfig {
+            small: crate::rotation::config::ReserveConfig {
+                funding_amount_usdc: "1".into(),
+                max_funding_amount_usdc: None,
+            },
+            large: Some(crate::rotation::config::ReserveConfig {
+                funding_amount_usdc: "8".into(),
+                max_funding_amount_usdc: None,
+            }),
+        };
+        let pool = store
+            .ensure_capacity_group("vacancies", &reserves, Some(U256::from(10_000_000)), 0)
+            .unwrap();
+        store.db.execute_batch("CREATE TRIGGER fail_large BEFORE INSERT ON funding_jobs WHEN NEW.allocation_kind='large' BEGIN SELECT RAISE(ABORT,'fixture_large_failure'); END;").unwrap();
+        assert!(store.fill_funding_vacancies("vacancies").is_err());
+        let count: i64 = store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM funding_jobs WHERE pool_id=?1",
+                [&pool],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 2,
+            "large failure must preserve committed initial and small claims"
+        );
+        store.db.execute_batch("DROP TRIGGER fail_large").unwrap();
+        store.deny_new_funding();
+        assert!(store.fill_funding_vacancies("vacancies").is_err());
+        let count_after: i64 = store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM funding_jobs WHERE pool_id=?1",
+                [&pool],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after, count);
     }
 
     #[test]
@@ -1543,7 +1628,7 @@ mod completion_tests {
                     )
                     .unwrap();
                 store
-                    .reserve(&job.operation_id, Some(&job.pool_id), 1, 100, 1000)
+                    .reserve(&job.operation_id, Some(&job.pool_id), 1, 100)
                     .unwrap();
                 let revision = store.snapshot().unwrap().0;
                 store
@@ -1573,6 +1658,39 @@ mod completion_tests {
         }
     }
 
+    #[cfg(feature = "zcash")]
+    #[test]
+    fn source_preparation_binds_the_original_pool_and_exact_accepted_source_terms() {
+        let (_dir, mut store, job) = fixture();
+        let quote = crate::rotation::near::Quote {
+            request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
+            response: serde_json::json!({}),
+            input: 50,
+            deadline: 1000,
+            deposit: Some("deposit".into()),
+        };
+        store
+            .save_funding_quote(&job.id, &serde_json::to_vec(&quote).unwrap())
+            .unwrap();
+        store
+            .require_preparation_binding(&job.operation_id, Some(&job.pool_id), "deposit", 50, 1000)
+            .unwrap();
+        for (pool, deposit, input, deadline) in [
+            (None, "deposit", 50, 1000),
+            (Some("other-pool"), "deposit", 50, 1000),
+            (Some(job.pool_id.as_str()), "other-deposit", 50, 1000),
+            (Some(job.pool_id.as_str()), "deposit", 51, 1000),
+            (Some(job.pool_id.as_str()), "deposit", 50, 1001),
+        ] {
+            assert!(
+                store
+                    .require_preparation_binding(&job.operation_id, pool, deposit, input, deadline)
+                    .is_err()
+            );
+        }
+        assert!(store.status().unwrap().treasury_operations.is_empty());
+    }
+
     #[test]
     fn treasury_owner_rechecks_policy_and_exact_attempt_before_preparation() {
         use crate::rotation::transaction::ManagedFundingAuthority;
@@ -1588,19 +1706,25 @@ mod completion_tests {
                 .is_err()
         );
         authority.auto_fund = true;
-        store
-            .require_preparation_authority(&job.operation_id, Some(&authority))
-            .unwrap();
+        assert!(
+            store
+                .require_preparation_authority(&job.operation_id, Some(&authority))
+                .is_err(),
+            "an accepted quote is required"
+        );
         assert!(
             store
                 .require_preparation_authority(&job.operation_id, None)
                 .is_err()
         );
         let quote = serde_json::to_vec(
-            &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
+            &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
         )
         .unwrap();
         store.save_funding_quote(&job.id, &quote).unwrap();
+        store
+            .require_preparation_authority(&job.operation_id, Some(&authority))
+            .unwrap();
         store
             .refresh_unprepared_quote_for_operation(&job.id, &job.operation_id)
             .unwrap();
@@ -1610,6 +1734,7 @@ mod completion_tests {
                 .is_err()
         );
         let current = store.funding_job(&job.id).unwrap().unwrap();
+        store.save_funding_quote(&current.id, &quote).unwrap();
         store
             .require_preparation_authority(&current.operation_id, Some(&authority))
             .unwrap();
@@ -1636,8 +1761,31 @@ mod completion_tests {
     #[test]
     fn clean_quote_policy_changes_preserve_original_intent_and_stop_after_readiness() {
         let (_dir, mut store, job) = fixture();
+        let configured = |target: &str, ceiling: &str| crate::rotation::config::ReservesConfig {
+            small: crate::rotation::config::ReserveConfig {
+                funding_amount_usdc: target.into(),
+                max_funding_amount_usdc: Some(ceiling.into()),
+            },
+            large: None,
+        };
+        store
+            .configure_capacity_group(
+                &job.pool_id,
+                Some(U256::from(1_000_000)),
+                0,
+                &configured("0.000020", "0.000030"),
+            )
+            .unwrap();
         store
             .select_quote_terms(&job.id, &job.operation_id, "20", "30")
+            .unwrap();
+        store
+            .configure_capacity_group(
+                &job.pool_id,
+                Some(U256::from(1_000_000)),
+                0,
+                &configured("0.000002", "0.000003"),
+            )
             .unwrap();
         store
             .select_quote_terms(&job.id, &job.operation_id, "2", "3")
@@ -1747,6 +1895,11 @@ mod completion_tests {
     #[test]
     fn recorded_requirement_survives_spending_and_policy_changes() {
         let (_dir, mut store, job) = fixture();
+        let mut reserves = super::super::test_support::reserves("0.000010");
+        reserves.small.max_funding_amount_usdc = Some("0.000020".into());
+        store
+            .configure_capacity_group(&job.pool_id, Some(U256::from(1_000_000)), 0, &reserves)
+            .unwrap();
         let quote = serde_json::to_vec(
             &serde_json::json!({"request":{"amount":"20","recipient":job.recipient}}),
         )

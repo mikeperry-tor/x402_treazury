@@ -189,7 +189,13 @@ mod tests {
         let state = dir.path().join("state");
         let key = dir.path().join("key");
         let mut s = Store::create(&state, &key, 1, b"snapshot")?;
-        s.ensure_pool("return_history", "5")?;
+        super::super::test_support::declare_and_allocate(
+            &mut s,
+            "return_history",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )?;
         let job = s.funding_jobs()?.remove(0);
         s.save_refund_address(&job.id, "original-address", 1, b"with-address")?;
         let quote = serde_json::to_vec(
@@ -201,7 +207,7 @@ mod tests {
             funding::FundingPhase::Quoted,
             funding::FundingPhase::Preparing,
         )?;
-        s.reserve(&job.operation_id, None, 1, 100, 1000)?;
+        s.reserve(&job.operation_id, None, 1, 100)?;
         s.prepare_with_facts(
             &job.operation_id,
             2,
@@ -281,7 +287,7 @@ mod tests {
             b"snapshot",
         )?;
         let id = Uuid::new_v4().to_string();
-        s.reserve(&id, None, 1, 100, 200)?;
+        s.reserve(&id, None, 1, 100)?;
         s.prepare_with_facts(
             &id,
             1,
@@ -321,8 +327,13 @@ mod tests {
             height: 10,
         })?;
         s.confirm_spend(&id, 100, 1)?; // gross accounting remains idempotent
-        assert!(s.reserve("too_much", None, 1, 181, 200).is_err());
-        s.reserve("allowed", None, 1, 180, 200)?;
+        let (gross,returned):(i64,i64)=s.db.query_row("SELECT consumed,(SELECT SUM(credited) FROM refund_outputs WHERE operation_id=?1) FROM budget_entries WHERE id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        assert_eq!(
+            (gross, returned),
+            (100, 80),
+            "return credit is capped to principal; fee remains consumed"
+        );
+        s.reserve("allowed", None, 1, 180)?;
         assert_eq!(s.status()?.refunds.len(), 2);
         assert_eq!(
             s.return_accounting()?.issues,
@@ -340,7 +351,15 @@ mod tests {
         )?;
         s.record_refund(refund)?;
         assert_eq!(s.status()?.refunds.len(), 2);
-        assert!(s.reserve("extra-budget", None, 1, 1, 200).is_err());
+        s.reserve("independent-capital", None, 1, 1)?;
+        assert_eq!(
+            s.db.query_row(
+                "SELECT consumed FROM budget_entries WHERE id=?1",
+                [&id],
+                |r| r.get::<_, i64>(0)
+            )?,
+            100
+        );
         Ok(())
     }
 }

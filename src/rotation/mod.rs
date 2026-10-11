@@ -12,3 +12,6 @@ pub mod near;
 
 #[cfg(feature = "zcash")]
 pub mod funding;
+
+#[cfg(test)]
+pub(crate) mod test_capacity;

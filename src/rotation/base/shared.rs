@@ -197,7 +197,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = store.ensure_pool("shared", "5").unwrap();
+        let pool = crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            "shared",
+            "5",
+            Some(alloy_primitives::U256::from(100_000_000u64)),
+            0,
+        )
+        .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         let query = store
             .scoped_chain_query(&pool, vec![job.wallet_id.clone()], vec![])

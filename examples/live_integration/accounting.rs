@@ -97,7 +97,10 @@ pub fn summarize(data: &Value) -> Result<Value> {
         );
         let role = id(&wallet["role"])?;
         ensure!(
-            matches!(role, "ALLOCATED" | "ACTIVE" | "READY" | "RETIRED"),
+            matches!(
+                role,
+                "ALLOCATED" | "ACTIVE" | "READY" | "RETAINED" | "RETIRED"
+            ),
             "unknown wallet role"
         );
         let bucket = roles.entry(role.to_owned()).or_default();
@@ -200,6 +203,23 @@ mod tests {
             "7"
         );
         assert_eq!(result["fresh_chain_read"], false);
+    }
+    #[test]
+    fn retained_saved_balances_remain_separate_from_retired_inventory() {
+        let mut data = fixture();
+        data["wallets"].as_array_mut().unwrap().push(
+            json!({"id":"retained","role":"RETAINED","balance":"9","height":101,"hash":"observed"}),
+        );
+        let report = summarize(&data).unwrap();
+        assert_eq!(
+            report["wallet_roles"]["RETAINED"]["saved_balance_atomic"],
+            "9"
+        );
+        assert_eq!(
+            report["wallet_roles"]["RETIRED"]["saved_balance_atomic"],
+            "7"
+        );
+        assert_eq!(report["fresh_chain_read"], false);
     }
     #[test]
     fn contradictory_or_overflowing_bookkeeping_is_rejected() {

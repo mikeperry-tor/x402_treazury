@@ -189,10 +189,15 @@ mod tests {
         for stopped in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let mut treasury=Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
-            treasury
-                .ensure_pool("actor".into(), "5".into())
-                .await
-                .unwrap();
+            crate::rotation::test_capacity::treasury_pair(
+                &treasury,
+                "actor",
+                "5",
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .await
+            .unwrap();
             let status = treasury.status().await.unwrap();
             let id = status.treasury_id;
             let job = status.funding_jobs[0].id.clone();
@@ -264,10 +269,10 @@ mod tests {
         let stop = CancellationToken::new();
         let request = PrepareRequest {
             managed_funding: None,
-            allocation_limits: None,
+
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
-            daily_limit_zatoshis: 200000,
+
             deadline: u64::MAX,
             recipient: "not-used-before-sync".into(),
             amount_zatoshis: 1,

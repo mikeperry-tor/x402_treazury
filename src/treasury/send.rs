@@ -41,12 +41,19 @@ impl TransactionPreparer for Treasury {
         let authority = request.managed_funding.clone();
         let principal = request.amount_zatoshis;
         let deposit = request.recipient.clone();
+        let binding_pool = request.pool_id.clone();
         let deadline = request.deadline;
         let (treasury_id, revision, observed) = self
             .store
             .call(move |s| {
-                s.require_preparation_binding(&id, &deposit, principal, deadline)
-                    .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
+                s.require_preparation_binding(
+                    &id,
+                    binding_pool.as_deref(),
+                    &deposit,
+                    principal,
+                    deadline,
+                )
+                .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.require_preparation_authority(&id, authority.as_ref())
                     .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.require_unstarted_preparation(&id)?;
@@ -150,7 +157,6 @@ impl TransactionPreparer for Treasury {
         );
         let id = request.operation_id.clone();
         let pool = request.pool_id.clone();
-        let limit = i64::try_from(request.daily_limit_zatoshis)?;
         let reserve = i64::try_from(total)?;
         self.store
             .call(move |s| {
@@ -166,10 +172,7 @@ impl TransactionPreparer for Treasury {
                     "funding_deadline_too_close"
                 );
                 let day = u32::try_from(instant / 86400)?;
-                if let Some(limits) = request.allocation_limits {
-                    s.check_funding_allocation(&id, day, limits)?;
-                }
-                s.reserve(&id, pool.as_deref(), day, reserve, limit)?;
+                s.reserve(&id, pool.as_deref(), day, reserve)?;
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(())
             })
@@ -461,10 +464,10 @@ mod tests {
         });
         let request = || PrepareRequest {
             managed_funding: None,
-            allocation_limits: None,
+
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
-            daily_limit_zatoshis: 1_000_000,
+
             deadline: now().unwrap() + 600,
             recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
             amount_zatoshis: 50_000,

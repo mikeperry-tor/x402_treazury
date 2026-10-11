@@ -1,6 +1,7 @@
 //! Ownership of accepted calls is independent of MCP response delivery.
 use std::sync::{Arc, Mutex};
 use tokio_util::task::TaskTracker;
+use tracing::{Instrument, instrument::WithSubscriber};
 
 #[derive(Clone, Default)]
 pub struct Work {
@@ -14,18 +15,33 @@ struct Inner {
 }
 
 impl Work {
-    pub async fn run<T: Send + 'static>(
+    pub fn run<T: Send + 'static>(
         &self,
         work: impl std::future::Future<Output = T> + Send + 'static,
-    ) -> anyhow::Result<T> {
-        let handle = {
-            let closed = self.inner.closed.lock().expect("work admission lock");
-            anyhow::ensure!(!*closed, "listener is draining; new calls are refused");
-            // Spawn and close are serialized. Dropping a response waiter does
-            // not drop the task's ownership or its durable qualification claim.
-            self.inner.tasks.spawn(work)
-        };
-        Ok(handle.await?)
+    ) -> impl std::future::Future<Output = anyhow::Result<T>> + Send + '_ {
+        let work = Box::pin(work);
+        async move {
+            if crate::payment::ownership::retained() {
+                let _tracked = {
+                    let closed = self.inner.closed.lock().expect("work admission lock");
+                    anyhow::ensure!(!*closed, "work owner is draining; new calls are refused");
+                    self.inner.tasks.token()
+                };
+                return Ok(work.await);
+            }
+            let handle = {
+                let closed = self.inner.closed.lock().expect("work admission lock");
+                anyhow::ensure!(!*closed, "listener is draining; new calls are refused");
+                // Spawn and close are serialized. Dropping a response waiter does
+                // not drop the task's ownership or its durable qualification claim.
+                self.inner.tasks.spawn(
+                    crate::payment::ownership::scope(work)
+                        .in_current_span()
+                        .with_current_subscriber(),
+                )
+            };
+            Ok(handle.await?)
+        }
     }
 
     pub fn close(&self) {

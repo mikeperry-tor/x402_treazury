@@ -2,13 +2,42 @@
 use super::*;
 use crate::rotation::store::{
     StoreHandle,
-    bootstrap::{GROUP_PAGE, PATH_PAGE, StartupDisposition},
+    bootstrap::{GROUP_PAGE, StartupClaim, StartupDisposition},
 };
 
 #[derive(Serialize)]
 pub struct BootstrapSummary {
-    /// Initial pairs have received confirmed credit; this is not a live balance report.
-    pub bootstrapped_wallets: Vec<String>,
+    pub schema_version: u32,
+    pub serving_ready_groups: Vec<String>,
+    pub inventory_ready_groups: Vec<String>,
+    pub captured_completed_groups: Vec<String>,
+    pub incomplete_captured_jobs: Vec<String>,
+}
+
+async fn bootstrap_summary(
+    store: &StoreHandle,
+    names: &BTreeSet<String>,
+) -> Result<BootstrapSummary> {
+    let mut summary = BootstrapSummary {
+        schema_version: 2,
+        serving_ready_groups: Vec::new(),
+        inventory_ready_groups: Vec::new(),
+        captured_completed_groups: names.iter().cloned().collect(),
+        incomplete_captured_jobs: Vec::new(),
+    };
+    let names: Vec<_> = names.iter().cloned().collect();
+    for page in names.chunks(GROUP_PAGE) {
+        let page = page.to_vec();
+        for group in store.call(move |s| s.startup_groups(&page)).await? {
+            if group.serving_ready {
+                summary.serving_ready_groups.push(group.name.clone());
+            }
+            if group.inventory_ready {
+                summary.inventory_ready_groups.push(group.name);
+            }
+        }
+    }
+    Ok(summary)
 }
 
 /// Explicit funding authority still requires the deployment's auto_fund policy.
@@ -302,23 +331,24 @@ async fn supervise(
     };
     let initial = check_startup(&store, &names, &attempts, Some(&captured), true).await;
     if !matches!(initial, Ok(false)) {
+        let summary = match initial {
+            Ok(_) => bootstrap_summary(&store, &names).await,
+            Err(error) => Err(error),
+        };
         drop(funding_runtime);
         drop(store);
         owner.close().await?;
-        initial?;
         tracing::info!(
             wallets = names.len(),
-            "Initial managed wallet bootstrap already complete"
+            "Initial managed capacity bootstrap already complete"
         );
-        return Ok(BootstrapSummary {
-            bootstrapped_wallets: names.into_iter().collect(),
-        });
+        return summary;
     }
     let (commands, sender, worker) =
         funding_runtime.context("bootstrap funding worker unavailable")?;
     tracing::info!(
         wallets = names.len(),
-        "Bootstrapping initial managed wallet pairs before discovery; waiting for confirmed USDC credit"
+        "Bootstrapping initial managed wallet capacity before discovery; waiting for confirmed USDC credit"
     );
     let monitored_names = names.clone();
     let monitor = async move {
@@ -334,7 +364,7 @@ async fn supervise(
             )
             .await?
             {
-                return Ok(());
+                return bootstrap_summary(&store, &monitored_names).await;
             }
             if progress {
                 next_progress = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -342,7 +372,7 @@ async fn supervise(
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     };
-    run_workers(
+    let summary = run_workers(
         monitor,
         owner.run_commands(commands, sender, stop.clone()),
         worker.run(stop.clone()),
@@ -351,11 +381,9 @@ async fn supervise(
     .await?;
     tracing::info!(
         wallets = names.len(),
-        "Initial managed wallet bootstrap complete"
+        "Initial managed capacity bootstrap complete"
     );
-    Ok(BootstrapSummary {
-        bootstrapped_wallets: names.into_iter().collect(),
-    })
+    Ok(summary)
 }
 
 fn startup_attempts(wallets: &BTreeMap<String, WalletConfig>) -> BTreeMap<String, u32> {
@@ -371,13 +399,13 @@ fn startup_attempts(wallets: &BTreeMap<String, WalletConfig>) -> BTreeMap<String
 async fn capture_startup(
     store: &StoreHandle,
     names: &BTreeSet<String>,
-) -> Result<BTreeMap<String, i64>> {
+) -> Result<BTreeMap<String, Vec<StartupClaim>>> {
     let mut captured = BTreeMap::new();
     let names: Vec<_> = names.iter().cloned().collect();
     for page in names.chunks(GROUP_PAGE) {
         let page = page.to_vec();
         for group in store.call(move |s| s.startup_groups(&page)).await? {
-            captured.insert(group.name, group.through_sequence);
+            captured.insert(group.name, group.claims);
         }
     }
     Ok(captured)
@@ -389,7 +417,7 @@ async fn check_startup(
     store: &StoreHandle,
     names: &BTreeSet<String>,
     attempts: &BTreeMap<String, u32>,
-    captured: Option<&BTreeMap<String, i64>>,
+    captured: Option<&BTreeMap<String, Vec<StartupClaim>>>,
     progress: bool,
 ) -> Result<bool> {
     let names: Vec<_> = names.iter().cloned().collect();
@@ -402,11 +430,10 @@ async fn check_startup(
             if captured.is_none() && group.serving_ready {
                 continue;
             }
-            let through = captured
+            let claims = captured
                 .and_then(|c| c.get(&group.name))
-                .copied()
-                .unwrap_or(group.through_sequence);
-            let mut cursor = -1;
+                .unwrap_or(&group.claims)
+                .clone();
             let mut path_count = 0;
             let mut pending = 0;
             let mut actionable = false;
@@ -414,16 +441,13 @@ async fn check_startup(
             let maximum = *attempts
                 .get(&group.name)
                 .context("startup funding policy missing")?;
-            loop {
+            {
                 let pool = group.pool.clone();
+                let claims = claims.clone();
                 let paths = store
-                    .call(move |s| s.startup_paths_page(&pool, cursor, through, PATH_PAGE))
+                    .call(move |s| s.startup_claim_paths(&pool, &claims))
                     .await?;
-                if paths.is_empty() {
-                    break;
-                }
                 for path in paths {
-                    cursor = path.sequence;
                     path_count += 1;
                     let disposition = path.disposition(maximum, group.source_pending);
                     if disposition == StartupDisposition::DestinationReady {
@@ -437,15 +461,17 @@ async fn check_startup(
                     }
                 }
             }
-            if captured.is_some() && path_count > 0 && pending == 0 {
+            if captured.is_some() && path_count == claims.len() && pending == 0 {
                 continue;
             }
             all_ready = false;
             if !actionable && pending > 0 {
                 let name = group.name.clone();
-                let serving = captured.is_none();
+                let captured_claims = captured.map(|_| claims.clone());
                 if let Some(obstructions) = store
-                    .call(move |s| s.startup_obstruction(&name, maximum, serving))
+                    .call(move |s| {
+                        s.startup_obstruction(&name, maximum, captured_claims.as_deref())
+                    })
                     .await?
                 {
                     return Err(StartupObstructed {
@@ -480,17 +506,17 @@ impl std::fmt::Display for StartupObstructed {
 }
 impl std::error::Error for StartupObstructed {}
 
-async fn run_workers(
-    monitor: impl std::future::Future<Output = Result<()>>,
+async fn run_workers<T>(
+    monitor: impl std::future::Future<Output = Result<T>>,
     treasury: impl std::future::Future<Output = Result<()>> + Send + 'static,
     funding: impl std::future::Future<Output = Result<()>> + Send + 'static,
     stop: CancellationToken,
-) -> Result<()> {
+) -> Result<T> {
     let mut treasury_task = tokio::spawn(treasury);
     let mut funding_task = tokio::spawn(funding);
     let mut treasury_finished = false;
     let mut funding_finished = false;
-    let result: Result<()> = tokio::select! {
+    let result: Result<T> = tokio::select! {
         result = monitor => result,
         _ = stop.cancelled() => Err(anyhow::anyhow!("wallet bootstrap interrupted; persisted funding progress retained")),
         result = &mut treasury_task => {
@@ -523,14 +549,31 @@ async fn run_workers(
             .context("bootstrap treasury task failed")
             .and_then(|r| r)
     };
-    result?;
+    let value = result?;
     funding_result?;
-    treasury_result
+    treasury_result?;
+    Ok(value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bootstrap_output_contract_v2_separates_current_and_captured_inventory() {
+        let summary = BootstrapSummary {
+            schema_version: 2,
+            serving_ready_groups: vec!["web".into()],
+            inventory_ready_groups: vec![],
+            captured_completed_groups: vec!["web".into()],
+            incomplete_captured_jobs: vec![],
+        };
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/capacity/bootstrap-output-v2.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(summary).unwrap(), expected);
+    }
+
     #[tokio::test]
     async fn scoped_startup_waits_for_actionable_sibling_and_reports_only_fixed_obstructions() {
         let dir = tempfile::tempdir().unwrap();
@@ -541,7 +584,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        state.ensure_pool("web", "5").unwrap();
+        crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "web",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         let jobs = state.funding_jobs().unwrap();
         state
             .defer_funding(
@@ -677,7 +727,13 @@ mod tests {
             accepted.await?;
             funding_store
                 .call(|s| {
-                    s.ensure_pool("accepted", "2")?;
+                    crate::rotation::test_capacity::declare_and_allocate!(
+                        s,
+                        "accepted",
+                        crate::rotation::test_capacity::small_reserve("2"),
+                        Some(alloy_primitives::U256::from(1_000_000u64)),
+                        0
+                    )?;
                     Ok(())
                 })
                 .await?;
@@ -708,7 +764,7 @@ mod tests {
         let (finish, accepted) = tokio::sync::oneshot::channel::<()>();
         let owner_stop = stop.clone();
         let (closing, owner_closing) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(run_workers(
+        let task = tokio::spawn(run_workers::<()>(
             async move {
                 let _store = store;
                 std::future::pending::<Result<()>>().await
@@ -744,7 +800,7 @@ mod tests {
         let stop = CancellationToken::new();
         let owner_stop = stop.clone();
         let (closed, closure) = tokio::sync::oneshot::channel();
-        let result = run_workers(
+        let result = run_workers::<()>(
             std::future::pending(),
             async move {
                 owner_stop.cancelled().await;
@@ -769,7 +825,7 @@ mod tests {
         let stop = CancellationToken::new();
         let owner_stop = stop.clone();
         let funding_stop = stop.clone();
-        run_workers(
+        run_workers::<()>(
             async { Ok(()) },
             async move {
                 owner_stop.cancelled().await;

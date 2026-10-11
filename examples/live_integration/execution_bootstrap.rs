@@ -7,7 +7,11 @@ pub(super) fn ready(snapshot: &Value, pools: &[String]) -> Result<bool> {
     Ok(pools.iter().all(|name| {
         actual.iter().any(|p| {
             p["name"] == *name
-                && p["bootstrapped"] == true
+                && if snapshot["treasury_status"]["schema_version"] == 2 {
+                    p["inventory_ready"] == true
+                } else {
+                    p["bootstrapped"] == true
+                }
                 && p["enabled"] == true
                 && p["addresses"]
                     .as_array()
@@ -24,7 +28,7 @@ pub(super) async fn wait(
     stop: &CancellationToken,
 ) -> Result<()> {
     eprintln!(
-        "qualification waiting for treasury funding, swap completion and confirmed active/standby bootstrap; no API calls dispatched yet"
+        "qualification waiting for verified active and configured reserve inventory; no API calls dispatched yet"
     );
     registry.event(
         &manifest.run_id,
@@ -144,7 +148,10 @@ pub(super) async fn wait_evidence(
 }
 
 fn terminal_without_debit(case: &Value) -> bool {
-    matches!(case["settlement"].as_str(), Some("EXPIRED_UNUSED" | "NOT_SIGNED"))
+    matches!(
+        case["settlement"].as_str(),
+        Some("EXPIRED_UNUSED" | "NOT_SIGNED")
+    )
 }
 
 pub(crate) fn waiting_count(
@@ -200,6 +207,14 @@ pub(crate) fn waiting_count(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capacity_readiness_requires_configured_inventory_without_source_completion() {
+        let names = vec!["a".into()];
+        let mut snapshot = json!({"treasury_status":{"schema_version":2,"pools":[{"name":"a","enabled":true,"inventory_ready":true,"addresses":[{"role":"ACTIVE"}]}],"funding_jobs":[{"phase":"SWAPPING"}]}});
+        assert!(ready(&snapshot, &names).unwrap());
+        snapshot["treasury_status"]["pools"][0]["inventory_ready"] = json!(false);
+        assert!(!ready(&snapshot, &names).unwrap());
+    }
     #[test]
     fn readiness_uses_production_bootstrap_and_does_not_demand_an_unspent_active_on_resume() {
         let names = vec!["a".into(), "b".into()];

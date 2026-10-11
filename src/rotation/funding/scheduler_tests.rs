@@ -103,7 +103,7 @@ fn submitted(store: &mut Store, job: &FundingJob) {
         )
         .unwrap();
     store
-        .reserve(&job.operation_id, Some(&job.pool_id), 1, 100, 10000)
+        .reserve(&job.operation_id, Some(&job.pool_id), 1, 100)
         .unwrap();
     let revision = store.snapshot().unwrap().0;
     store
@@ -149,7 +149,14 @@ async fn later_page_status_survives_blocked_credit_and_source_and_cancelled_wait
     )
     .unwrap();
     for i in 0..34 {
-        store.ensure_pool(&format!("pool{i}"), "5").unwrap();
+        crate::rotation::store::test_support::declare_and_allocate(
+            &mut store,
+            &format!("pool{i}"),
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
     }
     let mut jobs = store.funding_jobs().unwrap();
     jobs.sort_by(|a, b| a.id.cmp(&b.id));
@@ -309,7 +316,14 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
         b"fixture",
     )
     .unwrap();
-    store.ensure_pool("pool", "5").unwrap();
+    crate::rotation::store::test_support::declare_and_allocate(
+        &mut store,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
     let mut jobs = store.funding_jobs().unwrap();
     jobs.sort_by(|a, b| a.id.cmp(&b.id));
     submitted(&mut store, &jobs[0]);
@@ -423,7 +437,14 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
         b"fixture",
     )
     .unwrap();
-    store.ensure_pool("pool", "5").unwrap();
+    crate::rotation::store::test_support::declare_and_allocate(
+        &mut store,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
     let mut jobs = store.funding_jobs().unwrap();
     jobs.sort_by(|a, b| a.id.cmp(&b.id));
     submitted(&mut store, &jobs[1]);

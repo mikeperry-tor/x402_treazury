@@ -25,7 +25,10 @@ pub(super) async fn perform(
         Restart::QueuedRefill => Checkpoint::QueuedRefill,
         Restart::SubmittedDeposit => Checkpoint::SubmittedDeposit,
     };
-    let (state, pool, job) = controller.restart_target()?;
+    let (state, pool, job_id) = controller
+        .restart_target(application.running()?, wait.deadline, wait.stop)
+        .await?;
+    let job = job_id.as_str();
     let mut progress = Instant::now() - Duration::from_secs(15);
     let observed = loop {
         let snapshot = rotation::snapshot(state).await?;
@@ -95,12 +98,12 @@ pub(super) async fn perform(
         "restart cancelled or deadline reached after safe drain; no new application started"
     );
     application.reopen(registry, m)?;
-    let session=application.current.binding.session.clone();
+    let session = application.current.binding.session.clone();
     ready(
         wait.clients,
         wait.snapshot,
         application.running()?,
-        (registry,&m.run_id,&session),
+        (registry, &m.run_id, &session),
         m.limits.result_bytes,
         wait.deadline,
         wait.stop,

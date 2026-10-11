@@ -470,10 +470,10 @@ async fn run_deployment(
     if args.check {
         let summary = deployment.wallet_summary();
         println!(
-            "{} managed pools ({} automatic); active + standby target: {} USDC",
+            "{} managed pools ({} automatic); initial inventory target: {} USDC",
             summary.managed_pool_count,
             summary.generated_pool_count,
-            summary.active_and_standby_target_usdc
+            summary.initial_inventory_target_usdc
         );
         for server in deployment.inventory() {
             println!(

@@ -1,4 +1,6 @@
 //! Server-held credentials must not become diagnostic content. Vendor bodies are distinct.
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 use axum::{Router, http::StatusCode, routing::any};
 use serde_json::json;
 use x402_treazury::{
@@ -66,7 +68,14 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let mut store =
         x402_treazury::rotation::store::Store::create(&db, &key, 1, b"fixture").unwrap();
     let id = store.id().to_owned();
-    store.ensure_pool("fixture", "5").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "fixture",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let job = store.funding_jobs().unwrap().remove(0);
     store
         .defer_funding(&job.id, 100, Some(&err.to_string()), false)

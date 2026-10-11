@@ -14,7 +14,7 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
         b"fixture",
     )
     .unwrap();
-    store.reserve("op", None, 1, 200, 1000).unwrap();
+    store.reserve("op", None, 1, 200).unwrap();
     store
         .prepare_with_facts(
             "op",
@@ -146,14 +146,24 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
     )
     .await
     .unwrap();
-    treasury
-        .ensure_pool("ambiguous".into(), "5".into())
-        .await
-        .unwrap();
-    treasury
-        .ensure_pool("independent".into(), "5".into())
-        .await
-        .unwrap();
+    crate::rotation::test_capacity::treasury_pair(
+        &treasury,
+        "ambiguous",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0,
+    )
+    .await
+    .unwrap();
+    crate::rotation::test_capacity::treasury_pair(
+        &treasury,
+        "independent",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0,
+    )
+    .await
+    .unwrap();
     let mut wallet = SyntheticWalletBuilder::new(SEED)
         .transparent_coin(50)
         .build();
@@ -201,7 +211,7 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
                     crate::rotation::store::funding::FundingPhase::Quoted,
                     crate::rotation::store::funding::FundingPhase::Preparing,
                 )?;
-                s.reserve(&job.operation_id, None, 1, 100, 1000)?;
+                s.reserve(&job.operation_id, None, 1, 100)?;
                 let revision = s.status()?.snapshot_revision;
                 s.prepare_with_facts(
                     &job.operation_id,

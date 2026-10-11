@@ -122,10 +122,10 @@ async fn qualify_preparation(fail_commit: bool) {
     let operation = uuid::Uuid::new_v4().to_string();
     let request = || PrepareRequest {
         managed_funding: None,
-        allocation_limits: None,
+
         operation_id: operation.clone(),
         pool_id: None,
-        daily_limit_zatoshis: 100_000,
+
         deadline: now().unwrap() + 600,
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,

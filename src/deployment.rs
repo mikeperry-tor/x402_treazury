@@ -251,12 +251,6 @@ impl MetaConfig {
                 .as_ref()
                 .context("managed profiles require [funding]")?;
             funding.validate()?;
-            ensure!(
-                funding.daily_funding_limit_usdc.is_some()
-                    || funding.total_funding_limit_usdc.is_some()
-                    || treasury.daily_treasury_spend_limit_zec.is_some(),
-                "managed funding requires daily_funding_limit_usdc, total_funding_limit_usdc or daily_treasury_spend_limit_zec"
-            );
         } else {
             if let Some(t) = &self.treasury {
                 t.validate()?;
@@ -690,30 +684,31 @@ impl Deployment {
                         continue;
                     }
                     if let WalletConfig::ZcashRotation {
-                        funding_amount_usdc,
+                        reserves,
                         max_api_payment_usdc,
-                        limit_payments_to_funding_target,
+                        max_retirement_remainder_usdc,
                         ..
                     } = w
                     {
+                        let policy = SpendPolicy::dollars(max_api_payment_usdc)?;
                         let pool = owner
-                            .ensure_pool(name.clone(), funding_amount_usdc.clone())
+                            .ensure_capacity_group(
+                                name.clone(),
+                                reserves.clone(),
+                                policy.max_atomic,
+                                crate::rotation::config::retirement_remainder(
+                                    max_retirement_remainder_usdc,
+                                )?,
+                            )
                             .await?;
-                        let manager = ManagedPool::new(
-                            store.clone(),
-                            pool,
-                            base.clone(),
-                            funding_amount_usdc,
-                            SpendPolicy::dollars(max_api_payment_usdc)?,
-                        )?
-                        .with_funding_target_limit(*limit_payments_to_funding_target);
+                        let manager = ManagedPool::new(store.clone(), pool, base.clone(), policy)?;
                         let manager = std::sync::Arc::new(manager);
                         managed_pools.push(manager.clone());
                         wallets.insert(name.clone(), PaidClient::managed(manager));
                     }
                 }
                 tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
-                    "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to funding budgets, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
+                    "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to actual spendable treasury funds, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
                 let (handle, commands) = crate::treasury::actor::channel();
                 let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
                 let session = f.near_user_session_env.as_deref().map(secret).transpose()?;
@@ -727,12 +722,6 @@ impl Deployment {
                     base,
                     wallets: self.wallet_resolution.wallets.clone(),
                     funding: f.clone(),
-                    daily_limit: t
-                        .daily_treasury_spend_limit_zec
-                        .as_deref()
-                        .map(crate::rotation::config::zatoshis)
-                        .transpose()?
-                        .unwrap_or(i64::MAX) as u64,
                     max_network_fee: crate::rotation::config::zatoshis(
                         &t.max_funding_transaction_fee_zec,
                     )? as u64,
@@ -814,6 +803,7 @@ impl Deployment {
                         t.clone(),
                         wallets[&self.wallet_resolution.bindings[name][id].wallet]
                             .clone()
+                            .with_source_identity(id)
                             .with_transport(source.config.transport())
                             .with_cover(
                                 source.config.cover_traffic.clone(),
@@ -1507,14 +1497,20 @@ bearer_token_env="TOKEN"
             b"fixture snapshot",
         )
         .unwrap();
-        let pool = store.ensure_pool("test", "5").unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "test",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         let (store, store_task) = crate::rotation::store::StoreHandle::spawn(store);
         running.managed_pools.push(Arc::new(
             crate::rotation::manager::ManagedPool::new(
                 store.clone(),
                 pool,
                 crate::rotation::base::BaseRpc::new(&rpc_url, 12, 120).unwrap(),
-                "5",
                 crate::payment::SpendPolicy::dollars("5").unwrap(),
             )
             .unwrap(),

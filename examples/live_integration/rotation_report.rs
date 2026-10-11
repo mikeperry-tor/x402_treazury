@@ -43,19 +43,35 @@ pub(crate) fn refill_ready(state: &Value, pool: &str, job: &str, generation: u64
             && wallet["target"] == job["target"],
         "completed refill wallet binding/role mismatch"
     );
-    let target = job["target"]
-        .as_str()
-        .context("refill target missing")?
-        .parse::<U256>()?;
-    ensure!(
-        target > U256::ZERO
-            && wallet["confirmed_balance"]
-                .as_str()
-                .context("refill balance missing")?
-                .parse::<U256>()?
-                >= target,
-        "completed refill lacks confirmed target credit"
-    );
+    if state["schema_version"] == 2 {
+        let claim = selected["reserve_claims"]
+            .as_array()
+            .context("refill reserve claims missing")?
+            .iter()
+            .find(|claim| claim["wallet_id"] == wallet["id"])
+            .context("refill current claim missing")?;
+        ensure!(
+            wallet["destination_recorded"] == true
+                && wallet["destination_disputed"].is_null()
+                && claim["enabled"] == true
+                && claim["destination_ready"] == true,
+            "completed refill lacks undisputed destination support"
+        );
+    } else {
+        let target = job["target"]
+            .as_str()
+            .context("refill target missing")?
+            .parse::<U256>()?;
+        ensure!(
+            target > U256::ZERO
+                && wallet["confirmed_balance"]
+                    .as_str()
+                    .context("refill balance missing")?
+                    .parse::<U256>()?
+                    >= target,
+            "completed refill lacks confirmed target credit"
+        );
+    }
     let source = state["source_operations"]
         .as_array()
         .context("refill source evidence missing")?
@@ -208,15 +224,42 @@ fn phase_result(
     let pool = observation["pool"]
         .as_str()
         .context("rotation pool ID missing")?;
-    let job = x402_treazury::qualification::lifecycle::promotion(
+    let initial_job = x402_treazury::qualification::lifecycle::consumed_reserve(
         &boundary["before"],
         &boundary["after"],
         pool,
     )?;
     ensure!(
-        boundary["replacement_job"] == job,
+        boundary["replacement_job"] == json!(initial_job),
         "replacement job mismatch"
     );
+    let job = if let Some(job) = initial_job {
+        job
+    } else {
+        let Some(ready) = round_event(
+            events,
+            "rotation_refill_ready",
+            &phase.id,
+            index,
+            rounds.len(),
+        )?
+        else {
+            return Ok(
+                json!({"status":"incomplete","reason":"reserve consumption recorded; replacement readiness not yet observed"}),
+            );
+        };
+        let job = x402_treazury::qualification::lifecycle::consumed_reserve(
+            &boundary["before"],
+            &ready["state"],
+            pool,
+        )?
+        .context("replacement allocation missing from readiness observation")?;
+        ensure!(
+            ready["job"] == job,
+            "later replacement correlation mismatch"
+        );
+        job
+    };
     let promoted = selected(&boundary["after"], pool)?;
     let generation = promoted["generation"]
         .as_u64()

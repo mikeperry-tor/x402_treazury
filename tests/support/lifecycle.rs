@@ -12,15 +12,19 @@ use x402_treazury::rotation::{
     transaction::TransactionFacts,
 };
 #[derive(Clone)]
-struct Funding {
+pub(super) struct Funding {
     store: StoreHandle,
     fake: Fake,
     base: String,
     sends: Arc<Mutex<std::collections::BTreeSet<String>>>,
     available: Arc<AtomicBool>,
     refund_pool: Option<String>,
+    pub(super) capital: Arc<std::sync::atomic::AtomicU64>,
 }
-fn synced(s: &mut Store) -> Result<()> {
+pub(super) fn synced(s: &mut Store) -> Result<()> {
+    synced_capacity(s, 10000)
+}
+pub(super) fn synced_capacity(s: &mut Store, capacity: u64) -> Result<()> {
     let revision = s.snapshot()?.0;
     let instant = now()?;
     s.save_sync_snapshot(
@@ -40,7 +44,7 @@ fn synced(s: &mut Store) -> Result<()> {
             max_age_seconds: 3600,
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 10000,
-            spendable_shielded_zatoshis: 10000,
+            spendable_shielded_zatoshis: capacity,
         }),
     )?;
     Ok(())
@@ -78,6 +82,19 @@ impl FundingBackend for Funding {
     fn observations(&self) -> Self {
         self.clone()
     }
+    fn allocation_groups(&self) -> Vec<String> {
+        [
+            "research",
+            "other",
+            "lifecycle",
+            "background",
+            "refund",
+            "consumption",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    }
     fn swap_timeout_seconds(&self) -> u64 {
         u64::MAX
     }
@@ -90,7 +107,7 @@ impl FundingBackend for Funding {
             "treasury_insufficient_spendable_funds"
         );
         self.store
-            .call(|s| s.check_funding_capacity(now()?, 100, 10000))
+            .call(|s| s.check_funding_capacity(now()?, 100))
             .await
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
@@ -127,7 +144,6 @@ impl FundingBackend for Funding {
                     Some(&job.pool_id),
                     u32::try_from(now()? / 86400)?,
                     100,
-                    10000,
                 )?;
                 let revision = s.snapshot()?.0;
                 s.prepare_with_facts(
@@ -163,16 +179,21 @@ impl FundingBackend for Funding {
     }
     async fn reconcile(&mut self, job: &FundingJob) -> Result<bool> {
         let id = job.operation_id.clone();
+        let capital = self.capital.clone();
         self.store
             .call(move |s| {
+                let previously = s.operation(&id)?.submission == "CONFIRMED";
                 s.confirm_spend(&id, 100, u32::try_from(now()? / 86400)?)?;
-                synced(s)
+                if !previously {
+                    capital.fetch_sub(100, Ordering::SeqCst);
+                }
+                synced_capacity(s, capital.load(Ordering::SeqCst))
             })
             .await?;
         Ok(true)
     }
 }
-fn funder(
+pub(super) fn funder(
     h: &Harness,
     sends: Arc<Mutex<std::collections::BTreeSet<String>>>,
 ) -> FundingWorker<Funding> {
@@ -185,11 +206,12 @@ fn funder(
             sends,
             available: Arc::new(AtomicBool::new(true)),
             refund_pool: None,
+            capital: Arc::new(std::sync::atomic::AtomicU64::new(10000)),
         },
         1,
     )
 }
-async fn tick(worker: &mut FundingWorker<Funding>, instant: &mut u64) {
+pub(super) async fn tick(worker: &mut FundingWorker<Funding>, instant: &mut u64) {
     worker.tick(*instant).await.unwrap();
     *instant += 100;
 }
@@ -197,10 +219,29 @@ async fn tick(worker: &mut FundingWorker<Funding>, instant: &mut u64) {
 #[tokio::test]
 async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation() {
     let mut h = Harness::new().await;
-    h.f.balances.lock().unwrap().clear();
+    h.pool = h
+        .store
+        .call(|s| {
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "lifecycle",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000)),
+                0
+            )
+        })
+        .await
+        .unwrap();
+    h.client = make_client(h.store.clone(), h.pool.clone(), &h.base);
     h.store
         .call(|s| {
-            s.ensure_pool("other", "5")?;
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "other",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000)),
+                0
+            )?;
             synced(s)
         })
         .await
@@ -213,7 +254,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
     for _ in 0..60 {
         tick(&mut worker, &mut instant).await;
         if h.store
-            .call(|s| Ok(s.status()?.pools.iter().all(|p| p.bootstrapped)))
+            .call(|s| Ok(s.status()?.pools.iter().all(|p| p.inventory_ready)))
             .await
             .unwrap()
         {
@@ -221,7 +262,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
         }
     }
     let status = h.store.call(|s| s.status()).await.unwrap();
-    assert!(status.pools.iter().all(|p| p.bootstrapped));
+    assert!(status.pools.iter().all(|p| p.inventory_ready));
     assert_eq!(sends.lock().unwrap().len(), 4);
     let research = status.pools.iter().find(|p| p.id == h.pool).unwrap();
     let old_active = research
@@ -323,7 +364,15 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
     assert_eq!(sends.lock().unwrap().len(), 5);
     assert!(sends.lock().unwrap().contains(&replacement.operation_id));
     let research = status.pools.iter().find(|p| p.id == h.pool).unwrap();
-    assert_eq!(research.generation, 1);
+    assert_eq!(
+        research
+            .reserve_claims
+            .iter()
+            .find(|claim| claim.slot == "small")
+            .unwrap()
+            .generation,
+        1
+    );
     assert_eq!(
         research
             .addresses
@@ -342,7 +391,15 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
         standby
     );
     let other = status.pools.iter().find(|p| p.name == "other").unwrap();
-    assert_eq!(other.generation, 0);
+    assert_eq!(
+        other
+            .reserve_claims
+            .iter()
+            .find(|claim| claim.slot == "small")
+            .unwrap()
+            .generation,
+        0
+    );
     assert_eq!(other.addresses.len(), 2);
     assert!(
         research
@@ -361,7 +418,13 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
     h.client.execute(h.route()).await.unwrap();
     h.store
         .call(|s| {
-            s.ensure_pool("refund", "5")?;
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "refund",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000)),
+                0
+            )?;
             synced(s)
         })
         .await
@@ -375,7 +438,7 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
     }
     let status = h.store.call(|s| s.status()).await.unwrap();
     let refund = status.pools.iter().find(|p| p.name == "refund").unwrap();
-    assert!(refund.funding_degraded && !refund.bootstrapped);
+    assert!(refund.funding_degraded && !refund.inventory_ready);
     assert!(
         status
             .funding_jobs
@@ -427,7 +490,13 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
     let other = h
         .store
         .call(|s| {
-            let p = s.ensure_pool("background", "5")?;
+            let p = crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "background",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000)),
+                0
+            )?;
             synced(s)?;
             Ok(p)
         })
@@ -447,7 +516,7 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
                 .iter()
                 .find(|p| p.id == other)
                 .unwrap()
-                .bootstrapped
+                .inventory_ready
             {
                 break;
             }
@@ -462,7 +531,7 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
             .iter()
             .find(|p| p.id == other)
             .unwrap()
-            .bootstrapped
+            .inventory_ready
     );
     assert_eq!(sends.lock().unwrap().len(), 2);
     assert!(
@@ -471,18 +540,29 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
     );
     let independent = make_client(h.store.clone(), other, &h.base);
     assert_eq!(independent.execute(h.route()).await.unwrap(), "paid");
-    // The unresolved held authorization still prevents over-admission on research.
+    // The unresolved authorization continues to consume its original wallet's
+    // capacity; another READY wallet can independently satisfy the next call.
     h.f.release.notify_one();
     assert_eq!(payment.await.unwrap().unwrap(), "paid");
-    assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("payment_pending")
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    let signed = h.f.signed.lock().unwrap().clone();
+    assert_eq!(signed.len(), 3);
+    assert_ne!(
+        signed[0]["payload"]["authorization"]["from"],
+        signed[2]["payload"]["authorization"]["from"]
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        3,
+        "cross-wallet progress must retain every unresolved signed liability"
+    );
+    drop(db);
     drop(independent);
     drop(worker);
     h.close().await;

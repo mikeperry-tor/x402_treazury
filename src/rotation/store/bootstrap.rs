@@ -4,7 +4,6 @@ use super::funding::{FundingFacts, FundingJob};
 use super::*;
 
 pub(crate) const GROUP_PAGE: usize = 16;
-pub(crate) const PATH_PAGE: usize = 64;
 
 #[derive(Debug)]
 pub(crate) struct StartupGroup {
@@ -13,17 +12,21 @@ pub(crate) struct StartupGroup {
     pub enabled: bool,
     /// Role ownership and validated immutable D; not fresh payment capacity.
     pub serving_ready: bool,
-    /// Current legacy ACTIVE + READY occupancy. Schema16 uses exact enabled claims.
+    /// Enabled current claims are funded and structurally bound.
     pub inventory_ready: bool,
-    /// Capture once for explicit bootstrap. Future replacements are not its work.
-    pub through_sequence: i64,
     /// An owned source reservation is a wait, not proof of capital exhaustion.
     pub source_pending: bool,
+    pub claims: Vec<StartupClaim>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StartupClaim {
+    pub kind: String,
+    pub generation: Option<i64>,
 }
 
 #[derive(Debug)]
 pub(crate) struct StartupPath {
-    pub sequence: i64,
     pub job: FundingJob,
     pub facts: FundingFacts,
     pub operation: Option<OperationStatus>,
@@ -107,10 +110,6 @@ impl StartupPath {
             "treasury_insufficient_spendable_funds" if !source_pending => {
                 "treasury_insufficient_spendable_funds"
             }
-            // Temporary legacy limits disappear with schema16/config7.
-            "daily_funding_limit_exceeded"
-            | "total_funding_limit_exceeded"
-            | "treasury_budget_exceeded" => "funding_policy_requires_review",
             _ => {
                 return if self.facts.accepted_quote || source_pending {
                     Waiting
@@ -125,7 +124,7 @@ impl StartupPath {
 
 impl Store {
     /// Caller pages its immutable configured name set, at most GROUP_PAGE per turn.
-    /// Each group has at most one ACTIVE and one READY under schema15 constraints.
+    /// Each group has at most one ACTIVE and two enabled reserve claims.
     pub(crate) fn startup_groups(&self, names: &[String]) -> Result<Vec<StartupGroup>> {
         ensure!(names.len() <= GROUP_PAGE, "startup group page too large");
         let mut result = Vec::with_capacity(names.len());
@@ -139,49 +138,57 @@ impl Store {
                 )
                 .optional()?
                 .context("bootstrap pool missing from state")?;
-            let through_sequence: i64 = self.db.query_row(
-                "SELECT COALESCE(MAX(sequence),-1) FROM wallets WHERE pool_id=?1",
-                [&pool],
-                |row| row.get(0),
-            )?;
-            let mut statement = self.db.prepare(
-                "SELECT id,role,evidence_repair FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','READY') ORDER BY role LIMIT 3",
-            )?;
-            let candidates = statement
-                .query_map([&pool], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            ensure!(candidates.len() <= 2, "startup role ownership conflict");
-            let mut active = false;
-            let mut ready = false;
-            for (wallet, role, repair) in candidates {
-                if repair.is_some() || !funding::readiness_supported(&self.db, &wallet)? {
-                    continue;
+            let mut claims = vec![StartupClaim {
+                kind: "initial".into(),
+                generation: None,
+            }];
+            let mut slots = self.db.prepare("SELECT slot,generation FROM reserve_claims WHERE pool_id=?1 AND enabled=1 ORDER BY slot")?;
+            claims.extend(
+                slots
+                    .query_map([&pool], |r| {
+                        Ok(StartupClaim {
+                            kind: r.get(0)?,
+                            generation: Some(r.get(1)?),
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
+            ensure!(claims.len() <= 3, "startup claim inventory conflict");
+            let mut statement = self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','RETAINED','READY') ORDER BY CASE role WHEN 'ACTIVE' THEN 0 WHEN 'READY' THEN 1 ELSE 2 END,sequence LIMIT 64")?;
+            // Bounded candidate page; short-circuit at the first funded identity.
+            // This indexed walk does not copy history or require admission freshness.
+            let mut rows = statement.query([&pool])?;
+            let mut serving_ready = false;
+            let mut active_ready = false;
+            while let Some(row) = rows.next()? {
+                let wallet: String = row.get(0)?;
+                if let Some(ownership) = capacity::payment_ownership(&self.db, &pool, &wallet)? {
+                    serving_ready = true;
+                    active_ready = ownership.role == "ACTIVE";
+                    break;
                 }
-                match role.as_str() {
-                    "ACTIVE" => {
-                        ensure!(!active, "multiple startup active owners");
-                        active = true;
-                    }
-                    "READY" => {
-                        ensure!(!ready, "multiple startup ready owners");
-                        ready = true;
-                    }
-                    _ => unreachable!(),
-                }
+            }
+            let mut inventory_ready = active_ready;
+            for claim in claims.iter().filter(|c| c.generation.is_some()) {
+                let wallet:Option<String> = self.db.query_row("SELECT wallet_id FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND enabled=1",params![pool,claim.kind,claim.generation],|r|r.get(0))?;
+                let ready = if let Some(wallet) = wallet {
+                    capacity::payment_ownership(&self.db, &pool, &wallet)?.is_some_and(|owner| {
+                        owner.role == "READY"
+                            && owner.slot.as_deref() == Some(claim.kind.as_str())
+                            && owner.claim_generation == claim.generation
+                    })
+                } else {
+                    false
+                };
+                inventory_ready &= ready;
             }
             result.push(StartupGroup {
                 pool,
                 name: name.clone(),
                 enabled,
-                serving_ready: enabled && (active || ready),
-                inventory_ready: enabled && active && ready,
-                through_sequence,
+                serving_ready: enabled && serving_ready,
+                inventory_ready: enabled && inventory_ready,
+                claims,
                 source_pending: self.db.query_row(
                     "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
                     [],
@@ -199,14 +206,16 @@ impl Store {
         &self,
         name: &str,
         max_attempts: u32,
-        serving: bool,
+        captured: Option<&[StartupClaim]>,
     ) -> Result<Option<Vec<(String, &'static str)>>> {
         let group = self.startup_groups(&[name.to_owned()])?.remove(0);
-        if (serving && group.serving_ready) || (!serving && group.inventory_ready) {
+        let serving = captured.is_none();
+        if serving && group.serving_ready {
             return Ok(None);
         }
-        let paths = self.startup_paths_page(&group.pool, -1, group.through_sequence, PATH_PAGE)?;
-        if paths.is_empty() || paths.len() == PATH_PAGE {
+        let claims = captured.unwrap_or(&group.claims);
+        let paths = self.startup_claim_paths(&group.pool, claims)?;
+        if paths.len() != claims.len() {
             return Ok(None);
         }
         let mut blocked = Vec::new();
@@ -224,53 +233,80 @@ impl Store {
         Ok((!blocked.is_empty()).then_some(blocked))
     }
 
-    /// Captured destination work, not funding completion. All current ALLOCATED
-    /// paths remain visible, including disabled groups. Historical funded wallets
-    /// with source-only backlog do not enlarge startup's path inventory.
-    pub(crate) fn startup_paths_page(
+    pub(crate) fn startup_claim_paths(
         &self,
         pool: &str,
-        after: i64,
-        through: i64,
-        limit: usize,
+        claims: &[StartupClaim],
     ) -> Result<Vec<StartupPath>> {
-        ensure!(limit > 0 && limit <= PATH_PAGE, "invalid startup path page");
-        let mut statement = self.db.prepare(
-            "SELECT w.sequence,f.id FROM wallets w JOIN funding_jobs f ON f.wallet_id=w.id WHERE w.pool_id=?1 AND w.sequence>?2 AND w.sequence<=?3 AND (w.role IN ('ALLOCATED','ACTIVE','READY')) ORDER BY w.sequence LIMIT ?4",
-        )?;
-        let rows = statement
-            .query_map(
-                params![pool, after, through, i64::try_from(limit)?],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows.into_iter()
-            .map(|(sequence, id)| {
-                let (job, operation) = self.funding_recovery_context(&id)?;
-                ensure!(job.pool_id == pool, "startup funding pool mismatch");
-                let facts = self.funding_facts(&id, &job.operation_id)?;
-                let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
-                Ok(StartupPath {
-                    sequence,
-                    job,
-                    facts,
-                    operation,
-                    destination_ready,
-                    recovery_count: self.funding_recovery_count(&id)?,
-                    readiness_dispute: self.db.query_row(
-                        "SELECT readiness_disputed FROM funding_jobs WHERE id=?1",
-                        [&id],
-                        |row| row.get(0),
-                    )?,
-                })
-            })
-            .collect()
+        ensure!(claims.len() <= 3, "startup claim inventory too large");
+        let mut result = Vec::new();
+        for claim in claims {
+            let saved:Option<String> = self.db.query_row(
+                "SELECT f.id FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.pool_id=?1 AND f.allocation_kind=?2 AND f.claim_generation IS ?3",
+                params![pool,claim.kind,claim.generation], |r| r.get(0)).optional()?;
+            if let Some(id) = saved {
+                result.push(self.startup_path(&id)?);
+            }
+        }
+        Ok(result)
+    }
+
+    fn startup_path(&self, id: &str) -> Result<StartupPath> {
+        let (job, operation) = self.funding_recovery_context(id)?;
+        let facts = self.funding_facts(id, &job.operation_id)?;
+        let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
+        Ok(StartupPath {
+            job,
+            facts,
+            operation,
+            destination_ready,
+            recovery_count: self.funding_recovery_count(id)?,
+            readiness_dispute: self.db.query_row(
+                "SELECT readiness_disputed FROM funding_jobs WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )?,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn current_status_contract_has_explicit_authority_and_claims() {
+        let (_dir, store, _pool) = fixture();
+        let value = serde_json::to_value(store.status().unwrap()).unwrap();
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["state_schema_version"], 16);
+        let keys: Vec<_> = value["pools"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        let expected: Vec<String> = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/capacity/pool-status-fields-v2.json"
+        ))
+        .unwrap();
+        assert_eq!(keys, expected);
+        assert_eq!(value["pools"][0]["payment_limit_atomic"], "1000000");
+        assert_eq!(value["pools"][0]["retirement_tolerance_atomic"], "0");
+        assert_eq!(value["pools"][0]["inventory_ready"], false);
+        let wallet = &value["pools"][0]["addresses"][0];
+        let keys: Vec<_> = wallet.as_object().unwrap().keys().cloned().collect();
+        let expected: Vec<String> = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/capacity/address-status-fields-v2.json"
+        ))
+        .unwrap();
+        assert_eq!(keys, expected);
+        assert!(wallet["runtime_balance_evidence"].is_null());
+        assert_eq!(
+            value["pools"][0]["retirement_accounting"]["automatic_recorded_confirmed_atomic"],
+            "0"
+        );
+    }
+
     fn fixture() -> (tempfile::TempDir, Store, String) {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::create(
@@ -280,7 +316,14 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = store.ensure_pool("configured", "5").unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "configured",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         (dir, store, pool)
     }
     #[test]
@@ -303,9 +346,7 @@ mod tests {
             .unwrap()
             .remove(0);
         assert!(group.serving_ready && group.inventory_ready);
-        let paths = store
-            .startup_paths_page(&pool, -1, group.through_sequence, PATH_PAGE)
-            .unwrap();
+        let paths = store.startup_claim_paths(&pool, &group.claims).unwrap();
         assert_eq!(paths.len(), 2);
         assert!(
             paths
@@ -323,27 +364,23 @@ mod tests {
     fn pages_are_scoped_bounded_and_empty_is_not_a_readiness_claim() {
         let (_dir, mut store, pool) = fixture();
         for n in 0..40 {
-            store.ensure_pool(&format!("unrelated_{n}"), "5").unwrap();
+            crate::rotation::test_capacity::declare_and_allocate!(
+                store,
+                &format!("unrelated_{n}"),
+                crate::rotation::test_capacity::small_reserve("5"),
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0
+            )
+            .unwrap();
         }
         let group = store
             .startup_groups(&["configured".into()])
             .unwrap()
             .remove(0);
         assert!(!group.serving_ready && !group.inventory_ready);
-        let first = store
-            .startup_paths_page(&pool, -1, group.through_sequence, 1)
-            .unwrap();
-        let second = store
-            .startup_paths_page(&pool, first[0].sequence, group.through_sequence, 1)
-            .unwrap();
-        assert_eq!((first.len(), second.len()), (1, 1));
-        assert_ne!(first[0].job.id, second[0].job.id);
-        assert!(
-            store
-                .startup_paths_page(&pool, second[0].sequence, group.through_sequence, 1)
-                .unwrap()
-                .is_empty()
-        );
+        let paths = store.startup_claim_paths(&pool, &group.claims).unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_ne!(paths[0].job.id, paths[1].job.id);
         assert!(
             store
                 .startup_groups(&vec!["configured".into(); GROUP_PAGE + 1])
@@ -351,13 +388,13 @@ mod tests {
         );
         assert!(
             store
-                .startup_paths_page(&pool, -1, group.through_sequence, PATH_PAGE + 1)
+                .startup_claim_paths(&pool, &vec![group.claims[0].clone(); 4])
                 .is_err()
         );
-        assert!(store.startup_groups(&["absent".into()]).is_err());
     }
+
     #[test]
-    fn disabled_group_and_disputed_destination_cannot_claim_ready_inventory() {
+    fn disputed_destination_preserves_funded_inventory_but_disabled_group_cannot_serve() {
         let (_dir, mut store, _pool) = fixture();
         let jobs = store.funding_jobs().unwrap();
         for job in &jobs {
@@ -376,7 +413,31 @@ mod tests {
             .startup_groups(&["configured".into()])
             .unwrap()
             .remove(0);
-        assert!(!group.inventory_ready);
+        assert!(group.serving_ready && group.inventory_ready);
+        let paths = store
+            .startup_claim_paths(&group.pool, &group.claims)
+            .unwrap();
+        assert!(
+            !paths
+                .iter()
+                .find(|path| path.job.id == jobs[0].id)
+                .unwrap()
+                .destination_ready
+        );
+        assert!(
+            store
+                .startup_obstruction("configured", 3, None)
+                .unwrap()
+                .is_none()
+        );
+        let blocked = store
+            .startup_obstruction("configured", 3, Some(&group.claims))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            blocked,
+            vec![(jobs[0].id.clone(), "destination_support_requires_review")]
+        );
         store
             .db
             .execute("UPDATE pools SET enabled=0 WHERE name='configured'", [])
@@ -405,7 +466,7 @@ mod tests {
                 .unwrap();
             assert!(
                 store
-                    .startup_obstruction("configured", 3, true)
+                    .startup_obstruction("configured", 3, None)
                     .unwrap()
                     .is_none(),
                 "one blocked quote cannot forecast group exhaustion"
@@ -420,7 +481,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 store
-                    .startup_obstruction("configured", 3, true)
+                    .startup_obstruction("configured", 3, None)
                     .unwrap()
                     .unwrap()
                     .len(),
@@ -431,9 +492,7 @@ mod tests {
             .startup_groups(&["configured".into()])
             .unwrap()
             .remove(0);
-        let paths = store
-            .startup_paths_page(&pool, -1, group.through_sequence, PATH_PAGE)
-            .unwrap();
+        let paths = store.startup_claim_paths(&pool, &group.claims).unwrap();
         let insufficient = paths
             .iter()
             .find(|p| {
@@ -463,7 +522,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, true)
+                .startup_obstruction("configured", 3, None)
                 .unwrap()
                 .is_none()
         );

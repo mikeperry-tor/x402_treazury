@@ -2,7 +2,7 @@
 use super::*;
 use crate::manifest::{Phase, RotationRound};
 use std::path::PathBuf;
-use x402_treazury::qualification::{depletion_estimate, lifecycle::promotion};
+use x402_treazury::qualification::depletion_estimate;
 
 pub(super) struct Controller {
     phase: Phase,
@@ -12,6 +12,7 @@ pub(super) struct Controller {
     pool: String,
     generation: u64,
     job: Option<String>,
+    consumed: bool,
     state: PathBuf,
 }
 pub(super) async fn snapshot(state: &Path) -> Result<Value> {
@@ -158,7 +159,12 @@ impl Controller {
             .find(|p| p["id"] == pool)
             .context("observed pool missing")?;
         ensure!(
-            selected["enabled"] == true && selected["bootstrapped"] == true,
+            selected["enabled"] == true
+                && if observation["state"]["schema_version"] == 2 {
+                    selected["inventory_ready"] == true
+                } else {
+                    selected["bootstrapped"] == true
+                },
             "rotation requires an enabled bootstrapped pool"
         );
         let price = crate::manifest::usdc(&round.expected_price_usdc)?.to_string();
@@ -191,27 +197,41 @@ impl Controller {
             pool,
             generation,
             job: None,
+            consumed: false,
             state,
         }))
     }
-    pub(super) fn restart_target(&self) -> Result<(&Path, &str, &str)> {
-        Ok((
-            &self.state,
-            &self.pool,
-            self.job
-                .as_deref()
-                .context("restart requires an observed promotion")?,
-        ))
+    pub(super) async fn restart_target(
+        &self,
+        child: &mut Process,
+        deadline: Instant,
+        stop: &CancellationToken,
+    ) -> Result<(&Path, &str, String)> {
+        ensure!(
+            self.consumed,
+            "restart requires observed reserve consumption"
+        );
+        loop {
+            let state = snapshot(&self.state).await?;
+            if let Some(job) = x402_treazury::qualification::lifecycle::consumed_reserve(
+                &self.before,
+                &state,
+                &self.pool,
+            )? {
+                return Ok((&self.state, &self.pool, job));
+            }
+            tick(child, deadline, stop).await?;
+        }
     }
     pub(super) fn before_case(&self, id: &str) -> Result<()> {
         if self.round.service_cases.iter().any(|c| c == id) {
             ensure!(
-                self.job.is_some(),
+                self.consumed,
                 "reviewed depletion calls exhausted without promotion; no unplanned calls or service dispatch"
             );
         } else {
             ensure!(
-                self.round.depletion_cases.iter().any(|c| c == id) && self.job.is_none(),
+                self.round.depletion_cases.iter().any(|c| c == id) && !self.consumed,
                 "depletion cannot continue after its promotion boundary"
             );
         }
@@ -234,13 +254,40 @@ impl Controller {
         let generation = pool(&after, &self.pool)?["generation"]
             .as_u64()
             .context("observed generation missing")?;
-        if self.job.is_some() {
-            ensure!(
-                generation == self.generation + 1,
-                "unexpected additional promotion during post-rotation service"
-            );
-        } else if generation != self.generation {
-            let job = promotion(&self.before, &after, &self.pool)?;
+        let current_schema = after["schema_version"] == 2;
+        let changed = if current_schema {
+            let active = |value: &Value| -> Result<Value> {
+                Ok(pool(value, &self.pool)?["addresses"]
+                    .as_array()
+                    .context("wallet inventory missing")?
+                    .iter()
+                    .find(|w| w["role"] == "ACTIVE")
+                    .context("active wallet missing")?["id"]
+                    .clone())
+            };
+            active(&after)? != active(&self.before)?
+        } else {
+            generation != self.generation
+        };
+        if self.consumed {
+            let observed = x402_treazury::qualification::lifecycle::consumed_reserve(
+                &self.before,
+                &after,
+                &self.pool,
+            )?;
+            if let Some(job) = &self.job {
+                ensure!(
+                    observed.as_ref() == Some(job),
+                    "unexpected additional reserve consumption during service"
+                );
+            }
+            self.job = observed;
+        } else if changed {
+            let job = x402_treazury::qualification::lifecycle::consumed_reserve(
+                &self.before,
+                &after,
+                &self.pool,
+            )?;
             registry.stop_depletion(
                 &m.run_id,
                 &self.phase.id,
@@ -249,7 +296,8 @@ impl Controller {
                 &after,
                 now()?,
             )?;
-            self.job = Some(job);
+            self.job = job;
+            self.consumed = true;
         } else {
             // Resolve each depletion payment before requesting another challenge.
             // After promotion, service must proceed immediately rather than wait
@@ -266,14 +314,25 @@ impl Controller {
         deadline: Instant,
         stop: &CancellationToken,
     ) -> Result<()> {
-        let job = self
-            .job
-            .as_deref()
-            .context("rotation did not occur within reviewed depletion calls")?;
+        ensure!(
+            self.consumed,
+            "rotation did not occur within reviewed depletion calls"
+        );
         let mut progress = Instant::now() - Duration::from_secs(15);
         loop {
             let state = snapshot(&self.state).await?;
-            if crate::rotation_report::refill_ready(&state, &self.pool, job, self.generation + 1)? {
+            let Some(job) = x402_treazury::qualification::lifecycle::consumed_reserve(
+                &self.before,
+                &state,
+                &self.pool,
+            )?
+            else {
+                tick(child, deadline, stop).await?;
+                continue;
+            };
+            let expected_generation = self.generation + u64::from(state["schema_version"] != 2);
+            if crate::rotation_report::refill_ready(&state, &self.pool, &job, expected_generation)?
+            {
                 registry.event(
                     &m.run_id,
                     "rotation_refill_ready",
@@ -313,11 +372,15 @@ mod tests {
             pool: "p".into(),
             generation: 0,
             job: None,
+            consumed: false,
             state: PathBuf::new(),
         };
         controller.before_case("deplete").unwrap();
         assert!(controller.before_case("service").is_err());
         assert!(controller.before_case("unreviewed").is_err());
+        controller.consumed = true;
+        controller.before_case("service").unwrap(); // vacancy alone ends depletion
+        assert!(controller.job.is_none());
         controller.job = Some("replacement".into());
         controller.before_case("service").unwrap();
         assert!(controller.before_case("deplete").is_err());

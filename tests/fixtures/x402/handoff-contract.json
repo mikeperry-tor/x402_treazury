@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/x402-foundation/x402",
+  "commit": "f8f83309706b14cc696962f0a002eeeb66c3dc26",
+  "reviewed_on": "2026-10-11",
+  "files": [
+    {
+      "path": "specs/transports-v2/http.md",
+      "url": "https://github.com/x402-foundation/x402/blob/f8f83309706b14cc696962f0a002eeeb66c3dc26/specs/transports-v2/http.md",
+      "sha256": "4f0298aaa23ac75de0eb49b1e96e6e67a5b910d7527b3a71c63e426b3bf5bdfb"
+    },
+    {
+      "path": "typescript/packages/http/express/src/index.ts",
+      "url": "https://github.com/x402-foundation/x402/blob/f8f83309706b14cc696962f0a002eeeb66c3dc26/typescript/packages/http/express/src/index.ts",
+      "sha256": "61f92e1dbb1250c9f99f73a99b66c7fcf0b0a150b82b178a828d27b92f76912e"
+    }
+  ],
+  "fixture_contract": {
+    "unsigned_protected_request": "Return the payment-required response before invoking the protected handler, regardless of HTTP method.",
+    "free_response": "Invoke the handler without requiring payment.",
+    "verified_payment": "Invoke the protected handler; settlement may subsequently fail while its response is buffered.",
+    "settlement_failure": "May return HTTP 402 after handler execution; never grants replay authority."
+  },
+  "limits": "Local fixtures model these branches. They do not qualify arbitrary provider middleware, POST idempotency, or live settlement."
+}

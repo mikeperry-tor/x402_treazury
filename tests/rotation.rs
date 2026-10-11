@@ -1,6 +1,10 @@
+#[path = "support/capacity.rs"]
+mod capacity_fixture;
 #[path = "support/funding_quote.rs"]
 mod quote_fixture;
 use std::path::Path;
+#[path = "support/consume_reserve.rs"]
+mod consume_reserve;
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
 use x402_treazury::rotation::store::{Store, StoreHandle, status};
@@ -19,7 +23,14 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     let mut store = create(dir.path());
     let id = store.id().to_owned();
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err());
-    store.ensure_pool("research", "5.00").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "research",
+        crate::capacity_fixture::small_reserve("5.00"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     assert_eq!(status(&dir.path().join("state")).unwrap().pools.len(), 1);
     assert_eq!(store.save_snapshot(1, b"next-secret-snapshot").unwrap(), 2);
     assert!(store.save_snapshot(1, b"stale").is_err());
@@ -45,47 +56,99 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     assert!(Store::create(&dir.path().join("state"), &dir.path().join("key"), 1, b"x").is_err());
 }
 #[test]
-fn pools_bootstrap_rotate_independently_and_keep_allocation_targets() {
+fn groups_consume_reserves_independently_and_keep_allocation_targets() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
-    let a = s.ensure_pool("a", "5.00").unwrap();
-    let b = s.ensure_pool("b", "10.00").unwrap();
+    let a = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5.00"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    let b = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "b",
+        crate::capacity_fixture::small_reserve("10.00"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let wallets = s.status().unwrap().pools;
     for pool in &wallets {
         assert_eq!(pool.addresses.len(), 2);
-        assert!(!pool.bootstrapped);
+        assert!(!pool.inventory_ready);
     }
     let first = &wallets[0].addresses[0];
     rpc_evidence::credit(&mut s, &first.id, "4999999", 13).unwrap();
-    assert!(!s.status().unwrap().pools[0].bootstrapped);
+    assert!(!s.status().unwrap().pools[0].inventory_ready);
     for address in &wallets[0].addresses {
         rpc_evidence::credit(&mut s, &address.id, "5000000", 14).unwrap();
     }
     let now = s.status().unwrap();
-    assert!(now.pools[0].bootstrapped);
-    assert!(!now.pools[1].bootstrapped);
-    assert_eq!(s.ensure_pool("a", "7.00").unwrap(), a);
-    assert_eq!(s.promote(&a, 0).unwrap(), 1);
-    assert!(s.promote(&a, 0).is_err());
-    assert!(s.promote(&a, 1).is_err());
-    assert!(s.promote(&b, 0).is_err());
+    assert!(now.pools[0].inventory_ready);
+    assert!(!now.pools[1].inventory_ready);
+    assert_eq!(
+        crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "a",
+            crate::capacity_fixture::small_reserve("7.00"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap(),
+        a
+    );
+    s = consume_reserve::consume_and_replace(
+        s,
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &a,
+    );
+    assert!(
+        s.allocate_capacity_kind(
+            &a,
+            x402_treazury::rotation::store::AllocationKind::Small,
+            true
+        )
+        .unwrap()
+        .is_none()
+    );
     let now = s.status().unwrap();
     assert_eq!(now.pools[0].addresses.len(), 3);
-    assert_eq!(now.pools[0].addresses[0].role, "RETIRED");
+    assert_eq!(now.pools[0].addresses[0].role, "RETAINED");
     assert_eq!(now.pools[0].addresses[1].role, "ACTIVE");
     assert_eq!(now.pools[0].addresses[1].target, "5000000");
     assert_eq!(now.pools[0].addresses[2].target, "7000000");
     assert_eq!(now.pools[1].addresses.len(), 2);
-    s.reserve("pending", Some(&a), 1, 10, 100).unwrap();
+    s.reserve("pending", Some(&a), 1, 10).unwrap();
     s.disable_pool("a").unwrap();
-    assert!(s.promote(&a, 1).is_err());
-    assert!(s.reserve("new", Some(&a), 1, 10, 100).is_err());
+    assert!(
+        s.allocate_capacity_kind(
+            &a,
+            x402_treazury::rotation::store::AllocationKind::Small,
+            true
+        )
+        .is_err()
+    );
+    assert!(s.reserve("new", Some(&a), 1, 10).is_err());
     assert!(s.prepare("pending", 1, b"snapshot", b"raw").is_err());
     assert_eq!(s.snapshot().unwrap().0, 1);
     let id = s.id().to_owned();
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    assert_eq!(s.ensure_pool("a", "7").unwrap(), a);
+    assert_eq!(
+        crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "a",
+            crate::capacity_fixture::small_reserve("7"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap(),
+        a
+    );
     assert_eq!(s.status().unwrap().pools[0].addresses.len(), 3);
     let managed = std::collections::BTreeSet::from(["a".into()]);
     let statics = std::collections::BTreeSet::from(["b".into()]);
@@ -93,21 +156,45 @@ fn pools_bootstrap_rotate_independently_and_keep_allocation_targets() {
     assert!(s.status().unwrap().pools[1].enabled);
     s.configure_profiles(&managed, &Default::default()).unwrap();
     assert!(!s.status().unwrap().pools[1].enabled);
-    assert_eq!(s.ensure_pool("b", "10").unwrap(), b);
+    assert_eq!(
+        crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "b",
+            crate::capacity_fixture::small_reserve("10"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap(),
+        b
+    );
     assert_eq!(s.status().unwrap().pools[1].addresses.len(), 2);
 }
 #[test]
-fn shared_budget_and_prepared_send_survive_restart_without_duplicate_work() {
+fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
-    let a = s.ensure_pool("a", "5").unwrap();
-    let b = s.ensure_pool("b", "10").unwrap();
-    s.reserve("op-a", Some(&a), 10, 60, 100).unwrap();
-    s.reserve("op-a", Some(&a), 10, 60, 100).unwrap();
-    assert!(s.reserve("op-a", Some(&b), 10, 60, 100).is_err());
-    assert!(s.reserve("op-b", Some(&b), 11, 50, 100).is_err());
-    s.reserve("op-b", Some(&b), 11, 40, 100).unwrap();
+    let a = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    let b = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "b",
+        crate::capacity_fixture::small_reserve("10"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    s.reserve("op-a", Some(&a), 10, 60).unwrap();
+    s.reserve("op-a", Some(&a), 10, 60).unwrap();
+    assert!(s.reserve("op-a", Some(&b), 10, 60).is_err());
+    s.reserve("independent", Some(&b), 11, 50).unwrap();
+    s.reserve("op-b", Some(&b), 11, 40).unwrap();
     assert_eq!(
         s.prepare("op-a", 1, b"post-calc", b"exact-transaction")
             .unwrap(),
@@ -134,12 +221,12 @@ fn shared_budget_and_prepared_send_survive_restart_without_duplicate_work() {
     s.confirm_spend("op-a", 55, 11).unwrap();
     s.confirm_spend("op-a", 55, 11).unwrap();
     assert!(s.confirm_spend("op-a", 54, 11).is_err());
-    s.reserve("op-a", Some(&a), 10, 60, 100).unwrap();
-    assert!(s.reserve("too-much", Some(&b), 11, 6, 100).is_err());
+    s.reserve("op-a", Some(&a), 10, 60).unwrap();
+    s.reserve("another-operation", Some(&b), 11, 6).unwrap();
     assert_eq!(s.prepare("op-b", 2, b"post-second", b"tx-b").unwrap(), 3);
 }
 #[tokio::test]
-async fn concurrent_pool_requests_and_budget_reservations_serialize() {
+async fn concurrent_pool_requests_and_source_reservations_serialize() {
     let dir = tempfile::tempdir().unwrap();
     let s = create(dir.path());
     let (handle, worker) = StoreHandle::spawn(s);
@@ -147,7 +234,17 @@ async fn concurrent_pool_requests_and_budget_reservations_serialize() {
     for _ in 0..8 {
         let h = handle.clone();
         tasks.push(tokio::spawn(async move {
-            h.call(|s| s.ensure_pool("same", "5")).await.unwrap()
+            h.call(|s| {
+                crate::capacity_fixture::declare_and_allocate!(
+                    s,
+                    "same",
+                    crate::capacity_fixture::small_reserve("5"),
+                    Some(alloy_primitives::U256::from(1_000_000u64)),
+                    0
+                )
+            })
+            .await
+            .unwrap()
         }));
     }
     let mut ids = std::collections::BTreeSet::new();
@@ -157,12 +254,23 @@ async fn concurrent_pool_requests_and_budget_reservations_serialize() {
     assert_eq!(ids.len(), 1);
     let h = handle.clone();
     let pool = ids.into_iter().next().unwrap();
-    let other = handle.call(|s| s.ensure_pool("other", "5")).await.unwrap();
+    let other = handle
+        .call(|s| {
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "other",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0
+            )
+        })
+        .await
+        .unwrap();
     let (a, b) = tokio::join!(
-        handle.call(move |s| s.reserve("a", Some(&pool), 1, 60, 100)),
-        h.call(move |s| s.reserve("b", Some(&other), 1, 60, 100))
+        handle.call(move |s| s.reserve("a", Some(&pool), 1, 60)),
+        h.call(move |s| s.reserve("b", Some(&other), 1, 60))
     );
-    assert_ne!(a.is_ok(), b.is_ok());
+    assert!(a.is_ok() && b.is_ok());
     assert_eq!(
         handle.call(|s| s.status()).await.unwrap().pools[0]
             .addresses
@@ -175,23 +283,38 @@ async fn concurrent_pool_requests_and_budget_reservations_serialize() {
 }
 
 #[test]
-fn failed_promotion_rolls_back_every_role_and_job_and_keys_restore() {
+fn failed_refill_preserves_committed_payment_roles_and_keys_restore() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
-    let pool = s.ensure_pool("a", "5").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let wallets = s.status().unwrap().pools.remove(0).addresses;
     let secret = s.wallet_secret(&pool, &wallets[0].id).unwrap();
     for w in &wallets {
         rpc_evidence::credit(&mut s, &w.id, "5000000", 13).unwrap();
     }
+    s = consume_reserve::consume_only(s, &dir.path().join("state"), &dir.path().join("key"), &pool);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER fail_job BEFORE INSERT ON funding_jobs BEGIN SELECT RAISE(ABORT,'injected disk-write failure'); END;").unwrap();
-    assert!(s.promote(&pool, 0).is_err());
+    assert!(
+        s.allocate_capacity_kind(
+            &pool,
+            x402_treazury::rotation::store::AllocationKind::Small,
+            true
+        )
+        .is_err()
+    );
     let now = s.status().unwrap();
     assert_eq!(now.pools[0].generation, 0);
     assert_eq!(now.pools[0].addresses.len(), 2);
-    assert_eq!(now.pools[0].addresses[0].role, "ACTIVE");
-    assert_eq!(now.pools[0].addresses[1].role, "READY");
+    assert_eq!(now.pools[0].addresses[0].role, "RETAINED");
+    assert_eq!(now.pools[0].addresses[1].role, "ACTIVE");
     db.execute_batch("DROP TRIGGER fail_job").unwrap();
     drop(db);
     let id = s.id().to_owned();
@@ -202,7 +325,15 @@ fn failed_promotion_rolls_back_every_role_and_job_and_keys_restore() {
         secret.as_slice()
     );
     assert!(s.wallet_secret("other-pool", &wallets[0].id).is_err());
-    s.promote(&pool, 0).unwrap();
+    assert!(
+        s.allocate_capacity_kind(
+            &pool,
+            x402_treazury::rotation::store::AllocationKind::Small,
+            true
+        )
+        .unwrap()
+        .is_some()
+    );
 }
 
 #[tokio::test]
@@ -217,7 +348,13 @@ async fn cancelling_a_waiter_does_not_cancel_an_accepted_store_transaction() {
         h.call(move |s| {
             let _ = entered.send(());
             gate.recv().unwrap();
-            s.ensure_pool("survives", "5")
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "survives",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0
+            )
         })
         .await
     });
@@ -237,8 +374,15 @@ async fn cancelling_a_waiter_does_not_cancel_an_accepted_store_transaction() {
 fn committed_crash_child() {
     let root = std::env::var_os("X402_TEST_COMMITTED_CRASH_DIR").expect("explicit subprocess only");
     let mut s = create(Path::new(&root));
-    let pool = s.ensure_pool("crash", "5").unwrap();
-    s.reserve("saved", Some(&pool), 1, 100, 100).unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "crash",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    s.reserve("saved", Some(&pool), 1, 100).unwrap();
     s.prepare(
         "saved",
         1,
@@ -274,9 +418,33 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
         s.snapshot().unwrap().1.as_slice(),
         b"post-crash-calculation"
     );
-    assert_eq!(s.ensure_pool("crash", "5").unwrap(), persisted.pools[0].id);
+    assert_eq!(
+        crate::capacity_fixture::declare_and_allocate!(
+            s,
+            "crash",
+            crate::capacity_fixture::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap(),
+        persisted.pools[0].id
+    );
     assert_eq!(s.status().unwrap().pools[0].addresses.len(), 2);
-    assert!(s.reserve("duplicate", None, 2, 1, 100).is_err());
+    s.reserve("duplicate", None, 2, 1).unwrap();
+    let revision = s.snapshot().unwrap().0;
+    assert!(
+        s.prepare(
+            "duplicate",
+            revision,
+            b"duplicate snapshot",
+            b"duplicate bytes"
+        )
+        .is_err()
+    );
+    assert_eq!(
+        s.prepared_bytes("saved").unwrap().as_slice(),
+        b"same-transaction-bytes"
+    );
 }
 
 #[test]
@@ -321,7 +489,7 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
     assert!(s.require_spend_ready(100, 1).is_err());
     s.save_sync_snapshot(3, b"resynced", Some(ready.clone()))
         .unwrap();
-    s.reserve("outgoing", None, 1, 100, 1_000).unwrap();
+    s.reserve("outgoing", None, 1, 100).unwrap();
     s.prepare("outgoing", 4, b"calculated", b"signed-transaction")
         .unwrap();
     s.save_sync_snapshot(5, b"still-pending", Some(ready))
@@ -343,14 +511,14 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
 }
 
 #[test]
-fn sync_schema_migrates_admission_state_without_changing_wallet() {
+fn legacy_sync_schema_is_rejected_without_changing_wallet() {
     let dir = tempfile::tempdir().unwrap();
     let s = create(dir.path());
     let id = s.id().to_owned();
     drop(s);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     // Build an actual empty version-1 schema while retaining the encrypted identity
-    // and snapshot. Merely lowering user_version on schema15 is not a legacy fixture.
+    // and snapshot. Merely lowering user_version on schema16 is not a legacy fixture.
     let tables: Vec<String> = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('instance','snapshots')")
         .unwrap()
@@ -377,9 +545,20 @@ fn sync_schema_migrates_admission_state_without_changing_wallet() {
     db.execute_batch("PRAGMA user_version=1;").unwrap();
     drop(db);
     assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
-    let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    assert_eq!(s.snapshot().unwrap().0, 1);
-    assert!(s.status().unwrap().sync.is_none());
+    let saved = std::fs::read(dir.path().join("state/state.sqlite")).unwrap();
+    let error = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id)
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("stopped-service conversion required")
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("state/state.sqlite")).unwrap(),
+        saved
+    );
+    assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
 }
 
 #[test]
@@ -388,7 +567,7 @@ fn submission_contract_only_accepts_durable_pending_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     assert!(PreparedTransaction::load(&s, "op").is_err());
-    s.reserve("op", None, 1, 100, 1000).unwrap();
+    s.reserve("op", None, 1, 100).unwrap();
     assert!(PreparedTransaction::load(&s, "op").is_err());
     s.prepare("op", 1, b"calculated", b"exact-bytes").unwrap();
     // Later sync checkpoints must preserve the snapshot referenced by this send.
@@ -419,7 +598,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
         fee_zatoshis: 10,
         deadline: 1000,
     };
-    s.reserve("op", None, 0, 100, 100).unwrap();
+    s.reserve("op", None, 0, 100).unwrap();
     let mut too_large = facts.clone();
     too_large.fee_zatoshis = 60;
     assert!(
@@ -432,7 +611,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
         .unwrap();
     assert_eq!(s.operation("op").unwrap().facts, facts);
     // Preparation shrinks the conservative reservation to actual input plus fee.
-    s.reserve("other", None, 0, 40, 100).unwrap();
+    s.reserve("other", None, 0, 40).unwrap();
     assert!(s.abandon_unprepared("op").is_err());
     s.abandon_unprepared("other").unwrap();
     assert!(s.request_broadcast("op", 1000, 499, false).is_err());
@@ -466,8 +645,22 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
-    s.ensure_pool("a", "5").unwrap();
-    s.ensure_pool("b", "7").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "b",
+        crate::capacity_fixture::small_reserve("7"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let mut picked = std::collections::BTreeSet::new();
     for _ in 0..4 {
         picked.insert(s.next_funding_job(0).unwrap().unwrap().id);
@@ -519,14 +712,21 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
-    let pool = s.ensure_pool("a", "5").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let jobs = s.funding_jobs().unwrap();
     s.save_funding_quote(
         &jobs[0].id,
         &quote_fixture::bound(&jobs[0].target, &jobs[0].recipient, "bound-quote"),
     )
     .unwrap();
-    s.reserve("source", Some(&pool), 1, 100, 1000).unwrap();
+    s.reserve("source", Some(&pool), 1, 100).unwrap();
     s.prepare("source", 1, b"prepared-snapshot", b"durable-signed-bytes")
         .unwrap();
     let original = serde_json::to_value(s.status().unwrap()).unwrap();
@@ -562,7 +762,14 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
-    let pool = s.ensure_pool("a", "5").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "a",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let job = s.funding_jobs().unwrap().remove(0);
     s.save_funding_quote(
         &job.id,
@@ -584,8 +791,7 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
     .unwrap();
     s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
-    s.reserve(&next.operation_id, Some(&pool), 1, 100, 100)
-        .unwrap();
+    s.reserve(&next.operation_id, Some(&pool), 1, 100).unwrap();
     assert!(s.recover_unprepared_funding(&job.id).is_err());
     assert_eq!(s.funding_jobs().unwrap()[0].operation_id, next.operation_id);
     s.prepare(&next.operation_id, 1, b"next-snapshot", b"signed")
@@ -606,7 +812,14 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let treasury_id = s.id().to_owned();
-    let pool = s.ensure_pool("identity", "5").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "identity",
+        crate::capacity_fixture::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let job = s.funding_jobs().unwrap().remove(0);
     s.save_refund_address(&job.id, "fixture-refund-address", 1, b"refund snapshot")
         .unwrap();
@@ -617,8 +830,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     .unwrap();
     s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
-    s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
-        .unwrap();
+    s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
     s.prepare_with_facts(
         &job.operation_id,
         2,
@@ -649,7 +861,12 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     {
         rpc_evidence::credit(&mut s, &address, "5000000", 13).unwrap();
     }
-    s.promote(&pool, 0).unwrap();
+    s = consume_reserve::consume_and_replace(
+        s,
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &pool,
+    );
     assert_ne!(
         s.status().unwrap().pools[0].addresses[1].address,
         job.recipient
@@ -680,7 +897,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
 }
 
 #[test]
-fn funding_capacity_and_reservation_agree_across_days_and_reduced_limits() {
+fn actual_spendable_capacity_and_journals_survive_gross_totals_rollover_and_restart() {
     use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
@@ -710,33 +927,56 @@ fn funding_capacity_and_reservation_agree_across_days_and_reduced_limits() {
         .unwrap();
     };
     fresh(&mut s, 86410);
-    s.reserve("pending", None, 1, 90, 100).unwrap();
+    s.reserve("pending", None, 1, 90).unwrap();
     for day in [1u32, 2] {
         let instant = u64::from(day) * 86400 + 10;
         fresh(&mut s, instant);
-        assert!(s.check_funding_capacity(instant, 10, 100).is_ok());
-        assert!(s.check_funding_capacity(instant, 11, 100).is_err());
-        assert!(s.reserve("too-large", None, day, 11, 100).is_err());
+        assert!(s.check_funding_capacity(instant, 1000).is_ok());
+        assert!(s.check_funding_capacity(instant, 1001).is_err());
     }
     let revision = s.snapshot().unwrap().0;
     s.prepare("pending", revision, b"prepared", b"signed")
         .unwrap();
+    assert!(
+        s.check_funding_capacity(172810, 1).is_err(),
+        "unresolved outgoing still owns the treasury"
+    );
     s.confirm_spend("pending", 80, 2).unwrap();
     s.confirm_spend("pending", 80, 2).unwrap();
     fresh(&mut s, 172810);
-    assert!(s.check_funding_capacity(172810, 20, 100).is_ok());
-    s.reserve("at-limit", None, 2, 20, 100).unwrap();
-    assert!(s.reserve("over-limit", None, 2, 1, 100).is_err());
-    assert!(s.reserve("overflow", None, 2, i64::MAX, i64::MAX).is_err());
+    s.reserve("unprepared", None, 2, 20).unwrap();
+    assert!(s.check_funding_capacity(172810, 1000).is_ok());
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    assert!(s.check_funding_capacity(172810, 1, 99).is_err());
-    assert!(s.reserve("reduced", None, 2, 1, 99).is_err());
     fresh(&mut s, 259210);
-    // Confirmed expense belonged to day 2, but the unspent reservation crosses day 3.
-    assert!(s.check_funding_capacity(259210, 80, 100).is_ok());
-    assert!(s.check_funding_capacity(259210, 81, 100).is_err());
-    s.reserve("next-day", None, 3, 80, 100).unwrap();
+    assert!(s.check_funding_capacity(259210, 1000).is_ok());
+    assert!(s.check_funding_capacity(259210, 1001).is_err());
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let accounted: (i64, i64, i64, i64) = db
+        .query_row(
+            "SELECT original_day,day,reserved,consumed FROM budget_entries WHERE id='pending'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        accounted,
+        (1, 2, 0, 80),
+        "gross source cost survives rollover and reopen"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT reserved FROM budget_entries WHERE id='unprepared'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        20
+    );
+    assert!(
+        s.reserve("unprepared", None, 2, 21).is_err(),
+        "existing operation amount cannot expand"
+    );
 }
 
 #[cfg(feature = "zcash")]
@@ -746,7 +986,20 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
-    s.ensure_pool("minimum", "2").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "minimum",
+        x402_treazury::rotation::config::ReservesConfig {
+            small: x402_treazury::rotation::config::ReserveConfig {
+                funding_amount_usdc: "2".into(),
+                max_funding_amount_usdc: Some("2.5".into())
+            },
+            large: None
+        },
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let job = s.funding_jobs().unwrap()[0].clone();
     let quote = |target: &str| {
         serde_json::to_vec(&Quote {
@@ -787,7 +1040,14 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     );
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    s.ensure_pool("minimum", "2").unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        s,
+        "minimum",
+        crate::capacity_fixture::small_reserve("2"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let state = s.status().unwrap();
     assert_eq!(
         state.pools[0]
@@ -890,7 +1150,14 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     assert!(logs.contains("existing funded EVM wallets remain usable"));
     assert!(store.status().unwrap().treasury_operations.is_empty());
     capture.0.lock().unwrap().clear();
-    let pool = store.ensure_pool("drain", "1").unwrap();
+    let pool = crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "drain",
+        crate::capacity_fixture::small_reserve("1"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let mut status = store.status().unwrap();
     let wallets = status.pools.remove(0).addresses;
     let amounts = |first: u64, second: u64| {

@@ -101,10 +101,15 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
     let state = dir.path().join("state");
     let key = dir.path().join("key");
     let owner=crate::treasury::Treasury::create(state.clone(),key.clone(),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
-    owner
-        .ensure_pool("research".into(), "5".into())
-        .await
-        .unwrap();
+    crate::rotation::test_capacity::treasury_pair(
+        &owner,
+        "research",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0,
+    )
+    .await
+    .unwrap();
     let store = owner.store_handle();
     let jobs = store.call(|s| s.funding_jobs()).await.unwrap();
     let first = jobs[0].clone();
@@ -125,7 +130,6 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
                 Some(&original.pool_id),
                 u32::try_from(instant / 86400)?,
                 110_000,
-                1_000_000,
             )?;
             let (revision, snapshot) = s.snapshot()?;
             s.prepare_with_facts(
@@ -183,8 +187,8 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
     let (handle, commands) = crate::treasury::actor::channel();
     let backend=Backend{
         treasury:handle,store:store.clone(),near:NearClient::test_at(&origin).unwrap(),base:BaseRpc::new(&format!("{origin}/base"),12,120).unwrap(),
-        wallets:BTreeMap::from([("research".into(),serde_json::from_value(json!({"mode":"zcash_rotation","funding_amount_usdc":"5","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())]),
-        funding:serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public","daily_funding_limit_usdc":"10","total_funding_limit_usdc":"15"})).unwrap(),daily_limit:1_000_000,max_network_fee:30_000,
+        wallets:BTreeMap::from([("research".into(),serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())]),
+        funding:serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),max_network_fee:30_000,
     };
     let stop = CancellationToken::new();
     let worker = tokio::spawn(FundingWorker::new(store.clone(), backend, 1).run(stop.clone()));

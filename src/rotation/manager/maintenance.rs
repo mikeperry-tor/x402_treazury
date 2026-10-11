@@ -467,7 +467,14 @@ mod tests {
         )
         .unwrap();
         let treasury = state.id().to_owned();
-        let id = state.ensure_pool("rolling", "5").unwrap();
+        let id = crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "rolling",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(crate::rotation::config::positive_usdc("5").unwrap()),
+            0
+        )
+        .unwrap();
         for job in state.funding_jobs().unwrap() {
             state
                 .record_credit(&job.wallet_id, "5000000", &format!("0x{:064x}", 88), 88)
@@ -531,14 +538,7 @@ mod tests {
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let (store, worker) = StoreHandle::spawn(state);
         let pool = Arc::new(
-            ManagedPool::new(
-                store.clone(),
-                id,
-                base,
-                "5",
-                SpendPolicy::dollars("5").unwrap(),
-            )
-            .unwrap(),
+            ManagedPool::new(store.clone(), id, base, SpendPolicy::dollars("5").unwrap()).unwrap(),
         );
         Fixture {
             dir,

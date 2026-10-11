@@ -36,7 +36,8 @@ pub trait FundingPermits: Send + Sync {
     fn validate_treasury(&self, treasury: &str) -> Result<()>;
     /// Called by the exclusive store owner before installing the restriction.
     /// The registry implementation also atomically reserves every missing pool's
-    /// bootstrap pair before any allocation, retaining orphan permits on restart.
+    /// initial and enabled reserve claims before any allocation, retaining orphan
+    /// permits on restart. These permits do not authorize automatic retirement.
     fn validate_state(&self, state: &serde_json::Value) -> Result<()>;
     fn reserve_allocations(
         &self,

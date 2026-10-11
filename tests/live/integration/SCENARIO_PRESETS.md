@@ -40,8 +40,8 @@ separately; the preset does not promise every level of overlap will be observed.
 
 Each rotation round declares twelve $0.20 Arkham depletion attempts, followed by
 two SocialFetch service cases, one per wallet. The runner checks current balance
-and unresolved exposure before depletion, stops at the natural promotion boundary,
-and marks unused depletion suffixes not executed. Service attempts must actually
+and unresolved exposure before depletion, stops at natural READY consumption with its exact slot/generation,
+and marks unused depletion suffixes not executed. Consumption leaves the slot vacant without allocating in the payment transaction. Service starts independently; the runner later correlates the replacement job through ordinary observations. Group generation stays stable. Service attempts must actually
 pay while the replacement remains pending, and credit/source confirmation must
 qualify independently. A provider failure remains a failure; no automatic paid
 retry is purchased.
@@ -57,7 +57,7 @@ make an assertion pass.
 The extended preset rotates `test_pool` twice and requests one graceful restart
 at the first queued-refill checkpoint while retaining Tor. Both rounds include
 service from `independent_pool`. The treasury-only variant has the same calls but
-starts with no EVM allocations: four bootstrap jobs (active plus standby for each
+starts with no EVM allocations: four bootstrap jobs (initial plus enabled small reserve for each
 of two pools) and two replacement jobs. Existing-wallet presets assume funded
 managed pools; they do not substitute an unrelated EVM private key.
 

@@ -56,8 +56,8 @@ or is cancelled. Proven pre-submission failures retain bounded retry/backoff and
 do not disable unrelated targets. Local bootstrap metadata avoids
 a catalog dependency cycle. `deployment/bootstrap.rs` supervises initial funding
 and confirmation before ordinary managed serving loads catalogs, and also powers
-`wallet bootstrap`. It drains accepted work before reopening ownership for serving;
-completed initial pairs are not funded again. Warming starts no funding workers. Origin freshness and relay provenance
+`wallet bootstrap`. It retains the same treasury actor and funding worker into serving;
+completed initial allocations are not funded again; reserve vacancies follow their exact current claims. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#paid-discovery-relay).
 
@@ -87,6 +87,20 @@ profiles support Base USDC v1/v2 exact and v2 upto signing. Managed profiles use
 v2 exact EIP-3009 admission and durable reservations. A paid timeout/body failure
 can still have spent money; neither tool dispatch nor output conversion replays it.
 
+Direct Rust `PaidClient` calls retain accepted work through response conversion
+when their waiter is canceled, and reuse an enclosing MCP owner when present.
+`PaidClient::drain` closes clone-shared admission and waits for accepted work.
+The existing foreground bound limits independently retained direct tasks; nested
+managed signing reuses that permit. Qualification case identity and unsigned
+restrictions follow the retained task without renewing authority.
+
+The Rust `ManagedPool::pay_with_cover` API now takes an owned optional cover call
+and returns `ManagedResponse`, carrying the response, extension warning flag and
+cover lease. Raw-body callers retain that lease through output consumption and
+mark it complete after success. `pay` preserves its tuple return for callers
+without cover; `drain_direct_payments` waits for accepted signing and dispatch.
+`PaidClient` continues to retain cover through its complete output conversion.
+
 `src/output.rs` preserves response bytes and MIME, handles ordinary text/JSON,
 small supported inline images and configured base64/data-URI mappings. A bounded
 or unsupported response produces explicit evidence, never a silently truncated
@@ -110,10 +124,65 @@ identities; wallet scans use the treasury UUID. The
 [egress inventory](network-egress.md) records callers, SDK integration, credential
 encoding, DNS behavior and qualification limits.
 
-Shutdown stops accepting calls and announces a deliberate bounded drain for
+Shutdown stops accepting calls and drains accepted work with progress reports for
 payment safety. Treasury ownership and durable journals survive cancellation;
 an interrupted waiter does not undo accepted preparation or submission. Restart
 reconciles existing work rather than inferring non-payment from a missing response.
+
+## Wallet selection and network isolation
+
+Decision: retain runtime price hints with wallet-scoped HTTP pooling, cover ownership
+and Tor isolation. Prefer reuse of pooled connections, cover capability/episode state
+and Tor circuits within the configured isolation boundary over choosing the exact
+smallest fit on every cold or inaccurately predicted call. Reuse is an opportunity,
+not a guarantee of circuit lifetime or unlinkability. Preserve the shared
+[smallest-sufficient ordering](wallet-rotation.md#capacity-and-admission) before
+binding and sufficient-bound-payer stability afterward. Actual challenge terms and
+fresh financial evidence remain authoritative for admission; hints never authorize payment.
+
+Late payer selection from the ordinary 402 response is technically feasible. Standard
+v2 exact EIP-3009 requirements do not require selecting the signer before that response;
+the pinned x402 2.0.2 client parses requirements and then selects/signs. The current
+prebinding/re-challenge requirement belongs to this application's network ownership
+contract, not to a universal x402 rule. `src/payment.rs` binds the unsigned request's
+client and cover owner to the selected EVM address; `src/network.rs` uses that identity
+for connection pooling and SOCKS isolation. Do not describe the alternatives as
+protocol-impossible, or silently change those ownership boundaries in a future selector fix.
+
+| Alternative | Benefit and request behavior | Decision and reason |
+| --- | --- | --- |
+| Selected: smallest-sufficient hints before binding, actual-price admission afterward | Normally one unsigned request and one signed submission; preserves wallet-scoped pooling, cover state and isolated Tor reuse. No dedicated price requests. | Keep. Missing/stale/inaccurate hints may produce a less suitable wallet or use the one affordability handoff. Accept that tradeoff without additional prediction machinery. |
+| Choose a different signer after the challenge on the original wallet's pooled connection | Exact-price selection with the same two ordinary requests. | Reject. A signature from wallet B on wallet A's reused connection/cover identity can associate B with A's prior activity and violates the wallet-isolation contract. |
+| Fresh invocation identity for both unsigned and signed requests; choose payer after the challenge | Exact-price selection with one unsigned request and one signed submission. Could remove runtime hints and affordability re-challenge logic while keeping one transport context for the negotiation. | Not selected. Loses cross-call wallet connection/circuit reuse and changes cover-owner lifetime, cache behavior and qualification evidence. The current bounded HTTP cache would churn; fresh cover owners would consume registry capacity and repeat capability qualification unless explicitly redesigned. Financial journal safeguards would still be required. |
+| Fresh unsigned identity, then the selected wallet's transport for the signed request | Exact-price selection with no additional API request; retains pooling for signed wallet traffic. | Not selected. Adds an unsigned transport/cover lifecycle and switches network context between challenge and submission. Core payment fields do not establish provider session or transport portability. A rejection after possible signed submission cannot authorize a fallback payment or replay. |
+| Hints plus a utilization-only handoff whenever the actual price reveals a smaller wallet | Improves fit after binding while keeping wallet-specific transports. | Reject. Adds unsigned provider requests merely to improve fit, increasing pressure on providers that rate-limit unsigned traffic. Keep the single affordability handoff only. |
+| Extra pricing probes, preflights or hint-refresh requests | Could improve prediction before binding. | Reject. Adds rate-limited traffic and a discovery/refresh lifecycle. Learn runtime hints from ordinary invocation traffic only. |
+| Skip the ordinary unsigned request using a cached estimate or previously observed challenge | Could reduce unsigned traffic below the ordinary one-per-invocation flow. | A display estimate is insufficient to sign. Reusable exact requirements would need a concrete provider contract covering terms, request/argument scope and validity; an old observed challenge alone supplies no such contract. This is separate future work, not a fallback here. It also removes the chance to discover a free response. No signed rejection permits automatic replacement or replay. |
+
+Keep three caches/flows distinct. Catalog/help discovery retains its existing caching
+and coalescing. Startup pricing remains one-shot and cached, with HTTP-supported disk
+freshness for derived display estimates; payment challenges are not persisted as reusable
+authority. Runtime hints learn from actual invocation challenges and only guide selection.
+The current invocation path still makes an ordinary unsigned request even when a display
+estimate is cached. Late selection would use that same response, not inherently add a
+pricing request or invalidate discovery caches, and could remove the affordability
+re-challenge. Its rejection here rests on transport/cover reuse and lifecycle cost.
+The selected design also creates new identities over time; its reuse objective depends
+on the HTTP and cover retention fixes in the [network retention contract](network-egress.md).
+Reclamation may require cover requalification and does not guarantee indefinite state retention.
+Conversely, a fresh-identity design must account for repeated cover qualification rather
+than claiming unchanged total unsigned traffic from API request counts alone.
+
+Retain the small/large reserve design's mixed-cost address-reuse rationale from the
+[configuration and sizing guidance](configuration.md).
+A uniform large funding size is not an equivalent privacy choice; the selected heuristic
+still permits cross-size use and does not guarantee price-class separation.
+
+This is a deliberate design choice, not an unimplemented requirement to add another
+selection mode. Revisit it only with an explicit change in priorities, a concrete provider
+reuse contract, or evidence that warrants the transport/cover tradeoff. Such a revision
+must assess request counts, pooling, owned cleanup, cover qualification and Tor isolation
+evidence together; it cannot introduce signed replay.
 
 ## Where to change and verify behavior
 

@@ -17,7 +17,19 @@ pub(super) async fn bounded<T>(future: impl std::future::Future<Output = T>) -> 
         .expect("concurrency test deadline")
 }
 pub(super) async fn other_pool(h: &Harness) -> PaidClient {
-    let pool = h.store.call(|s| s.ensure_pool("other", "5")).await.unwrap();
+    let pool = h
+        .store
+        .call(|s| {
+            crate::capacity_fixture::declare_and_allocate!(
+                s,
+                "other",
+                crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000u64)),
+                0
+            )
+        })
+        .await
+        .unwrap();
     let status = h.store.call(|s| s.status()).await.unwrap();
     for a in &status
         .pools
@@ -31,6 +43,10 @@ pub(super) async fn other_pool(h: &Harness) -> PaidClient {
             .unwrap()
             .insert(a.address.clone(), 5_000_000);
     }
+    make_pool(h.store.clone(), pool.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
     make_client(h.store.clone(), pool, &h.base)
 }
 pub(super) fn assert_liabilities(h: &Harness, count: i64, total: i64) {
@@ -78,10 +94,10 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
                 .unwrap()
         }));
     }
-    let barrier = gate(&h, 16);
+    let barrier = gate(&h, 24);
     let mut calls = tokio::task::JoinSet::new();
-    for i in 0..16 {
-        let endpoint = if i < 8 { i % 2 } else { 2 };
+    for i in 0..24 {
+        let endpoint = if i < 12 { i % 2 } else { 2 };
         let url = endpoints[endpoint].clone();
         let name = tools[0].name.clone();
         calls.spawn(async move {
@@ -100,7 +116,10 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
         while let Some(result) = calls.join_next().await {
             let (pool, result) = result.unwrap();
             if result["isError"] == true {
-                assert!(result.to_string().contains("payment_pending"), "{result}");
+                assert!(
+                    result.to_string().contains("funding_unavailable"),
+                    "{result}"
+                );
             } else {
                 assert_eq!(result["content"][0]["text"], "paid");
                 successes[pool] += 1;
@@ -108,14 +127,17 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
         }
     })
     .await;
-    assert_eq!(successes, [5, 5]);
-    assert_liabilities(&h, 10, 10_000_000);
+    assert_eq!(successes, [10, 10]);
+    assert_liabilities(&h, 20, 20_000_000);
     let signed = h.f.signed.lock().unwrap().clone();
     let mut counts = BTreeMap::new();
     for p in signed {
         *counts.entry(signatures::recover_exact(&p)).or_insert(0) += 1;
     }
-    assert_eq!(counts.values().copied().collect::<Vec<_>>(), vec![5, 5]);
+    assert_eq!(
+        counts.values().copied().collect::<Vec<_>>(),
+        vec![5, 5, 5, 5]
+    );
     let status = h.store.call(|s| s.status()).await.unwrap();
     assert!(
         status
@@ -126,6 +148,11 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
     for balance in h.f.balances.lock().unwrap().values_mut() {
         *balance = 20_000_000;
     }
+    assert_balance_observation_outcome(
+        make_pool(h.store.clone(), h.pool.clone(), &h.base)
+            .reconcile()
+            .await,
+    );
     h.f.hold.store(true, Ordering::SeqCst);
     let url = endpoints[0].clone();
     let name = tools[0].name.clone();
@@ -143,7 +170,7 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
     let response = bounded(draining).await.unwrap();
     assert_eq!(response["id"], 99);
     assert_eq!(response["result"]["content"][0]["text"], "paid");
-    assert_liabilities(&h, 11, 11_000_000);
+    assert_liabilities(&h, 21, 21_000_000);
     for server in servers {
         bounded(server).await.unwrap();
     }
@@ -202,23 +229,16 @@ async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
             while let Some(r) = calls.join_next().await {
                 match r.unwrap() {
                     Ok(_) => successes += 1,
-                    Err(e) => assert!(
-                        e.to_string().contains(if method == "POST" {
-                            "payer_changed_before_payment"
-                        } else {
-                            "payment_pending"
-                        }),
-                        "{e}"
-                    ),
+                    Err(e) => assert!(e.to_string().contains("funding_unavailable"), "{e}"),
                 }
             }
         })
         .await;
-        assert_eq!(successes, if method == "GET" { 5 } else { 0 });
+        assert_eq!(successes, 5);
         let state = h.store.call(|s| s.status()).await.unwrap();
-        assert_eq!(state.pools[0].generation, 1);
-        assert_eq!(state.pools[0].addresses.len(), 3);
-        assert_eq!(state.funding_jobs.len(), initial.funding_jobs.len() + 1);
+        assert_eq!(state.pools[0].generation, 0);
+        assert_eq!(state.pools[0].addresses.len(), 2);
+        assert_eq!(state.funding_jobs.len(), initial.funding_jobs.len());
         assert_liabilities(&h, successes as i64, successes as i64 * 1_000_000);
         let signed = h.f.signed.lock().unwrap().clone();
         assert_eq!(signed.len(), 1 + successes);
@@ -234,7 +254,7 @@ async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn simultaneous_depletion_promotes_once_and_never_replays_posts() {
+async fn simultaneous_depletion_consumes_once_with_one_handoff_for_get_and_post() {
     rotation_burst().await;
 }
 
@@ -242,6 +262,7 @@ async fn simultaneous_depletion_promotes_once_and_never_replays_posts() {
 async fn cancelled_and_rejected_waiters_preserve_liability_and_other_pool_progress() {
     let h = Harness::new().await;
     let other = other_pool(&h).await;
+    h.client.execute(h.route()).await.unwrap();
     h.f.hold.store(true, Ordering::SeqCst);
     let client = h.client.clone();
     let route = h.route();
@@ -264,10 +285,10 @@ async fn cancelled_and_rejected_waiters_preserve_liability_and_other_pool_progre
             .unwrap()
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
     assert!(!submitted.is_finished());
-    assert_liabilities(&h, 2, 6_000_000);
+    assert_liabilities(&h, 3, 9_000_000);
     submitted.abort();
     assert!(submitted.await.unwrap_err().is_cancelled());
     h.f.release.notify_one();
@@ -277,10 +298,10 @@ async fn cancelled_and_rejected_waiters_preserve_liability_and_other_pool_progre
             .await
             .unwrap_err()
             .to_string()
-            .contains("payment_pending")
+            .contains("funding_unavailable")
     );
-    assert_liabilities(&h, 2, 6_000_000);
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_liabilities(&h, 3, 9_000_000);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
     drop(other);
     h.close().await;
 }
@@ -323,7 +344,8 @@ async fn tor_burst_child() {
     .unwrap();
     let traces = rotation_burst().await;
     let records = proxy.records.lock().unwrap();
-    let mut checked = 0;
+    let mut signed = 0;
+    let mut rpc = 0;
     for (peer, phase, address) in traces {
         if phase == "unsigned" {
             continue;
@@ -337,10 +359,18 @@ async fn tor_burst_child() {
             network::global().credentials(&IsolationId::evm(&address).unwrap()),
             "{phase}"
         );
-        checked += 1;
+        if phase == "signed" {
+            signed += 1;
+        } else {
+            rpc += 1;
+        }
     }
+    assert_eq!(
+        signed, 12,
+        "all six signed calls in both bursts retain signer isolation"
+    );
     assert!(
-        checked > 20,
-        "must observe signed calls and RPC across the burst"
+        rpc > 0,
+        "actual readiness/acquisition RPC retains payer isolation"
     );
 }

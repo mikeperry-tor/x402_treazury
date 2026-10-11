@@ -381,7 +381,6 @@ async fn deployment_uses_existing_state_only_and_qualification_bypasses() {
 version=1
 [treasury]
 state_dir="state"
-daily_treasury_spend_limit_zec="0.01"
 max_refund_shielding_fee_zec="0.001"
 [wallets.w]
 mode="static"

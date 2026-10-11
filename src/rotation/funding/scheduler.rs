@@ -105,10 +105,29 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             epoch: instant,
             started: std::time::Instant::now(),
         };
-        let (reader, health_after) = {
+        let (reader, health_after, allocation_groups) = {
             let backend = self.backend.lock().await;
-            (backend.observations(), backend.swap_timeout_seconds())
+            (
+                backend.observations(),
+                backend.swap_timeout_seconds(),
+                backend.allocation_groups(),
+            )
         };
+        // Configuration is immutable for this owner. Current store restrictions,
+        // group enablement, cap and exact claim are rechecked on every commit.
+        for name in &allocation_groups {
+            let name = name.clone();
+            if self
+                .store
+                .call(move |s| s.fill_funding_vacancies(&name))
+                .await
+                .is_err()
+            {
+                tracing::debug!("funding vacancy allocation unavailable");
+            }
+        }
+        let mut allocation_cursor = 0usize;
+        let mut allocation_due = clock.now().saturating_add(self.poll_seconds.max(1));
         let mut reads = FuturesUnordered::<
             BoxFuture<'static, Completion<<B::Observations as FundingObservations>::QuoteRequest>>,
         >::new();
@@ -132,6 +151,23 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let mut stopping = false;
         loop {
             stopping |= stop.is_cancelled();
+            if !once && !stopping && !allocation_groups.is_empty() && clock.now() >= allocation_due
+            {
+                let name = allocation_groups[allocation_cursor].clone();
+                if self
+                    .store
+                    .call(move |s| s.fill_funding_vacancies(&name))
+                    .await
+                    .is_err()
+                {
+                    tracing::debug!("funding vacancy allocation unavailable");
+                }
+                allocation_cursor += 1;
+                if allocation_cursor == allocation_groups.len() {
+                    allocation_cursor = 0;
+                    allocation_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                }
+            }
             for (lane, kind) in [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
                 .into_iter()
                 .enumerate()

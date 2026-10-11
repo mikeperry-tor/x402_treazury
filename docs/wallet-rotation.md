@@ -1,8 +1,11 @@
 # Zcash treasury and managed wallet rotation
 
+See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
+
 A single embedded Zcash treasury funds named virtual EVM wallets on Base. Each
 virtual wallet is a durable pool with its own keys, balance reservations, payment
-cap and active/standby roles. Names determine sharing across sources and MCP
+cap, active and retained wallets, and exact small/optional-large reserve claims. Names determine sharing across sources and MCP
 listeners; they are not interchangeable labels for one global payer.
 
 Use the [wallet CLI reference](wallet-cli.md#treasury-and-managed-pools) for TOML,
@@ -33,72 +36,92 @@ of its caller. Independent EVM pools share source funds, not payment reservation
 
 ## Funding limits and fees
 
-Ordinary funding settings describe USDC allocations, not the exchange rate of ZEC:
+Reserve targets describe USDC requested for new allocations; payment caps and
+spendable treasury capacity supply separate authority. The complete syntax and
+migration rules are in [managed configuration](configuration.md).
 
 ```toml
 [funding]
-daily_funding_limit_usdc = "20.00"
-total_funding_limit_usdc = "50.00"
+auto_fund = true
 
 [wallets.research]
 mode = "zcash_rotation"
+max_api_payment_usdc = "1.00"
+max_retirement_remainder_usdc = "0"
+max_funding_spend_zec = "0.02"
+max_conversion_overhead_percent = 5
+
+[wallets.research.reserves.small]
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00"
-max_api_payment_usdc = "0.05"
-max_conversion_overhead_percent = 5
+
+[wallets.research.reserves.large]
+funding_amount_usdc = "10.00"
 ```
 
 | Setting | Meaning |
 | --- | --- |
-| `funding_amount_usdc` | Target for each newly allocated wallet; defaults to 2 USDC. Initial bootstrap needs two wallets per pool. |
-| `max_funding_amount_usdc` | Maximum accepted output when the bridge minimum increases the target. Defaults to the configured funding amount: no automatic increase. |
-| `max_api_payment_usdc` | Cap on one API payment, independently of funding budgets. Defaults to 1 USDC. |
-| `daily_funding_limit_usdc` | Treasury-wide gross USDC allocation allowance per UTC day. Omission leaves this allowance uncapped. |
-| `total_funding_limit_usdc` | Treasury-wide gross allocation allowance across retained history, including retired pools. Omission leaves this allowance uncapped. Raising it explicitly authorizes more future funding. |
-| `max_conversion_overhead_percent` | Integer percentage (0–100) by which the bridge's quoted USD input valuation may exceed the USDC output. This includes quoted conversion overhead, not the separately calculated Zcash transaction fee. |
+| `reserves.small.funding_amount_usdc` | Required positive target for the small reserve and initial active allocation. |
+| `reserves.large.funding_amount_usdc` | Optional large target, at least as large as small. |
+| Slot `max_funding_amount_usdc` | Maximum accepted output after a bridge-minimum increase; omission permits no increase above that slot's target. |
+| `max_api_payment_usdc` | Required explicit cap for each payment by every group wallet, independently of reserve sizes. |
+| `max_retirement_remainder_usdc` | Nonnegative automatic-retirement tolerance, default zero; it never authorizes transfers or replacement allocation. |
+| `max_conversion_overhead_percent` | Integer percentage (0–100) by which quoted USD input valuation may exceed output; the Zcash transaction fee has its own safeguard. |
 
-A managed deployment must configure at least one aggregate budget: daily USDC,
-total USDC, or daily ZEC. Omitting all three is rejected.
+Enabled automatic funding uses actual spendable treasury funds after confirmation,
+reservations, liabilities and transaction fees. Displayed total balance is not
+spendable capacity. There are no daily/cumulative USDC allocation or daily ZEC
+spending ceilings, and UTC rollover changes no funding authority. Adding spendable
+funds supplies capacity without another budget-setting step. Removed aggregate
+fields are rejected; historical charges and exact reservations remain intact.
 
-The daily and total allowances cover initial wallets and replacements, shared
-across every pool in this treasury state. They reserve the accepted quote's exact
-USDC output before transaction preparation, in the same serialized store operation
-as the ZEC reservation. Merely quoting or allocating an unfunded address does not
-consume an allowance. A typed deferred preparation creates no reservation.
+A group cap may exceed its reserve targets, and targets may exceed the cap.
+Neither case promises that initial funding can serve every allowed price. The
+fresh initial-inventory target is `2*S + L`, or `2*S` without large: $2/$10 requests
+$14 before accepted minimum increases and fees. Report actual credits, output
+ceilings, retained holdings and costs separately. Smaller reserve sizes offer more
+cheap-call rotation opportunities; larger sizes support expensive calls but can
+keep more traffic on an address. See [sizing and selection limits](configuration.md).
 
-Accounting reuses the durable ZEC journal and authenticated original quotes,
-including archived operation bindings; changing pool names, configuration, or
-restarting cannot reset it. Missing or malformed relevant history blocks new
-funding. The daily bucket follows the source journal's reservation/confirmation UTC
-day. Unresolved source transfers or destination allocations remain counted across
-midnight until canonical source and destination credit/refund evidence resolves
-them. A partial refund retains the pending allocation; fees are not assumed to
-explain missing principal. A provider's success/failure message alone releases nothing.
+`auto_fund=false` pauses new funding, while independently permitted retirement and
+reconciliation continue. Financial completion and current payment usability are
+separate: a consumed wallet need not rebuild its original funding balance to close
+the accepted source operation. Partial credited allocations retain their claims.
+Already accepted work retains its bytes, reservations and original identities
+across disablement. A valid successful operation may receive excess input later;
+canonical returns update the original source accounting without reopening funding.
 
-Refunds do not replenish the total USDC allowance: it measures gross funding,
-not net expenditure. Verified expiry without a spend and guarded recovery of
-unprepared work can release an unused reservation. New budgets never prevent
-reconciling already accepted work. When an allowance is exhausted, funding pauses;
-existing funded wallets can still pay for API calls. This is not a daily or lifetime
-API-consumption budget and excludes transaction fees from its USDC totals.
-
-Advanced safeguards use ZEC because they bound actual native-asset withdrawal:
+Per-operation safeguards remain:
 
 ```toml
 [treasury]
-# Optional across funding transfers and refund-shielding fees:
-daily_treasury_spend_limit_zec = "0.012"
-# Defaults; both are acceptance ceilings, not fee overrides:
 max_funding_transaction_fee_zec = "0.0003"
 max_refund_shielding_fee_zec = "0.0003"
 
-# Within an existing managed wallet profile:
-# max_funding_spend_zec = "0.006" # optional: one transfer plus its network fee
+# Within an existing managed profile:
+# max_funding_spend_zec = "0.006" # One transfer including its network fee.
 ```
 
-The ZEC daily limit retains unresolved reservations across UTC rollover and credits
-canonically confirmed returned principal. Refund shielding charges only its fee.
-The USDC gross allowance deliberately does not use those refund credits.
+Gross source expenditure, canonically confirmed returned principal and derived
+net cost remain distinct. Returned principal cannot erase source fees or credit
+another operation. Refund shielding is explicit and charges only its fee. Reported
+or expected returns are not spendable capacity, and successful funding never waits
+for a speculative surplus return.
+
+Return attribution uses the original operation/address binding, including archived
+recovery records. Known credited outpoints are rechecked by transaction ID and
+output index even after spending or shielding. Missing or ambiguous attribution
+preserves the affected accounting obligation while independent returns and otherwise
+valid treasury readiness can progress. It grants no guessed credit, shielding,
+reservation release or retry. Canonical contradictions affecting inputs or shared
+financial state, and storage failures, still block the affected treasury work.
+
+The pinned Zingolib exposes an in-memory transaction map. Discovering unknown late
+returns therefore retains one linear output scan under the treasury owner, with
+keyed binding matching and no second full history copy. Its work and actor occupancy
+grow with wallet history. Bounded SQLite reads do not make that dependency scan
+incremental or bound its resident history; an incremental discovery API remains
+separate work.
 
 Zingolib proposes funding transactions and calculates their standard network fees.
 Refund shielding uses the backend's standard ZIP-317 fee rule. The application
@@ -112,8 +135,8 @@ Larger transactions can exceed a fee ceiling and require an explicit
 configuration adjustment. All money values are decimal strings; accounting uses
 integer atomic units, never floating-point currency conversion.
 
-The bridge's USD valuation is not an independent exchange-rate oracle. USDC
-allocation and overhead limits do not replace a hard ZEC withdrawal limit when
+The bridge's USD valuation is not an independent exchange-rate oracle. Reserve output
+and conversion-overhead ceilings do not replace a per-operation ZEC safeguard when
 one is required. All financial limits still apply alongside qualification permits;
 no configuration value authorizes replay or bypasses a zero-new-funding restriction.
 Positive funded qualification still requires an explicit `max_funding_spend_zec`
@@ -177,7 +200,7 @@ anchor, revalidates that anchor, and then acquires a separate fresh balance view
 Wallet reads run with bounded concurrency and preserve each wallet’s network
 identity. Balance acquisition runs once; completed canonical evidence is retained
 even if it ages out. The serialized store checks its original block-derived
-admission expiry before reserving a payment or promoting a payer. Stale admission
+admission expiry before journaling a payment or consuming a reserve. Stale admission
 returns a readiness error and releases the pool gate; it does not restart the
 sweep indefinitely. Payment acquisition excludes retired-wallet balances while
 still resolving their historical authorizations. Old balances are never assigned
@@ -192,54 +215,100 @@ anchors still fail closed. Required evidence failures retain the ordinary
 configured failover policy; views never mix endpoints. Background reconciliation remains strict and reports
 unavailable observations as failures with its normal backoff.
 
-## Double buffering and admission
+## Capacity and admission
 
-Healthy steady state has one `ACTIVE` address and one funded `READY` standby.
-During refill, the active continues serving while a new candidate progresses
-through allocation/funding. Bootstrap allocates the initial pair and establishes
-readiness using independently verified credit.
+A group has one default `ACTIVE` identity, `RETAINED` wallets with spendable
+remainders, and one `READY` wallet for each fulfilled enabled reserve claim.
+Initial and small-reserve allocations use the explicit small target; an optional
+large reserve has its own target. Each allocation commits independently. A failed
+large fill cannot roll back successful small funding. Destination credit makes a
+wallet usable independently of source accounting and provider completion.
 
-The default future allocation floor is **2.00 USDC**. The funding adapter validates
-an exact-output quote and may raise a new allocation's target to the reported
-bridge minimum only up to `max_funding_amount_usdc`, subject to funding budgets
-and fee caps. Omitting that option permits no increase above `funding_amount_usdc`. This is a floating route
-constraint, not a hard-coded permanent minimum. A quote-bound target cannot be
-resized after acceptance. Changing configuration affects future allocations.
-A double-buffered pool allocates roughly twice its target; allocation is not API
-consumption and is not a lifetime spending cap.
+The funding adapter validates an exact-output quote and accepts a bridge-minimum
+increase only within that slot's explicit `max_funding_amount_usdc`. Original
+allocation targets remain immutable, accepted quote terms remain bound to their
+operation, and configuration changes govern new work. Actual spendable treasury
+funds, outstanding liabilities, per-operation safeguards and explicit qualification
+permits govern funding. Reserve targets do not cap individual API payments.
 
-`rotation/manager.rs` admits only supported Base USDC v2 exact EIP-3009 offers for
-managed wallets. It validates offer/domain/amount and schema metadata before
-signing or promoting. Unsupported schemes/assets and over-cap or over-target
-offers cannot cause wallet churn. Advertised extensions outside the managed
-payment contract are omitted with visible diagnostics; seller rejection remains
-possible. See the README for the supported extension policy.
+Sub-target external credits stay on the original allocation: for example, $3 sent
+into a $10 allocation cannot pay through ordinary selection until full destination
+readiness is recorded. This is a limitation of the allocation/readiness model,
+not a separate per-payment spending cap. Disabling and re-enabling the group or
+slot preserves that wallet, job, claim and recovery history; independent balance
+observation and safe recovery continue while disabled. No partial credit releases
+the claim, creates a successor or resets an attempt. Partial detachment and use
+before full readiness remain deferred to reviewed follow-up work.
 
-Canonical balance and nonce observations, less unresolved reservations, govern
-spendability. Funds tied up in pending authorizations cause bounded waiting or a
-`payment_pending` result, not automatic promotion. A depleted active can promote
-only a verified standby. The store compares the expected generation and commits
-retirement, activation, the replacement key and its funding outbox together.
-Concurrent callers cannot independently allocate replacement wallets for the same
-promotion. Existing pending operations retain their original identities.
+`rotation/manager.rs` admits supported Base USDC v2 exact EIP-3009 offers. It
+validates the envelope, domain, amount and explicit API cap before acquisition or
+signing. Advertised extensions outside the managed payment contract are omitted
+with visible diagnostics; seller rejection remains possible.
 
-The signer/transport candidate captures the actual EVM address and generation.
-If promotion occurs before signing, GET/HEAD can obtain one new challenge under
-the new identity; other methods return an actionable payer-change error. Once a
-payment is signed locally, its bytes remain private until one transaction commits
-the authorization, exposure and supporting balance evidence. Provisional validation
-creates no unsigned reservation. The transaction rechecks eligibility, capacity,
-the group cap, evidence freshness and signed validity. A definite expiry rollback
-permits one unpublished replacement signature, with fresh evidence when needed;
-other rejections or a missing commit acknowledgement permit no dispatch or retry.
-Schema 13 retains the admission evidence separately from later wallet observations.
-Legacy unsigned rows are removed only during the exclusive schema upgrade; signed
-journals are preserved.
+Fresh compatible balances minus unresolved signed exposure govern each wallet's
+available capacity. A recent actual-price hint can select the smallest sufficient
+cached wallet without RPC or a pricing probe. Without a usable hint, the existing
+active identity remains the default. Once its actual challenge is known, a
+sufficient bound payer stays selected. Otherwise a bounded rolling pass considers
+eligible retained and ready wallets. Holdings are never summed to authorize one
+payment; unavailable evidence differs from a completed insufficient-capacity pass.
+
+Runtime hints expire 300 seconds after the unsigned response was received and
+retain at most 512 fixed-size entries per process. Their trusted key includes
+source/revision, method/OpenAPI template, wallet group and transport scope; request
+arguments cannot choose that scope. Receipt order controls updates, including lower
+prices. Restart, expiry and eviction lose only a selection estimate. They cause
+no probe, cached-challenge reuse or new payment authority.
+
+The invocation may make one unsigned handoff to an explicitly selected replacement,
+including for POST and other supported methods. It preserves the original request
+and obtains the replacement identity's own challenge. A changed second price is
+checked only against that fixed payer; it cannot trigger another search or handoff.
+Free, malformed, unsupported and redirect responses do not authorize a handoff.
+A signed response or output-conversion failure never authorizes replay.
+
+Signing produces private bytes. One transaction rechecks current role, exact
+reserve claim, cap, evidence, capacity and signed validity, then commits the
+possibly-submitted authorization, exposure and immutable admission support. A
+READY payer consumes its exact claim in this transaction: the former active
+becomes RETAINED, the payer becomes ACTIVE and the reserve generation advances
+with a vacant slot. No replacement allocation or retirement occurs in admission.
+Ordinary authorized funding fills the vacancy independently, including while old
+remainders remain. Pausing funding does not prevent spending existing capacity.
+
+One evidence-race refresh and one definitely rolled-back unpublished signature
+replacement are separate invocation allowances. They remain on the same payer
+and survive the unsigned handoff. Contradictory evidence, an unknown commit
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema16
+preserves original payer role, consumed slot/generation and exact balance support;
+legacy state requires the separately reviewed stopped-service preflight.
 
 All handles for a store/group share one gate. Accepted store jobs keep that gate
 after waiter cancellation, and funding-credit publication uses the same owner.
 The pool gate releases before awaiting the signed HTTP response, allowing other
 admissible calls to progress without hiding the in-flight liability.
+
+## Automatic retirement
+
+Ordinary reconciliation may retire only a RETAINED wallet in an enabled group,
+using fresh compatible confirmed and latest balances. Both must be at or below
+`max_retirement_remainder_usdc`: the recorded bound is their maximum, not their
+minimum. Default zero therefore requires both observations to be zero. Pending
+payment exposure, a current enabled reserve claim, incomplete applicable destination
+credit or financial repair prevents retirement.
+
+Retirement records exact amounts, anchors, endpoint and supporting evidence in the
+same transaction that changes the role. It removes the wallet from routine balance
+polling and payment selection; keys, funds and historical authorization work remain.
+It sends no transfer and creates no replacement allocation. A later contradiction
+marks the saved retirement disputed without silently reactivating the wallet.
+
+The configured tolerance supplies ordinary retirement authority independently of
+`auto_fund`, treasury capacity and reserve vacancies. Qualification restrictions
+can deny that mutation; funding-only permits do not grant it. Positive tolerance
+accepts stranded purchasing power per retirement and has no cumulative loss cap.
+Status reports recorded amounts rather than claiming the funds were spent. Manual
+retirement and incident-specific repair remain [deferred](plans/deferred/managed_wallet_followups.md#manual-retirement-and-incident-repair).
 
 ## Payment reconciliation
 
@@ -253,6 +322,21 @@ block-pinned USDC balances and EIP-3009 authorization use. A used authorization
 or an expired authorization proven unused can release its reservation through the
 store's canonical reconciliation transaction. An unused but still-valid signature
 remains a liability. Reorg contradictions cannot silently reset accounting.
+
+Historical liability release and fresh spending capacity have separate anchors.
+A confirmed USED proof requires a new balance observation at or beyond its debit
+block before that released amount can contribute to capacity. EXPIRED_UNUSED can
+recertify a compatible balance without renewing its original freshness. For example,
+a $10 observation with $4 unresolved exposure cannot admit $8: settlement needs a
+fresh post-debit balance, while canonical expiry without use can restore the
+unspent capacity only while the original observation remains fresh and compatible.
+
+Evidence is wallet- and endpoint-bound, with exact confirmed/latest amounts and
+anchors. Malformed acquisition alone does not invalidate earlier independent
+evidence. A demonstrated endpoint contradiction invalidates its affected support
+across groups. Historical readiness or retirement discrepancies remain separate
+from invalidated liability-release/accounting support: fresh observations cannot
+silently clear a durable financial repair block or reactivate a retiree.
 
 The configured RPC policy defaults to PublicNode, dRPC and Base. Availability
 failure can restart an entire bounded view at another configured endpoint; it
@@ -280,7 +364,8 @@ ALLOCATED → QUOTED → PREPARING → PREPARED → DEPOSIT_PENDING
                                          VERIFYING_CREDIT → COMPLETE
 ```
 
-A confirmed credit path can skip the separate swapping observation. Refund and
+A confirmed credit path can skip the separate swapping observation. These phases
+describe source progress; they do not serialize independent observations. Refund and
 ambiguous outcomes retain `REFUND_PENDING` or `RECOVERY_REQUIRED` evidence; they
 do not discard the candidate or automatically create another transfer. The saved
 operation ID and recipient remain stable across restart.
@@ -293,7 +378,7 @@ from confidential to public mode. Current requests do not add application
 commissions. Do not infer a commercial partner agreement from an API key.
 
 Before preparation, the shared treasury verifies fresh sync, spendable funds,
-per-operation/daily exposure and its single unresolved outgoing-operation gate.
+actual reservations, per-operation safeguards and its single unresolved outgoing-operation gate.
 Zingolib calculates/proves without automatic broadcast. The post-calculation wallet
 snapshot, prepared bytes and accounting facts must commit before submission.
 Calculation followed by persistence failure invalidates that in-memory owner for
@@ -313,6 +398,22 @@ confirmation and destination credit are independent: a NEAR success response alo
 cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with
 an obsolete persistence warning; genuine source-reconciliation errors remain visible.
+
+Successful financial completion combines three independent facts: the operation's
+applicable immutable destination-readiness proof, canonical source confirmation,
+and validated provider fulfillment. Destination readiness alone publishes the funded
+wallet role and may permit payments before the other facts arrive. Consumption does
+not erase that historical proof or require rebuilding the original funding balance.
+Conflicting terminal outcomes preserve review-required work; provider fulfillment
+is not canonical source or return evidence.
+
+One retained funding owner schedules independent status, credit and prerequisite-
+complete unsigned quote observations in bounded lanes, alongside serialized treasury
+commands. Per-operation/kind backoff cannot stall another group's observations.
+Historical work uses captured boundaries and keyset pages, not full reporting
+snapshots; wallet count is not a deadline. Read-only readiness and quote prerequisites
+precede proposal mutation or reservation. The same treasury actor and worker survive
+bootstrap into serving, and accepted work drains after waiter cancellation.
 
 Funding logs distinguish progress from failed checks. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
@@ -334,11 +435,11 @@ waits for transaction expiry, which is a separate Zcash block height. Existing
 canonical absence, fresh-tip and unspent-input proofs authorize recovery; elapsed
 time alone does not. Submitted/ambiguous operations are reconciled before expiry
 recovery, never automatically rebroadcast. A successful recovery archives the old
-operation and returns the job to allocation under its existing funding budgets.
+operation and returns the job to allocation only under separately revalidated current funding authority.
 The profile's `max_attempts` bounds transaction recovery resets using durable
 history; neither process restart nor operation replacement erases this count.
 New quote refreshes proven to have no outgoing or budget record are explicitly
-marked in additive SQLite schema 12 and excluded from that count; historical
+marked in durable history and excluded from that count; historical
 unclassified records still count. Earlier binaries reject the newer state schema.
 Unsigned quote outages use bounded per-pass work and backoff without consuming
 transaction recovery attempts.

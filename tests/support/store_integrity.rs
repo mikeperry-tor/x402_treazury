@@ -4,7 +4,14 @@ use crate::test_funding_quote as quote_fixture;
 
 fn populated(dir: &Path) -> Store {
     let mut s = Store::create(&dir.join("state"), &dir.join("key"), 1, b"initial").unwrap();
-    let pool = s.ensure_pool("fixture", "5").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        s,
+        "fixture",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let jobs = s.funding_jobs().unwrap();
     for (i, job) in jobs.iter().enumerate() {
         let revision = s.snapshot().unwrap().0;
@@ -26,8 +33,7 @@ fn populated(dir: &Path) -> Store {
             funding::FundingPhase::Preparing,
         )
         .unwrap();
-        s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
-            .unwrap();
+        s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
         let revision = s.snapshot().unwrap().0;
         s.prepare_with_facts(
             &job.operation_id,
@@ -85,6 +91,7 @@ fn populated_historical_schemas_require_explicit_conversion_without_mutation() {
             fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
         }
         fs::copy(donor.path().join("key"), dir.path().join("key")).unwrap();
+        private_file(&state.join("owner.lock"), true).unwrap();
         private_file(&state.join("state.sqlite"), true).unwrap();
         let db = Connection::open(state.join("state.sqlite")).unwrap();
         let mut section = 0;
@@ -117,8 +124,17 @@ fn populated_historical_schemas_require_explicit_conversion_without_mutation() {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
                 .join(",");
+            let projection = columns
+                .split(',')
+                .map(|column| match (table.as_str(), column) {
+                    ("pools", "target") => "'5000000' AS target",
+                    ("pools", "bootstrapped") => "1 AS bootstrapped",
+                    _ => column,
+                })
+                .collect::<Vec<_>>()
+                .join(",");
             db.execute_batch(&format!(
-                "INSERT INTO main.{table}({columns}) SELECT {columns} FROM donor.{table};"
+                "INSERT INTO main.{table}({columns}) SELECT {projection} FROM donor.{table};"
             ))
             .unwrap();
         }
@@ -152,10 +168,7 @@ fn populated_historical_schemas_require_explicit_conversion_without_mutation() {
             assert!(
                 error
                     .to_string()
-                    .starts_with("legacy_financial_state_requires_conversion")
-                    || error
-                        .to_string()
-                        .starts_with("legacy_destination_readiness_support_missing"),
+                    .contains("stopped-service conversion required"),
                 "version {version}: {error}"
             );
             assert_eq!(fs::read(state.join("state.sqlite")).unwrap(), before);
@@ -407,7 +420,14 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
         let key = tmp.path().join("key");
         let mut s = Store::create(&dir, &key, 1, b"initial").unwrap();
         let id = s.id.clone();
-        let pool = s.ensure_pool("test", "5").unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            s,
+            "test",
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
         let job = s.funding_jobs().unwrap().remove(0);
         s.save_funding_quote(
             &job.id,
@@ -420,8 +440,7 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
             funding::FundingPhase::Preparing,
         )
         .unwrap();
-        s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
-            .unwrap();
+        s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
         let original = serde_json::to_value(s.status().unwrap()).unwrap();
         s.db.execute_batch(statement).unwrap();
         assert!(
@@ -483,7 +502,7 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
 }
 
 #[test]
-fn expired_admission_evidence_commits_balances_without_promotion_or_reservation() {
+fn expired_admission_evidence_preserves_prior_balance_without_role_change_or_reservation() {
     use crate::rotation::base::{Anchor, ChainView};
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(
@@ -494,7 +513,14 @@ fn expired_admission_evidence_commits_balances_without_promotion_or_reservation(
     )
     .unwrap();
     let id = store.id().to_owned();
-    let pool = store.ensure_pool("freshness", "5").unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        store,
+        "freshness",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
     let jobs = store.funding_jobs().unwrap();
     for job in &jobs {
         store
@@ -543,7 +569,7 @@ fn expired_admission_evidence_commits_balances_without_promotion_or_reservation(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((balance.as_str(), height), ("0", 20));
+    assert_eq!((balance.as_str(), height), ("5000000", 10));
 }
 
 #[test]
@@ -578,41 +604,86 @@ fn admission_skips_retired_balances_but_retains_their_authorizations() {
 
 #[test]
 fn unsigned_queries_and_rejected_legacy_reopen_preserve_all_journals() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = populated(dir.path());
+    let donor = tempfile::tempdir().unwrap();
+    let store = populated(donor.path());
     let id = store.id().to_owned();
     let pool = store.status().unwrap().pools.remove(0).id;
-    store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'unsigned',pool_id,wallet_id,generation,amount,requirements_hash,'ADMITTED' FROM payment_attempts WHERE id='payment'", []).unwrap();
     store.chain_query(&pool).unwrap();
     store.payment_chain_query(&pool).unwrap();
-    let count = |s: &Store| {
-        s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| {
-            r.get::<_, i64>(0)
-        })
-        .unwrap()
-    };
-    assert_eq!(count(&store), 2);
-    store
-        .db
-        .execute_batch(include_str!("../fixtures/state/remove_evidence_v14.sql"))
-        .unwrap();
-    store
-        .db
-        .execute_batch("DROP TABLE payment_admission_evidence; PRAGMA user_version=12;")
-        .unwrap();
+    assert_eq!(
+        store
+            .db
+            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
     drop(store);
-    let database = dir.path().join("state/state.sqlite");
+
+    // Construct an actual frozen legacy database. Fresh schema16 deliberately
+    // cannot admit unsigned rows; never relax its CHECK to manufacture this case.
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    fs::create_dir(&state).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::copy(donor.path().join("key"), dir.path().join("key")).unwrap();
+    private_file(&state.join("owner.lock"), true).unwrap();
+    let database = state.join("state.sqlite");
+    private_file(&database, true).unwrap();
+    let db = Connection::open(&database).unwrap();
+    db.execute_batch(include_str!("../fixtures/state/historical.sql"))
+        .unwrap();
+    db.execute(
+        "ATTACH DATABASE ?1 AS donor",
+        [donor.path().join("state/state.sqlite").to_str().unwrap()],
+    )
+    .unwrap();
+    let tables = db
+        .prepare("SELECT name FROM main.sqlite_master WHERE type='table' ORDER BY rowid")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    for table in tables {
+        let columns = db
+            .prepare(&format!("PRAGMA main.table_info({table})"))
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let projection = columns
+            .iter()
+            .map(|column| match (table.as_str(), column.as_str()) {
+                ("pools", "target") => "'5000000' AS target",
+                ("pools", "bootstrapped") => "1 AS bootstrapped",
+                _ => column.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        db.execute_batch(&format!(
+            "INSERT INTO main.{table}({}) SELECT {projection} FROM donor.{table}",
+            columns.join(",")
+        ))
+        .unwrap();
+    }
+    db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'unsigned',pool_id,wallet_id,generation,amount,requirements_hash,'ADMITTED' FROM payment_attempts WHERE id='payment'", []).unwrap();
+    db.execute_batch("PRAGMA user_version=12; DETACH DATABASE donor;")
+        .unwrap();
+    drop(db);
     let before = fs::read(&database).unwrap();
-    let error = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id)
+    let error = Store::open(&state, &dir.path().join("key"), &id)
         .err()
         .expect("legacy state requires explicit conversion");
     assert!(
         error
             .to_string()
-            .starts_with("legacy_financial_state_requires_conversion")
-            || error
-                .to_string()
-                .starts_with("legacy_destination_readiness_support_missing")
+            .contains("stopped-service conversion required")
     );
     assert_eq!(fs::read(&database).unwrap(), before);
     let db = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -688,14 +759,7 @@ fn prepared_payment(store: &mut Store) -> PreparedPayment {
         resolutions: Default::default(),
     };
     store
-        .prepare_payment(
-            &pool.id,
-            U256::from(11),
-            "atomic-offer",
-            view,
-            None,
-            U256::from(5_000_000),
-        )
+        .prepare_payment(&pool.id, U256::from(11), "atomic-offer", view, None)
         .unwrap()
 }
 fn prepared_authorization(prepared: &PreparedPayment) -> Authorization {
@@ -782,7 +846,7 @@ fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
                 evidence::add_exposure(&tx, &prepared.wallet, U256::from(4_999_992)).unwrap();
                 tx.commit().unwrap();
             },
-            "cap" => prepared.payment_limit = U256::from(10),
+            "cap" => { store.db.execute("UPDATE pools SET payment_limit='10' WHERE id=?1", [&prepared.pool]).unwrap(); },
             _ => {}
         }
         let result = store.journal_authorization(&prepared, auth, None);

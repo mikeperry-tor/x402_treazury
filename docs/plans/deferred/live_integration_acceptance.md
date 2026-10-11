@@ -25,11 +25,11 @@ balances, reuse completed cases or manufacture a slow refill to force a pass.
 Use the existing rotation/refill-service preset first, then the two-round lifecycle
 preset when feasible. Require:
 
-- One natural promotion and a replacement with a new address, unchanged job binding,
+- One natural READY consumption with its exact slot/generation, followed independently by a replacement with a new address and unchanged job binding,
   one source submission and confirmed target credit before READY.
 - Canonically paid service from the promoted payer and each declared peer while
   the same refill is pending, using admission/final-response observations.
-- Two consecutive rounds with unchanged generation between the previous confirmed
+- Two consecutive rounds with stable group identity and independently advancing consumed-slot generations between the previous confirmed
   refill and the next depletion baseline.
 - One graceful application restart at the reviewed queued/submitted checkpoint,
   retaining Tor and registered process/session boundaries. Verify durable operation,
@@ -37,7 +37,7 @@ preset when feasible. Require:
 - Explicit failed/incomplete results if refill is too fast to observe, funds are
   insufficient, service fails or a checkpoint is missed. No implicit retries.
 
-Record source principal/fees, canonical API debits, active/standby/retired balances
+Record source principal/fees, canonical API debits, active/ready/retained/retired balances
 and reserved liabilities separately. Preserve provider errors alongside independent
 lifecycle observations. Historical manual evidence and offline invariants do not
 replace the runner's actual process and payment evidence.

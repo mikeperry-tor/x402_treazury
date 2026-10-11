@@ -1,0 +1,48 @@
+//! Reuse an enclosing retained call owner, or retain direct library work through
+//! response conversion. The existing signing-owner bound also bounds new tasks.
+use anyhow::{Context, Result};
+use std::future::Future;
+use tokio::sync::{Semaphore, SemaphorePermit};
+
+static FOREGROUND: Semaphore = Semaphore::const_new(128);
+tokio::task_local! {
+    static RETAINED: ();
+    static HAS_FOREGROUND: ();
+}
+pub(crate) fn retained() -> bool {
+    RETAINED.try_with(|_| ()).is_ok()
+}
+pub(crate) async fn scope<T>(work: impl Future<Output = T>) -> T {
+    RETAINED.scope((), work).await
+}
+pub(crate) fn foreground() -> Result<Option<SemaphorePermit<'static>>> {
+    if HAS_FOREGROUND.try_with(|_| ()).is_ok() {
+        return Ok(None);
+    }
+    Ok(Some(
+        FOREGROUND
+            .try_acquire()
+            .context("managed payment queue capacity unavailable")?,
+    ))
+}
+pub(crate) fn run<T: Send + 'static>(
+    owner: &crate::server::work::Work,
+    work: impl Future<Output = T> + Send + 'static,
+) -> impl Future<Output = Result<T>> + Send + '_ {
+    let work = Box::pin(work);
+    async move {
+        if retained() {
+            return owner.run(work).await;
+        }
+        let permit = foreground()?;
+        let context = crate::qualification::capture_case();
+        owner
+            .run(async move {
+                let _permit = permit;
+                HAS_FOREGROUND
+                    .scope((), crate::qualification::inherit_case(context, work))
+                    .await
+            })
+            .await
+    }
+}
