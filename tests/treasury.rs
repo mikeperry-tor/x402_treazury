@@ -107,6 +107,7 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     assert!(!text.contains(SEED));
     let initial: serde_json::Value = serde_json::from_str(&text).unwrap();
     let id = initial["state"]["treasury_id"].as_str().unwrap();
+    let before_removed_command = std::fs::read(state.join("state.sqlite")).unwrap();
     let output = run(vec![
         "wallet",
         "pool",
@@ -121,11 +122,28 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
         "--funding-amount-usdc",
         "5",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("wallet pool was removed"), "{error}");
+    assert!(error.contains("wallet bootstrap --config FILE"), "{error}");
+    assert!(!error.contains(SEED));
+    assert_eq!(
+        std::fs::read(state.join("state.sqlite")).unwrap(),
+        before_removed_command
     );
+    // Explicit temporary-store setup retains the address/key persistence coverage
+    // without reintroducing a CLI allocation path or fabricating funded readiness.
+    {
+        let mut store = x402_treazury::rotation::store::Store::open(&state, &key, id).unwrap();
+        crate::capacity_fixture::declare_and_allocate!(
+            store,
+            "research",
+            crate::capacity_fixture::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
+    }
     let output = run(vec![
         "wallet",
         "status",

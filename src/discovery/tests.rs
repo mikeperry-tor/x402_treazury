@@ -1670,7 +1670,8 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
     for disconnect in [false, true] {
         let base = base.clone();
         let request = tokio::spawn(async move {
-            reqwest::Client::builder().read_timeout(Duration::from_secs(3)).build().unwrap().post(format!("{base}/mcp"))
+            crate::network::NetworkContext::new(Default::default()).unwrap()
+                .discovery(&base, Duration::from_secs(3)).unwrap().post(format!("{base}/mcp"))
                 .bearer_auth("test-token")
                 .header("accept", "application/json, text/event-stream")
                 .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":directory::SEARCH,"arguments":{"q":"fixture"}}}))

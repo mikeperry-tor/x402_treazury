@@ -107,9 +107,15 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let result = http.post(endpoint).bearer_auth("DUMMY_BEARER")
         .header("accept", "application/json, text/event-stream")
         .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"safe_help","arguments":{}}}))
-        .send().await.unwrap().text().await.unwrap();
+        .send().await.unwrap();
+    let content_type = result.headers()[reqwest::header::CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let result = result.text().await.unwrap();
+    let decoded = x402_treazury::mcp_wire::response_json(result.as_bytes(), &content_type).unwrap();
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&result).unwrap()["result"]["isError"],
+        serde_json::from_slice::<serde_json::Value>(&decoded).unwrap()["result"]["isError"],
         true
     );
     clean(&result);

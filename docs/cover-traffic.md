@@ -227,6 +227,13 @@ still follows the normal payment/output path. A rejected padded payment is never
 replayed without padding. Shutdown cancels cover and drains accepted financial
 work through the retained application owner; cover cleanup cannot abandon payment work.
 
+An unsigned payer handoff ends the original attempt's cover call and binds the
+replacement attempt to the replacement wallet's owner. It preserves the existing
+identity/origin/transport isolation keys; it does not carry a challenge or cover
+capability across wallets. Each physical request still applies real-call priority
+and cover accounting. See [managed request ownership](network-egress.md) and the
+[one-handoff admission contract](wallet-rotation.md#capacity-and-admission).
+
 Shared connections can still fail or experience resource contention. Optional
 error handling does not guarantee real-call availability. A three-call Tor
 experiment observed one API broken pipe; its cause remains unresolved. Cover can be disabled globally or per provider, and this failure is retained in

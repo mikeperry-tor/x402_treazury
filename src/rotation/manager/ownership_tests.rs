@@ -71,7 +71,10 @@ async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch()
         }
     }));
     let expected = manager.candidate().await.unwrap();
-    let http = reqwest::Client::new();
+    let http = crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .discovery(&base, None)
+        .unwrap();
     let retry = http.get(format!("{base}/pay")).build().unwrap();
     let response = http.execute(retry.try_clone().unwrap()).await.unwrap();
     let waiter = tokio::spawn({

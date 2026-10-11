@@ -192,7 +192,9 @@ mod tests {
                 saved.last_error.as_deref(),
                 Some("quote_refresh_exhausted; no preparation started")
             );
-            assert!(crate::treasury::recovery::can_recover_facts(&saved, None));
+            assert!(crate::rotation::store::funding::can_recover_facts(
+                &saved, None
+            ));
         }
         store
             .db
@@ -212,7 +214,7 @@ mod tests {
             .unwrap();
         let unknown = store.funding_job(&job.id).unwrap().unwrap();
         assert!(unknown.last_error.is_none());
-        assert!(!crate::treasury::recovery::can_recover_facts(
+        assert!(!crate::rotation::store::funding::can_recover_facts(
             &unknown, None
         ));
         store
@@ -234,7 +236,7 @@ mod tests {
                 blocked.last_error.as_deref(),
                 Some("funding_recovery_requires_operator; unresolved preparation")
             );
-            assert!(!crate::treasury::recovery::can_recover_facts(
+            assert!(!crate::rotation::store::funding::can_recover_facts(
                 &blocked, None
             ));
         }
@@ -295,7 +297,9 @@ mod source_disposition_tests {
             let diagnostic = current.last_error.as_deref().unwrap();
             assert!(diagnostic.starts_with("funding_attempt_closed;"));
             assert_eq!(diagnostic.matches("; source_operator: ").count(), 1);
-            assert!(crate::treasury::recovery::can_recover_facts(&current, None));
+            assert!(crate::rotation::store::funding::can_recover_facts(
+                &current, None
+            ));
         }
         crate::rotation::test_capacity::declare_and_allocate!(
             store,

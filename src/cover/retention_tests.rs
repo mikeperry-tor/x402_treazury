@@ -1,5 +1,12 @@
 use super::*;
-use crate::network::{HttpPolicy, IsolationId};
+use crate::network::{HttpPolicy, IsolationId, Mode, NetworkContext, NetworkPolicy};
+
+fn local_client() -> reqwest::Client {
+    NetworkContext::new(Default::default())
+        .unwrap()
+        .discovery("https://api.example.com", None)
+        .unwrap()
+}
 
 fn owner(name: &str) -> Owner {
     Owner {
@@ -29,7 +36,7 @@ async fn cleanup_ownership_outlives_zero_counters_and_prevents_replacement() {
     let config = Arc::new(config);
     let first = owner("first");
     let next = owner("next");
-    let http = reqwest::Client::new();
+    let http = local_client();
     let call = engine
         .begin(first.clone(), config.clone(), scope(), http.clone())
         .unwrap();
@@ -97,13 +104,20 @@ async fn ordinary_eviction_forgets_negative_capability_without_resetting_process
     });
     let (addr, server) =
         crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
-    let http = reqwest::Client::builder()
-        .no_proxy()
-        .http2_prior_knowledge()
-        .tls_certs_only([reqwest::Certificate::from_pem(crate::test_tls::CA).unwrap()])
-        .resolve("api.example.com", addr)
-        .build()
-        .unwrap();
+    let socks = crate::test_socks::Socks::start(
+        std::collections::BTreeMap::from([("api.example.com".into(), addr)]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    let http = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(socks.address),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA)
+    .discovery("https://api.example.com", None)
+    .unwrap();
     let engine = Engine::new(Limits {
         max_owners: 1,
         max_requests_per_window: 3,
@@ -148,7 +162,7 @@ async fn recency_preserves_retained_negative_and_fallback_state() {
     config.ranges_enabled = false;
     config.fallback_url = Some("https://api.example.com/fallback".into());
     let config = Arc::new(config);
-    let http = reqwest::Client::new();
+    let http = local_client();
     for name in ["cold", "hot"] {
         drop(
             engine

@@ -21,6 +21,23 @@ Eviction drops only cache ownership: acquired handles retain connections and
 in-flight work. Isolation, origin, runtime and transport keys remain unchanged;
 there is no cache-maintenance timer or wallet-inventory limit.
 
+Managed calls select the initial payer before provider I/O. A trusted price hint
+can choose a cached sufficient wallet; it never supplies a payment challenge.
+After a validated unpaid challenge, an insufficient payer may make one unsigned
+handoff using the replacement wallet's own provider transport and cover owner.
+The original business request is preserved for every supported method, including
+POST. The replacement obtains its own challenge and remains fixed for the second
+attempt. There is no handoff or replay after a signed submission. The
+[admission contract](wallet-rotation.md#capacity-and-admission) and pinned local
+middleware fixtures describe the supported boundary; this is not live-provider
+qualification for arbitrary middleware.
+
+Accepted calls retain their application owner through signed dispatch, response
+consumption and output conversion. A disconnected waiter cannot orphan that work
+or free its financial liability. Unsigned candidate acquisition has separate,
+cancellable read ownership; completion of unrelated reads cannot renew a balance
+observation or a signed authority deadline.
+
 | Caller | Transport and identity |
 | --- | --- |
 | `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, discovery origin |

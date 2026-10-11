@@ -1,7 +1,7 @@
 //! Funding recovery never submits transactions or relaxes canonical expiry evidence.
 use super::*;
 use crate::rotation::{
-    store::funding::{FundingJob, FundingPhase},
+    store::funding::{FundingJob, FundingPhase, safely_unprepared},
     transaction::TransactionSubmission,
 };
 
@@ -21,39 +21,6 @@ pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
                 job.phase,
                 FundingPhase::Preparing | FundingPhase::Prepared | FundingPhase::DepositPending
             ))
-}
-
-// Missing bytes are not proof that an interrupted preparer did no work.
-fn safely_unprepared(job: &FundingJob) -> bool {
-    matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-        || (job.phase == FundingPhase::RecoveryRequired
-            && job.last_error.as_deref().is_some_and(|e| {
-                e.starts_with("quote_refresh_exhausted;")
-                    || e.starts_with("funding_quote_failed;")
-                    || e.starts_with("funding_attempt_closed;")
-            }))
-}
-
-pub(crate) fn can_recover_facts(
-    job: &FundingJob,
-    operation: Option<&crate::rotation::transaction::OperationStatus>,
-) -> bool {
-    if job
-        .last_error
-        .as_deref()
-        .is_some_and(|e| e.starts_with("funding_recovery_requires_operator;"))
-    {
-        return false;
-    }
-    if job.phase == FundingPhase::RefundPending {
-        return false;
-    }
-    if job.phase != FundingPhase::RecoveryRequired {
-        return true;
-    }
-    operation
-        .map(|op| op.submission != "CONFIRMED")
-        .unwrap_or_else(|| safely_unprepared(job))
 }
 
 fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {

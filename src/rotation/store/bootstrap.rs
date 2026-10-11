@@ -82,7 +82,10 @@ impl StartupPath {
             return Obstructed("recovery_attempt_limit_reached");
         }
         if self.job.phase == funding::FundingPhase::RecoveryRequired
-            && !crate::treasury::recovery::can_recover_facts(&self.job, self.operation.as_ref())
+            && !crate::rotation::store::funding::can_recover_facts(
+                &self.job,
+                self.operation.as_ref(),
+            )
         {
             return Obstructed("preparation_or_swap_requires_review");
         }

@@ -1259,6 +1259,7 @@ pub struct StoreHandle {
     evidence_namespace: Uuid,
     sender: tokio::sync::mpsc::Sender<Work>,
     group_gates: GroupGates,
+    #[cfg(feature = "zcash")]
     funding_owner: std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>>,
 }
 impl StoreHandle {
@@ -1276,11 +1277,13 @@ impl StoreHandle {
                 evidence_namespace,
                 sender,
                 group_gates: Default::default(),
+                #[cfg(feature = "zcash")]
                 funding_owner: Default::default(),
             },
             task,
         )
     }
+    #[cfg(feature = "zcash")]
     pub(crate) fn funding_owner(
         &self,
     ) -> std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>> {

@@ -1,6 +1,39 @@
 //! Funding workflow journal. The source operation ID is allocated before any
 //! calculation and remains immutable across crashes and ambiguous submissions.
 use super::*;
+// Missing bytes are not proof that an interrupted preparer did no work.
+pub(crate) fn safely_unprepared(job: &FundingJob) -> bool {
+    matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
+        || (job.phase == FundingPhase::RecoveryRequired
+            && job.last_error.as_deref().is_some_and(|e| {
+                e.starts_with("quote_refresh_exhausted;")
+                    || e.starts_with("funding_quote_failed;")
+                    || e.starts_with("funding_attempt_closed;")
+            }))
+}
+
+pub(crate) fn can_recover_facts(
+    job: &FundingJob,
+    operation: Option<&crate::rotation::transaction::OperationStatus>,
+) -> bool {
+    if job
+        .last_error
+        .as_deref()
+        .is_some_and(|e| e.starts_with("funding_recovery_requires_operator;"))
+    {
+        return false;
+    }
+    if job.phase == FundingPhase::RefundPending {
+        return false;
+    }
+    if job.phase != FundingPhase::RecoveryRequired {
+        return true;
+    }
+    operation
+        .map(|op| op.submission != "CONFIRMED")
+        .unwrap_or_else(|| safely_unprepared(job))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FundingPhase {

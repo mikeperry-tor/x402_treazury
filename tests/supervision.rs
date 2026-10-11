@@ -369,7 +369,7 @@ async fn unsigned_mode_rejects_managed_funding_and_source_management_configs() {
         match kind {
             "managed" => {
                 document["wallets"]["test"] = toml::from_str::<toml::Value>(
-                    "mode='zcash_rotation'\nmax_funding_spend_zec='0.02'\nmax_conversion_overhead_percent=5",
+                    "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nreserves={small={funding_amount_usdc='2'}}\nmax_funding_spend_zec='0.02'\nmax_conversion_overhead_percent=5",
                 )
                 .unwrap();
                 document.as_table_mut().unwrap().insert(

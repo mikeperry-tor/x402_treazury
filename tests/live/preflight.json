@@ -56,6 +56,16 @@
     }
   },
   {
+    "provider": "curl",
+    "config": "providers/curl/provider.toml",
+    "method": "POST",
+    "url": "https://curl-http-request.underscoredone.com/curl",
+    "body": {
+      "url": "https://example.com/",
+      "method": "GET"
+    }
+  },
+  {
     "provider": "deepline",
     "config": "providers/deepline.toml",
     "method": "POST",

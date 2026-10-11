@@ -2,8 +2,16 @@
 
 ## Objective and status
 
-Implementation in progress under the operator's implementation request; this file
-does not authorize funded execution. Replace the active/ready pair with one active wallet, a small reserve slot,
+Implementation completed through `b92d41a`, with all nine delivery milestones
+recorded below. This document is retained at the operator's request as the review
+record of the implemented contracts and commit boundaries. Maintained guides are
+authoritative for ongoing use; see [wallet rotation](../wallet-rotation.md),
+[architecture](../architecture.md#wallet-selection-and-network-isolation) and
+[testing](../testing.md). The design and delivery requirements below retain their
+original imperative wording; completed-scope entries record delivery evidence.
+This file does not authorize funded execution.
+
+Replace the active/ready pair with one active wallet, a small reserve slot,
 an optional large reserve slot, and retained wallets. One named managed profile
 owns the group. Every wallet uses the same group per-payment cap. Reserve sizes
 control replenishment, not spending authority or wallet classification.
@@ -2408,7 +2416,8 @@ reading of historical qualification reports under their original versions. Check
 fixtures and CLI consumers for old field names, total-capacity claims and pair-readiness
 assumptions; do not silently retain an old name with new semantics.
 
-Update maintained guides only on delivery; this document remains a plan. Publish the
+Maintained guides were updated on delivery. Retain this document for review at the
+operator's request; the former instruction to remove it is superseded. Publish the
 contracts through the destination inventory below, using links instead of repeating
 transition rules. The [contract map](#normative-contracts-and-implementation-scope) defines
 the behavior to publish; preserve the stated limitations and qualification boundaries.
@@ -2419,13 +2428,13 @@ network isolation" (anchor `wallet-selection-and-network-isolation`). Transfer t
 chosen priorities, alternatives table, cache/request distinctions, accepted limitations
 and grounds for revisiting the decision. Link to that one authoritative section from
 the maintained wallet/network/cover guides and AGENTS.md. Do not leave the rationale
-only in this plan or create a completed-plan archive. Before removing the plan, verify
-that the section and all incoming links exist and still explain why late selection was
+only in this review record. Verify that the authoritative section and its incoming
+links exist and still explain why late selection was
 declined despite its protocol feasibility.
 
 | Destination | Required update |
 | --- | --- |
-| docs/README.md and incoming plan links | On delivery, index maintained guides, relocate durable explanations, retain concrete unfinished work in a focused plan, update incoming links and remove this completed plan. No implemented-plan archive. |
+| docs/README.md and incoming plan links | On delivery, index maintained guides, relocate durable explanations, retain concrete unfinished work in a focused plan, update incoming links and retain this completed plan as the operator-requested review record. |
 | README.md, docs/configuration.md | Publish the [configuration contract](#configuration-and-authority): syntax/rejected fields, sizing and cold/learned fragmentation examples, mixed-cost address-reuse rationale and selector limitations, initial capital versus holdings, treasury-funded authority and retirement controls. Explain reopen-only changes, startup outcomes, temporary unavailability of partial allocations and the narrow migration scope. |
 | docs/wallet-rotation.md, docs/architecture.md | Publish lifecycle, evidence, ownership and accounting from the [contract map](#normative-contracts-and-implementation-scope), including their limits and deferred work. Transfer the selection/isolation decision to the architecture section specified above; link from wallet rotation guidance. |
 | docs/wallet-cli.md and generated help | Remove wallet pool; document automatic retirement and the deferred manual CLI, readiness/captured-job outcomes, current-policy recovery and actionable status. Explain the one-time utility/backups and limits of ordinary recover versus incident-specific repair. Use the output schema specified above. |
@@ -2624,7 +2633,25 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   missing original resolution/readiness support, structural current-schema recognition
   and private query-only copies. The operator note explicitly excludes successful
   transformation, restored-key and live migration claims. The utility has not been
-  run on real state. Final integration/documentation remains step 9.
+  run on real state. Final integration/documentation completed in step 9 below.
+
+- **Step 9 — final integration and maintained guidance:** completed in `b92d41a`.
+  Maintained guides, tracked deployment examples, CLI/help contracts and versioned
+  qualification/output consumers reflect the delivered model. The selection and
+  network-isolation rationale lives in the linked architecture decision. Final
+  integration corrected stale SSE/configuration fixtures and network-factory and
+  feature-boundary issues without changing the financial contracts.
+  All 50 default-build library, binary, integration and example targets have passing
+  results, including 338 active library tests and 162 active integration-preparation
+  tests. The check pipeline completed through targeted corrections and resumed stages;
+  this is not a claim that one uninterrupted `scripts/check.sh` invocation passed.
+  Final all-target Clippy with `zcash-regtest` and warnings denied, dependency
+  compatibility, vendor verification, formatting, CLI/help checks, 201 local Markdown
+  links and 24 tracked example TOML files passed. No funded/live qualification or
+  real-state conversion was performed. The manual retirement CLI, incident-specific
+  repair and separately authorized live qualification remain deferred as specified.
+  This plan was removed in that delivery commit under its original cleanup guidance
+  and restored by the subsequent operator-requested fixup for review.
 
 The known
 operator source inspected read-only for step 8 is schema 12 with three funded
@@ -2637,7 +2664,10 @@ operations. Two archived operations retain quote/refund bindings, including one
 prepared operation with canonical-expiry metadata and preserved resolved bytes.
 There are no recorded return outputs or outstanding source reservations.
 
-### Remaining delivery order
+### Delivery order (completed)
+
+The following is the original commit-boundary guidance, retained for review. All
+nine milestones are complete within the strict rejection scope recorded for step 8.
 
 Deliver independently reviewable milestones with focused default-Zcash regression checks
 at each boundary. Preserve one final configuration/runtime model; intermediate review steps

@@ -1532,7 +1532,9 @@ bearer_token_env="TOKEN"
             .unwrap()
             .unwrap()
             .forget();
-        let http = reqwest::Client::new();
+        let http =
+            crate::network::discovery("https://deployment-fixture.invalid", Duration::from_secs(5))
+                .unwrap();
         for (_, address) in addresses {
             let response: Value = http
                 .post(format!("http://{address}/mcp"))
