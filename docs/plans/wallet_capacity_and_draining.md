@@ -2526,7 +2526,18 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   and seven failover/progress fixtures. Later role/selection integration remains
   step 7; direct-library retained dispatch ownership is a separately reviewed draft.
 
-Steps 2–9 remain unfinished except for the portions described above. The known
+- Step 4 treasury-return accounting resolves original current/archived operation
+  bindings without materializing deployment status. Keyed discovery scans resident
+  wallet history once because the pinned dependency has no incremental output feed;
+  previously credited outpoints are revalidated directly even after shielding.
+  Missing/ambiguous attribution remains operation-scoped; contradictory canonical
+  credit evidence still fails explicitly. Gross principal and fee accounting are
+  preserved. Four focused default-Zcash tests with `zcash-testutils` passed in the
+  isolated milestone snapshot, including actual embedded-wallet sync-stage calls,
+  archived bindings/reopen, unrelated history, duplicates and canonical conflicts.
+  These offline fixtures do not establish funded or live settlement qualification.
+
+Steps 5–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
 conversion has been performed. Detailed conversion preconditions remain to be

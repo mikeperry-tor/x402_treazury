@@ -1,7 +1,7 @@
 //! Per-address shielding through the backend's public calculate-only API.
 use super::*;
 use crate::rotation::{
-    store::refunds::RefundStatus,
+    store::refunds::{RefundStatus, ReturnAccountingIssue},
     transaction::{PreparedTransaction, TransactionFacts},
 };
 use pepper_sync::wallet::OutputInterface;
@@ -17,77 +17,167 @@ use zcash_client_backend::{
 };
 use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
+/// Operation-scoped unresolved accounting from the actual sync stage. Original
+/// bindings/credits stay durable in their existing journals; this is a read result.
+#[derive(Debug)]
+pub(crate) struct ReturnReconciliation {
+    pub observed_outputs: usize,
+    pub issues: Vec<ReturnAccountingIssue>,
+}
+#[derive(Debug)]
+struct ReturnObservation {
+    credits: Vec<RefundStatus>,
+    issues: Vec<ReturnAccountingIssue>,
+}
 impl SyncSession {
-    pub(super) async fn reconcile_refunds(&self, height: u64, confirmations: u32) -> Result<()> {
-        let (bindings, status) = self
-            .store
-            .call(|s| Ok((s.refund_bindings()?, s.status()?)))
-            .await?;
+    pub(super) async fn reconcile_refunds(
+        &self,
+        height: u64,
+        confirmations: u32,
+    ) -> Result<ReturnReconciliation> {
+        let accounting = self.store.call(|s| s.return_accounting()).await?;
         let wallet = self.client.wallet().read().await;
-        let refunds = collect_refunds(&wallet, &bindings, &status, height, confirmations)?;
+        let observation = collect_refunds(&wallet, &accounting, height, confirmations)?;
         drop(wallet);
+        let report = ReturnReconciliation {
+            observed_outputs: observation.credits.len(),
+            issues: observation.issues,
+        };
         self.store
             .call(move |s| {
-                for refund in refunds {
+                for refund in observation.credits {
                     s.record_refund(refund)?;
                 }
                 Ok(())
             })
-            .await
+            .await?;
+        // Only fixed categories/counts go to stderr. Exact operation identities
+        // remain in the typed result for dependent accounting/status consumers.
+        for (reason, count) in [
+            (
+                "missing_return_binding",
+                report
+                    .issues
+                    .iter()
+                    .filter(|issue| {
+                        matches!(issue, ReturnAccountingIssue::MissingOriginalBinding { .. })
+                    })
+                    .count(),
+            ),
+            (
+                "ambiguous_return_binding",
+                report
+                    .issues
+                    .iter()
+                    .filter(|issue| {
+                        matches!(
+                            issue,
+                            ReturnAccountingIssue::AmbiguousOriginalBinding { .. }
+                        )
+                    })
+                    .count(),
+            ),
+        ] {
+            if count > 0 {
+                tracing::warn!(
+                    reason,
+                    affected_operations = count,
+                    observed_outputs = report.observed_outputs,
+                    "treasury return accounting requires operation-scoped review"
+                );
+            }
+        }
+        Ok(report)
     }
 }
 fn collect_refunds(
     wallet: &zingolib::wallet::LightWallet,
-    bindings: &[(String, String)],
-    status: &crate::rotation::store::Status,
+    accounting: &crate::rotation::store::refunds::ReturnAccounting,
     height: u64,
     confirmations: u32,
-) -> Result<Vec<RefundStatus>> {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut refunds = vec![];
-    for record in wallet.wallet_transactions.values() {
-        let Some(h) = record
+) -> Result<ReturnObservation> {
+    let mut issues = accounting
+        .issues
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let canonical_height = |record: &pepper_sync::wallet::WalletTransaction| {
+        record
             .status()
             .get_confirmed_height()
             .map(|h| u64::from(u32::from(h)))
-        else {
-            continue;
-        };
-        if h == 0 || height < h || height - h + 1 < u64::from(confirmations) {
-            continue;
-        }
-        for coin in record.transparent_coins() {
-            let txid = coin.output_id().txid().to_string();
-            let index = coin.output_id().output_index();
-            seen.insert((txid.clone(), index));
-            if let Some((operation, _)) = bindings
-                .iter()
-                .find(|(_, address)| address == coin.address())
-                && status
-                    .treasury_operations
-                    .iter()
-                    .any(|o| &o.operation_id == operation && o.submission == "CONFIRMED")
-            {
-                refunds.push(RefundStatus {
-                    txid,
-                    output_index: index,
-                    operation_id: operation.clone(),
-                    amount: i64::try_from(coin.value())?,
-                    height: i64::try_from(h)?,
-                });
-            }
+            .filter(|h| *h > 0 && height >= *h && height - *h + 1 >= u64::from(confirmations))
+    };
+    // Known credits are canonical financial support, including outputs already
+    // spent or shielded. Missing origins or changed amounts must block readiness.
+    for credited in &accounting.credited {
+        let txid = zcash_primitives::transaction::TxId::from_hex(&credited.txid)
+            .context("invalid credited return transaction identity")?;
+        let record = wallet
+            .wallet_transactions
+            .get(&txid)
+            .context("treasury_refund_reorg: credited refund requires recovery")?;
+        let coin = record
+            .transparent_coins()
+            .iter()
+            .find(|coin| coin.output_id().output_index() == credited.output_index)
+            .context("treasury_refund_reorg: credited output missing")?;
+        ensure!(
+            canonical_height(record).is_some()
+                && i64::try_from(coin.value())? == credited.amount
+                && accounting.confirmed.contains(&credited.operation_id),
+            "treasury_refund_reorg: credited refund requires recovery"
+        );
+        // A positive contradictory ownership claim undermines credited accounting.
+        // Missing/ambiguous correlation alone retains the old credit and its review
+        // obligation; it cannot erase canonical money or block unrelated readiness.
+        if let Some(owners) = accounting.bindings.get(coin.address()) {
+            ensure!(
+                owners.contains(&credited.operation_id),
+                "treasury_refund_ownership: credited refund requires recovery"
+            );
+        } else {
+            issues.insert(ReturnAccountingIssue::MissingOriginalBinding {
+                operation_id: credited.operation_id.clone(),
+            });
         }
     }
-    // A refunded input may already be shielded: its originating transaction
-    // must still be present and confirmed even when its coin is spent.
-    ensure!(
-        status
-            .refunds
-            .iter()
-            .all(|r| seen.contains(&(r.txid.clone(), r.output_index))),
-        "treasury_refund_reorg: credited refund requires recovery"
-    );
-    Ok(refunds)
+    let mut refunds = vec![];
+    // The pinned dependency has no incremental unknown-output feed. Inspect its
+    // resident history once without copying it; matching is keyed by address.
+    for record in wallet.wallet_transactions.values() {
+        let Some(h) = canonical_height(record) else {
+            continue;
+        };
+        for coin in record.transparent_coins() {
+            let Some(owners) = accounting.bindings.get(coin.address()) else {
+                continue;
+            };
+            if owners.len() != 1 {
+                issues.extend(owners.iter().cloned().map(|operation_id| {
+                    ReturnAccountingIssue::AmbiguousOriginalBinding { operation_id }
+                }));
+                continue;
+            }
+            let operation = owners.first().expect("one owner");
+            if accounting.ambiguous_operations.contains(operation)
+                || !accounting.confirmed.contains(operation)
+            {
+                continue;
+            }
+            refunds.push(RefundStatus {
+                txid: coin.output_id().txid().to_string(),
+                output_index: coin.output_id().output_index(),
+                operation_id: operation.clone(),
+                amount: i64::try_from(coin.value())?,
+                height: i64::try_from(h)?,
+            });
+        }
+    }
+    Ok(ReturnObservation {
+        credits: refunds,
+        issues: issues.into_iter().collect(),
+    })
 }
 impl Treasury {
     /// Operator requested, one job/address per transaction. No broadcast here.
@@ -108,10 +198,20 @@ impl Treasury {
                     .into_iter()
                     .find(|j| j.id == job)
                     .context("network_identity_missing: refund job")?;
-                Ok((
-                    s.refund_address(&job)?.context("unknown refund address")?,
-                    funding.recipient,
-                ))
+                let address = s.refund_address(&job)?.context("unknown refund address")?;
+                let accounting = s.return_accounting()?;
+                ensure!(
+                    accounting
+                        .bindings
+                        .get(&address)
+                        .is_some_and(|owners| owners.len() == 1
+                            && owners.contains(&funding.operation_id)
+                            && !accounting
+                                .ambiguous_operations
+                                .contains(&funding.operation_id)),
+                    "ambiguous_return_binding: shielding requires operation-scoped review"
+                );
+                Ok((address, funding.recipient))
             })
             .await?;
         let status = self.status().await?;
