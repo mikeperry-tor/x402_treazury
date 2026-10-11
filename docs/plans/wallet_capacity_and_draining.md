@@ -2505,6 +2505,9 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   readiness reads avoid materializing full status. Validation: 44 store tests,
   18 rotation integration tests and two large-history/arithmetic fixtures pass;
   owner-failure tests also compare aggregate exposure to the preserved journal.
+  Three external credit/depletion fixtures now acquire real Base views through
+  local RPC instead of constructing financial evidence; all three pass. This
+  permits opaque verification checks without a production certificate bypass.
   Durable per-wallet verification, invalidation, bounded traversal and moving RPC
   outside the gate remain unfinished.
 

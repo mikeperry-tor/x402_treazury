@@ -1,5 +1,7 @@
 #![cfg(feature = "zcash")]
 use anyhow::Result;
+#[path = "support/rpc_evidence.rs"]
+mod rpc_evidence;
 use x402_treazury::rotation::{
     funding::{FundingBackend, FundingWorker},
     near::{Quote, SwapStatus},
@@ -771,9 +773,8 @@ async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() 
     task.await.unwrap();
 }
 
-#[test]
-fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
-    use x402_treazury::rotation::base::{Anchor, ChainView};
+#[tokio::test]
+async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
     for via_view in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Store::create(
@@ -795,29 +796,14 @@ fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
             .unwrap();
         }
         if via_view {
-            s.reconcile_pool(
-                &pool,
-                ChainView {
-                    observations: Default::default(),
-                    admission_valid_until: u64::MAX,
-                    anchor: Anchor {
-                        height: 1,
-                        hash: format!("0x{:064x}", 1),
-                    },
-                    balances: jobs
-                        .iter()
-                        .map(|j| {
-                            (
-                                j.wallet_id.clone(),
-                                alloy_primitives::U256::from(5_000_000u64),
-                            )
-                        })
-                        .collect(),
-                    released: vec![],
-                    resolutions: Default::default(),
-                },
-            )
-            .unwrap();
+            let query = s.chain_query(&pool).unwrap();
+            let balances = query
+                .wallets
+                .iter()
+                .map(|(id, _)| (id.clone(), 5_000_000))
+                .collect();
+            let view = rpc_evidence::acquire(query, balances, 100).await;
+            s.reconcile_pool(&pool, view).unwrap();
         } else {
             for j in &jobs {
                 s.record_credit(&j.wallet_id, "5000000", "block", 1)
@@ -890,7 +876,6 @@ fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() {
 
 #[tokio::test]
 async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wallets() {
-    use x402_treazury::rotation::base::{Anchor, ChainView};
     use x402_treazury::rotation::store::funding::FundingPhase;
     for promote_again in [false, true] {
         let dir = tempfile::tempdir().unwrap();
@@ -927,27 +912,17 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_or_promoted_wal
         });
         ready.await.unwrap();
         let p = pool.clone();
+        let query = store.call(move |s| s.chain_query(&p)).await.unwrap();
+        let balances = query
+            .wallets
+            .iter()
+            .map(|(id, _)| (id.clone(), 5_000_000))
+            .collect();
+        let view = rpc_evidence::acquire(query, balances, 100).await;
+        let p = pool.clone();
         store
             .call(move |s| {
-                let query = s.chain_query(&p)?;
-                s.reconcile_pool(
-                    &p,
-                    ChainView {
-                        observations: Default::default(),
-                        admission_valid_until: u64::MAX,
-                        anchor: Anchor {
-                            height: 3,
-                            hash: format!("0x{:064x}", 3),
-                        },
-                        balances: query
-                            .wallets
-                            .iter()
-                            .map(|(id, _)| (id.clone(), alloy_primitives::U256::from(5_000_000)))
-                            .collect(),
-                        released: vec![],
-                        resolutions: Default::default(),
-                    },
-                )?;
+                s.reconcile_pool(&p, view)?;
                 if promote_again {
                     s.promote(&p, 1)?;
                 }

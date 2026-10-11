@@ -1,4 +1,6 @@
 use std::path::Path;
+#[path = "support/rpc_evidence.rs"]
+mod rpc_evidence;
 use x402_treazury::rotation::store::{Store, StoreHandle, status};
 fn create(dir: &Path) -> Store {
     Store::create(
@@ -763,8 +765,8 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     assert!(state.treasury_operations.is_empty());
 }
 
-#[test]
-fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
+#[tokio::test]
+async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     // Isolate tracing's callsite interest cache from concurrent tests that emit
     // the same event without a subscriber.
     const CHILD: &str = "TREAZURY_TEST_TREASURY_WARNING_CHILD";
@@ -845,46 +847,65 @@ fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     assert!(logs.contains("existing funded EVM wallets remain usable"));
     assert!(store.status().unwrap().treasury_operations.is_empty());
     capture.0.lock().unwrap().clear();
-    use alloy_primitives::U256;
-    use x402_treazury::rotation::base::{Anchor, ChainView};
     let pool = store.ensure_pool("drain", "1").unwrap();
     let mut status = store.status().unwrap();
     let wallets = status.pools.remove(0).addresses;
-    let view = |first: u64, second: u64| ChainView {
-        observations: Default::default(),
-        admission_valid_until: u64::MAX,
-        anchor: Anchor {
-            height: 100,
-            hash: format!("0x{:064x}", 100),
-        },
-        balances: [
-            (wallets[0].id.clone(), U256::from(first)),
-            (wallets[1].id.clone(), U256::from(second)),
+    let amounts = |first: u64, second: u64| {
+        [
+            (wallets[0].id.clone(), first),
+            (wallets[1].id.clone(), second),
         ]
-        .into(),
-        released: vec![],
-        resolutions: Default::default(),
+        .into()
     };
     // Initial zeroes are unfunded allocations, not exhaustion.
-    store.reconcile_pool(&pool, view(0, 0)).unwrap();
-    store
-        .reconcile_pool(&pool, view(1_000_000, 1_000_000))
-        .unwrap();
-    store.reconcile_pool(&pool, view(1, 1_000_000)).unwrap();
+    let view = rpc_evidence::acquire(store.chain_query(&pool).unwrap(), amounts(0, 0), 100).await;
+    store.reconcile_pool(&pool, view).unwrap();
+    let view = rpc_evidence::acquire(
+        store.chain_query(&pool).unwrap(),
+        amounts(1_000_000, 1_000_000),
+        200,
+    )
+    .await;
+    store.reconcile_pool(&pool, view).unwrap();
+    let view = rpc_evidence::acquire(
+        store.chain_query(&pool).unwrap(),
+        amounts(1, 1_000_000),
+        300,
+    )
+    .await;
+    store.reconcile_pool(&pool, view).unwrap();
     assert!(capture.0.lock().unwrap().is_empty());
     // An incomplete view must roll back without reporting depletion.
-    let mut incomplete = view(0, 1_000_000);
+    let mut incomplete = rpc_evidence::acquire(
+        store.chain_query(&pool).unwrap(),
+        amounts(0, 1_000_000),
+        400,
+    )
+    .await;
     incomplete.balances.remove(&wallets[1].id);
     assert!(store.reconcile_pool(&pool, incomplete).is_err());
     assert!(capture.0.lock().unwrap().is_empty());
-    store.reconcile_pool(&pool, view(0, 1_000_000)).unwrap();
-    store.reconcile_pool(&pool, view(0, 1_000_000)).unwrap();
+    let view = rpc_evidence::acquire(
+        store.chain_query(&pool).unwrap(),
+        amounts(0, 1_000_000),
+        500,
+    )
+    .await;
+    store.reconcile_pool(&pool, view).unwrap();
+    let view = rpc_evidence::acquire(
+        store.chain_query(&pool).unwrap(),
+        amounts(0, 1_000_000),
+        600,
+    )
+    .await;
+    store.reconcile_pool(&pool, view).unwrap();
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logs.matches("evm_wallet_depleted").count(), 1);
     assert!(logs.contains(&wallets[0].id));
     assert!(logs.contains(&pool));
     capture.0.lock().unwrap().clear();
-    store.reconcile_pool(&pool, view(0, 0)).unwrap();
+    let view = rpc_evidence::acquire(store.chain_query(&pool).unwrap(), amounts(0, 0), 700).await;
+    store.reconcile_pool(&pool, view).unwrap();
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logs.matches("evm_wallet_depleted").count(), 1);
     assert!(logs.contains(&wallets[1].id));
