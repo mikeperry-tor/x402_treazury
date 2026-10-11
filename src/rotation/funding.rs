@@ -570,29 +570,40 @@ impl FundingBackend for Backend {
     }
     async fn credit(&mut self, job: &FundingJob) -> Result<()> {
         let pool = job.pool_id.clone();
+        let candidate = job.wallet_id.clone();
+        let gate = self.store.group_gate(&job.pool_id)?;
+        let capture_guard = std::sync::Arc::new(gate.clone().lock_owned().await);
         let query = self
             .store
-            .call(move |s| s.chain_query(&pool))
+            .call_with_guard(capture_guard, move |s| {
+                s.scoped_chain_query(&pool, vec![candidate], vec![])
+            })
             .await
             .context(super::base::VerificationStage("funding credit query"))?;
-        let view = self.base.view(query).await?;
-        let balance = view
-            .balances
-            .get(&job.wallet_id)
-            .context("missing candidate balance")?
-            .to_string();
+        let view = match self.base.view(query).await {
+            Ok(view) => view,
+            Err(error) => {
+                let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
+                return self
+                    .store
+                    .call_with_guard(guard, move |s| {
+                        s.record_base_failure(&error)?;
+                        Err(error)
+                    })
+                    .await;
+            }
+        };
+        ensure!(
+            view.balances.contains_key(&job.wallet_id),
+            "missing candidate balance"
+        );
         let wallet = job.wallet_id.clone();
         // Acquisition remains unsigned and independent; publication shares the
         // payment owner's gate through the accepted store job's completion.
-        let guard = std::sync::Arc::new(self.store.group_gate(&job.pool_id)?.lock_owned().await);
+        let guard = std::sync::Arc::new(gate.lock_owned().await);
         self.store
             .call_with_guard(guard, move |s| {
-                s.record_credit(
-                    &wallet,
-                    &balance,
-                    &view.anchor.hash,
-                    i64::try_from(view.anchor.height)?,
-                )
+                s.record_verified_credit(&wallet, view).map(|_| ())
             })
             .await
             .context(super::base::VerificationStage("funding credit persistence"))

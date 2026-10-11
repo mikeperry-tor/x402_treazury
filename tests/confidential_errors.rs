@@ -45,6 +45,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let rpc = BaseRpc::new(&url, 1, 60).unwrap();
     let err = rpc
         .view(ChainQuery {
+            captures: Default::default(),
             wallets: vec![],
             pending: vec![],
             anchor: None,

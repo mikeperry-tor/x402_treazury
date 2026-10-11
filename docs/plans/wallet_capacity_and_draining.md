@@ -2508,8 +2508,23 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   Three external credit/depletion fixtures now acquire real Base views through
   local RPC instead of constructing financial evidence; all three pass. This
   permits opaque verification checks without a production certificate bypass.
-  Durable per-wallet verification, invalidation, bounded traversal and moving RPC
-  outside the gate remain unfinished.
+  Opaque certificates now bind exact scope, runtime generations and wallet-scoped
+  financial checkpoints. Indexed durable support detects contradictions after cache
+  eviction/reopen; malformed purported exact support fails explicitly. Shared-store
+  endpoint invalidation reaches every affected group. Bounded wallet/history passes
+  retain independent progress and accepted work after waiter cancellation. Funding
+  credit and payment acquisition run outside the group gate; publication and atomic
+  signing recheck current predicates. One evidence-race refresh and one definite
+  unpublished-signature replacement remain separate invocation allowances.
+  Focused validation covers 50 store tests, five verifier fixtures, four real
+  maintenance fixtures and three real manager race fixtures (checkpoint then actual
+  SDK signature expiry, pre-sign evidence expiry and concurrent canonical debit).
+  Managed fixtures now preserve exact historical blocks and observe canonical
+  history through the independent owner. The isolated milestone snapshot passed
+  255 default-Zcash library tests (including the corrected cover fixture), 38
+  managed-payment tests, 18 rotation integration tests, the Base acquisition test
+  and seven failover/progress fixtures. Later role/selection integration remains
+  step 7; direct-library retained dispatch ownership is a separately reviewed draft.
 
 Steps 2–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded

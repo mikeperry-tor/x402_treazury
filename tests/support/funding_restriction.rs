@@ -296,6 +296,8 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
     assert_eq!(before, serde_json::to_value(s.status().unwrap()).unwrap());
     let view = super::super::base::ChainView {
         observations: Default::default(),
+        balance_certificates: Default::default(),
+        resolution_certificates: Default::default(),
         admission_valid_until: u64::MAX,
         anchor: super::super::base::Anchor {
             height: 2,

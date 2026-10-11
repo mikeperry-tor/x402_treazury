@@ -73,7 +73,10 @@ async fn paid_fixture() {
             assert!(!h.contains_key("x-example-padding")&&!h.contains_key("payment-signature"));
             let result=match v["method"].as_str().unwrap(){
                 "eth_chainId"=>json!("0x2105"),
-                "eth_getBlockByNumber"=>json!({"number":if v["params"][0]=="latest" {"0x64"} else {v["params"][0].as_str().unwrap()},"hash":format!("0x{:064x}",1),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())}),
+                "eth_getBlockByNumber"=>{
+                    let height=if v["params"][0]=="latest" {112} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                },
                 "eth_call"=>{let data=v["params"][0]["data"].as_str().unwrap();let value=if data.starts_with("0x70a08231"){let key=format!("0x{}",&data[data.len()-40..]).to_lowercase();*balances.lock().unwrap().get(&key).unwrap_or(&0)}else{0};json!(format!("0x{value:064x}"))},
                 _=>panic!("unexpected fixture RPC")
             };axum::Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
@@ -184,6 +187,7 @@ async fn paid_fixture() {
     assert_eq!(ranges.load(Ordering::SeqCst), before);
     // Synthetic managed pool: the first unsigned payer is empty, standby is funded.
     // Admission must promote before signing, preserving the new identity's cover owner.
+    // Seed credit predates the RPC confirmed block at height 100 and latest at 112.
     let dir = tempfile::tempdir().unwrap();
     let mut store = crate::rotation::store::Store::create(
         &dir.path().join("state"),
@@ -198,7 +202,7 @@ async fn paid_fixture() {
     let active = addresses[0].address.clone();
     for address in addresses {
         store
-            .record_credit(&address.id, "10000", &format!("0x{:064x}", 1), 88)
+            .record_credit(&address.id, "10000", &format!("0x{:064x}", 88), 88)
             .unwrap();
     }
     for address in addresses {

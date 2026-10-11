@@ -1239,18 +1239,8 @@ impl RunningDeployment {
         for pool in self.managed_pools {
             let stopped = reconciliation_stop.clone();
             reconciliation.spawn(async move {
-                let mut failures = 0u32;
-                loop {
-                    tokio::select! {
-                        _ = stopped.cancelled() => break,
-                        result = pool.reconcile() => {
-                            failures = if result.is_err() { failures.saturating_add(1) } else { 0 };
-                            if result.is_err() {
-                                tracing::warn!(retry_seconds = reconciliation_delay(failures), "background payment reconciliation unavailable; backing off without releasing payment reservations");
-                            }
-                        }
-                    }
-                    tokio::select! { _ = stopped.cancelled()=>break, _ = tokio::time::sleep(Duration::from_secs(reconciliation_delay(failures)))=>{} }
+                if let Err(error) = pool.run_reconciliation(stopped).await {
+                    tracing::warn!(category = %crate::rotation::base::safe_diagnostic(&error), "background reconciliation owner stopped; unresolved obligations remain durable");
                 }
             });
         }
@@ -1572,24 +1562,4 @@ bearer_token_env = "TOKEN"
                 .unwrap(),
         );
     }
-}
-
-// Read-only background polls back off after failures; paid calls still fail closed.
-#[cfg(feature = "zcash")]
-fn reconciliation_delay(failures: u32) -> u64 {
-    if failures == 0 {
-        5
-    } else {
-        15u64.saturating_mul(1u64 << failures.min(5)).min(300)
-    }
-}
-#[cfg(all(test, feature = "zcash"))]
-#[test]
-fn reconciliation_backoff_is_bounded_and_resets_after_success() {
-    assert_eq!(
-        (0..7).map(reconciliation_delay).collect::<Vec<_>>(),
-        vec![5, 30, 60, 120, 240, 300, 300]
-    );
-    assert_eq!(reconciliation_delay(u32::MAX), 300);
-    assert_eq!(reconciliation_delay(0), 5);
 }

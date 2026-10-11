@@ -266,7 +266,16 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         let result = match v["method"].as_str().unwrap() {
             "eth_chainId" => json!("0x2105"),
             "eth_getBlockByNumber" => {
-                json!({"number":if v["params"][0]=="latest" {"0x64"}else{v["params"][0].as_str().unwrap()},"hash":format!("0x{:064x}",1),"timestamp":format!("0x{:x}",now().unwrap())})
+                let height = if v["params"][0] == "latest" {
+                    100
+                } else {
+                    u64::from_str_radix(
+                        v["params"][0].as_str().unwrap().trim_start_matches("0x"),
+                        16,
+                    )
+                    .unwrap()
+                };
+                json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
             }
             "eth_call" => json!(format!("0x{:064x}", 5000000)),
             _ => panic!("unexpected RPC"),
@@ -324,7 +333,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             .await
             .unwrap_err()
             .to_string()
-            .contains("missing candidate balance")
+            .contains("funding credit query")
     );
     assert_eq!(
         before,

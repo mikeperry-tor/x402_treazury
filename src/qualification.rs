@@ -27,7 +27,7 @@ use std::{
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
-const LIMIT: usize = 16 * 1024 * 1024;
+pub(crate) const LIMIT: usize = 16 * 1024 * 1024;
 static ACTIVE: OnceLock<Arc<Guard>> = OnceLock::new();
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

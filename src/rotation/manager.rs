@@ -24,6 +24,22 @@ pub struct PaymentCandidateHandle {
     pub address: String,
     pub generation: i64,
 }
+#[cfg(test)]
+mod admission_tests;
+mod maintenance;
+
+#[cfg(test)]
+#[derive(Clone)]
+enum AdmissionTestStage {
+    Acquired,
+    Journaled,
+    Signed { nonce: String, valid_before: u64 },
+}
+#[cfg(test)]
+type AdmissionTestHook =
+    Arc<dyn Fn(AdmissionTestStage) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>;
+
+#[derive(Clone)]
 pub struct ManagedPool {
     store: StoreHandle,
     pool: String,
@@ -31,7 +47,24 @@ pub struct ManagedPool {
     payment_limit: U256,
     policy: SpendPolicy,
     gate: Arc<Mutex<()>>,
+    reconciliation: Arc<Mutex<()>>,
+    #[cfg(test)]
+    test_admission_hook: Option<AdmissionTestHook>,
 }
+#[derive(Default)]
+struct RecoveryAllowance {
+    evidence_used: bool,
+    signature_replacement_used: bool,
+}
+impl RecoveryAllowance {
+    fn take_evidence(&mut self) -> bool {
+        !std::mem::replace(&mut self.evidence_used, true)
+    }
+    fn take_signature_replacement(&mut self) -> bool {
+        !std::mem::replace(&mut self.signature_replacement_used, true)
+    }
+}
+
 struct Offer {
     raw: Value,
     amount: U256,
@@ -59,12 +92,21 @@ impl ManagedPool {
     ) -> Result<Self> {
         Ok(Self {
             gate: store.group_gate(&pool)?,
+            reconciliation: store.reconciliation_gate(&pool)?,
+            #[cfg(test)]
+            test_admission_hook: None,
             store,
             pool,
             base,
             payment_limit: positive_usdc(deposit)?.min(policy.max_atomic.unwrap_or(U256::MAX)),
             policy,
         })
+    }
+    #[cfg(test)]
+    async fn admission_test_stage(&self, stage: AdmissionTestStage) {
+        if let Some(hook) = &self.test_admission_hook {
+            hook(stage).await;
+        }
     }
     /// Explicit operator opt-out of the historical funding-target payment ceiling.
     pub fn with_funding_target_limit(mut self, enabled: bool) -> Self {
@@ -73,41 +115,32 @@ impl ManagedPool {
         }
         self
     }
-    pub async fn reconcile(&self) -> Result<()> {
-        let _gate = Arc::new(self.gate.clone().lock_owned().await);
-        let pool = self.pool.clone();
-        let query = self
-            .store
-            .call_with_guard(_gate.clone(), move |s| s.chain_query(&pool))
-            .await?;
-        let observation = crate::qualification::pool_observation(&self.pool).await;
-        let view = self.base.view(query).await?;
-        let pool = self.pool.clone();
-        self.store
-            .call_with_guard(_gate.clone(), move |s| {
-                // Keep the RPC anchor and refreshed wallet set distinct from persisted
-                // balances of retired wallets not included in this chain query.
-                let evidence = observation.as_ref().map(|_| serde_json::json!({
-                    "block_height":view.anchor.height,"block_hash":view.anchor.hash,
-                    "confirmed":view.balances.iter().map(|(id,b)| (id.clone(),b.to_string())).collect::<std::collections::BTreeMap<_,_>>()
-                }));
-                s.reconcile_pool(&pool, view)?;
-                if let Some(observation) = observation {
-                    let result = (|| {
-                        let mut evidence = evidence.context("missing pool balance evidence")?;
-                        evidence["unresolved"] = s.qualification_exposure(&pool)?;
-                        observation.record(s.qualification_lifecycle()?, evidence)
-                    })();
-                    if let Err(error) = result {
-                        tracing::warn!(category="qualification_pool_observation_failed", %error,
-                            "pool observation unavailable after successful reconciliation; normal reconciliation continues, no paid request is retried");
-                    }
-                }
-                Ok(())
-            })
-            .await?;
-        drop(_gate);
-        crate::qualification::reconcile_debit(&self.base, &self.store, &self.pool).await
+    async fn acquire_view(
+        &self,
+        query: super::base::ChainQuery,
+        payment: bool,
+        guard: Option<Arc<tokio::sync::OwnedMutexGuard<()>>>,
+    ) -> Result<super::base::ChainView> {
+        let result = if payment {
+            self.base.payment_view(query).await
+        } else {
+            self.base.view(query).await
+        };
+        match result {
+            Ok(view) => Ok(view),
+            Err(error) => {
+                let guard = match guard {
+                    Some(guard) => guard,
+                    None => Arc::new(self.gate.clone().lock_owned().await),
+                };
+                self.store
+                    .call_with_guard(guard, move |store| {
+                        store.record_base_failure(&error)?;
+                        Err(error)
+                    })
+                    .await
+            }
+        }
     }
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
         let pool = self.pool.clone();
@@ -150,6 +183,12 @@ impl ManagedPool {
         cover: Option<&crate::cover::runtime::Call>,
         progress: &crate::payment::SubmissionProgress,
     ) -> Result<(reqwest::Response, bool)> {
+        // Bound foreground owners, including callers awaiting the group gate.
+        // The permit lives through the one signed dispatch and cannot cancel it.
+        static FOREGROUND: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(128);
+        let _foreground = FOREGROUND
+            .try_acquire()
+            .context("managed payment queue capacity unavailable")?;
         let header = response
             .headers()
             .get("payment-required")
@@ -178,20 +217,33 @@ impl ManagedPool {
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
         let qualification = crate::qualification::payment_context()?;
         let (headers, attempt_id) = {
-            let guard = Arc::new(self.gate.clone().lock_owned().await);
+            let mut guard = Arc::new(self.gate.clone().lock_owned().await);
             let pool = self.pool.clone();
             let query = self
                 .store
-                .call(move |s| s.payment_chain_query(&pool))
+                .call_with_guard(guard.clone(), move |s| {
+                    let boundary = s.wallet_boundary(&pool)?;
+                    let wallets = s
+                        .priority_wallets(&pool, boundary)?
+                        .into_iter()
+                        .map(|(_, id, _)| id)
+                        .collect();
+                    s.scoped_chain_query(&pool, wallets, vec![])
+                })
                 .await?;
-            let mut view = self.base.payment_view(query).await?;
-            let mut recovery_commit = false;
+            drop(guard);
+            let mut view = self.acquire_view(query, true, None).await?;
+            #[cfg(test)]
+            self.admission_test_stage(AdmissionTestStage::Acquired)
+                .await;
+            guard = Arc::new(self.gate.clone().lock_owned().await);
+            let mut recovery = RecoveryAllowance::default();
             loop {
                 let pool = self.pool.clone();
                 let hash = requirements_hash.clone();
                 let amount = offer.amount;
                 let payment_limit = self.payment_limit;
-                let expected = expected.clone();
+                let bound_payer = expected.clone();
                 let evidence = view.clone();
                 let prepared = self
                     .store
@@ -201,11 +253,89 @@ impl ManagedPool {
                             amount,
                             &hash,
                             evidence,
-                            Some(&expected),
+                            Some(&bound_payer),
                             payment_limit,
                         )
                     })
-                    .await?;
+                    .await;
+                let prepared = match prepared {
+                    Ok(prepared) => prepared,
+                    Err(error)
+                        if error.downcast_ref::<super::base::evidence::EvidenceFailure>()
+                            == Some(
+                                &super::base::evidence::EvidenceFailure::CompatibilityRequired,
+                            )
+                            && recovery.take_evidence() =>
+                    {
+                        let wallets = vec![expected.wallet.clone()];
+                        let captures = self
+                            .store
+                            .call_with_guard(guard.clone(), move |store| {
+                                wallets
+                                    .into_iter()
+                                    .map(|wallet| {
+                                        Ok((wallet.clone(), store.capture_evidence(&wallet)?))
+                                    })
+                                    .collect::<Result<std::collections::BTreeMap<_, _>>>()
+                            })
+                            .await?;
+                        drop(guard);
+                        for (wallet, certificate) in &mut view.balance_certificates {
+                            if wallet != &expected.wallet {
+                                continue;
+                            }
+                            match self
+                                .base
+                                .recheck_balance(certificate.clone(), captures[wallet].clone())
+                                .await
+                            {
+                                Ok(verified) => *certificate = verified,
+                                Err(error) => {
+                                    let failure_guard =
+                                        Arc::new(self.gate.clone().lock_owned().await);
+                                    return self
+                                        .store
+                                        .call_with_guard(failure_guard, move |store| {
+                                            store.record_base_failure(&error)?;
+                                            Err(error)
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
+                        guard = Arc::new(self.gate.clone().lock_owned().await);
+                        continue;
+                    }
+                    Err(error)
+                        if matches!(
+                            error.downcast_ref::<super::base::evidence::EvidenceFailure>(),
+                            Some(
+                                super::base::evidence::EvidenceFailure::Expired
+                                    | super::base::evidence::EvidenceFailure::BeforeDebit
+                                    | super::base::evidence::EvidenceFailure::Invalidated
+                            )
+                        ) && recovery.take_evidence() =>
+                    {
+                        let pool = self.pool.clone();
+                        let query = self
+                            .store
+                            .call_with_guard(guard.clone(), move |store| {
+                                let boundary = store.wallet_boundary(&pool)?;
+                                let wallets = store
+                                    .priority_wallets(&pool, boundary)?
+                                    .into_iter()
+                                    .map(|(_, id, _)| id)
+                                    .collect();
+                                store.scoped_chain_query(&pool, wallets, vec![])
+                            })
+                            .await?;
+                        drop(guard);
+                        view = self.acquire_view(query, true, None).await?;
+                        guard = Arc::new(self.gate.clone().lock_owned().await);
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
                 let signer = PrivateKeySigner::from_slice(&prepared.key)
                     .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
                 ensure!(
@@ -225,7 +355,14 @@ impl ManagedPool {
                     "managed signer unexpectedly emitted extensions"
                 );
                 let auth = validate_payload(&payload, &offer, &prepared.address)?;
+                #[cfg(test)]
+                self.admission_test_stage(AdmissionTestStage::Signed {
+                    nonce: auth.nonce.clone(),
+                    valid_before: auth.valid_before,
+                })
+                .await;
                 let attempt_id = prepared.id.clone();
+                let balance_valid_until = prepared.valid_until;
                 let context = qualification.clone();
                 // Mark before enqueueing: cancelled/lost acknowledgements never
                 // permit relay retry, dispatch or replacement signing.
@@ -243,24 +380,43 @@ impl ManagedPool {
                         break (headers, attempt_id);
                     }
                     Err(error)
-                        if error.is::<super::store::AdmissionExpired>() && !recovery_commit =>
+                        if error.is::<super::store::AdmissionExpired>()
+                            && recovery.take_signature_replacement() =>
                     {
                         // This typed rejection proves rollback and the bytes are
                         // still private. Discard them and sign once more.
-                        recovery_commit = true;
-                        if now()? > view.admission_valid_until {
+                        if now()? > balance_valid_until {
+                            ensure!(
+                                recovery.take_evidence(),
+                                AdmissionError::WalletNotReady(
+                                    "fresh Base balances required; evidence refresh allowance exhausted; no payment signed"
+                                )
+                            );
                             let pool = self.pool.clone();
                             let query = self
                                 .store
-                                .call(move |s| s.payment_chain_query(&pool))
+                                .call_with_guard(guard.clone(), move |s| {
+                                    let boundary = s.wallet_boundary(&pool)?;
+                                    let wallets = s
+                                        .priority_wallets(&pool, boundary)?
+                                        .into_iter()
+                                        .map(|(_, id, _)| id)
+                                        .collect();
+                                    s.scoped_chain_query(&pool, wallets, vec![])
+                                })
                                 .await?;
-                            view = self.base.payment_view(query).await?;
+                            drop(guard);
+                            view = self.acquire_view(query, true, None).await?;
+                            guard = Arc::new(self.gate.clone().lock_owned().await);
                         }
                     }
                     Err(error) => return Err(error),
                 }
             }
         };
+        #[cfg(test)]
+        self.admission_test_stage(AdmissionTestStage::Journaled)
+            .await;
         retry.headers_mut().extend(headers);
         let mut padding = cover.and_then(|c| c.pad(&mut retry, true));
         if let Some(p) = &mut padding {
@@ -511,6 +667,8 @@ mod ownership_tests {
         let first = make();
         let second = make();
         assert!(Arc::ptr_eq(&first.gate, &second.gate));
+        assert!(Arc::ptr_eq(&first.reconciliation, &second.reconciliation));
+        assert!(!Arc::ptr_eq(&first.gate, &first.reconciliation));
         let guard = first.gate.lock().await;
         assert!(second.gate.try_lock().is_err());
         drop(guard);
@@ -519,5 +677,37 @@ mod ownership_tests {
         drop(second);
         drop(store);
         worker.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod recovery_allowance_tests {
+    use super::RecoveryAllowance;
+
+    #[test]
+    fn compatibility_refresh_and_definite_rollback_allow_one_local_signature_replacement() {
+        let mut recovery = RecoveryAllowance::default();
+        assert!(recovery.take_evidence());
+        assert!(
+            recovery.take_signature_replacement(),
+            "earlier header recheck cannot consume private-signature rollback recovery"
+        );
+        assert!(
+            !recovery.take_evidence(),
+            "expired balances after that rollback cannot acquire a second refresh"
+        );
+        assert!(
+            !recovery.take_signature_replacement(),
+            "a second expired private signature ends the invocation"
+        );
+    }
+
+    #[test]
+    fn definite_rollback_may_use_the_still_available_evidence_refresh() {
+        let mut recovery = RecoveryAllowance::default();
+        assert!(recovery.take_signature_replacement());
+        assert!(recovery.take_evidence());
+        assert!(!recovery.take_signature_replacement());
+        assert!(!recovery.take_evidence());
     }
 }

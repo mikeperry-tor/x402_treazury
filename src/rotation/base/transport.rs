@@ -222,6 +222,7 @@ pub(super) async fn rpc(
         ),
         "unsupported read-only Base RPC method"
     );
+    let _permits = super::resources::rpc().await?;
     let payload = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
     let started = Instant::now();
     // The network client owns connection and renewable read-inactivity limits.

@@ -27,15 +27,18 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
                 return Json(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"private error"}})).into_response();
             }
             let result = match method {
-                "eth_chainId" => json!(if mode == "wrong-chain" {"0x1"} else {"0x2105"}),
+                "eth_chainId" => json!(if mode == "wrong-chain" {"0x1"} else if mode == "malformed-chain" {"not-a-quantity"} else {"0x2105"}),
                 "eth_getBlockByNumber" => {
                     let height = if v["params"][0] == "latest" {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap()};
                     let hash = if mode == "conflict" {999} else {height};
-                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{block_time:x}")})
+                    let timestamp = if mode == "history-stale" {block_time-1000} else {block_time};
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{timestamp:x}")})
                 }
                 "eth_call" => {
                     assert_eq!(v["params"][1]["requireCanonical"], true);
-                    let amount = if mode == "exact" {
+                    let nonce = !v["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231");
+                    let amount = if nonce { if mode == "malformed-nonce" {2} else {1} }
+                    else if mode == "exact" {
                         if v["params"][1]["blockHash"] == format!("0x{:064x}", 88) {9} else {4}
                     } else if mode == "ok" {7} else {999};
                     json!(format!("0x{amount:064x}"))
@@ -52,6 +55,7 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
 }
 pub fn query() -> ChainQuery {
     ChainQuery {
+        captures: Default::default(),
         wallets: vec![
             ("one".into(), format!("0x{:040x}", 1)),
             ("two".into(), format!("0x{:040x}", 2)),

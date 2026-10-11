@@ -6,6 +6,7 @@ mod evidence;
 #[cfg(feature = "zcash")]
 mod expiry;
 pub mod funding;
+pub(crate) mod history;
 mod ownership;
 pub mod refunds;
 use super::error::AdmissionError;
@@ -152,6 +153,9 @@ pub struct Store {
     funding_restriction: super::restriction::FundingRestriction,
     funding_permits: Option<std::sync::Arc<dyn super::restriction::FundingPermits>>,
     network: TreasuryNetwork,
+    evidence_namespace: Uuid,
+    evidence_cache: std::collections::BTreeMap<String, (u64, super::base::BalanceCertificate)>,
+    evidence_order: u64,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
     _lock: ownership::Owner,
@@ -329,6 +333,7 @@ impl Store {
         tx.execute("INSERT INTO snapshots VALUES (1,?1)", [encrypted])?;
         tx.commit()?;
         admission_schema(&db)?;
+        evidence::initialize_runtime(&db)?;
         File::open(dir)?.sync_all()?;
         if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
             File::open(parent)?.sync_all()?;
@@ -336,6 +341,9 @@ impl Store {
         Ok(Self {
             funding_restriction: Default::default(),
             funding_permits: None,
+            evidence_namespace: Uuid::new_v4(),
+            evidence_cache: Default::default(),
+            evidence_order: 0,
             db,
             _lock: owner,
             key,
@@ -383,6 +391,9 @@ impl Store {
         let store = Self {
             funding_restriction: Default::default(),
             funding_permits: None,
+            evidence_namespace: Uuid::new_v4(),
+            evidence_cache: Default::default(),
+            evidence_order: 0,
             db,
             _lock: owner,
             key,
@@ -392,6 +403,7 @@ impl Store {
         store.snapshot()?;
         configure(&store.db)?;
         admission_schema(&store.db)?;
+        evidence::initialize_runtime(&store.db)?;
         Ok(store)
     }
     pub fn id(&self) -> &str {
@@ -1228,9 +1240,12 @@ fn read_status(db: &Connection) -> Result<Status> {
 // The async facade serializes all SQL on a dedicated blocking task. A cancelled
 // caller drops only its response receiver; an accepted transaction still finishes.
 type Work = Box<dyn FnOnce(&mut Store) + Send>;
-type GroupGates = std::sync::Arc<
-    std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
->;
+#[derive(Default)]
+struct GroupOwners {
+    payment: std::sync::Arc<tokio::sync::Mutex<()>>,
+    reconciliation: std::sync::Arc<tokio::sync::Mutex<()>>,
+}
+type GroupGates = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, GroupOwners>>>;
 #[derive(Clone)]
 pub struct StoreHandle {
     sender: tokio::sync::mpsc::Sender<Work>,
@@ -1260,7 +1275,23 @@ impl StoreHandle {
             .group_gates
             .lock()
             .map_err(|_| anyhow::anyhow!("group gate registry poisoned"))?;
-        Ok(gates.entry(pool.to_owned()).or_default().clone())
+        Ok(gates.entry(pool.to_owned()).or_default().payment.clone())
+    }
+    /// Maintenance lifetime ownership is shared across separately constructed
+    /// handles, but never holds the payment gate while acquiring network evidence.
+    pub(crate) fn reconciliation_gate(
+        &self,
+        pool: &str,
+    ) -> Result<std::sync::Arc<tokio::sync::Mutex<()>>> {
+        let mut gates = self
+            .group_gates
+            .lock()
+            .map_err(|_| anyhow::anyhow!("group gate registry poisoned"))?;
+        Ok(gates
+            .entry(pool.to_owned())
+            .or_default()
+            .reconciliation
+            .clone())
     }
     /// Keep group ownership with an accepted store job even if its response
     /// waiter is cancelled. The caller may retain the same guard through signing
@@ -1386,8 +1417,9 @@ pub(crate) struct PreparedPayment {
     balance: U256,
     reserved: U256,
     anchor: super::base::Anchor,
-    valid_until: u64,
+    pub(crate) valid_until: u64,
     support: Option<evidence::BalanceSupport>,
+    certificate: Option<super::base::BalanceCertificate>,
 }
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AdmissionExpired;
@@ -1440,6 +1472,7 @@ impl Store {
     }
     /// Historical authorizations still reconcile, but retired balances cannot
     /// fund a payment and must not delay acquisition of active admission evidence.
+    #[cfg(test)]
     pub(crate) fn payment_chain_query(&self, pool: &str) -> Result<super::base::ChainQuery> {
         self.chain_query_inner(pool, false)
     }
@@ -1448,33 +1481,29 @@ impl Store {
         pool: &str,
         retired_balances: bool,
     ) -> Result<super::base::ChainQuery> {
-        let wallets = self
+        let wallets: Vec<(String,String)> = self
             .db
             .prepare("SELECT id,address FROM wallets WHERE pool_id=?1 AND (role!='RETIRED' OR (?2 AND EXISTS (SELECT 1 FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED')))")?
             .query_map(params![pool, retired_balances], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let pending = self.db.prepare("SELECT a.id,a.wallet_id,a.payer,a.nonce,a.valid_before FROM payment_attempts a WHERE pool_id=?1 AND state='POSSIBLY_SUBMITTED'")?.query_map([pool], |r| Ok(super::base::PendingAuthorization { id:r.get(0)?,wallet:r.get(1)?,payer:r.get(2)?,nonce:r.get(3)?,valid_before:sql_u64(r,4)? }))?.collect::<rusqlite::Result<_>>()?;
-        let anchor = self
-            .db
-            .query_row(
-                "SELECT height,hash FROM payment_anchors WHERE pool_id=?1",
-                [pool],
-                |r| {
-                    Ok(super::base::Anchor {
-                        height: sql_u64(r, 0)?,
-                        hash: r.get(1)?,
-                    })
-                },
-            )
-            .optional()?;
+        let pending: Vec<super::base::PendingAuthorization> = self.db.prepare("SELECT a.id,a.wallet_id,a.payer,a.nonce,a.valid_before FROM payment_attempts a WHERE pool_id=?1 AND state='POSSIBLY_SUBMITTED'")?.query_map([pool], |r| Ok(super::base::PendingAuthorization { id:r.get(0)?,wallet:r.get(1)?,payer:r.get(2)?,nonce:r.get(3)?,valid_before:sql_u64(r,4)? }))?.collect::<rusqlite::Result<_>>()?;
+        let captures = wallets
+            .iter()
+            .map(|(wallet, _)| wallet)
+            .chain(pending.iter().map(|auth| &auth.wallet))
+            .map(|wallet| Ok((wallet.clone(), self.capture_evidence(wallet)?)))
+            .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
         Ok(super::base::ChainQuery {
             wallets,
             pending,
-            anchor,
+            // Legacy pool anchors remain audit data. Verification is wallet scoped.
+            anchor: None,
+            captures,
         })
     }
     /// Chain-only reconciliation. Never admits a payment or promotes a payer.
     pub fn reconcile_pool(&mut self, pool: &str, view: super::base::ChainView) -> Result<()> {
+        let view = self.prepare_evidence_view(view)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1482,10 +1511,87 @@ impl Store {
             tx.query_row("SELECT bootstrapped FROM pools WHERE id=?1", [pool], |r| {
                 r.get(0)
             })?;
-        let depleted = apply_chain_view(&tx, pool, bootstrapped, &view)?;
+        let depleted = apply_chain_view(
+            &tx,
+            pool,
+            bootstrapped,
+            &view,
+            self.evidence_namespace,
+            true,
+        )?;
         commit_chain_view(tx, pool, &view, &depleted)?;
         Ok(())
     }
+    /// Capture a bounded explicit wallet or authorization page. Historical work
+    /// carries no unrelated balance inventory or pool-wide chain dependency.
+    pub(crate) fn scoped_chain_query(
+        &self,
+        pool: &str,
+        wallets: Vec<String>,
+        pending: Vec<super::base::PendingAuthorization>,
+    ) -> Result<super::base::ChainQuery> {
+        ensure!(
+            wallets.len() <= history::PAGE_SIZE && pending.len() <= history::PAGE_SIZE,
+            "evidence page exceeds resource bound"
+        );
+        let wallets = wallets
+            .into_iter()
+            .map(|wallet| {
+                let address = self.db.query_row(
+                    "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
+                    params![wallet, pool],
+                    |row| row.get(0),
+                )?;
+                Ok((wallet, address))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut captures = std::collections::BTreeMap::new();
+        for wallet in wallets
+            .iter()
+            .map(|(wallet, _)| wallet)
+            .chain(pending.iter().map(|auth| &auth.wallet))
+        {
+            let belongs: bool = self.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2)",
+                params![wallet, pool],
+                |row| row.get(0),
+            )?;
+            ensure!(belongs, "evidence wallet group mismatch");
+            captures.insert(wallet.clone(), self.capture_evidence(wallet)?);
+        }
+        Ok(super::base::ChainQuery {
+            wallets,
+            pending,
+            anchor: None,
+            captures,
+        })
+    }
+
+    pub(crate) fn publish_scoped_evidence(
+        &mut self,
+        pool: &str,
+        view: super::base::ChainView,
+    ) -> Result<()> {
+        let view = self.prepare_evidence_view(view)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let bootstrapped = tx.query_row(
+            "SELECT bootstrapped FROM pools WHERE id=?1",
+            [pool],
+            |row| row.get(0),
+        )?;
+        let depleted = apply_chain_view(
+            &tx,
+            pool,
+            bootstrapped,
+            &view,
+            self.evidence_namespace,
+            false,
+        )?;
+        commit_chain_view(tx, pool, &view, &depleted)
+    }
+
     /// Bind an operation's network identity before calculation; bindings are immutable.
     pub fn bind_operation_recipient(&mut self, operation: &str, recipient: &str) -> Result<()> {
         let address: alloy_primitives::Address = recipient.parse()?;
@@ -1552,6 +1658,37 @@ impl Store {
         payment_limit: U256,
     ) -> Result<PreparedPayment> {
         ensure!(cost > U256::ZERO, "invalid payment amount");
+        let view = if let Some(expected) = expected
+            && view.balance_certificates.contains_key(&expected.wallet)
+            && self.db.query_row(
+                "SELECT bootstrapped FROM pools WHERE id=?1",
+                [pool],
+                |row| row.get::<_, bool>(0),
+            )? {
+            // A sufficient bound payer has no dependency on an unrelated
+            // standby's observation or checkpoint race. Legacy fallback selection
+            // validates standby evidence only when that payer cannot cover cost.
+            let mut required = view.clone();
+            required
+                .balances
+                .retain(|wallet, _| wallet == &expected.wallet);
+            required
+                .observations
+                .retain(|wallet, _| wallet == &expected.wallet);
+            required
+                .balance_certificates
+                .retain(|wallet, _| wallet == &expected.wallet);
+            let required = self.prepare_evidence_view(required)?;
+            let available = required.balances[&expected.wallet]
+                .saturating_sub(payment_exposure(&self.db, &expected.wallet)?);
+            if available >= cost {
+                required
+            } else {
+                self.prepare_evidence_view(view)?
+            }
+        } else {
+            self.prepare_evidence_view(view)?
+        };
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1566,14 +1703,14 @@ impl Store {
             cost <= payment_limit,
             AdmissionError::PriceLimit("payment exceeds configured API payment ceiling")
         );
-        let depleted = apply_chain_view(&tx, pool, bootstrapped, &view)?;
-        // Commit evidence even when not ready; payment failures must not lose reconciliation.
-        if super::base::now()? > view.admission_valid_until {
-            commit_chain_view(tx, pool, &view, &depleted)?;
-            anyhow::bail!(AdmissionError::WalletNotReady(
-                "fresh Base balances required; canonical reconciliation retained; no payment signed"
-            ));
-        }
+        let depleted = apply_chain_view(
+            &tx,
+            pool,
+            bootstrapped,
+            &view,
+            self.evidence_namespace,
+            !bootstrapped,
+        )?;
         let active: Option<String> = tx
             .query_row(
                 "SELECT id FROM wallets WHERE pool_id=?1 AND role='ACTIVE'",
@@ -1587,8 +1724,24 @@ impl Store {
                 "both bootstrap addresses require confirmed funding"
             ));
         };
+        let fresh = |wallet: &str| -> Result<bool> {
+            Ok(super::base::now()?
+                <= view
+                    .observations
+                    .get(wallet)
+                    .map_or(view.admission_valid_until, |observation| {
+                        observation.valid_until
+                    }))
+        };
+        if !fresh(&wallet)? {
+            commit_chain_view(tx, pool, &view, &depleted)?;
+            anyhow::bail!(super::base::evidence::EvidenceFailure::Expired);
+        }
         let reserved = |wallet: &str| payment_exposure(&tx, wallet);
-        let balance = view.balances[&wallet];
+        let Some(&balance) = view.balances.get(&wallet) else {
+            commit_chain_view(tx, pool, &view, &depleted)?;
+            anyhow::bail!(AdmissionError::PayerChanged);
+        };
         let exposure = reserved(&wallet)?;
         if balance.saturating_sub(exposure) < cost {
             // A live authorization could explain depletion. Never churn a busy slot.
@@ -1609,7 +1762,15 @@ impl Store {
                     "standby not ready; refill pending; inspect wallet status for funding errors and fund/sync the Zcash treasury if needed; no payment signed"
                 ));
             };
-            if view.balances[&ready].saturating_sub(reserved(&ready)?) < cost {
+            if !fresh(&ready)? {
+                commit_chain_view(tx, pool, &view, &depleted)?;
+                anyhow::bail!(super::base::evidence::EvidenceFailure::Expired);
+            }
+            let Some(&ready_balance) = view.balances.get(&ready) else {
+                commit_chain_view(tx, pool, &view, &depleted)?;
+                anyhow::bail!(AdmissionError::PayerChanged);
+            };
+            if ready_balance.saturating_sub(reserved(&ready)?) < cost {
                 commit_chain_view(tx, pool, &view, &depleted)?;
                 anyhow::bail!(AdmissionError::FundingUnavailable(
                     "standby cannot cover payment"
@@ -1679,14 +1840,24 @@ impl Store {
             payment_limit,
             balance,
             reserved: final_exposure,
-            support: view.observations.get(&wallet).cloned().map(|observation| {
-                evidence::BalanceSupport {
-                    observation,
-                    checkpoint: None,
-                }
-            }),
-            anchor: view.anchor,
-            valid_until: view.admission_valid_until,
+            support: view
+                .balance_certificates
+                .get(&wallet)
+                .map(|certificate| {
+                    evidence::check_balance(&self.db, self.evidence_namespace, certificate)
+                })
+                .transpose()?,
+            certificate: view.balance_certificates.get(&wallet).cloned(),
+            anchor: view.observations.get(&wallet).map_or_else(
+                || view.anchor.clone(),
+                |observation| observation.confirmed.anchor.clone(),
+            ),
+            valid_until: view
+                .observations
+                .get(&wallet)
+                .map_or(view.admission_valid_until, |observation| {
+                    observation.valid_until
+                }),
             wallet,
             generation,
             address,
@@ -1702,6 +1873,19 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let support = admission
+            .certificate
+            .as_ref()
+            .map(|certificate| evidence::check_balance(&tx, self.evidence_namespace, certificate))
+            .transpose()?;
+        ensure!(
+            support.as_ref().map(|support| &support.observation)
+                == admission
+                    .support
+                    .as_ref()
+                    .map(|support| &support.observation),
+            "payment_evidence_changed"
+        );
         let (enabled, generation, role, address, balance, height, hash): (bool, i64, String, String, String, i64, String) = tx.query_row(
             "SELECT p.enabled,p.generation,w.role,w.address,w.balance,w.block_height,w.block_hash FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2",
             params![admission.wallet, admission.pool],
@@ -1794,11 +1978,16 @@ fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
 
 impl Store {
     pub fn operation(&self, id: &str) -> Result<OperationStatus> {
-        self.status()?
-            .treasury_operations
-            .into_iter()
-            .find(|o| o.operation_id == id)
-            .context("operation metadata missing")
+        let (facts, submission, attempts): (String, String, i64) = self.db.query_row(
+            "SELECT facts,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id) THEN 'EXPIRED' ELSE submission END,attempts FROM treasury_operations o WHERE id=?1",
+            [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).optional()?.context("operation metadata missing")?;
+        Ok(OperationStatus {
+            operation_id: id.to_owned(),
+            facts: serde_json::from_str(&facts)?,
+            submission,
+            attempts,
+        })
     }
     pub fn abandon_unprepared(&mut self, id: &str) -> Result<()> {
         let exists: bool = self.db.query_row(
@@ -1888,10 +2077,35 @@ fn apply_chain_view(
     pool: &str,
     bootstrapped: bool,
     view: &super::base::ChainView,
+    namespace: Uuid,
+    complete: bool,
 ) -> Result<Vec<String>> {
     let mut depleted = Vec::new();
+    #[cfg(not(test))]
+    ensure!(
+        view.observations.len() == view.balances.len()
+            && view.balance_certificates.len() == view.balances.len()
+            && view.resolution_certificates.len() == view.resolutions.len(),
+        "missing verified evidence certificates"
+    );
+    if !view.observations.is_empty() {
+        ensure!(
+            view.observations.len() == view.balances.len()
+                && view.balance_certificates.len() == view.observations.len(),
+            "missing verified balance certificates"
+        );
+    }
     for (wallet, observation) in &view.observations {
         observation.validate()?;
+        let certificate = view
+            .balance_certificates
+            .get(wallet)
+            .context("missing verified balance certificate")?;
+        ensure!(
+            certificate.observation() == observation,
+            "balance_certificate_binding_mismatch"
+        );
+        evidence::check_balance(tx, namespace, certificate)?;
         let address: String = tx.query_row(
             "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
             params![wallet, pool],
@@ -1901,8 +2115,6 @@ fn apply_chain_view(
             observation.wallet == *wallet
                 && observation.address.parse::<alloy_primitives::Address>()?
                     == address.parse::<alloy_primitives::Address>()?
-                && observation.confirmed.anchor == view.anchor
-                && observation.valid_until == view.admission_valid_until
                 && view.balances.get(wallet) == Some(&observation.available()),
             super::base::evidence::EvidenceFailure::ScopeMismatch
         );
@@ -1932,6 +2144,32 @@ fn apply_chain_view(
             super::base::AuthorizationOutcome::Used => "USED",
             super::base::AuthorizationOutcome::ExpiredUnused => "EXPIRED_UNUSED",
         };
+        let support = view
+            .resolution_certificates
+            .get(id)
+            .map(|certificate| {
+                ensure!(
+                    certificate.anchor() == anchor
+                        && certificate.outcome() == &resolution.outcome
+                        && certificate.block_time() == resolution.block_time,
+                    "resolution_certificate_binding_mismatch"
+                );
+                evidence::check_resolution(tx, namespace, certificate)
+            })
+            .transpose()?;
+        let existing: Option<(String,i64,String,u64)> = tx.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
+        if let Some(existing) = existing {
+            ensure!(
+                existing
+                    == (
+                        outcome.into(),
+                        i64::try_from(anchor.height)?,
+                        anchor.hash.clone(),
+                        resolution.block_time
+                    ),
+                "conflicting_authorization_resolution"
+            );
+        }
         let changed = tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
         if changed == 1 {
             let (wallet, cost): (String, String) = tx.query_row(
@@ -1940,14 +2178,29 @@ fn apply_chain_view(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
             evidence::subtract_exposure(tx, &wallet, amount(&cost)?)?;
-            tx.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES(?1,?2,?3,?4,?5)",
-                params![id,outcome,i64::try_from(anchor.height)?,anchor.hash,i64::try_from(resolution.block_time)?])?;
+            tx.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES(?1,?2,?3,?4,?5,?6)",
+                params![id,outcome,i64::try_from(anchor.height)?,anchor.hash,i64::try_from(resolution.block_time)?,support])?;
+            if support.is_some() {
+                evidence::advance_checkpoint(tx, &wallet, anchor, outcome == "USED")?;
+            }
         }
     }
-    let rows: Vec<(String, String, String)> = tx
-        .prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
-        .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-        .collect::<rusqlite::Result<_>>()?;
+    let rows: Vec<(String, String, String)> = if complete {
+        tx.prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
+            .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    } else {
+        view.balances
+            .keys()
+            .map(|wallet| {
+                tx.query_row(
+                    "SELECT id,role,target FROM wallets WHERE pool_id=?1 AND id=?2",
+                    params![pool, wallet],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+            })
+            .collect::<rusqlite::Result<_>>()?
+    };
     for (id, role, target) in &rows {
         let Some(balance) = view.balances.get(id) else {
             ensure!(role == "RETIRED", "incomplete Base view");
@@ -1964,19 +2217,32 @@ fn apply_chain_view(
             "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
             params![
                 balance.to_string(),
-                view.anchor.hash,
-                i64::try_from(view.anchor.height)?,
+                view.observations
+                    .get(id)
+                    .map_or(&view.anchor.hash, |observation| &observation
+                        .confirmed
+                        .anchor
+                        .hash),
+                i64::try_from(
+                    view.observations
+                        .get(id)
+                        .map_or(view.anchor.height, |observation| observation
+                            .confirmed
+                            .anchor
+                            .height)
+                )?,
                 id
             ],
         )?;
-        if role == "ALLOCATED" && *balance >= amount(target)? {
+        if complete && role == "ALLOCATED" && *balance >= amount(target)? {
             funding::complete_job(tx, id)?;
             if bootstrapped {
                 tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [id])?;
             }
         }
     }
-    if !bootstrapped
+    if complete
+        && !bootstrapped
         && rows.len() == 2
         && rows
             .iter()

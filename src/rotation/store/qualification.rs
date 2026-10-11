@@ -328,6 +328,8 @@ mod tests {
         }
         let view = || ChainView {
             observations: Default::default(),
+            balance_certificates: Default::default(),
+            resolution_certificates: Default::default(),
             admission_valid_until: u64::MAX,
             anchor: Anchor {
                 height: 10,
@@ -376,7 +378,7 @@ mod tests {
         let mut later = view();
         later.anchor.height = 11;
         later.resolutions.get_mut("used").unwrap().outcome = AuthorizationOutcome::ExpiredUnused;
-        store.reconcile_pool(&pool, later).unwrap();
+        assert!(store.reconcile_pool(&pool, later).is_err());
         assert_eq!(
             store.qualification_state().unwrap()["payment_resolutions"],
             expected

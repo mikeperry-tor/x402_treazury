@@ -163,11 +163,13 @@ without joining blocking scan/proving workers; it does not release liabilities o
 run wallet cleanup. Library serving returns a typed `ForcedShutdown` error for
 its embedding process to handle. A signed-request timeout still leaves durable unresolved exposure.
 
-Managed pool gates protect chain verification, admission, signing and durable
-journaling. Release the gate before signed HTTP submission; a seller delay cannot
-serialize other requests sharing a wallet. Exposure stays reserved until confirmed
-chain reconciliation. A slow Base RPC can still delay admission to that pool;
-waiters remain cancellable, and separate pools remain independent.
+Managed pool gates protect evidence publication, admission, signing and durable
+journaling. Base RPC acquisition and signed HTTP submission run outside the gate.
+Publication rechecks each wallet's captured evidence and shared endpoint generation;
+a completed RPC alone cannot grant authority. A seller delay cannot serialize other
+requests sharing a wallet. Exposure stays reserved until confirmed chain reconciliation.
+A separate reconciliation owner keeps bounded wallet and authorization reads moving
+independently; cancellation of a response waiter does not abandon its accepted pass.
 Help coalesces requests for the same document without blocking other resources.
 Required catalogs must succeed; explicitly optional remote failures are reported
 as unavailable during serving. The rolling catalog-load limit defaults to 2
@@ -346,6 +348,9 @@ financial or qualification authority.
 | MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Base block age and treasury observation age/lag | Evidence freshness for new authority; slow historical reconciliation and scans acquire new admission/catch-up evidence. Base balance acquisition runs once and retains canonical evidence; the serialized store rejects stale admission without restarting the sweep. Old observations are never relabeled. |
+| Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. |
+| Managed payment owners: 128 | Bounds completed financial observations and private signing work retained while waiting for the group gate or signed dispatch. Saturation cannot sign or create a liability. |
+| Reconciliation: four balance reads and four history reads per group | Separate bounded rolling work permits balance refresh while historical nonce reads progress. Five-second cadence and history failure backoff up to 300 seconds control polling only; captured keyset passes have no inventory-count or elapsed-time cutoff. |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours; the separate 300-second margin remains pending the provider contract. |
 | Refund shielding local 24-hour deadline | Persisted authorization lifetime of that prepared operation, alongside consensus block expiry; never renewed during recovery. |
 | x402 authorization validity | Signed payment authority and canonical expiry recovery, independent of HTTP progress. |

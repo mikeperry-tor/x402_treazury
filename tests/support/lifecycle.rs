@@ -222,6 +222,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
     h.client.execute(h.route()).await.unwrap();
     h.f.used.store(true, Ordering::SeqCst);
     h.f.balances.lock().unwrap().insert(old_active.clone(), 0);
+    reconcile_complete_history(&h).await;
     h.client.execute(h.route()).await.unwrap();
     let signed = h.f.signed.lock().unwrap().clone();
     assert_eq!(
@@ -274,6 +275,8 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
     (h.store, h.worker) = StoreHandle::spawn(s);
     h.client = make_client(h.store.clone(), h.pool.clone(), &h.base);
     let mut worker = funder(&h, Arc::clone(&sends));
+    // Canonical history observes prior settlement independently of the refill.
+    reconcile_complete_history(&h).await;
     // Payment from the promoted active wallet works while Zcash refill is pending.
     h.client.execute(h.route()).await.unwrap();
     for _ in 0..12 {
@@ -384,6 +387,7 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
         .address
         .clone();
     h.f.balances.lock().unwrap().insert(active, 2_000_000);
+    reconcile_complete_history(&h).await;
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     h.client.execute(h.route()).await.unwrap();
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);

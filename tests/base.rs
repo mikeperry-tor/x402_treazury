@@ -44,6 +44,7 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
             });
             let rpc = BaseRpc::new(&url, 12, 120).unwrap();
             let query = |anchor| ChainQuery {
+                captures: Default::default(),
                 wallets: vec![("wallet".into(), format!("0x{:040x}", 1))],
                 pending: vec![PendingAuthorization {
                     id: "attempt".into(),

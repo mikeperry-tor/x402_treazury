@@ -11,6 +11,14 @@ pub enum EvidenceFailure {
     ConfirmedReplacement,
     LatestReplacement,
     AmountContradiction,
+    Invalidated,
+    CompatibilityRequired,
+    BeforeDebit,
+    Expired,
+    ChainRepairRequired,
+    EvidenceRepairRequired,
+    ResolutionConflict,
+    MalformedSupport,
 }
 impl std::fmt::Display for EvidenceFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -20,6 +28,14 @@ impl std::fmt::Display for EvidenceFailure {
             Self::ConfirmedReplacement => "confirmed_anchor_replacement",
             Self::LatestReplacement => "latest_anchor_replacement",
             Self::AmountContradiction => "evidence_amount_contradiction",
+            Self::Invalidated => "evidence_invalidated",
+            Self::CompatibilityRequired => "evidence_compatibility_required",
+            Self::BeforeDebit => "balance_precedes_canonical_debit",
+            Self::Expired => "fresh Base balances required; evidence_expired; no payment signed",
+            Self::ChainRepairRequired => "chain_repair_required",
+            Self::EvidenceRepairRequired => "evidence_repair_required",
+            Self::ResolutionConflict => "conflicting_authorization_resolution",
+            Self::MalformedSupport => "malformed_durable_evidence_support",
         })
     }
 }

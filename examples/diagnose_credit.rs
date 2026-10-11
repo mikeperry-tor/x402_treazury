@@ -78,6 +78,7 @@ async fn run() -> Result<()> {
         for (index, pool) in state.pools.iter().enumerate() {
             for lane in 0..2 {
                 let query = ChainQuery {
+                    captures: Default::default(),
                     wallets: pool
                         .addresses
                         .iter()

@@ -33,6 +33,17 @@ struct UnsignedGate {
     remaining: usize,
 }
 #[derive(Clone)]
+struct ChainSnapshot {
+    balances: BTreeMap<String, u64>,
+    used: bool,
+    timestamp: u64,
+}
+#[derive(Default)]
+struct ChainHistory {
+    latest: u64,
+    blocks: BTreeMap<u64, ChainSnapshot>,
+}
+#[derive(Clone)]
 struct Fake {
     balances: Arc<Mutex<BTreeMap<String, u64>>>,
     challenge: Arc<Mutex<Value>>,
@@ -41,7 +52,7 @@ struct Fake {
     rpc_hold: Arc<AtomicBool>,
     nonce_delay: Arc<AtomicBool>,
     balance_delay: Arc<AtomicBool>,
-    latest_time: Arc<std::sync::atomic::AtomicU64>,
+    chain: Arc<Mutex<ChainHistory>>,
     rpc_fault: Arc<Mutex<Option<String>>>,
     confirmed_reads: Arc<AtomicUsize>,
     used: Arc<AtomicBool>,
@@ -116,20 +127,59 @@ async fn rpc(
             "0x2105"
         }),
         "eth_getBlockByNumber" => {
-            if v["params"][0] == "latest" {
-                f.latest_time.store(now().unwrap(), Ordering::SeqCst);
-            }
-            let timestamp = f.latest_time.load(Ordering::SeqCst);
-            let number = if v["params"][0] == "latest" {
-                "0x64"
+            let mut chain = f.chain.lock().unwrap();
+            let height = if v["params"][0] == "latest" {
+                // Every acquisition has a new confirmed head. Historical hashes
+                // retain their exact balances, even after settlement changes the
+                // fixture's current wallet balances.
+                let next = if chain.latest == 0 {
+                    100
+                } else {
+                    chain.latest + 24
+                };
+                let snapshot = ChainSnapshot {
+                    balances: f.balances.lock().unwrap().clone(),
+                    used: f.used.load(Ordering::SeqCst),
+                    timestamp: now().unwrap(),
+                };
+                for height in chain.latest + 1..=next {
+                    chain.blocks.insert(height, snapshot.clone());
+                }
+                chain.latest = next;
+                next
             } else {
-                v["params"][0].as_str().unwrap()
+                u64::from_str_radix(
+                    v["params"][0].as_str().unwrap().trim_start_matches("0x"),
+                    16,
+                )
+                .unwrap()
             };
-            json!({"number":number,"hash":format!("0x{:064x}",if f.reorg.load(Ordering::SeqCst){2}else{1}),"timestamp":format!("0x{:x}",timestamp-if f.stale.load(Ordering::SeqCst){1000}else{0})})
+            let timestamp = chain
+                .blocks
+                .get(&height)
+                .map_or_else(|| now().unwrap(), |block| block.timestamp);
+            let fork = u64::from(f.reorg.load(Ordering::SeqCst));
+            json!({"number":format!("0x{height:x}"),"hash":format!("0x{:064x}",height*2+fork),"timestamp":format!("0x{:x}",timestamp-if f.stale.load(Ordering::SeqCst){1000}else{0})})
         }
         "eth_call" => {
             assert_eq!(v["params"][1]["requireCanonical"], true);
             let data = v["params"][0]["data"].as_str().unwrap();
+            let hash = u64::from_str_radix(
+                v["params"][1]["blockHash"]
+                    .as_str()
+                    .unwrap()
+                    .trim_start_matches("0x"),
+                16,
+            )
+            .unwrap();
+            let snapshot = f
+                .chain
+                .lock()
+                .unwrap()
+                .blocks
+                .get(&(hash / 2))
+                .cloned()
+                .expect("known fixture block");
             let n = if data.starts_with("0x70a08231") {
                 assert_eq!(data.len(), 74);
                 let address = format!("0x{}", &data[data.len() - 40..])
@@ -140,9 +190,9 @@ async fn rpc(
                     .lock()
                     .unwrap()
                     .push((peer, "balance".into(), address.clone()));
-                *f.balances.lock().unwrap().get(&address).unwrap_or(&0)
+                *snapshot.balances.get(&address).unwrap_or(&0)
             } else {
-                u64::from(f.used.load(Ordering::SeqCst))
+                u64::from(snapshot.used)
             };
             json!(format!("0x{n:064x}"))
         }
@@ -274,7 +324,7 @@ impl Harness {
             rpc_hold: Arc::default(),
             nonce_delay: Arc::default(),
             balance_delay: Arc::default(),
-            latest_time: Arc::default(),
+            chain: Arc::default(),
             rpc_fault: Arc::default(),
             confirmed_reads: Arc::default(),
             used: Arc::default(),
@@ -339,6 +389,39 @@ impl Harness {
         }
     }
 }
+// Independently completed balance reads need not be simultaneously compatible
+// with a history proof committed by another read in this same bounded pass.
+fn assert_balance_observation_outcome(result: anyhow::Result<()>) {
+    if let Err(error) = result {
+        use x402_treazury::rotation::base::evidence::EvidenceFailure;
+        assert!(
+            matches!(
+                error.downcast_ref::<EvidenceFailure>(),
+                Some(EvidenceFailure::BeforeDebit | EvidenceFailure::CompatibilityRequired)
+            ),
+            "{error:#}"
+        );
+    }
+}
+async fn reconcile_complete_history(h: &Harness) {
+    assert_balance_observation_outcome(
+        make_pool(h.store.clone(), h.pool.clone(), &h.base)
+            .reconcile()
+            .await,
+    );
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let remaining: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        remaining, 0,
+        "canonical history must finish even if a concurrent balance needs recertification"
+    );
+}
 fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {
     let manager = ManagedPool::new(
         store,
@@ -377,6 +460,7 @@ async fn confirmed_depletion_promotes_once_and_queues_one_replacement() {
         .clone();
     h.f.used.store(true, Ordering::SeqCst);
     h.f.balances.lock().unwrap().insert(active, 0);
+    reconcile_complete_history(&h).await;
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     db.execute_batch("CREATE TRIGGER fail_replacement BEFORE INSERT ON funding_jobs BEGIN SELECT RAISE(ABORT,'injected replacement failure'); END;").unwrap();
     assert!(h.client.execute(h.route()).await.is_err());
@@ -698,7 +782,7 @@ async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("chain_recovery_required")
+            .contains("anchor_replacement")
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     h.close().await;
@@ -1008,6 +1092,7 @@ async fn unused_expired_authorization_requires_fresh_chain_evidence_to_release()
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     h.f.stale.store(false, Ordering::SeqCst);
     h.f.reject.store(false, Ordering::SeqCst);
+    reconcile_complete_history(&h).await;
     h.client.execute(h.route()).await.unwrap();
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     assert_eq!(
@@ -1056,6 +1141,7 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
         .clone();
     h.f.balances.lock().unwrap().insert(active, 0);
     h.f.used.store(true, Ordering::SeqCst);
+    reconcile_complete_history(&h).await;
     h.store
         .call(|s| s.ensure_pool("research", "10"))
         .await
@@ -1105,7 +1191,7 @@ async fn background_reconciliation_releases_confirmed_payment_without_rotating_o
         SpendPolicy::dollars("none").unwrap(),
     )
     .unwrap();
-    manager.reconcile().await.unwrap();
+    assert_balance_observation_outcome(manager.reconcile().await);
     let state = h.store.call(|s| s.status()).await.unwrap();
     assert_eq!(state.pools[0].generation, 0);
     assert_eq!(state.pools[0].addresses.len(), 2);
@@ -1195,6 +1281,7 @@ async fn post_rotation_returns_before_signing_and_requires_caller_retry() {
         .clone();
     h.f.used.store(true, Ordering::SeqCst);
     h.f.balances.lock().unwrap().insert(active, 0);
+    reconcile_complete_history(&h).await;
     let mut route = h.route();
     route.method = "POST".into();
     let error = h.client.execute(route).await.unwrap_err();
@@ -1255,6 +1342,7 @@ async fn promotion_identity_child() {
         h.client.execute(h.route()).await.unwrap();
         h.f.used.store(true, Ordering::SeqCst);
         h.f.balances.lock().unwrap().insert(active.clone(), 0);
+        reconcile_complete_history(&h).await;
         let mut route = h.route();
         route.method = method.into();
         let result = h.client.execute(route).await;
@@ -1422,6 +1510,7 @@ async fn confirmed_payment_can_rotate_while_original_seller_response_is_pending(
         .to_string();
     h.f.used.store(true, Ordering::SeqCst);
     h.f.balances.lock().unwrap().insert(payer, 0);
+    reconcile_complete_history(&h).await;
     assert_eq!(
         concurrency::bounded(h.client.execute(h.route()))
             .await
@@ -1469,20 +1558,16 @@ async fn slow_chain_reconciliation_allows_waiting_admission_without_blocking_oth
     );
     let waiting = client.clone();
     let route = h.route();
-    let mut admission = tokio::spawn(async move { waiting.execute(route).await });
-    // Waiting for the pool lock must survive the former 30-second default.
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(31), &mut admission)
-            .await
-            .is_err()
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    h.f.release.notify_one();
-    concurrency::bounded(reconciliation).await.unwrap().unwrap();
+    let admission = tokio::spawn(async move { waiting.execute(route).await });
+    // The background RPC owns no payment gate. This same-group payment
+    // completes while that exact response remains deliberately held.
     assert_eq!(
         concurrency::bounded(admission).await.unwrap().unwrap(),
         "paid"
     );
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    h.f.release.notify_one();
+    concurrency::bounded(reconciliation).await.unwrap().unwrap();
     concurrency::assert_liabilities(&h, 2, 6_000_000);
     drop(other);
     drop(client);
@@ -1512,6 +1597,7 @@ async fn qualification_guard_allows_active_calls_but_blocks_replacement_before_s
         .unwrap()
         .insert(active.address.clone(), 2_000_000);
     h.f.used.store(true, Ordering::SeqCst);
+    reconcile_complete_history(&h).await;
     // Parallel refusals must not rotate, allocate or sign; confirmed reconciliation survives.
     let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
     for result in [a, b] {
@@ -1674,7 +1760,7 @@ async fn explicit_target_ceiling_opt_out_uses_api_cap_and_confirmed_capacity() {
 }
 
 #[tokio::test]
-async fn slow_historical_authorization_sweep_acquires_fresh_admission_balances() {
+async fn foreground_admission_does_not_start_historical_authorization_sweep() {
     let mut h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
@@ -1690,6 +1776,10 @@ async fn slow_historical_authorization_sweep_acquires_fresh_admission_balances()
     h.client = PaidClient::managed(Arc::new(manager));
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert!(
+        h.f.nonce_delay.load(Ordering::SeqCst),
+        "foreground never requested historical nonce state"
+    );
     h.close().await;
 }
 
@@ -1730,10 +1820,15 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
         .unwrap()
     };
     assert_eq!(pending(), 2);
-    // There is still ample capacity, but malformed evidence must not be
-    // downgraded to an availability failure and silently retained.
+    // Malformed historical evidence fails that reconciliation operation. Paid
+    // admission independently reads balances and never sweeps old nonces.
     *h.f.rpc_fault.lock().unwrap() = Some("nonce".into());
-    assert!(h.client.execute(h.route()).await.is_err());
+    assert!(
+        make_pool(h.store.clone(), h.pool.clone(), &h.base)
+            .reconcile()
+            .await
+            .is_err()
+    );
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     *h.f.rpc_fault.lock().unwrap() = Some("nonce_unavailable".into());
     *h.f.challenge.lock().unwrap() = challenge("4000000");
@@ -1758,6 +1853,12 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
     // Retain one failed nonce while committing another's actual canonical proof.
     *h.f.rpc_fault.lock().unwrap() = Some("first_nonce_unavailable".into());
     h.f.used.store(true, Ordering::SeqCst);
+    assert!(
+        make_pool(h.store.clone(), h.pool.clone(), &h.base)
+            .reconcile()
+            .await
+            .is_err()
+    );
     h.client.execute(h.route()).await.unwrap();
     assert_eq!(pending(), 2);
     assert_eq!(
@@ -1794,6 +1895,7 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
     );
     assert_eq!(h.f.signed.lock().unwrap().len(), 3);
     *h.f.rpc_fault.lock().unwrap() = None;
+    reconcile_complete_history(&h).await;
     h.client.execute(h.route()).await.unwrap();
     assert_eq!(h.f.signed.lock().unwrap().len(), 4);
     assert_eq!(
@@ -1844,19 +1946,31 @@ async fn slow_balance_collection_retains_resolution_without_signing_or_looping()
         )
         .unwrap();
     assert_eq!(
-        resolved, 1,
-        "canonical resolution persists despite stale admission balances"
+        resolved, 0,
+        "foreground admission never sweeps unrelated historical nonces"
     );
     let attempts: i64 = db
         .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
         .unwrap();
     assert_eq!(attempts, 1, "stale balances grant no new reservation");
-    // Background reconciliation also completes, retaining the original block
-    // evidence. Once fresh reads are possible the pool gate is immediately usable.
-    tokio::time::timeout(std::time::Duration::from_secs(8), manager.reconcile())
-        .await
-        .unwrap()
+    // Independently owned historical reconciliation can commit the canonical
+    // resolution even while the balance owner obtains stale admission evidence.
+    assert_balance_observation_outcome(
+        tokio::time::timeout(std::time::Duration::from_secs(8), manager.reconcile())
+            .await
+            .unwrap(),
+    );
+    let resolved: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state='RESOLVED'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
+    assert_eq!(
+        resolved, 1,
+        "canonical resolution survives independently stale balances"
+    );
     h.f.balance_delay.store(false, Ordering::SeqCst);
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);

@@ -5,7 +5,14 @@ use x402_treazury::rotation::base::{Anchor, BaseRpc};
 #[tokio::test]
 async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_view() {
     let (address, logs, server) = fixture::fixture().await;
-    for mode in ["403", "429", "503", "limited", "malformed"] {
+    for mode in [
+        "403",
+        "429",
+        "503",
+        "limited",
+        "malformed",
+        "malformed-chain",
+    ] {
         logs.lock().unwrap().clear();
         let rpc = BaseRpc::with_fallbacks(
             &[
@@ -171,8 +178,9 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
     assert_eq!(view.balances.len(), 2);
     let calls = logs.lock().unwrap();
     // Chain identity, two latest/confirmed anchor pairs, four wallet balance
-    // reads and three canonical anchor rechecks (historical, stable, latest).
-    assert_eq!(calls.len(), 12);
+    // reads and two distinct canonical anchor rechecks. The historical anchor
+    // equals the stable block and is checked once.
+    assert_eq!(calls.len(), 11);
     assert!(calls.iter().all(|(mode, _)| mode == "slow"));
     server.abort();
 }
@@ -200,5 +208,50 @@ async fn exact_balance_evidence_preserves_both_anchors_amounts_and_original_life
         assert_eq!(observation.endpoint.len(), 64);
         assert!(!observation.endpoint.contains(&address.to_string()));
     }
+    server.abort();
+}
+
+#[tokio::test]
+async fn history_uses_its_original_proof_without_requiring_a_fresh_balance_tip() {
+    use x402_treazury::rotation::base::{PendingAuthorization, now};
+    let (address, logs, server) = fixture::fixture().await;
+    let mut query = fixture::query();
+    let (wallet, payer) = query.wallets.remove(0);
+    query.wallets.clear();
+    query.pending.push(PendingAuthorization {
+        id: "history".into(),
+        wallet,
+        payer,
+        nonce: format!("0x{:064x}", 1),
+        valid_before: now().unwrap() - 2000,
+    });
+    let view = BaseRpc::new(&format!("http://{address}/history-stale"), 12, 120)
+        .unwrap()
+        .view(query.clone())
+        .await
+        .unwrap();
+    assert_eq!(view.released, vec!["history"]);
+    assert!(view.observations.is_empty());
+    assert_eq!(
+        logs.lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, call)| call["method"] == "eth_getBlockByNumber"
+                && call["params"][0] == "latest")
+            .count(),
+        1
+    );
+    logs.lock().unwrap().clear();
+    let rpc = BaseRpc::with_fallbacks(
+        &[
+            format!("http://{address}/malformed-nonce"),
+            format!("http://{address}/ok"),
+        ],
+        12,
+        120,
+    )
+    .unwrap();
+    assert_eq!(rpc.view(query).await.unwrap().released, vec!["history"]);
+    assert!(logs.lock().unwrap().iter().any(|(mode, _)| mode == "ok"));
     server.abort();
 }

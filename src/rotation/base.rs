@@ -10,9 +10,13 @@ use std::{
 };
 pub mod evidence;
 mod receipt;
+mod resources;
 mod transport;
+mod verification;
 pub use receipt::{TransferExpectation, TransferProof};
 pub(crate) use transport::RpcFailure;
+pub use verification::{BalanceCertificate, EvidenceCapture, ResolutionCertificate};
+pub(crate) use verification::{EndpointMismatch, EvidenceConflict};
 #[derive(Debug)]
 pub(crate) struct VerificationStage(pub &'static str);
 impl std::fmt::Display for VerificationStage {
@@ -28,6 +32,12 @@ pub fn safe_diagnostic(error: &anyhow::Error) -> String {
     format!("{stage}: {}", safe_reason(error))
 }
 fn safe_reason(error: &anyhow::Error) -> String {
+    if let Some(failure) = error.downcast_ref::<EvidenceConflict>() {
+        return failure.to_string();
+    }
+    if let Some(failure) = error.downcast_ref::<EndpointMismatch>() {
+        return failure.to_string();
+    }
     if let Some(failure) = error.downcast_ref::<evidence::EvidenceFailure>() {
         return failure.to_string();
     }
@@ -114,6 +124,7 @@ pub struct ChainQuery {
     pub wallets: Vec<(String, String)>,
     pub pending: Vec<PendingAuthorization>,
     pub anchor: Option<Anchor>,
+    pub captures: BTreeMap<String, EvidenceCapture>,
 }
 #[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -137,6 +148,8 @@ pub struct ChainView {
     pub balances: BTreeMap<String, U256>,
     /// Complete exact reads, retained separately from the conservative balance.
     pub observations: BTreeMap<String, evidence::BalanceObservation>,
+    pub balance_certificates: BTreeMap<String, BalanceCertificate>,
+    pub resolution_certificates: BTreeMap<String, ResolutionCertificate>,
     pub released: Vec<String>,
     pub resolutions: BTreeMap<String, AuthorizationResolution>,
 }
@@ -209,6 +222,162 @@ impl BaseRpc {
             fallbacks: vec![],
         })
     }
+    fn endpoint_id(&self) -> String {
+        use sha2::{Digest, Sha256};
+        alloy_primitives::hex::encode(Sha256::digest(self.url.as_str().as_bytes()))
+    }
+    async fn verify_capture(
+        &self,
+        capture: &EvidenceCapture,
+        endpoint: &str,
+        progress: &ViewProgress,
+    ) -> Result<()> {
+        let mut anchors: BTreeMap<(u64, String), (bool, bool)> = BTreeMap::new();
+        if let Some(checkpoint) = &capture.checkpoint {
+            anchors.insert((checkpoint.height, checkpoint.hash.clone()), (false, true));
+        }
+        if let Some(previous) = &capture.previous {
+            if !capture.previous_confirmed_covered {
+                anchors
+                    .entry((
+                        previous.confirmed.anchor.height,
+                        previous.confirmed.anchor.hash.clone(),
+                    ))
+                    .or_insert((false, false));
+            }
+            anchors
+                .entry((
+                    previous.latest.anchor.height,
+                    previous.latest.anchor.hash.clone(),
+                ))
+                .or_insert((true, false));
+        }
+        for ((height, hash), (latest_only, financial_checkpoint)) in anchors {
+            let (canonical, _) = progress
+                .step("wallet_checkpoint", self.block(&format!("0x{height:x}")))
+                .await?;
+            if canonical.height != height || canonical.hash != hash {
+                return Err(EvidenceConflict {
+                    wallet: capture.wallet.clone(),
+                    endpoint: endpoint.into(),
+                    anchor: Anchor { height, hash },
+                    latest_only,
+                    financial_checkpoint,
+                }
+                .into());
+            }
+        }
+        Ok(())
+    }
+    /// Header-only compatibility verification preserves the original facts and
+    /// validity. It never falls back by copying amounts between endpoints.
+    pub(crate) async fn recheck_balance(
+        &self,
+        certificate: BalanceCertificate,
+        mut capture: EvidenceCapture,
+    ) -> Result<BalanceCertificate> {
+        let _owner = resources::query()?;
+        let observation = certificate.observation();
+        ensure!(
+            capture.namespace == certificate.capture().namespace
+                && capture.wallet == observation.wallet
+                && capture.generation == certificate.capture().generation,
+            evidence::EvidenceFailure::Invalidated
+        );
+        let endpoint = self.original_endpoint(&observation.endpoint)?;
+        ensure!(
+            capture
+                .endpoint_generations
+                .get(&observation.endpoint)
+                .copied()
+                .unwrap_or(0)
+                == certificate.endpoint_generation(),
+            evidence::EvidenceFailure::Invalidated
+        );
+        capture.previous = Some(observation.clone());
+        capture.previous_confirmed_covered = false;
+        let endpoint = endpoint.for_address(&observation.address)?;
+        endpoint
+            .verify_recheck(&capture, &observation.endpoint)
+            .await?;
+        Ok(BalanceCertificate::verified(
+            capture,
+            observation.clone(),
+            observation.confirmed.anchor.clone(),
+        ))
+    }
+
+    /// A historical immutable nonce fact may survive replaceable-balance
+    /// invalidation, but never endpoint trust invalidation or process reopen.
+    pub(crate) async fn recheck_resolution(
+        &self,
+        certificate: ResolutionCertificate,
+        mut capture: EvidenceCapture,
+    ) -> Result<ResolutionCertificate> {
+        let _owner = resources::query()?;
+        ensure!(
+            capture.namespace == certificate.capture().namespace
+                && capture.wallet == certificate.authorization().wallet
+                && capture
+                    .endpoint_generations
+                    .get(certificate.endpoint())
+                    .copied()
+                    .unwrap_or(0)
+                    == certificate.endpoint_generation(),
+            evidence::EvidenceFailure::Invalidated
+        );
+        let endpoint = self
+            .original_endpoint(certificate.endpoint())?
+            .for_address(&certificate.authorization().payer)?;
+        // Only the compact checkpoint and immutable proof anchor are required.
+        // A replaced ordinary balance cannot destroy useful completed history.
+        capture.previous = None;
+        endpoint
+            .verify_recheck(&capture, certificate.endpoint())
+            .await?;
+        let (canonical, _) = endpoint
+            .block(&format!("0x{:x}", certificate.anchor().height))
+            .await?;
+        ensure!(
+            canonical == *certificate.anchor(),
+            EvidenceConflict {
+                wallet: capture.wallet.clone(),
+                endpoint: certificate.endpoint().into(),
+                anchor: certificate.anchor().clone(),
+                latest_only: false,
+                financial_checkpoint: capture.checkpoint.as_ref() == Some(certificate.anchor())
+            }
+        );
+        Ok(ResolutionCertificate::verified(
+            capture,
+            certificate.endpoint().into(),
+            certificate.authorization().clone(),
+            certificate.anchor().clone(),
+            certificate.outcome().clone(),
+            certificate.block_time(),
+        ))
+    }
+
+    fn original_endpoint(&self, identity: &str) -> Result<&Self> {
+        std::iter::once(self)
+            .chain(&self.fallbacks)
+            .find(|endpoint| endpoint.endpoint_id() == identity)
+            .context("original evidence endpoint unavailable")
+    }
+
+    async fn verify_recheck(&self, capture: &EvidenceCapture, endpoint: &str) -> Result<()> {
+        ensure!(
+            quantity(&self.rpc("eth_chainId", json!([])).await?)
+                .map_err(|_| RpcFailure::malformed("eth_chainId"))?
+                == 8453,
+            EndpointMismatch {
+                endpoint: endpoint.into()
+            }
+        );
+        self.verify_capture(capture, endpoint, &ViewProgress::new())
+            .await
+    }
+
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
         transport::rpc(&self.http, &self.url, method, params).await
     }
@@ -257,6 +426,7 @@ impl BaseRpc {
         self.view_with_policy(query, true).await
     }
     async fn view_with_policy(&self, query: ChainQuery, payment: bool) -> Result<ChainView> {
+        let _owner = resources::query()?;
         // Process-local correlation only; never derived from wallet/pool identities.
         static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let view_sequence = NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -318,8 +488,12 @@ impl BaseRpc {
                 &progress
                     .step("chain_id", self.rpc("eth_chainId", json!([])))
                     .await?
-            )? == 8453,
-            "wrong Base chain"
+            )
+            .map_err(|_| RpcFailure::malformed("eth_chainId"))?
+                == 8453,
+            EndpointMismatch {
+                endpoint: self.endpoint_id()
+            }
         );
         if let Some(previous) = &query.anchor {
             let (canonical, _) = progress
@@ -338,7 +512,14 @@ impl BaseRpc {
             .await
             .context(VerificationStage("latest block"))?;
         let clock = now()?;
-        validate_timestamp(timestamp, clock, self.max_age)?;
+        if !query.wallets.is_empty() {
+            validate_timestamp(timestamp, clock, self.max_age)?;
+        } else {
+            ensure!(
+                timestamp <= clock.saturating_add(30),
+                "Base block is in the future"
+            );
+        }
         let height = latest
             .height
             .checked_sub(self.confirmations)
@@ -353,8 +534,10 @@ impl BaseRpc {
                 && query.anchor.as_ref().is_none_or(|a| height >= a.height),
             "invalid confirmed block"
         );
+        let endpoint = self.endpoint_id();
         let mut released = Vec::new();
         let mut resolutions = BTreeMap::new();
+        let mut resolution_certificates = BTreeMap::new();
         let selector = &keccak256("authorizationState(address,bytes32)")[..4];
         let selector = alloy_primitives::hex::encode(selector);
         let mut unavailable = 0usize;
@@ -387,7 +570,7 @@ impl BaseRpc {
                 }
                 Err(error) => return Err(error),
             };
-            ensure!(used <= U256::from(1), "invalid authorizationState result");
+            ensure!(used <= U256::from(1), RpcFailure::malformed("eth_call"));
             if used == U256::from(1) || confirmed_time > auth.valid_before {
                 resolutions.insert(
                     auth.id.clone(),
@@ -401,6 +584,20 @@ impl BaseRpc {
                         block_time: confirmed_time,
                     },
                 );
+                if let Some(capture) = query.captures.get(&auth.wallet) {
+                    let resolution = &resolutions[&auth.id];
+                    resolution_certificates.insert(
+                        auth.id.clone(),
+                        ResolutionCertificate::verified(
+                            capture.clone(),
+                            endpoint.clone(),
+                            auth.clone(),
+                            confirmed.clone(),
+                            resolution.outcome.clone(),
+                            confirmed_time,
+                        ),
+                    );
+                }
                 released.push(auth.id);
             }
         }
@@ -414,6 +611,47 @@ impl BaseRpc {
         // Authorization resolution is historical canonical evidence. Its sweep
         // cannot age the independently acquired admission balance view.
         let resolution_anchor = confirmed;
+        if query.wallets.is_empty() {
+            let (canonical, _) = progress
+                .step(
+                    "history_anchor_recheck",
+                    self.block(&format!("0x{:x}", resolution_anchor.height)),
+                )
+                .await?;
+            if canonical != resolution_anchor {
+                if let Some(capture) = query
+                    .captures
+                    .values()
+                    .find(|capture| capture.checkpoint.as_ref() == Some(&resolution_anchor))
+                {
+                    return Err(EvidenceConflict {
+                        wallet: capture.wallet.clone(),
+                        endpoint: endpoint.clone(),
+                        anchor: resolution_anchor,
+                        latest_only: false,
+                        financial_checkpoint: true,
+                    }
+                    .into());
+                }
+                anyhow::bail!("Base view changed during reconciliation");
+            }
+            for capture in query.captures.values() {
+                let mut historical = capture.clone();
+                historical.previous = None;
+                self.verify_capture(&historical, &endpoint, progress)
+                    .await?;
+            }
+            return Ok(ChainView {
+                anchor: resolution_anchor,
+                admission_valid_until: timestamp.saturating_add(self.max_age),
+                balances: BTreeMap::new(),
+                observations: BTreeMap::new(),
+                balance_certificates: BTreeMap::new(),
+                resolution_certificates,
+                released,
+                resolutions,
+            });
+        }
         let (latest, timestamp) = progress
             .step("admission_latest_block", self.block("latest"))
             .await?;
@@ -435,10 +673,6 @@ impl BaseRpc {
             "invalid admission block"
         );
         use futures_util::{StreamExt, TryStreamExt};
-        let endpoint = {
-            use sha2::{Digest, Sha256};
-            alloy_primitives::hex::encode(Sha256::digest(self.url.as_str().as_bytes()))
-        };
         let observations: BTreeMap<_, _> =
             futures_util::stream::iter(query.wallets.clone().into_iter().map(|(id, address)| {
                 let confirmed = confirmed.clone();
@@ -481,18 +715,64 @@ impl BaseRpc {
             .buffer_unordered(8)
             .try_collect()
             .await?;
+        let mut rechecked = std::collections::BTreeSet::new();
         for anchor in [&resolution_anchor, &confirmed, &latest] {
+            if !rechecked.insert((anchor.height, anchor.hash.clone())) {
+                continue;
+            }
             let (end, _) = progress
                 .step(
                     "anchor_recheck",
                     self.block(&format!("0x{:x}", anchor.height)),
                 )
                 .await?;
-            ensure!(
-                end.height == anchor.height && end.hash == anchor.hash,
-                "Base view changed during reconciliation"
-            );
+            if end.height != anchor.height || end.hash != anchor.hash {
+                // A contradiction of captured accepted evidence has its scoped
+                // integrity treatment even when that anchor was also a new read.
+                for capture in query.captures.values() {
+                    let financial_checkpoint = capture.checkpoint.as_ref() == Some(anchor);
+                    let previous_confirmed = capture
+                        .previous
+                        .as_ref()
+                        .is_some_and(|observation| &observation.confirmed.anchor == anchor);
+                    let previous_latest = capture
+                        .previous
+                        .as_ref()
+                        .is_some_and(|observation| &observation.latest.anchor == anchor);
+                    if financial_checkpoint || previous_confirmed || previous_latest {
+                        return Err(EvidenceConflict {
+                            wallet: capture.wallet.clone(),
+                            endpoint: endpoint.clone(),
+                            anchor: anchor.clone(),
+                            latest_only: !financial_checkpoint && !previous_confirmed,
+                            financial_checkpoint,
+                        }
+                        .into());
+                    }
+                }
+                anyhow::bail!("Base view changed during reconciliation");
+            }
         }
+        // The financial checkpoint and captured same-wallet facts must still be
+        // canonical on the very endpoint that supplied these exact reads.
+        for capture in query.captures.values() {
+            self.verify_capture(capture, &endpoint, progress).await?;
+        }
+        let balance_certificates = observations
+            .iter()
+            .filter_map(|(wallet, observation)| {
+                query.captures.get(wallet).map(|capture| {
+                    (
+                        wallet.clone(),
+                        BalanceCertificate::verified(
+                            capture.clone(),
+                            observation.clone(),
+                            resolution_anchor.clone(),
+                        ),
+                    )
+                })
+            })
+            .collect();
         // Preserve completed evidence even if balance acquisition outlasted its
         // admission window. The store checks that window before new authority;
         // retrying this entire sweep here could hold the pool gate forever.
@@ -504,6 +784,8 @@ impl BaseRpc {
                 .map(|(id, observation)| (id.clone(), observation.available()))
                 .collect(),
             observations,
+            balance_certificates,
+            resolution_certificates,
             released,
             resolutions,
         })
@@ -572,7 +854,7 @@ mod tests {
             let writer = logs.clone();
             let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false).with_writer(move ||writer.clone()).finish();
             let rpc = BaseRpc::new(&url,12,120).unwrap();
-            let error = rpc.view(ChainQuery{wallets:vec![],pending:vec![],anchor:None}).with_subscriber(subscriber).await.err().unwrap();
+            let error = rpc.view(ChainQuery{wallets:vec![],pending:vec![],anchor:None,captures:Default::default()}).with_subscriber(subscriber).await.err().unwrap();
             let public = safe_diagnostic(&error);
             let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
             for text in [&public, &logged, &error.to_string()] {
