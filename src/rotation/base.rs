@@ -459,6 +459,7 @@ impl BaseRpc {
                         .context(VerificationStage("latest balance"))?;
                     let observation = evidence::BalanceObservation {
                         wallet: id.clone(),
+                        address: address.to_string(),
                         network: "eip155:8453".into(),
                         asset: USDC.into(),
                         endpoint,

@@ -1,6 +1,6 @@
 //! Complete balance values and canonical comparison, independent of payment policy.
 use super::Anchor;
-use alloy_primitives::U256;
+use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Fixed failure categories. Acquisition failures alone never invalidate accepted facts.
@@ -35,6 +35,7 @@ pub struct BalancePoint {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BalanceObservation {
     pub wallet: String,
+    pub address: String,
     pub network: String,
     pub asset: String,
     /// SHA-256 identity of the configured endpoint; contains no URL or credential.
@@ -52,6 +53,18 @@ impl BalanceObservation {
         self.confirmed.amount.max(self.latest.amount)
     }
     pub fn validate(&self) -> Result<(), EvidenceFailure> {
+        if self.network != "eip155:8453" || !self.asset.eq_ignore_ascii_case(crate::payment::USDC) {
+            return Err(EvidenceFailure::ScopeMismatch);
+        }
+        if self.wallet.is_empty()
+            || self.address.parse::<Address>().is_err()
+            || self.confirmed.anchor.hash.parse::<B256>().is_err()
+            || self.latest.anchor.hash.parse::<B256>().is_err()
+            || self.endpoint.len() != 64
+            || !self.endpoint.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(EvidenceFailure::InvalidTuple);
+        }
         if self.confirmations == 0
             || self.latest.anchor.height.checked_sub(self.confirmations)
                 != Some(self.confirmed.anchor.height)
@@ -66,6 +79,7 @@ impl BalanceObservation {
         self.validate()?;
         previous.validate()?;
         if self.wallet != previous.wallet
+            || self.address != previous.address
             || self.network != previous.network
             || self.asset != previous.asset
             || self.confirmations != previous.confirmations
@@ -105,21 +119,22 @@ mod tests {
     fn observation(height: u64, confirmed: u64, latest: u64) -> BalanceObservation {
         BalanceObservation {
             wallet: "wallet".into(),
+            address: format!("0x{:040x}", 1),
             network: "eip155:8453".into(),
             asset: crate::payment::USDC.into(),
-            endpoint: "endpoint".into(),
+            endpoint: "a".repeat(64),
             confirmations: 12,
             confirmed: BalancePoint {
                 anchor: Anchor {
                     height,
-                    hash: format!("hash-{height}"),
+                    hash: format!("0x{height:064x}"),
                 },
                 amount: U256::from(confirmed),
             },
             latest: BalancePoint {
                 anchor: Anchor {
                     height: height + 12,
-                    hash: format!("hash-{}", height + 12),
+                    hash: format!("0x{:064x}", height + 12),
                 },
                 amount: U256::from(latest),
             },
@@ -148,12 +163,12 @@ mod tests {
     fn replacements_and_scope_changes_have_distinct_categories() {
         let original = observation(20, 8, 3);
         let mut changed = original.clone();
-        changed.latest.anchor.hash = "replacement".into();
+        changed.latest.anchor.hash = format!("0x{:064x}", 999);
         assert_eq!(
             changed.compare(&original),
             Err(EvidenceFailure::LatestReplacement)
         );
-        changed.confirmed.anchor.hash = "replacement-confirmed".into();
+        changed.confirmed.anchor.hash = format!("0x{:064x}", 998);
         assert_eq!(
             changed.compare(&original),
             Err(EvidenceFailure::ConfirmedReplacement)

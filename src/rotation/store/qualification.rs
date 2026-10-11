@@ -244,7 +244,7 @@ mod tests {
         store
             .db
             .execute(
-                "INSERT INTO payment_admission_evidence VALUES ('new',12,?1,'100','10','1000')",
+                "INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until) VALUES ('new',12,?1,'100','10','1000')",
                 [&hash],
             )
             .unwrap();
@@ -324,6 +324,7 @@ mod tests {
         for (id, wallet) in ["used", "expired"].into_iter().zip(&wallets) {
             store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES(?1,?2,?3,0,'1','hash','POSSIBLY_SUBMITTED')",
                 params![id,pool,wallet.id]).unwrap();
+            super::evidence::add_exposure(&store.db, &wallet.id, U256::from(1)).unwrap();
         }
         let view = || ChainView {
             observations: Default::default(),

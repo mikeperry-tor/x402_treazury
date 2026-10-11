@@ -2,6 +2,7 @@
 #[cfg(feature = "zcash")]
 mod allocation;
 mod backup;
+mod evidence;
 #[cfg(feature = "zcash")]
 mod expiry;
 pub mod funding;
@@ -543,13 +544,28 @@ impl Store {
     pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
-        let status = self.status()?;
-        ensure!(!status.outgoing_pending, "treasury_send_pending");
-        let observation = status.sync.context("treasury_not_synced")?;
-        ensure!(
-            observation.fresh(now, status.snapshot_revision),
-            "treasury_sync_stale"
-        );
+        let outgoing_pending: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(!outgoing_pending, "treasury_send_pending");
+        let observation: String = self
+            .db
+            .query_row(
+                "SELECT observation FROM treasury_sync WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .context("treasury_not_synced")?;
+        let observation: SyncObservation = serde_json::from_str(&observation)?;
+        let revision: i64 = self.db.query_row(
+            "SELECT revision FROM snapshots ORDER BY revision DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(observation.fresh(now, revision), "treasury_sync_stale");
         if input_zatoshis > observation.spendable_shielded_zatoshis {
             tracing::warn!(
                 category = "treasury_insufficient_spendable_funds",
@@ -1060,7 +1076,7 @@ fn allocate(
     )?;
     db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,?2,?3,?4,?5,?6,'ALLOCATED')",params![id,pool,seq,signer.address().to_string(),encrypted,target])?;
     db.execute(
-        "INSERT INTO funding_jobs VALUES (?1,?2,'QUEUED',?3)",
+        "INSERT INTO funding_jobs(id,wallet_id,state,target) VALUES (?1,?2,'QUEUED',?3)",
         params![job, id, target],
     )?;
     db.execute(
@@ -1278,7 +1294,7 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 13, "unsupported state schema");
+    ensure!(version <= 14, "unsupported state schema");
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1352,6 +1368,9 @@ CREATE TABLE payment_admission_evidence(attempt_id TEXT PRIMARY KEY REFERENCES p
 DELETE FROM payment_attempts WHERE state='ADMITTED';
 PRAGMA user_version=13; COMMIT;")?;
     }
+    if version < 14 {
+        evidence::initialize(db)?;
+    }
     Ok(())
 }
 pub(crate) struct PreparedPayment {
@@ -1368,6 +1387,7 @@ pub(crate) struct PreparedPayment {
     reserved: U256,
     anchor: super::base::Anchor,
     valid_until: u64,
+    support: Option<evidence::BalanceSupport>,
 }
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AdmissionExpired;
@@ -1659,6 +1679,12 @@ impl Store {
             payment_limit,
             balance,
             reserved: final_exposure,
+            support: view.observations.get(&wallet).cloned().map(|observation| {
+                evidence::BalanceSupport {
+                    observation,
+                    checkpoint: None,
+                }
+            }),
             anchor: view.anchor,
             valid_until: view.admission_valid_until,
             wallet,
@@ -1714,16 +1740,21 @@ impl Store {
             clock <= admission.valid_until && clock < auth.valid_before,
             AdmissionExpired
         );
-        tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before) VALUES (?1,?2,?3,?4,?5,?6,'POSSIBLY_SUBMITTED',?7,?8,?9,?10,?11)",params![admission.id,admission.pool,admission.wallet,admission.generation,admission.cost.to_string(),admission.requirements_hash,auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?])?;
+        tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,?4,?5,?6,'POSSIBLY_SUBMITTED',?7,?8,?9,?10,?11,?12)",params![admission.id,admission.pool,admission.wallet,admission.generation,admission.cost.to_string(),admission.requirements_hash,auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?,evidence::next_sequence(&tx)?])?;
+        evidence::add_exposure(&tx, &admission.wallet, admission.cost)?;
         tx.execute(
-            "INSERT INTO payment_admission_evidence VALUES (?1,?2,?3,?4,?5,?6)",
+            "INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
                 admission.id,
                 height,
                 hash,
                 balance,
                 reserved.to_string(),
-                admission.valid_until.to_string()
+                admission.valid_until.to_string(),
+                admission.support.as_ref().map(serde_json::to_string).transpose()?,
+                admission.support.as_ref().map(|support| i64::try_from(support.observation.latest.anchor.height)).transpose()?,
+                admission.support.as_ref().map(|support| &support.observation.latest.anchor.hash),
+                admission.support.as_ref().map(|support| &support.observation.endpoint),
             ],
         )?;
         if let Some(context) = qualification {
@@ -1748,12 +1779,7 @@ impl Store {
 }
 
 fn payment_exposure(db: &Connection, wallet: &str) -> Result<U256> {
-    db.prepare("SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'")?
-        .query_map([wallet], |r| r.get::<_, String>(0))?
-        .try_fold(U256::ZERO, |sum, value| {
-            sum.checked_add(amount(&value?)?)
-                .context("reservation overflow")
-        })
+    evidence::exposure(db, wallet)
 }
 
 fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
@@ -1864,6 +1890,23 @@ fn apply_chain_view(
     view: &super::base::ChainView,
 ) -> Result<Vec<String>> {
     let mut depleted = Vec::new();
+    for (wallet, observation) in &view.observations {
+        observation.validate()?;
+        let address: String = tx.query_row(
+            "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
+            params![wallet, pool],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            observation.wallet == *wallet
+                && observation.address.parse::<alloy_primitives::Address>()?
+                    == address.parse::<alloy_primitives::Address>()?
+                && observation.confirmed.anchor == view.anchor
+                && observation.valid_until == view.admission_valid_until
+                && view.balances.get(wallet) == Some(&observation.available()),
+            super::base::evidence::EvidenceFailure::ScopeMismatch
+        );
+    }
     ensure!(
         view.released.len() == view.resolutions.len()
             && view
@@ -1891,6 +1934,12 @@ fn apply_chain_view(
         };
         let changed = tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
         if changed == 1 {
+            let (wallet, cost): (String, String) = tx.query_row(
+                "SELECT wallet_id,amount FROM payment_attempts WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            evidence::subtract_exposure(tx, &wallet, amount(&cost)?)?;
             tx.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES(?1,?2,?3,?4,?5)",
                 params![id,outcome,i64::try_from(anchor.height)?,anchor.hash,i64::try_from(resolution.block_time)?])?;
         }

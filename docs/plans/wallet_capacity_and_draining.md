@@ -2497,14 +2497,26 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   responses and TLS failures permit complete reacquisition from a configured
   fallback without weakening TLS or retrying accepted contradictions. Four value
   tests, a fallback-classifier fixture and six real Base failover fixtures pass.
-  Durable per-wallet verification, invalidation, bounded traversal/exposure and
-  moving RPC outside the gate remain unfinished.
+  Schema 14 now preserves exact signed-admission support and indexed immutable
+  reconciliation sequences. Checked per-wallet exposure is derived by streaming
+  existing decimal journal amounts and maintained with signed insertion/release
+  in their transactions. Ordinary admission no longer sums historical rows.
+  Canonical checkpoints remain explicitly unknown until verified. Targeted treasury
+  readiness reads avoid materializing full status. Validation: 44 store tests,
+  18 rotation integration tests and two large-history/arithmetic fixtures pass;
+  owner-failure tests also compare aggregate exposure to the preserved journal.
+  Durable per-wallet verification, invalidation, bounded traversal and moving RPC
+  outside the gate remain unfinished.
 
 Steps 2–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
 conversion has been performed. Detailed conversion preconditions remain to be
-established against relevant source accounting and canonical metadata.
+established against relevant source accounting and canonical metadata. All five
+payment resolutions are USED; current completed jobs have confirmed source
+operations. Two archived operations retain quote/refund bindings, including one
+prepared operation with canonical-expiry metadata and preserved resolved bytes.
+There are no recorded return outputs or outstanding source reservations.
 
 ### Remaining delivery order
 

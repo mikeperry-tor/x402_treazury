@@ -1,0 +1,18 @@
+DROP INDEX IF EXISTS payment_reconciliation_sequence;
+DROP INDEX IF EXISTS payment_pending_sequence;
+DROP INDEX IF EXISTS payment_wallet_state;
+DROP INDEX IF EXISTS admission_confirmed_support;
+DROP INDEX IF EXISTS admission_latest_support;
+DROP INDEX IF EXISTS resolution_anchor_support;
+ALTER TABLE wallets DROP COLUMN financial_height;
+ALTER TABLE wallets DROP COLUMN financial_hash;
+ALTER TABLE wallets DROP COLUMN debit_height;
+ALTER TABLE wallets DROP COLUMN debit_hash;
+ALTER TABLE wallets DROP COLUMN evidence_repair;
+ALTER TABLE wallets DROP COLUMN unresolved_exposure;
+ALTER TABLE payment_attempts DROP COLUMN reconciliation_sequence;
+ALTER TABLE payment_admission_evidence DROP COLUMN support;
+ALTER TABLE payment_admission_evidence DROP COLUMN latest_height;
+ALTER TABLE payment_admission_evidence DROP COLUMN latest_hash;
+ALTER TABLE payment_admission_evidence DROP COLUMN endpoint;
+ALTER TABLE payment_resolutions DROP COLUMN support;

@@ -56,7 +56,8 @@ fn populated(dir: &Path) -> Store {
             .unwrap();
     }
     let wallet = &s.status().unwrap().pools[0].addresses[0];
-    s.db.execute("INSERT INTO payment_attempts VALUES ('payment',?1,?2,0,'7','hash','POSSIBLY_SUBMITTED',?3,?3,?4,0,1000)",params![pool,wallet.id,wallet.address,format!("0x{:064x}",1)]).unwrap();
+    s.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES ('payment',?1,?2,0,'7','hash','POSSIBLY_SUBMITTED',?3,?3,?4,0,1000,1)",params![pool,wallet.id,wallet.address,format!("0x{:064x}",1)]).unwrap();
+    evidence::add_exposure(&s.db, &wallet.id, U256::from(7)).unwrap();
     s.db.execute(
         "INSERT INTO payment_anchors VALUES (?1,100,'base-block')",
         [&pool],
@@ -107,8 +108,16 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
             .unwrap();
         db.execute_batch("BEGIN;").unwrap();
         for table in tables {
+            let columns = db
+                .prepare(&format!("PRAGMA main.table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .join(",");
             db.execute_batch(&format!(
-                "INSERT INTO main.{table} SELECT * FROM donor.{table};"
+                "INSERT INTO main.{table}({columns}) SELECT {columns} FROM donor.{table};"
             ))
             .unwrap();
         }
@@ -138,7 +147,7 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
         assert_eq!(
             s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
                 .unwrap(),
-            13
+            14
         );
         assert_eq!(s.snapshot().unwrap().0, revision);
         assert_eq!(
@@ -407,14 +416,14 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
             format!("prepared-{i}").as_bytes()
         );
     }
-    s.db.execute_batch("PRAGMA user_version=14;").unwrap();
+    s.db.execute_batch("PRAGMA user_version=15;").unwrap();
     drop(s);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err());
     let db = Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap(),
-        14
+        15
     );
     assert_eq!(
         db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
@@ -618,6 +627,10 @@ fn unsigned_queries_preserve_leases_and_exclusive_reopen_cleans_only_unsigned() 
     assert_eq!(count(&store), 2);
     store
         .db
+        .execute_batch(include_str!("../fixtures/state/remove_evidence_v14.sql"))
+        .unwrap();
+    store
+        .db
         .execute_batch("DROP TABLE payment_admission_evidence; PRAGMA user_version=12;")
         .unwrap();
     drop(store);
@@ -721,6 +734,28 @@ fn assert_atomic_counts(store: &Store, signed: i64, evidence: i64) {
         })
         .unwrap();
     assert_eq!(count, evidence);
+    let wallets = store
+        .db
+        .prepare("SELECT id,unresolved_exposure FROM wallets")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    for (wallet, aggregate) in wallets {
+        let journal = store
+            .db
+            .prepare("SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'")
+            .unwrap()
+            .query_map([wallet], |row| row.get::<_, String>(0))
+            .unwrap()
+            .fold(U256::ZERO, |sum, value| {
+                sum.checked_add(amount(&value.unwrap()).unwrap()).unwrap()
+            });
+        assert_eq!(amount(&aggregate).unwrap(), journal);
+    }
 }
 
 #[test]
@@ -746,7 +781,12 @@ fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
             "expiry" => prepared.valid_until = 0,
             "signature_expiry" => auth.valid_before = 1,
             "ownership" => store.disable_pool("fixture").unwrap(),
-            "capacity" => { store.db.execute("UPDATE payment_attempts SET amount='4999999' WHERE id='payment'", []).unwrap(); },
+            "capacity" => {
+                let tx = store.db.transaction().unwrap();
+                tx.execute("UPDATE payment_attempts SET amount='4999999' WHERE id='payment'", []).unwrap();
+                evidence::add_exposure(&tx, &prepared.wallet, U256::from(4_999_992)).unwrap();
+                tx.commit().unwrap();
+            },
             "cap" => prepared.payment_limit = U256::from(10),
             _ => {}
         }
