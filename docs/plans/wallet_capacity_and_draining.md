@@ -2537,11 +2537,32 @@ handoff. Public reports omit private identifiers, credentials, prose and paths.
   archived bindings/reopen, unrelated history, duplicates and canonical conflicts.
   These offline fixtures do not establish funded or live settlement qualification.
 
-Steps 5–9 remain unfinished except for the portions described above. The known
+- Step 5 records immutable destination readiness independently of source accounting
+  and validated provider outcomes. Financial completion validates the complete
+  original readiness support and operation binding; later spending does not revoke
+  that evidence. Accepted quote terms remain exact, original allocation targets
+  remain immutable, and the treasury owner rechecks preparation authority after
+  read-only readiness checks. Canonical expiry or proven unprepared closure archives
+  the original operation without authorizing a replacement; reauthorization checks
+  current policy separately. Historical endpoint reverification preserves original
+  support and never creates a fresh admission balance. Occupied legacy state fails
+  read-only preflight before writable initialization or key loading. Focused funding
+  library tests (45), funding integration tests (20), and the corrected allocation
+  rollover fixture passed. The isolated milestone snapshot passed 273 default-Zcash
+  library tests, nine CLI contracts, 20 funding integrations, 38 managed-payment
+  tests (including the corrected lifecycle fixtures), 18 rotation integrations,
+  the real treasury actor preparation/submission/reconciliation fixture, all-target
+  Clippy with warnings denied, and formatting checks. Source submission,
+  confirmation, sync-phase updates and prepared-byte lookup use scoped reads.
+  Independent observation scheduling and final reserve-claim
+  integration remain steps 6 and 7 respectively.
+
+Steps 6–9 remain unfinished except for the portions described above. The known
 operator source inspected read-only for step 8 is schema 12 with three funded
 active/ready pairs, six completed jobs and five resolved payment attempts; no
-conversion has been performed. Detailed conversion preconditions remain to be
-established against relevant source accounting and canonical metadata. All five
+conversion has been performed. The source lacks immutable destination-readiness
+support; the operator explicitly selected the strict preflight-rejection branch
+(`legacy_destination_readiness_support_missing`). All five
 payment resolutions are USED; current completed jobs have confirmed source
 operations. Two archived operations retain quote/refund bindings, including one
 prepared operation with canonical-expiry metadata and preserved resolved bytes.

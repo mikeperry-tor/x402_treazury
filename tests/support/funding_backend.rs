@@ -59,28 +59,69 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         deadline: now().unwrap() + 1000,
         deposit: Some("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into()),
     };
+    let original_job = job.clone();
+    let original_quote = serde_json::to_vec(&quote).unwrap();
+    store
+        .call(move |s| s.save_funding_quote(&original_job.id, &original_quote))
+        .await
+        .unwrap();
     let before = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
-    for field in ["recipient", "amount", "confidentiality"] {
+    for field in [
+        "recipient",
+        "amount",
+        "confidentiality",
+        "input",
+        "deposit",
+        "deadline",
+        "request",
+        "response",
+    ] {
         let mut bad = quote.clone();
-        let value = match field {
-            "recipient" => json!(format!("0x{:040x}", 9)),
-            "amount" => json!("4000000"),
-            _ => json!("basic"),
-        };
-        bad.request[field] = value.clone();
-        bad.response["quoteRequest"][field] = value;
-        if field == "amount" {
-            bad.response["quote"]["amountOut"] = json!("4000000");
-            bad.response["quote"]["amountInUsd"] = json!("4");
+        match field {
+            "recipient" | "amount" | "confidentiality" => {
+                let value = match field {
+                    "recipient" => json!(format!("0x{:040x}", 9)),
+                    "amount" => json!("4000000"),
+                    _ => json!("basic"),
+                };
+                bad.request[field] = value.clone();
+                bad.response["quoteRequest"][field] = value;
+                if field == "amount" {
+                    bad.response["quote"]["amountOut"] = json!("4000000");
+                    bad.response["quote"]["amountInUsd"] = json!("4");
+                }
+            }
+            "input" => {
+                bad.input = 90_000;
+                bad.response["quote"]["amountIn"] = json!("90000");
+            }
+            "deposit" => {
+                bad.deposit = Some("t1different-deposit".into());
+                bad.response["quote"]["depositAddress"] = json!("t1different-deposit");
+            }
+            "deadline" => {
+                bad.deadline += 1;
+                bad.response["quote"]["deadline"] = json!(
+                    chrono::DateTime::from_timestamp(bad.deadline as i64, 0)
+                        .unwrap()
+                        .to_rfc3339()
+                );
+            }
+            "request" => {
+                bad.request["opaque"] = json!("changed");
+                bad.response["quoteRequest"] = bad.request.clone();
+            }
+            "response" => bad.response["opaque"] = json!("changed"),
+            _ => unreachable!(),
         }
         let error = backend.prepare(&job, &bad).await.unwrap_err();
         assert!(
             error
                 .to_string()
-                .contains("persisted funding binding mismatch"),
+                .contains("persisted funding quote mismatch"),
             "{field}: {error}"
         );
-        assert!(commands.test_is_empty());
+        assert!(commands.test_is_empty(), "{field} dispatched a command");
     }
     let (result, observed) = tokio::join!(backend.prepare(&job, &quote), commands.test_observe());
     assert!(
@@ -242,11 +283,28 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             "waiting_for_transaction_expiry"
         ))
     ));
-    let ObservedCommand::RecoverFunding(id, limit) = observed else {
+    let ObservedCommand::RecoverFunding(id, limit, allowed) = observed else {
         panic!("wrong recovery command")
     };
     assert_eq!(id, job.id);
     assert_eq!(limit, backend.max_attempts(&job));
+    assert_eq!(allowed, backend.funding.auto_fund);
+    backend.funding.auto_fund = false;
+    assert!(
+        backend
+            .submit(&job)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("funding_disabled")
+    );
+    assert!(commands.test_is_empty());
+    let (recovered, observed) = tokio::join!(backend.recover(&job), commands.test_observe());
+    assert!(recovered.unwrap().is_some());
+    assert!(matches!(
+        observed,
+        ObservedCommand::RecoverFunding(_, _, false)
+    ));
     let (result, observed) = tokio::join!(backend.reconcile(&job), commands.test_observe());
     assert!(result.is_err());
     let ObservedCommand::Reconcile(id) = observed else {

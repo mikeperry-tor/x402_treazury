@@ -192,7 +192,10 @@ mod tests {
         s.ensure_pool("return_history", "5")?;
         let job = s.funding_jobs()?.remove(0);
         s.save_refund_address(&job.id, "original-address", 1, b"with-address")?;
-        s.save_funding_quote(&job.id, b"quote")?;
+        let quote = serde_json::to_vec(
+            &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+        )?;
+        s.save_funding_quote(&job.id, &quote)?;
         s.advance_funding(
             &job.id,
             funding::FundingPhase::Quoted,

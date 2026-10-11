@@ -1,4 +1,8 @@
 //! Offline executable boundaries, with synthetic stores and no real wallet material.
+#[path = "support/funding_quote.rs"]
+mod quote_fixture;
+#[path = "support/rpc_evidence.rs"]
+mod rpc_evidence;
 use serde_json::{Value, json};
 use std::{path::Path, process::Output};
 use x402_treazury::rotation::store::{Store, funding::FundingPhase};
@@ -48,7 +52,12 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     let pool = store.ensure_pool("fixture", "5").unwrap();
     let jobs = store.funding_jobs().unwrap();
     let pending = &jobs[1];
-    store.save_funding_quote(&pending.id, b"quote").unwrap();
+    store
+        .save_funding_quote(
+            &pending.id,
+            &quote_fixture::bound(&pending.target, &pending.recipient, "quote"),
+        )
+        .unwrap();
     store
         .advance_funding(&pending.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
@@ -112,11 +121,11 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     recover[9] = jobs[0].id.as_str();
     assert_eq!(
         good(run(dir, &recover, &[]).await),
-        json!({"funding_job_reset":true})
+        json!({"funding_attempt_closed":true})
     );
     let mut store = Store::open(&state, &key, &id).unwrap();
     let now = store.funding_jobs().unwrap();
-    assert_ne!(
+    assert_eq!(
         now.iter()
             .find(|j| j.id == jobs[0].id)
             .unwrap()
@@ -505,7 +514,8 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         .unwrap();
     drop(store);
     // Recovery works with auto_fund=false and unavailable catalog/RPC URLs;
-    // safe unprepared reset requires no network, listener token or new transfer.
+    // Safe unprepared closure requires no network, listener token or new transfer.
+    // Paused funding cannot authorize a replacement operation.
     let report = good(
         run(
             dir,
@@ -514,15 +524,28 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         )
         .await,
     );
-    assert_eq!(report["recovery"][0]["outcome"]["status"], "recovered");
+    assert_eq!(
+        report["recovery"][0]["outcome"]["status"],
+        "operator_required"
+    );
+    assert_eq!(
+        report["recovery"][0]["outcome"]["reason"],
+        "funding_disabled"
+    );
     let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
     assert!(store.status().unwrap().treasury_operations.is_empty());
     assert_eq!(store.funding_recovery_count(&recovery_job.id).unwrap(), 1);
+    assert_eq!(
+        store
+            .funding_job(&recovery_job.id)
+            .unwrap()
+            .unwrap()
+            .operation_id,
+        recovery_job.operation_id
+    );
     for job in store.funding_jobs().unwrap() {
         // Synthetic confirmed credit, never a real transfer or live RPC.
-        store
-            .record_credit(&job.wallet_id, &job.target, "fixture-block", 1)
-            .unwrap();
+        rpc_evidence::credit(&mut store, &job.wallet_id, &job.target, 13).unwrap();
     }
     let jobs = store.status().unwrap().funding_jobs.len();
     drop(store);

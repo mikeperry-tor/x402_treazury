@@ -1,4 +1,5 @@
 //! Obtain real opaque Base verification results from a local unfunded chain fixture.
+#![allow(dead_code)]
 use std::collections::BTreeMap;
 use x402_treazury::rotation::base::{BaseRpc, ChainQuery, ChainView, now};
 
@@ -53,4 +54,69 @@ pub async fn acquire(query: ChainQuery, amounts: BTreeMap<String, u64>, head: u6
     let result = BaseRpc::new(&url, 12, 120).unwrap().view(query).await;
     server.abort();
     result.unwrap()
+}
+
+/// Capture only the requested wallet; fixture helpers never start a historical
+/// nonce scan or manufacture opaque certificates.
+pub fn credit_query(
+    store: &x402_treazury::rotation::store::Store,
+    wallet: &str,
+) -> anyhow::Result<ChainQuery> {
+    let pool = store
+        .status()?
+        .pools
+        .into_iter()
+        .find(|pool| pool.addresses.iter().any(|address| address.id == wallet))
+        .ok_or_else(|| anyhow::anyhow!("fixture wallet not found"))?
+        .id;
+    let mut query = store.chain_query(&pool)?;
+    query.wallets.retain(|(id, _)| id == wallet);
+    query.captures.retain(|id, _| id == wallet);
+    query.pending.clear();
+    query.anchor = None;
+    Ok(query)
+}
+
+/// Synchronous setup may be called inside a Tokio fixture. A separate scoped
+/// runtime owns only this local RPC server, avoiding nested runtime/block_on.
+pub fn credit(
+    store: &mut x402_treazury::rotation::store::Store,
+    wallet: &str,
+    amount: &str,
+    head: u64,
+) -> anyhow::Result<()> {
+    let query = credit_query(store, wallet)?;
+    let amounts = [(wallet.to_owned(), amount.parse::<u64>()?)].into();
+    let view = std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(acquire(query, amounts, head))
+            })
+            .join()
+            .unwrap()
+    });
+    store.record_verified_credit(wallet, view).map(|_| ())
+}
+
+pub async fn credit_owned(
+    store: &x402_treazury::rotation::store::StoreHandle,
+    wallet: String,
+    amount: &str,
+    head: u64,
+) -> anyhow::Result<()> {
+    let id = wallet.clone();
+    let query = store.call(move |s| credit_query(s, &id)).await?;
+    let view = acquire(
+        query,
+        [(wallet.clone(), amount.parse::<u64>()?)].into(),
+        head,
+    )
+    .await;
+    store
+        .call(move |s| s.record_verified_credit(&wallet, view).map(|_| ()))
+        .await
 }

@@ -3,6 +3,7 @@
 mod allocation;
 mod backup;
 mod evidence;
+pub use evidence::BalanceSupport;
 #[cfg(feature = "zcash")]
 mod expiry;
 pub mod funding;
@@ -363,6 +364,15 @@ impl Store {
         let owner = lock(dir)?;
         database_paths(dir)?;
         private_file(&dir.join("state.sqlite"), false)?;
+        {
+            let preflight = Connection::open_with_flags(
+                dir.join("state.sqlite"),
+                OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let version: u32 = preflight.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            ensure!(version <= 15, "unsupported state schema");
+            funding::preflight_funding_upgrade(&preflight, version)?;
+        }
         let mut file = private_file(key_file, false)?;
         use std::io::Read;
         let mut key = Zeroizing::new([0u8; 32]);
@@ -485,7 +495,16 @@ impl Store {
         Ok(revision)
     }
     pub fn set_sync_phase(&mut self, phase: SyncPhase) -> Result<()> {
-        if let Some(mut observation) = self.status()?.sync {
+        let observation: Option<String> = self
+            .db
+            .query_row(
+                "SELECT observation FROM treasury_sync WHERE singleton=1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(observation) = observation {
+            let mut observation: SyncObservation = serde_json::from_str(&observation)?;
             observation.phase = phase;
             self.db.execute(
                 "INSERT OR REPLACE INTO treasury_sync VALUES (1,?1)",
@@ -652,59 +671,65 @@ impl Store {
         );
         Ok(())
     }
-    /// Called only by a trusted chain-reconciliation adapter after confirming credit.
-    /// This module does not implement that adapter and exposes no CLI credit override.
+    /// Unfunded unit-fixture convenience. Production requires opaque Base evidence.
+    #[cfg(test)]
     pub fn record_credit(
         &mut self,
         wallet: &str,
         balance: &str,
-        block_hash: &str,
+        _block_hash: &str,
         height: i64,
     ) -> Result<()> {
-        let balance = amount(balance)?;
-        ensure!(!block_hash.is_empty(), "missing chain evidence");
+        let address: String =
+            self.db
+                .query_row("SELECT address FROM wallets WHERE id=?1", [wallet], |r| {
+                    r.get(0)
+                })?;
+        let height = u64::try_from(height)?;
+        let point = super::base::evidence::BalancePoint {
+            anchor: super::base::Anchor {
+                height,
+                hash: format!("0x{height:064x}"),
+            },
+            amount: amount(balance)?,
+        };
+        let support = evidence::BalanceSupport {
+            checkpoint: None,
+            observation: super::base::evidence::BalanceObservation {
+                wallet: wallet.into(),
+                address,
+                network: "eip155:8453".into(),
+                asset: crate::payment::USDC.into(),
+                endpoint: "a".repeat(64),
+                confirmed: point.clone(),
+                latest: super::base::evidence::BalancePoint {
+                    anchor: super::base::Anchor {
+                        height: height + 1,
+                        hash: format!("0x{:064x}", height + 1),
+                    },
+                    amount: point.amount,
+                },
+                confirmations: 1,
+                valid_until: u64::MAX,
+            },
+        };
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let (pool, role, target): (String, String, String) = tx.query_row(
-            "SELECT pool_id,role,target FROM wallets WHERE id=?1",
-            [wallet],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )?;
-        let completed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM funding_jobs WHERE wallet_id=?1 AND state='COMPLETE')",
-            [wallet],
-            |r| r.get(0),
-        )?;
-        if completed {
-            // Background reconciliation may have completed funding, promoted the
-            // wallet, or observed later spending while this RPC view was in flight.
-            // The durable completion wins; never overwrite newer balances/roles.
-            return Ok(());
-        }
         ensure!(
-            role == "ALLOCATED",
-            "credit verification requires an allocated candidate"
+            funding::record_readiness(&tx, wallet, &support)?,
+            "insufficient confirmed credit"
         );
-        ensure!(balance >= amount(&target)?, "insufficient confirmed credit");
         tx.execute(
-            "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4",
-            params![balance.to_string(), block_hash, height, wallet],
+            "UPDATE wallets SET balance=?2,block_hash=?3,block_height=?4 WHERE id=?1",
+            params![
+                wallet,
+                balance,
+                support.observation.confirmed.anchor.hash,
+                i64::try_from(height)?
+            ],
         )?;
-        funding::complete_job(&tx, wallet)?;
-        let bootstrapped: bool =
-            tx.query_row("SELECT bootstrapped FROM pools WHERE id=?1", [&pool], |r| {
-                r.get(0)
-            })?;
-        if bootstrapped {
-            tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [wallet])?;
-        } else {
-            let pending:u32=tx.query_row("SELECT COUNT(*) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE w.pool_id=?1 AND f.state!='COMPLETE'",[&pool],|r|r.get(0))?;
-            if pending == 0 {
-                tx.execute("UPDATE wallets SET role=CASE sequence WHEN 0 THEN 'ACTIVE' ELSE 'READY' END WHERE pool_id=?1",[&pool])?;
-                tx.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [&pool])?;
-            }
-        }
+        funding::publish_destination_readiness(&tx, wallet)?;
         tx.commit()?;
         Ok(())
     }
@@ -914,12 +939,17 @@ impl Store {
         ensure!(reserved > 0, "operation has no reservation");
         let enabled:bool=tx.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1",[id],|r|r.get(0))?;
         ensure!(enabled, "pool disabled");
-        let funding: Option<(String, String)> = tx.query_row("SELECT j.phase,w.role FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1", [id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if let Some((phase, role)) = funding {
+        let funding: Option<String> = tx
+            .query_row(
+                "SELECT phase FROM funding_progress WHERE operation_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(phase) = funding {
             ensure!(
                 serde_json::from_str::<funding::FundingPhase>(&phase)?
-                    == funding::FundingPhase::Preparing
-                    && role == "ALLOCATED",
+                    == funding::FundingPhase::Preparing,
                 "funding candidate changed during preparation"
             );
         }
@@ -1325,7 +1355,8 @@ impl StoreHandle {
 // Additive admission schema, versioned independently of the encrypted record format.
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(version <= 14, "unsupported state schema");
+    ensure!(version <= 15, "unsupported state schema");
+    funding::preflight_funding_upgrade(db, version)?;
     if version == 0 {
         db.execute_batch("BEGIN IMMEDIATE;
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('ADMITTED','POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER,UNIQUE(wallet_id,nonce));
@@ -1401,6 +1432,15 @@ PRAGMA user_version=13; COMMIT;")?;
     }
     if version < 14 {
         evidence::initialize(db)?;
+    }
+    if version < 15 {
+        db.execute_batch("BEGIN IMMEDIATE")?;
+        let migrated = funding::initialize_funding_facts(db);
+        if let Err(error) = migrated {
+            db.execute_batch("ROLLBACK")?;
+            return Err(error);
+        }
+        db.execute_batch("PRAGMA user_version=15; COMMIT")?;
     }
     Ok(())
 }
@@ -1977,6 +2017,23 @@ fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
 }
 
 impl Store {
+    pub(crate) fn operation_facts(
+        &self,
+        id: &str,
+    ) -> Result<Option<super::transaction::TransactionFacts>> {
+        let facts: Option<String> = self
+            .db
+            .query_row(
+                "SELECT facts FROM treasury_operations WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        facts
+            .map(|facts| serde_json::from_str(&facts).map_err(Into::into))
+            .transpose()
+    }
+
     pub fn operation(&self, id: &str) -> Result<OperationStatus> {
         let (facts, submission, attempts): (String, String, i64) = self.db.query_row(
             "SELECT facts,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id) THEN 'EXPIRED' ELSE submission END,attempts FROM treasury_operations o WHERE id=?1",
@@ -2024,7 +2081,7 @@ impl Store {
         if operation.attempts == 0 {
             let enabled: bool = self.db.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1", [id], |r| r.get(0))?;
             ensure!(enabled, "pool disabled");
-            let candidate: Option<bool> = self.db.query_row("SELECT f.state!='COMPLETE' AND w.role='ALLOCATED' FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1", [id], |r| r.get(0)).optional()?;
+            let candidate: Option<bool> = self.db.query_row("SELECT j.phase IN ('\"PREPARED\"','\"DEPOSIT_PENDING\"') FROM funding_progress j WHERE j.operation_id=?1", [id], |r| r.get(0)).optional()?;
             ensure!(
                 candidate.unwrap_or(true),
                 "funding candidate no longer needs deposit"
@@ -2075,7 +2132,7 @@ fn commit_chain_view(
 fn apply_chain_view(
     tx: &Connection,
     pool: &str,
-    bootstrapped: bool,
+    _bootstrapped: bool,
     view: &super::base::ChainView,
     namespace: Uuid,
     complete: bool,
@@ -2201,7 +2258,7 @@ fn apply_chain_view(
             })
             .collect::<rusqlite::Result<_>>()?
     };
-    for (id, role, target) in &rows {
+    for (id, role, _target) in &rows {
         let Some(balance) = view.balances.get(id) else {
             ensure!(role == "RETIRED", "incomplete Base view");
             continue;
@@ -2234,22 +2291,54 @@ fn apply_chain_view(
                 id
             ],
         )?;
-        if complete && role == "ALLOCATED" && *balance >= amount(target)? {
-            funding::complete_job(tx, id)?;
-            if bootstrapped {
-                tx.execute("UPDATE wallets SET role='READY' WHERE id=?1", [id])?;
+        if let Some(certificate) = view.balance_certificates.get(id) {
+            let support = evidence::check_balance(tx, namespace, certificate)?;
+            if funding::record_readiness(tx, id, &support)? {
+                funding::publish_destination_readiness(tx, id)?;
             }
         }
-    }
-    if complete
-        && !bootstrapped
-        && rows.len() == 2
-        && rows
-            .iter()
-            .all(|(id, _, target)| view.balances[id] >= amount(target).unwrap_or(U256::MAX))
-    {
-        tx.execute("UPDATE wallets SET role=CASE sequence WHEN 0 THEN 'ACTIVE' ELSE 'READY' END WHERE pool_id=?1",[pool])?;
-        tx.execute("UPDATE pools SET bootstrapped=1 WHERE id=?1", [pool])?;
+        #[cfg(test)]
+        if view.balance_certificates.is_empty()
+            && role == "ALLOCATED"
+            && *balance >= amount(_target)?
+        {
+            // Legacy unsigned unit views exercise role mechanics only. Production
+            // reaches readiness exclusively through the verified branch above.
+            let address: String =
+                tx.query_row("SELECT address FROM wallets WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })?;
+            let point = super::base::evidence::BalancePoint {
+                anchor: super::base::Anchor {
+                    height: view.anchor.height,
+                    hash: format!("0x{:064x}", view.anchor.height),
+                },
+                amount: *balance,
+            };
+            let support = evidence::BalanceSupport {
+                checkpoint: None,
+                observation: super::base::evidence::BalanceObservation {
+                    wallet: id.clone(),
+                    address,
+                    network: "eip155:8453".into(),
+                    asset: crate::payment::USDC.into(),
+                    endpoint: "a".repeat(64),
+                    confirmed: point.clone(),
+                    latest: super::base::evidence::BalancePoint {
+                        anchor: super::base::Anchor {
+                            height: view.anchor.height + 1,
+                            hash: format!("0x{:064x}", view.anchor.height + 1),
+                        },
+                        amount: point.amount,
+                    },
+                    confirmations: 1,
+                    valid_until: view.admission_valid_until,
+                },
+            };
+            if funding::record_readiness(tx, id, &support)? {
+                funding::publish_destination_readiness(tx, id)?;
+            }
+        }
     }
     tx.execute("INSERT INTO payment_anchors VALUES (?1,?2,?3) ON CONFLICT(pool_id) DO UPDATE SET height=excluded.height,hash=excluded.hash",params![pool,i64::try_from(view.anchor.height)?,view.anchor.hash])?;
     Ok(depleted)

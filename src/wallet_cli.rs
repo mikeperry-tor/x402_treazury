@@ -79,7 +79,7 @@ enum Action {
         #[arg(long)]
         job_id: String,
     },
-    /// Retry an unprepared funding job; refuses operations with signed bytes.
+    /// Close proven-unprepared work; use configured recover for another attempt.
     #[command(hide = true)]
     RecoverUnprepared {
         #[arg(long)]
@@ -270,7 +270,7 @@ enum Command {
         meta_config: PathBuf,
         job_id: String,
     },
-    /// Retry an unprepared funding job; refuses every operation with signed bytes.
+    /// Close proven-unprepared work without authorizing a new funding attempt.
     RecoverUnprepared {
         state_dir: PathBuf,
         key_file: PathBuf,
@@ -410,7 +410,7 @@ async fn run_args(
             store.recover_unprepared_funding(&job_id)
         })
         .await??;
-        println!("{}", serde_json::json!({"funding_job_reset":true}));
+        println!("{}", serde_json::json!({"funding_attempt_closed":true}));
         return Ok(());
     }
     #[cfg(not(feature = "zcash"))]
@@ -505,6 +505,10 @@ async fn recover_funding(
 ) -> Result<()> {
     let config: crate::deployment::MetaConfig =
         toml::from_str(&tokio::fs::read_to_string(&path).await?)?;
+    let allow_new_attempt = config
+        .funding
+        .as_ref()
+        .is_some_and(|funding| funding.auto_fund);
     let wallets = config.validate()?.wallets;
     let (mut treasury, settings) = configured(&path, network).await?;
     let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
@@ -518,14 +522,13 @@ async fn recover_funding(
         let status = treasury.status().await?;
         let mut reports = Vec::new();
         for job in status.funding_jobs.iter().filter(|job| crate::treasury::recovery::needs_recovery(job) || job.last_error.is_some()) {
-            let outcome = match wallets.get(&job.pool_name) {
-                Some(crate::rotation::config::WalletConfig::ZcashRotation { max_attempts, .. }) => {
-                    match treasury.recover_funding_job(job.id.clone(), *max_attempts, &mut sender, &stop).await {
-                        Ok(outcome) => serde_json::to_value(outcome)?,
-                        Err(error) => serde_json::json!({"status":"check_failed", "reason":crate::treasury::diagnostics::sync_failure(&error)}),
-                    }
-                }
-                _ => serde_json::json!({"status":"operator_required", "reason":"wallet_profile_missing"}),
+            let (max_attempts, enabled) = match wallets.get(&job.pool_name) {
+                Some(crate::rotation::config::WalletConfig::ZcashRotation { max_attempts, .. }) => (*max_attempts, allow_new_attempt),
+                _ => (0, false),
+            };
+            let outcome = match treasury.recover_funding_job(job.id.clone(), max_attempts, enabled, &mut sender, &stop).await {
+                Ok(outcome) => serde_json::to_value(outcome)?,
+                Err(error) => serde_json::json!({"status":"check_failed", "reason":crate::treasury::diagnostics::sync_failure(&error)}),
             };
             reports.push(serde_json::json!({"job_id":job.id, "pool_name":job.pool_name, "previous_error":job.last_error, "outcome":outcome}));
             if stop.is_cancelled() { break; }

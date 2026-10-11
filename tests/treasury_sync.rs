@@ -351,6 +351,7 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         let before = calls.lock().unwrap().len();
         let error = treasury
             .prepare(PrepareRequest {
+                managed_funding: None,
                 allocation_limits: None,
                 operation_id: uuid::Uuid::new_v4().to_string(),
                 pool_id: None,
@@ -793,6 +794,7 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
     ));
     let error = handle
         .prepare(PrepareRequest {
+            managed_funding: None,
             allocation_limits: None,
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,

@@ -9,6 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 pub mod evidence;
+pub(crate) mod historical;
 mod receipt;
 mod resources;
 mod transport;
@@ -251,6 +252,11 @@ impl BaseRpc {
                     previous.latest.anchor.hash.clone(),
                 ))
                 .or_insert((true, false));
+        }
+        for anchor in &capture.durable_balance_anchors {
+            anchors
+                .entry((anchor.height, anchor.hash.clone()))
+                .or_insert((false, false));
         }
         for ((height, hash), (latest_only, financial_checkpoint)) in anchors {
             let (canonical, _) = progress

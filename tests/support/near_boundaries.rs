@@ -52,6 +52,20 @@ fn asset_and_quote_boundaries_fail_closed() {
     }
 }
 
+#[test]
+fn exact_output_keeps_gross_input_even_with_a_smaller_minimum() {
+    // Official contract: https://docs.near-intents.org/integration/distribution-channels/1click-api/swap-types
+    // Checked 2026-10-11. The buffer may be returned; it is not an advance credit.
+    let (request, mut response, limits) = fixture(false);
+    assert_eq!(request["swapType"], "EXACT_OUTPUT");
+    assert_eq!(request["originAsset"], "nep141:zec.omft.near");
+    response["quote"]["minAmountIn"] = json!("90000");
+    let gross = response["quote"]["amountIn"].as_str().unwrap().parse::<u64>().unwrap();
+    let quote = validate_quote(request, response, &limits, 2_000_000_000).unwrap();
+    assert_eq!(quote.input, gross);
+    assert!(quote.input > 90000);
+}
+
 #[tokio::test]
 async fn status_binds_quote_and_credentials_stay_on_the_original_request() {
     use axum::{
@@ -126,6 +140,11 @@ async fn status_binds_quote_and_credentials_stay_on_the_original_request() {
         state.lock().unwrap().0 = bad;
         assert!(client.status(&quote).await.is_err(), "{pointer}");
     }
+    // EXACT_OUTPUT's input-side buffer is not a failed-swap disposition.
+    // This ZEC/Base fixture pins local interpretation only; it establishes no
+    // route-specific return amount, transfer attribution or settlement deadline.
+    state.lock().unwrap().0 = json!({"status":"SUCCESS","quoteResponse":response,"swapDetails":{"refundedAmount":"1000"}});
+    assert!(matches!(client.status(&quote).await.unwrap(), SwapStatus::Success));
     state.lock().unwrap().0 = json!({"status":"FUTURE_STATUS","quoteResponse":response});
     assert!(matches!(
         client.status(&quote).await.unwrap(),

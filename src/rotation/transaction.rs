@@ -22,7 +22,17 @@ impl std::fmt::Display for PreparationDeferred {
 }
 impl std::error::Error for PreparationDeferred {}
 
+/// Current process configuration passed to the serialized treasury owner.
+/// This cannot replace the durable qualification permit or current job binding.
+#[derive(Clone)]
+pub struct ManagedFundingAuthority {
+    pub job_id: String,
+    pub auto_fund: bool,
+    pub max_attempts: u32,
+}
+
 pub struct PrepareRequest {
+    pub managed_funding: Option<ManagedFundingAuthority>,
     pub allocation_limits: Option<super::config::FundingBudgetLimits>,
     pub operation_id: String,
     pub pool_id: Option<String>,
@@ -53,12 +63,7 @@ impl PreparedTransaction {
             operation_id: operation_id.into(),
             recipient_identity: store.operation_recipient(operation_id)?,
             raw: store.prepared_bytes(operation_id)?,
-            facts: store
-                .status()?
-                .treasury_operations
-                .into_iter()
-                .find(|o| o.operation_id == operation_id)
-                .map(|o| o.facts),
+            facts: store.operation_facts(operation_id)?,
         })
     }
     pub fn network_identity(&self) -> Result<crate::network::IsolationId> {

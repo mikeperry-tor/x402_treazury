@@ -163,7 +163,7 @@ mod tests {
             .find(|j| j.pool_id == pool)
             .unwrap();
         let quote = Quote {
-            request: json!({"amount":job.target,"swapType":"EXACT_OUTPUT","destinationAsset":crate::rotation::near::USDC}),
+            request: json!({"amount":job.target,"recipient":job.recipient,"swapType":"EXACT_OUTPUT","destinationAsset":crate::rotation::near::USDC}),
             response: json!({"quote":{"amountIn":"100","amountOut":job.target}}),
             input: 100,
             deadline: u64::MAX,
@@ -251,20 +251,19 @@ mod tests {
         // Source confirmation alone is not destination credit.
         assert!(reserve(&mut store, &second, 3, limits).is_err());
         store
+            .record_provider_outcome(
+                &first.id,
+                &first.operation_id,
+                &crate::rotation::near::SwapStatus::Success,
+                1,
+            )
+            .unwrap();
+        store
             .record_credit(&first.wallet_id, &first.target, "block", 1)
             .unwrap();
         store.disable_pool("first").unwrap();
         store.ensure_pool("first", "9").unwrap();
-        // Historical operations keep their own authenticated quote even when the
-        // current job binding has advanced. A new pool target cannot rewrite cost.
-        store.db.execute("INSERT INTO funding_recovery SELECT operation_id,job_id,phase,quote,NULL FROM funding_progress WHERE job_id=?1", [&first.id]).unwrap();
-        store
-            .db
-            .execute(
-                "UPDATE funding_progress SET operation_id=?2,quote=NULL WHERE job_id=?1",
-                params![first.id, Uuid::new_v4().to_string()],
-            )
-            .unwrap();
+        // Current configuration cannot rewrite the completed operation's cost.
         let id = store.id.clone();
         drop(store);
         let mut store = Store::open(&state, &key, &id).unwrap();
@@ -347,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn unprepared_recovery_releases_only_unused_allocation_and_missing_history_fails_closed() {
+    fn uncertain_preparation_and_missing_history_fail_closed() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::create(
             &dir.path().join("state"),
@@ -364,15 +363,15 @@ mod tests {
         };
         reserve(&mut store, &first, 1, limits).unwrap();
         assert!(store.refresh_unprepared_quote(&first.id).is_err());
-        store.recover_unprepared_funding(&first.id).unwrap();
-        reserve(&mut store, &next, 1, limits).unwrap();
+        assert!(store.recover_unprepared_funding(&first.id).is_err());
+        assert!(reserve(&mut store, &next, 1, limits).is_err());
         let third = quoted(&mut store, "third", "2");
         // Simulate incomplete historical accounting, not an empty wallet.
         store
             .db
             .execute(
                 "UPDATE funding_progress SET quote=NULL WHERE job_id=?1",
-                [&next.id],
+                [&first.id],
             )
             .unwrap();
         assert_eq!(

@@ -1,6 +1,8 @@
 //! Real executable, frozen offline catalogs, synthetic registry, no wallet credentials.
 #![allow(dead_code, unused_imports)]
 include!("../examples/live_integration/driver.rs");
+#[path = "support/rpc_evidence.rs"]
+mod rpc_evidence;
 use serde_json::json;
 use std::path::Path;
 fn fixture(dir: &Path) -> (manifest::Manifest, std::path::PathBuf) {
@@ -627,9 +629,7 @@ fn unsigned_identity_export_keeps_retired_and_replacement_wallets_unpermitted() 
     .unwrap();
     let pool = store.ensure_pool("history", "1").unwrap();
     for address in &store.status().unwrap().pools[0].addresses {
-        store
-            .record_credit(&address.id, "1000000", "offline", 1)
-            .unwrap();
+        rpc_evidence::credit(&mut store, &address.id, "1000000", 13).unwrap();
     }
     store.promote(&pool, 0).unwrap();
     drop(store);
@@ -780,9 +780,7 @@ async fn managed_tor_map_preserves_wallet_scope_and_requires_paid_provider_desti
         .unwrap()
         .addresses;
     for wallet in &wallets {
-        store
-            .record_credit(&wallet.id, "1000000", "offline", 1)
-            .unwrap();
+        rpc_evidence::credit(&mut store, &wallet.id, "1000000", 13).unwrap();
     }
     // Exercise the real snapshot shape. `config show` has extra resolved fields
     // which are intentionally absent from the configuration used for execution.

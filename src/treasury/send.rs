@@ -38,19 +38,26 @@ impl TransactionPreparer for Treasury {
             .clone()
             .context("sync endpoint not configured")?;
         let id = request.operation_id.clone();
+        let authority = request.managed_funding.clone();
         let principal = request.amount_zatoshis;
-        let observed = self
+        let deposit = request.recipient.clone();
+        let deadline = request.deadline;
+        let (treasury_id, revision, observed) = self
             .store
             .call(move |s| {
+                s.require_preparation_binding(&id, &deposit, principal, deadline)
+                    .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
+                s.require_preparation_authority(&id, authority.as_ref())
+                    .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.require_unstarted_preparation(&id)?;
                 // An obviously unaffordable principal needs no proposal mutation.
                 // Do not add the fee ceiling here: the proposal determines cost.
                 s.require_spend_ready(now()?, principal)
                     .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
-                s.status()
+                s.funding_preparation_context()
             })
             .await?;
-        let identity = crate::network::IsolationId::treasury(&observed.treasury_id);
+        let identity = crate::network::IsolationId::treasury(&treasury_id);
         // Read-only checks precede any reservation, library mutation or poisoning.
         let preflight: Result<_> = async {
             let mut indexer = crate::network::global()
@@ -65,7 +72,7 @@ impl TransactionPreparer for Treasury {
                 "indexer is not on mainnet"
             );
             let instant = now()?;
-            super::freshness::spending_ready(&observed, info.block_height, instant)?;
+            super::freshness::spending_ready(&observed, revision, info.block_height, instant)?;
             ensure!(
                 request
                     .deadline
@@ -80,6 +87,12 @@ impl TransactionPreparer for Treasury {
         .await;
         let indexer =
             preflight.map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
+        let operation = request.operation_id.clone();
+        let authority = request.managed_funding;
+        self.store
+            .call(move |s| s.begin_funding_preparation(&operation, authority.as_ref()))
+            .await
+            .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
         // Calculate-only proposal creation mutates library memory. Cancellation
         // still poisons this owner, but no bytes exist and no ceiling-sized
         // budget reservation is needed before its actual fee is known.
@@ -247,12 +260,9 @@ impl Treasury {
         // Refresh the chain view even after restart. Sync is permitted while a send
         // is pending; spend admission is not.
         self.sync_once(stop).await?;
-        let status = self.status().await?;
-        let observation = status.sync.context("treasury_not_synced")?;
-        ensure!(
-            observation.fresh(now()?, status.snapshot_revision),
-            "treasury_sync_stale"
-        );
+        let (_, revision, observation) =
+            self.store.call(|s| s.funding_preparation_context()).await?;
+        ensure!(observation.fresh(now()?, revision), "treasury_sync_stale");
         let height = observation.height.context("missing sync height")?;
         let operation = id.clone();
         let durable = self
@@ -335,12 +345,8 @@ impl Treasury {
             let instant = now()?;
             self.store
                 .call(move |s| {
-                    let status = s.status()?;
-                    let observation = status.sync.context("treasury_not_synced")?;
-                    ensure!(
-                        observation.fresh(instant, status.snapshot_revision),
-                        "treasury_sync_stale"
-                    );
+                    let (_, revision, observation) = s.funding_preparation_context()?;
+                    ensure!(observation.fresh(instant, revision), "treasury_sync_stale");
                     ensure!(
                         height > 0
                             && observation.height.is_some_and(|tip| tip >= height
@@ -454,6 +460,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         let request = || PrepareRequest {
+            managed_funding: None,
             allocation_limits: None,
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,

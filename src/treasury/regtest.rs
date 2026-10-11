@@ -359,6 +359,7 @@ async fn run() -> Result<()> {
         .await?;
     let prepared = treasury
         .prepare(PrepareRequest {
+            managed_funding: None,
             allocation_limits: None,
             operation_id: op.clone(),
             pool_id: None,
@@ -481,7 +482,6 @@ async fn high_index_refunds_and_separate_shielding() -> Result<()> {
     tokio::time::timeout(Duration::from_secs(900), refunds_run(false)).await?
 }
 async fn refunds_run(cli: bool) -> Result<()> {
-    use crate::rotation::store::funding::FundingPhase;
     let dir = tempfile::tempdir()?;
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -544,20 +544,30 @@ async fn refunds_run(cli: bool) -> Result<()> {
         treasury.sync_once(&stop).await?;
         let job = jobs[n].clone();
         let jid = job.id.clone();
+        let deadline = now()? + 3600;
+        let quote = serde_json::to_vec(&crate::rotation::near::Quote {
+            request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
+            response: serde_json::json!({}),
+            input: 50_000,
+            deadline,
+            deposit: Some(addresses[n].clone()),
+        })?;
         treasury
             .store
-            .call(move |s| {
-                s.save_funding_quote(&jid, b"test quote")?;
-                s.advance_funding(&jid, FundingPhase::Quoted, FundingPhase::Preparing)
-            })
+            .call(move |s| s.save_funding_quote(&jid, &quote))
             .await?;
         treasury
             .prepare(PrepareRequest {
+                managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
+                    job_id: job.id.clone(),
+                    auto_fund: true,
+                    max_attempts: 0,
+                }),
                 allocation_limits: None,
                 operation_id: job.operation_id.clone(),
                 pool_id: Some(job.pool_id),
                 daily_limit_zatoshis: 1_000_000,
-                deadline: now()? + 3600,
+                deadline,
                 recipient: addresses[n].clone(),
                 amount_zatoshis: 50_000,
                 max_fee_zatoshis: 50_000,
@@ -814,6 +824,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
         .await?;
     let prepared = treasury
         .prepare(PrepareRequest {
+            managed_funding: None,
             allocation_limits: None,
             operation_id: op.clone(),
             pool_id: None,

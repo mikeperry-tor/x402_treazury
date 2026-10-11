@@ -1,3 +1,5 @@
+#[path = "support/funding_quote.rs"]
+mod quote_fixture;
 use std::path::Path;
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
@@ -31,15 +33,6 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
         }
     }
     drop(store);
-    // Simulate a database produced by the offline foundation, before admission tables.
-    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    db.execute_batch(include_str!("fixtures/state/remove_evidence_v14.sql"))
-        .unwrap();
-    db.execute_batch(
-        "DROP TABLE payment_admission_evidence; DROP TABLE funding_quote_refreshes; DROP TABLE payment_resolutions; DROP TABLE payment_attempts; DROP TABLE payment_anchors; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=0;",
-    )
-    .unwrap();
-    drop(db);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), "wrong").is_err());
     let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(
@@ -63,9 +56,10 @@ fn pools_bootstrap_rotate_independently_and_keep_allocation_targets() {
         assert!(!pool.bootstrapped);
     }
     let first = &wallets[0].addresses[0];
-    assert!(s.record_credit(&first.id, "4999999", "block", 1).is_err());
+    rpc_evidence::credit(&mut s, &first.id, "4999999", 13).unwrap();
+    assert!(!s.status().unwrap().pools[0].bootstrapped);
     for address in &wallets[0].addresses {
-        s.record_credit(&address.id, "5000000", "block", 1).unwrap();
+        rpc_evidence::credit(&mut s, &address.id, "5000000", 14).unwrap();
     }
     let now = s.status().unwrap();
     assert!(now.pools[0].bootstrapped);
@@ -188,7 +182,7 @@ fn failed_promotion_rolls_back_every_role_and_job_and_keys_restore() {
     let wallets = s.status().unwrap().pools.remove(0).addresses;
     let secret = s.wallet_secret(&pool, &wallets[0].id).unwrap();
     for w in &wallets {
-        s.record_credit(&w.id, "5000000", "block", 1).unwrap();
+        rpc_evidence::credit(&mut s, &w.id, "5000000", 13).unwrap();
     }
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER fail_job BEFORE INSERT ON funding_jobs BEGIN SELECT RAISE(ABORT,'injected disk-write failure'); END;").unwrap();
@@ -355,12 +349,32 @@ fn sync_schema_migrates_admission_state_without_changing_wallet() {
     let id = s.id().to_owned();
     drop(s);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    db.execute_batch(include_str!("fixtures/state/remove_evidence_v14.sql"))
+    // Build an actual empty version-1 schema while retaining the encrypted identity
+    // and snapshot. Merely lowering user_version on schema15 is not a legacy fixture.
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('instance','snapshots')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
         .unwrap();
-    db.execute_batch(
-        "DROP TABLE payment_admission_evidence; DROP TABLE funding_quote_refreshes; DROP TABLE payment_resolutions; DROP TABLE treasury_operations; DROP TABLE treasury_sync; PRAGMA user_version=1;",
-    )
-    .unwrap();
+    for table in tables {
+        db.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))
+            .unwrap();
+    }
+    let mut version = 0;
+    for line in include_str!("fixtures/state/historical.sql").lines() {
+        if let Some(value) = line.strip_prefix("-- version ") {
+            version = value.parse::<u32>().unwrap();
+        } else if version <= 1
+            && line.starts_with("CREATE ")
+            && !line.starts_with("CREATE TABLE instance(")
+            && !line.starts_with("CREATE TABLE snapshots(")
+        {
+            db.execute_batch(line).unwrap();
+        }
+    }
+    db.execute_batch("PRAGMA user_version=1;").unwrap();
     drop(db);
     assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
     let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
@@ -460,9 +474,18 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
     }
     assert_eq!(picked.len(), 4);
     let job = s.next_funding_job(0).unwrap().unwrap();
-    s.save_funding_quote(&job.id, b"sensitive-bound-quote")
-        .unwrap();
-    assert!(s.save_funding_quote(&job.id, b"other quote").is_err());
+    s.save_funding_quote(
+        &job.id,
+        &quote_fixture::bound(&job.target, &job.recipient, "sensitive-bound-quote"),
+    )
+    .unwrap();
+    assert!(
+        s.save_funding_quote(
+            &job.id,
+            &quote_fixture::bound(&job.target, &job.recipient, "other quote")
+        )
+        .is_err()
+    );
     assert!(
         s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Complete)
             .is_err()
@@ -483,7 +506,7 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
     assert_eq!(restored.phase, FundingPhase::Preparing);
     assert_eq!(
         s.funding_quote(&job.id).unwrap().as_slice(),
-        b"sensitive-bound-quote"
+        quote_fixture::bound(&job.target, &job.recipient, "sensitive-bound-quote").as_slice()
     );
     for _ in 0..4 {
         assert_ne!(s.next_funding_job(41).unwrap().unwrap().id, job.id);
@@ -498,7 +521,11 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
     let id = s.id().to_owned();
     let pool = s.ensure_pool("a", "5").unwrap();
     let jobs = s.funding_jobs().unwrap();
-    s.save_funding_quote(&jobs[0].id, b"bound-quote").unwrap();
+    s.save_funding_quote(
+        &jobs[0].id,
+        &quote_fixture::bound(&jobs[0].target, &jobs[0].recipient, "bound-quote"),
+    )
+    .unwrap();
     s.reserve("source", Some(&pool), 1, 100, 1000).unwrap();
     s.prepare("source", 1, b"prepared-snapshot", b"durable-signed-bytes")
         .unwrap();
@@ -525,7 +552,7 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
     );
     assert_eq!(
         restored.funding_quote(&jobs[0].id).unwrap().as_slice(),
-        b"bound-quote"
+        quote_fixture::bound(&jobs[0].target, &jobs[0].recipient, "bound-quote").as_slice()
     );
     assert!(backup.join("backup.json").is_file());
 }
@@ -537,22 +564,30 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
     let mut s = create(dir.path());
     let pool = s.ensure_pool("a", "5").unwrap();
     let job = s.funding_jobs().unwrap().remove(0);
-    s.save_funding_quote(&job.id, b"old-quote").unwrap();
-    s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
-        .unwrap();
-    s.reserve(&job.operation_id, Some(&pool), 1, 100, 100)
-        .unwrap();
+    s.save_funding_quote(
+        &job.id,
+        &quote_fixture::bound(&job.target, &job.recipient, "old-quote"),
+    )
+    .unwrap();
     s.recover_unprepared_funding(&job.id).unwrap();
+    assert_eq!(s.funding_jobs().unwrap()[0].operation_id, job.operation_id);
+    s.reauthorize_closed_funding(&job.id, 1).unwrap();
     let next = s.funding_jobs().unwrap().remove(0);
     assert_ne!(next.operation_id, job.operation_id);
     assert_eq!(next.recipient, job.recipient);
     assert_eq!(next.phase, FundingPhase::Allocated);
     assert!(s.funding_quote(&job.id).is_err());
-    s.save_funding_quote(&job.id, b"new-quote").unwrap();
+    s.save_funding_quote(
+        &job.id,
+        &quote_fixture::bound(&job.target, &job.recipient, "new-quote"),
+    )
+    .unwrap();
     s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
     s.reserve(&next.operation_id, Some(&pool), 1, 100, 100)
         .unwrap();
+    assert!(s.recover_unprepared_funding(&job.id).is_err());
+    assert_eq!(s.funding_jobs().unwrap()[0].operation_id, next.operation_id);
     s.prepare(&next.operation_id, 1, b"next-snapshot", b"signed")
         .unwrap();
     assert!(s.recover_unprepared_funding(&job.id).is_err());
@@ -575,7 +610,11 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     let job = s.funding_jobs().unwrap().remove(0);
     s.save_refund_address(&job.id, "fixture-refund-address", 1, b"refund snapshot")
         .unwrap();
-    s.save_funding_quote(&job.id, b"immutable quote").unwrap();
+    s.save_funding_quote(
+        &job.id,
+        &quote_fixture::bound(&job.target, &job.recipient, "immutable quote"),
+    )
+    .unwrap();
     s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
     s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
@@ -608,7 +647,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
         .map(|a| a.id.clone())
         .collect::<Vec<_>>()
     {
-        s.record_credit(&address, "5000000", "block", 1).unwrap();
+        rpc_evidence::credit(&mut s, &address, "5000000", 13).unwrap();
     }
     s.promote(&pool, 0).unwrap();
     assert_ne!(
@@ -636,7 +675,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     );
     assert_eq!(
         s.funding_quote(&job.id).unwrap().as_slice(),
-        b"immutable quote"
+        quote_fixture::bound(&job.target, &job.recipient, "immutable quote").as_slice()
     );
 }
 
@@ -711,7 +750,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     let job = s.funding_jobs().unwrap()[0].clone();
     let quote = |target: &str| {
         serde_json::to_vec(&Quote {
-            request: serde_json::json!({"amount":target}),
+            request: serde_json::json!({"amount":target,"recipient":job.recipient}),
             response: serde_json::json!({}),
             input: 100000,
             deadline: 2000000000,
@@ -719,6 +758,8 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
         })
         .unwrap()
     };
+    s.select_quote_terms(&job.id, &job.operation_id, "2000000", "2500000")
+        .unwrap();
     assert!(
         s.save_funding_quote_with_target(&job.id, &quote("1000000"), "1000000")
             .is_err()
@@ -727,7 +768,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
         s.save_funding_quote_with_target(&job.id, &quote("2500000"), "3000000")
             .is_err()
     );
-    // Inject a failure after target updates; neither target nor quote may survive.
+    // Inject a failure at acceptance; immutable intent and absence of accepted terms remain.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER reject_quote BEFORE UPDATE OF quote ON funding_progress BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
     assert!(
@@ -755,13 +796,15 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
             .find(|a| a.id == job.wallet_id)
             .unwrap()
             .target,
+        "2000000"
+    );
+    assert_eq!(s.funding_jobs().unwrap()[0].target, "2000000");
+    assert_eq!(
+        s.destination_requirement(&job.id).unwrap().amount,
         "2500000"
     );
-    assert_eq!(s.funding_jobs().unwrap()[0].target, "2500000");
-    assert!(
-        s.record_credit(&job.wallet_id, "2000000", "block", 1)
-            .is_err()
-    );
+    rpc_evidence::credit(&mut s, &job.wallet_id, "2000000", 13).unwrap();
+    assert!(!s.destination_requirement(&job.id).unwrap().recorded);
     assert!(state.treasury_operations.is_empty());
 }
 

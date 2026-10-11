@@ -53,15 +53,15 @@ pub(super) fn validate(
 
 /// Ordinary spending shares sync's bounded lag; a new observation may not regress.
 pub(super) fn spending_ready(
-    status: &crate::rotation::store::Status,
+    sync: &SyncObservation,
+    revision: i64,
     tip: u64,
     now: u64,
 ) -> Result<()> {
-    let sync = status
-        .sync
-        .as_ref()
-        .filter(|s| s.fresh(now, status.snapshot_revision))
-        .ok_or_else(|| anyhow::anyhow!("treasury requires a fresh sync before calculation"))?;
+    ensure!(
+        sync.fresh(now, revision),
+        "treasury requires a fresh sync before calculation"
+    );
     let height = sync
         .height
         .ok_or_else(|| anyhow::anyhow!("missing scanned height"))?;

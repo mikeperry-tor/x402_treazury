@@ -19,11 +19,7 @@ pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
         || (job.timed_out
             && matches!(
                 job.phase,
-                FundingPhase::Allocated
-                    | FundingPhase::Quoted
-                    | FundingPhase::Preparing
-                    | FundingPhase::Prepared
-                    | FundingPhase::DepositPending
+                FundingPhase::Preparing | FundingPhase::Prepared | FundingPhase::DepositPending
             ))
 }
 
@@ -32,7 +28,9 @@ fn safely_unprepared(job: &FundingJob) -> bool {
     matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
         || (job.phase == FundingPhase::RecoveryRequired
             && job.last_error.as_deref().is_some_and(|e| {
-                e.starts_with("quote_refresh_exhausted;") || e.starts_with("funding_quote_failed;")
+                e.starts_with("quote_refresh_exhausted;")
+                    || e.starts_with("funding_quote_failed;")
+                    || e.starts_with("funding_attempt_closed;")
             }))
 }
 
@@ -54,7 +52,7 @@ pub(crate) fn can_recover(status: &Status, job: &FundingJob) -> bool {
         .treasury_operations
         .iter()
         .find(|op| op.operation_id == job.operation_id)
-        .map(|op| !matches!(op.submission.as_str(), "CONFIRMED" | "EXPIRED"))
+        .map(|op| op.submission != "CONFIRMED")
         .unwrap_or_else(|| safely_unprepared(job))
 }
 
@@ -90,11 +88,12 @@ impl Treasury {
         &mut self,
         job_id: String,
         max_attempts: u32,
+        allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
     ) -> Result<RecoveryOutcome> {
         match self
-            .recover_funding_job_inner(job_id, max_attempts, sender, stop)
+            .recover_funding_job_inner(job_id, max_attempts, allow_new_attempt, sender, stop)
             .await
         {
             Err(error) => match evidence_outcome(&error) {
@@ -108,6 +107,7 @@ impl Treasury {
         &mut self,
         job_id: String,
         max_attempts: u32,
+        allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
     ) -> Result<RecoveryOutcome> {
@@ -116,13 +116,20 @@ impl Treasury {
         if crate::qualification::active() {
             return Ok(OperatorRequired("qualification_recovery_requires_review"));
         }
-        let status = self.status().await?;
-        let job = status
-            .funding_jobs
-            .iter()
-            .find(|j| j.id == job_id)
-            .context("recovery job missing")?;
-        if !needs_recovery(job) {
+        let (job, operation) = self
+            .store
+            .call(move |s| s.funding_recovery_context(&job_id))
+            .await?;
+        let completed_job = job.id.clone();
+        let completed_operation = job.operation_id.clone();
+        if self
+            .store
+            .call(move |s| s.finish_funding_if_proven(&completed_job, &completed_operation))
+            .await?
+        {
+            return Ok(Recovered);
+        }
+        if !needs_recovery(&job) {
             if job.last_error.as_deref().is_some_and(|reason| {
                 [
                     "treasury_insufficient_spendable_funds",
@@ -161,27 +168,68 @@ impl Treasury {
             .call(move |s| s.funding_recovery_count(&id))
             .await?;
         let exhausted = count >= u64::from(max_attempts);
-        let operation = status
-            .treasury_operations
-            .iter()
-            .find(|op| op.operation_id == job.operation_id);
-        let Some(operation) = operation else {
-            if !safely_unprepared(job) {
+        let Some(operation) = operation.as_ref() else {
+            if !safely_unprepared(&job) {
                 return Ok(OperatorRequired("preparation_outcome_unknown"));
             }
-            if exhausted {
+            let id = job.id.clone();
+            let expected_operation = job.operation_id.clone();
+            let (closed_count, completed) = self
+                .store
+                .call(move |s| {
+                    s.close_unprepared_funding_for_operation(&id, &expected_operation)?;
+                    Ok((
+                        s.funding_recovery_count(&id)?,
+                        s.finish_funding_if_proven(&id, &expected_operation)?,
+                    ))
+                })
+                .await?;
+            if completed {
+                return Ok(Recovered);
+            }
+            if !allow_new_attempt {
+                return Ok(OperatorRequired("funding_disabled"));
+            }
+            if closed_count > u64::from(max_attempts) {
                 return Ok(OperatorRequired("recovery_attempt_limit_reached"));
             }
             let id = job.id.clone();
+            let expected_operation = job.operation_id.clone();
             self.store
-                .call(move |s| s.recover_unprepared_funding(&id))
+                .call(move |s| {
+                    s.reauthorize_closed_funding_for_operation(
+                        &id,
+                        &expected_operation,
+                        max_attempts,
+                    )
+                })
                 .await?;
             return Ok(Recovered);
         };
         if operation.submission == "CONFIRMED" && job.phase != FundingPhase::RecoveryRequired {
             return Ok(Waiting("source_confirmed_waiting_for_swap"));
         }
-        if matches!(operation.submission.as_str(), "CONFIRMED" | "EXPIRED") {
+        if operation.submission == "EXPIRED" {
+            if !allow_new_attempt {
+                return Ok(OperatorRequired("funding_disabled"));
+            }
+            if count > u64::from(max_attempts) {
+                return Ok(OperatorRequired("recovery_attempt_limit_reached"));
+            }
+            let id = job.id.clone();
+            let expected_operation = job.operation_id.clone();
+            self.store
+                .call(move |s| {
+                    s.reauthorize_closed_funding_for_operation(
+                        &id,
+                        &expected_operation,
+                        max_attempts,
+                    )
+                })
+                .await?;
+            return Ok(Recovered);
+        }
+        if operation.submission == "CONFIRMED" {
             return Ok(OperatorRequired("swap_outcome_requires_review"));
         }
         let terminal = job.phase == FundingPhase::RecoveryRequired;
@@ -202,11 +250,11 @@ impl Treasury {
                 }
                 return Err(error);
             }
-            let status = self.status().await?;
-            if status
-                .treasury_operations
-                .iter()
-                .any(|op| op.operation_id == operation_id && op.submission == "CONFIRMED")
+            let id = operation_id.clone();
+            if self
+                .store
+                .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
+                .await?
             {
                 return Ok(if terminal {
                     OperatorRequired("source_confirmed_check_swap_outcome")
@@ -217,8 +265,7 @@ impl Treasury {
         } else {
             self.sync_once(stop).await?;
         }
-        let status = self.status().await?;
-        let sync = status.sync.context("recovery sync unavailable")?;
+        let sync = self.store.call(|s| s.funding_sync_observation()).await?;
         if expiry == 0 {
             return Ok(OperatorRequired("transaction_expiry_missing"));
         }
@@ -228,10 +275,29 @@ impl Treasury {
         {
             return Ok(Waiting("waiting_for_transaction_expiry"));
         }
+        self.recover_expired(operation_id, sender, stop).await?;
+        let id = job.id.clone();
+        let operation = job.operation_id.clone();
+        if self
+            .store
+            .call(move |s| s.finish_funding_if_proven(&id, &operation))
+            .await?
+        {
+            return Ok(Recovered);
+        }
+        if !allow_new_attempt {
+            return Ok(OperatorRequired("funding_disabled"));
+        }
         if exhausted {
             return Ok(OperatorRequired("recovery_attempt_limit_reached"));
         }
-        self.recover_expired(operation_id, sender, stop).await?;
+        let id = job.id.clone();
+        let expected_operation = job.operation_id.clone();
+        self.store
+            .call(move |s| {
+                s.reauthorize_closed_funding_for_operation(&id, &expected_operation, max_attempts)
+            })
+            .await?;
         Ok(Recovered)
     }
 }
@@ -292,7 +358,7 @@ mod tests {
         let stop = CancellationToken::new();
         assert_eq!(
             owner
-                .recover_funding_job(job.id.clone(), 1, &mut NoNetwork, &stop)
+                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
                 .await
                 .unwrap(),
             RecoveryOutcome::OperatorRequired("preparation_outcome_unknown")
@@ -312,7 +378,23 @@ mod tests {
             .unwrap();
         assert_eq!(
             owner
-                .recover_funding_job(job.id.clone(), 1, &mut NoNetwork, &stop)
+                .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
+                .await
+                .unwrap(),
+            RecoveryOutcome::OperatorRequired("funding_disabled")
+        );
+        let closed = owner
+            .status()
+            .await
+            .unwrap()
+            .funding_jobs
+            .into_iter()
+            .find(|j| j.id == job.id)
+            .unwrap();
+        assert_eq!(closed.operation_id, job.operation_id);
+        assert_eq!(
+            owner
+                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
                 .await
                 .unwrap(),
             RecoveryOutcome::Recovered
@@ -343,10 +425,44 @@ mod tests {
         let mut owner = Treasury::open(state, key, treasury_id).await.unwrap();
         assert_eq!(
             owner
-                .recover_funding_job(job.id, 1, &mut NoNetwork, &stop)
+                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
                 .await
                 .unwrap(),
             RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached")
+        );
+        let id = job.id.clone();
+        assert_eq!(
+            owner
+                .store
+                .call(move |s| s.funding_recovery_count(&id))
+                .await
+                .unwrap(),
+            2
+        );
+        let closed = owner
+            .status()
+            .await
+            .unwrap()
+            .funding_jobs
+            .into_iter()
+            .find(|j| j.id == job.id)
+            .unwrap();
+        assert_eq!(closed.phase, FundingPhase::RecoveryRequired);
+        assert_eq!(
+            owner
+                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
+                .await
+                .unwrap(),
+            RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached")
+        );
+        let id = job.id.clone();
+        assert_eq!(
+            owner
+                .store
+                .call(move |s| s.funding_recovery_count(&id))
+                .await
+                .unwrap(),
+            2
         );
         assert!(owner.status().await.unwrap().treasury_operations.is_empty());
         owner.close().await.unwrap();

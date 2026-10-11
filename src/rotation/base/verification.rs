@@ -11,6 +11,8 @@ pub struct EvidenceCapture {
     pub(crate) checkpoint: Option<Anchor>,
     pub(crate) previous: Option<BalanceObservation>,
     pub(crate) previous_confirmed_covered: bool,
+    /// Fixed per-wallet durable readiness dependencies, independent of cache retention.
+    pub(crate) durable_balance_anchors: Vec<Anchor>,
 }
 #[derive(Clone)]
 pub struct BalanceCertificate {

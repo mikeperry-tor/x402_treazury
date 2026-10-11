@@ -1,6 +1,6 @@
 //! Store-level fixtures exercise encryption AAD and independently constructed schemas.
 use super::*;
-use crate::rotation::transaction::PreparedTransaction;
+use crate::test_funding_quote as quote_fixture;
 
 fn populated(dir: &Path) -> Store {
     let mut s = Store::create(&dir.join("state"), &dir.join("key"), 1, b"initial").unwrap();
@@ -15,8 +15,11 @@ fn populated(dir: &Path) -> Store {
             b"refund snapshot",
         )
         .unwrap();
-        s.save_funding_quote(&job.id, format!("quote-{i}").as_bytes())
-            .unwrap();
+        s.save_funding_quote(
+            &job.id,
+            &quote_fixture::bound(&job.target, &job.recipient, &format!("quote-{i}")),
+        )
+        .unwrap();
         s.advance_funding(
             &job.id,
             funding::FundingPhase::Quoted,
@@ -63,16 +66,14 @@ fn populated(dir: &Path) -> Store {
         [&pool],
     )
     .unwrap();
-    s.db.execute("INSERT INTO funding_recovery SELECT 'prior-operation',p.job_id,p.phase,p.quote,r.address FROM funding_progress p JOIN funding_refunds r ON r.job_id=p.job_id ORDER BY p.rowid LIMIT 1",[]).unwrap();
+    s.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund) SELECT 'prior-operation',p.job_id,p.phase,p.quote,r.address FROM funding_progress p JOIN funding_refunds r ON r.job_id=p.job_id ORDER BY p.rowid LIMIT 1",[]).unwrap();
     s
 }
 #[test]
-fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules() {
+fn populated_historical_schemas_require_explicit_conversion_without_mutation() {
     let donor = tempfile::tempdir().unwrap();
     let s = populated(donor.path());
     let id = s.id().to_owned();
-    let jobs = s.status().unwrap().funding_jobs;
-    let revision = s.snapshot().unwrap().0;
     drop(s);
     for version in 0..=12 {
         let dir = tempfile::tempdir().unwrap();
@@ -143,78 +144,38 @@ fn populated_historical_schemas_preserve_liability_and_backfill_identity_rules()
         ))
         .unwrap_or_else(|e| panic!("version {version}: {e}"));
         drop(db);
-        let s = Store::open(&state, &dir.path().join("key"), &id).unwrap();
-        assert_eq!(
-            s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
-                .unwrap(),
-            14
-        );
-        assert_eq!(s.snapshot().unwrap().0, revision);
-        assert_eq!(
-            s.prepared_bytes(&jobs[1].operation_id).unwrap().as_slice(),
-            b"signed-1"
-        );
-        assert_eq!(
-            s.db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            100
-        );
-        if version >= 1 {
-            assert_eq!(
-                s.db.query_row(
-                    "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
-                    [],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
-                1
+        let before = fs::read(state.join("state.sqlite")).unwrap();
+        for _ in 0..2 {
+            let error = Store::open(&state, &dir.path().join("key"), &id)
+                .err()
+                .expect("occupied legacy state must require explicit conversion");
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("legacy_financial_state_requires_conversion")
+                    || error
+                        .to_string()
+                        .starts_with("legacy_destination_readiness_support_missing"),
+                "version {version}: {error}"
             );
-        }
-        if version >= 4 {
-            assert_eq!(s.funding_quote(&jobs[1].id).unwrap().as_slice(), b"quote-1");
+            assert_eq!(fs::read(state.join("state.sqlite")).unwrap(), before);
+            let db = Connection::open_with_flags(
+                state.join("state.sqlite"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
             assert_eq!(
-                PreparedTransaction::load(&s, &jobs[1].operation_id)
-                    .unwrap()
-                    .network_identity()
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
                     .unwrap(),
-                crate::network::IsolationId::evm(&jobs[1].recipient).unwrap()
+                version
             );
-            assert!(
-                s.db.query_row(
-                    "SELECT started_at FROM funding_health WHERE job_id=?1",
-                    [&jobs[1].id],
-                    |r| r.get::<_, Option<i64>>(0)
-                )
-                .unwrap()
-                .is_some()
-            );
-        } else {
-            assert!(
-                PreparedTransaction::load(&s, &jobs[1].operation_id)
-                    .unwrap()
-                    .network_identity()
-                    .is_err()
-            );
-        }
-        if version >= 5 {
             assert_eq!(
-                s.refund_address(&jobs[1].id).unwrap().as_deref(),
-                Some("refund-1")
+                db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                100
             );
         }
-        if version >= 6 {
-            assert_eq!(
-                s.operation_recipient("prior-operation").unwrap(),
-                Some(jobs[0].recipient.clone())
-            );
-        }
-        if version >= 7 {
-            assert_eq!(s.status().unwrap().refunds.len(), 1);
-        }
-        drop(s);
-        let reopened = Store::open(&state, &dir.path().join("key"), &id).unwrap();
-        assert!(reopened.operation_pending(&jobs[1].operation_id).unwrap());
     }
 }
 
@@ -416,14 +377,14 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
             format!("prepared-{i}").as_bytes()
         );
     }
-    s.db.execute_batch("PRAGMA user_version=15;").unwrap();
+    s.db.execute_batch("PRAGMA user_version=999;").unwrap();
     drop(s);
     assert!(Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err());
     let db = Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap(),
-        15
+        999
     );
     assert_eq!(
         db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
@@ -448,7 +409,11 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
         let id = s.id.clone();
         let pool = s.ensure_pool("test", "5").unwrap();
         let job = s.funding_jobs().unwrap().remove(0);
-        s.save_funding_quote(&job.id, b"quote").unwrap();
+        s.save_funding_quote(
+            &job.id,
+            &quote_fixture::bound(&job.target, &job.recipient, "quote"),
+        )
+        .unwrap();
         s.advance_funding(
             &job.id,
             funding::FundingPhase::Quoted,
@@ -612,7 +577,7 @@ fn admission_skips_retired_balances_but_retains_their_authorizations() {
 }
 
 #[test]
-fn unsigned_queries_preserve_leases_and_exclusive_reopen_cleans_only_unsigned() {
+fn unsigned_queries_and_rejected_legacy_reopen_preserve_all_journals() {
     let dir = tempfile::tempdir().unwrap();
     let store = populated(dir.path());
     let id = store.id().to_owned();
@@ -636,9 +601,35 @@ fn unsigned_queries_preserve_leases_and_exclusive_reopen_cleans_only_unsigned() 
         .execute_batch("DROP TABLE payment_admission_evidence; PRAGMA user_version=12;")
         .unwrap();
     drop(store);
-    let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    assert_eq!(count(&store), 1);
-    assert_eq!(store.chain_query(&pool).unwrap().pending[0].id, "payment");
+    let database = dir.path().join("state/state.sqlite");
+    let before = fs::read(&database).unwrap();
+    let error = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id)
+        .err()
+        .expect("legacy state requires explicit conversion");
+    assert!(
+        error
+            .to_string()
+            .starts_with("legacy_financial_state_requires_conversion")
+            || error
+                .to_string()
+                .starts_with("legacy_destination_readiness_support_missing")
+    );
+    assert_eq!(fs::read(&database).unwrap(), before);
+    let db = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let rows: Vec<(String, String)> = db
+        .prepare("SELECT id,state FROM payment_attempts ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("payment".into(), "POSSIBLY_SUBMITTED".into()),
+            ("unsigned".into(), "ADMITTED".into())
+        ]
+    );
 }
 
 #[tokio::test]

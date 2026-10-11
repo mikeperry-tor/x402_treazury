@@ -11,10 +11,26 @@ impl Store {
     }
     /// Evidence is checked by Treasury, never supplied by a CLI/MCP caller.
     pub(crate) fn resolve_expired(&mut self, id: &str, revision: i64, instant: u64) -> Result<()> {
-        let status = self.status()?;
-        let sync = status.sync.context("missing recovery sync")?;
+        let closed: Option<bool> = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0) FROM expired_operations WHERE id=?1",
+            [id], |row| row.get(0)).optional()?;
+        if let Some(closed) = closed {
+            ensure!(closed, "expired operation accounting conflict");
+            return Ok(());
+        }
+        let observation: String = self.db.query_row(
+            "SELECT observation FROM treasury_sync WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?;
+        let sync: SyncObservation = serde_json::from_str(&observation)?;
+        let current_revision: i64 = self.db.query_row(
+            "SELECT revision FROM snapshots ORDER BY revision DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
         ensure!(
-            status.snapshot_revision == revision && sync.fresh(instant, revision),
+            current_revision == revision && sync.fresh(instant, revision),
             "expiry recovery requires fresh unchanged snapshot"
         );
         ensure!(
@@ -46,14 +62,13 @@ impl Store {
             "INSERT INTO expired_operations VALUES (?1,?2,?3)",
             params![id, i64::try_from(height)?, revision],
         )?;
-        // A replacement is a new operation, quote and refund derivation. Preserve
-        // the old signed bytes forever; they can never mint another broadcast.
+        // Canonical closure does not grant another attempt. Preserve the original
+        // operation, quote, refund binding and exact bytes until a separate
+        // current-authority check permits reauthorization on the same job.
         let job: Option<String> = tx.query_row("SELECT job_id FROM funding_progress WHERE operation_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",[id],|r|r.get(0)).optional()?;
         if let Some(job) = job {
-            tx.execute("INSERT INTO funding_recovery SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[&job])?;
-            tx.execute("DELETE FROM funding_refunds WHERE job_id=?1", [&job])?;
-            tx.execute("DELETE FROM funding_health WHERE job_id=?1", [&job])?;
-            tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,attempts=0,next_poll=0,last_error=NULL WHERE job_id=?1",params![job,Uuid::new_v4().to_string()])?;
+            tx.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[&job])?;
+            tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1",[&job])?;
         }
         tx.commit()?;
         Ok(())
@@ -64,7 +79,7 @@ impl Store {
 mod tests {
     use super::*;
     #[test]
-    fn expiry_release_is_revision_guarded_and_replaces_job_identity() -> Result<()> {
+    fn expiry_release_is_revision_guarded_and_preserves_job_identity() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let mut s = Store::create(
             &dir.path().join("state"),
@@ -74,7 +89,12 @@ mod tests {
         )?;
         let pool = s.ensure_pool("a", "5")?;
         let job = s.funding_jobs()?.remove(0);
-        s.save_funding_quote(&job.id, b"quote")?;
+        s.save_funding_quote(
+            &job.id,
+            &serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+            )?,
+        )?;
         s.advance_funding(
             &job.id,
             funding::FundingPhase::Quoted,
@@ -133,9 +153,25 @@ mod tests {
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         assert!(!s.operation_pending(&job.operation_id)?);
         let next = s.funding_jobs()?.remove(0);
-        assert_ne!(next.operation_id, job.operation_id);
-        assert_eq!(next.phase, funding::FundingPhase::Allocated);
-        assert!(s.resolve_expired(&job.operation_id, revision, 100).is_err());
+        assert_eq!(next.operation_id, job.operation_id);
+        assert_eq!(next.phase, funding::FundingPhase::RecoveryRequired);
+        assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+        assert!(s.reauthorize_closed_funding(&job.id, 0).is_err());
+        s.funding_restriction =
+            super::super::super::restriction::FundingRestriction::DenyNewFunding;
+        assert!(s.reauthorize_closed_funding(&job.id, 1).is_err());
+        assert_eq!(
+            s.funding_job(&job.id)?.unwrap().operation_id,
+            job.operation_id
+        );
+        s.funding_restriction = super::super::super::restriction::FundingRestriction::Ordinary;
+        s.reauthorize_closed_funding(&job.id, 1)?;
+        assert_ne!(
+            s.funding_job(&job.id)?.unwrap().operation_id,
+            job.operation_id
+        );
+        assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+        s.resolve_expired(&job.operation_id, revision, 100)?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         assert!(s.confirm_spend(&job.operation_id, 100, 1).is_err());
         let treasury = s.id().to_owned();

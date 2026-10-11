@@ -1,5 +1,6 @@
 //! The restriction is enforced at store boundaries, independently of worker settings.
 use super::*;
+use crate::test_funding_quote as quote_fixture;
 use std::sync::{Arc, Mutex};
 #[derive(Clone, Default)]
 struct Logs(Arc<Mutex<Vec<u8>>>);
@@ -126,7 +127,11 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
 fn restriction_does_not_poison_queued_preparation_as_interrupted_work() {
     let (_dir, mut s, _pool) = fixture();
     let job = s.funding_jobs().unwrap().remove(0);
-    s.save_funding_quote(&job.id, b"saved quote").unwrap();
+    s.save_funding_quote(
+        &job.id,
+        &quote_fixture::bound(&job.target, &job.recipient, "saved quote"),
+    )
+    .unwrap();
     s.deny_new_funding();
     denied(s.advance_funding(
         &job.id,
@@ -277,9 +282,13 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
     let job = &jobs[0];
     denied(s.reserve(&job.operation_id, Some(&pool), 1, 101, 1000));
     assert!(s.reserve("unbound", Some(&pool), 1, 1, 1000).is_err());
+    s.save_funding_quote(
+        &job.id,
+        &quote_fixture::bound(&job.target, &job.recipient, "fixture quote"),
+    )
+    .unwrap();
     s.reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
         .unwrap();
-    s.save_funding_quote(&job.id, b"fixture quote").unwrap();
     s.advance_funding(
         &job.id,
         funding::FundingPhase::Quoted,
@@ -341,7 +350,7 @@ fn permit_hooks_bound_bootstrap_promotion_and_preparation_before_mutation() {
 }
 
 #[test]
-fn archived_unprepared_recovery_releases_only_the_old_operation_after_restart() {
+fn uncertain_preparation_keeps_the_same_operation_and_permit_after_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(
         &dir.path().join("state"),
@@ -357,10 +366,10 @@ fn archived_unprepared_recovery_releases_only_the_old_operation_after_restart() 
     store
         .reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
         .unwrap();
-    store.recover_unprepared_funding(&job.id).unwrap();
+    assert!(store.recover_unprepared_funding(&job.id).is_err());
     let treasury = store.id().to_owned();
     drop(store);
-    // The treasury reset committed; the registry still charges the old attempt.
+    // No result proves whether proposal work started; the permit stays charged.
     assert_eq!(
         permits
             .db
@@ -381,18 +390,11 @@ fn archived_unprepared_recovery_releases_only_the_old_operation_after_restart() 
     )
     .unwrap();
     store.install_funding_permits(permits.clone()).unwrap();
-    let new = store.funding_jobs().unwrap().remove(0);
-    assert_ne!(job.operation_id, new.operation_id);
-    store
-        .reserve(&new.operation_id, Some(&pool), 1, 100, 1000)
-        .unwrap();
+    let same = store.funding_jobs().unwrap().remove(0);
+    assert_eq!(job.operation_id, same.operation_id);
+    assert!(store.recover_unprepared_funding(&job.id).is_err());
     assert!(
-        store
-            .reserve(&job.operation_id, Some(&pool), 1, 100, 1000)
-            .is_err()
-    );
-    assert!(
-        permits
+        !permits
             .db
             .lock()
             .unwrap()

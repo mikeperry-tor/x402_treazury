@@ -70,7 +70,7 @@ PRAGMA user_version=14;")?;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct BalanceSupport {
+pub struct BalanceSupport {
     pub observation: BalanceObservation,
     pub checkpoint: Option<Anchor>,
 }
@@ -156,7 +156,17 @@ mod tests {
                 "../../../tests/fixtures/state/remove_evidence_v14.sql"
             ))
             .unwrap();
+        // Exercise the conversion primitive explicitly. Runtime open must not
+        // perform an automatic upgrade of this populated synthetic history.
+        let version: i64 = store
+            .db
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
         store.db.execute_batch("PRAGMA user_version=13;").unwrap();
+        let tx = store.db.transaction().unwrap();
+        initialize_in_transaction(&tx).unwrap();
+        tx.pragma_update(None, "user_version", version).unwrap();
+        tx.commit().unwrap();
         drop(store);
         let store = Store::open(&state, &key, &identity).unwrap();
         for (wallet, expected) in wallets.iter().zip(expected) {
@@ -665,7 +675,44 @@ impl Store {
                             && certificate.compatible(Some(checkpoint))
                     })
                 });
+        // Exactly one funding job owns a wallet. This keyed read is bounded;
+        // immutable support remains relevant after ordinary cache eviction.
+        let saved:Option<(Option<String>,Option<String>)>=self.db.query_row(
+            "SELECT readiness_requirement,readiness_support FROM funding_jobs WHERE wallet_id=?1",[wallet],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+        let mut durable_balance_anchors = Vec::new();
+        if let Some((Some(_), support)) = saved {
+            let support: BalanceSupport = serde_json::from_str(
+                support
+                    .as_deref()
+                    .ok_or(EvidenceFailure::MalformedSupport)?,
+            )
+            .map_err(|_| EvidenceFailure::MalformedSupport)?;
+            support.observation.validate()?;
+            ensure!(
+                support.observation.wallet == wallet,
+                EvidenceFailure::ScopeMismatch
+            );
+            let address: String =
+                self.db
+                    .query_row("SELECT address FROM wallets WHERE id=?1", [wallet], |row| {
+                        row.get(0)
+                    })?;
+            ensure!(
+                support
+                    .observation
+                    .address
+                    .parse::<alloy_primitives::Address>()?
+                    == address.parse::<alloy_primitives::Address>()?,
+                EvidenceFailure::ScopeMismatch
+            );
+            durable_balance_anchors.push(support.observation.confirmed.anchor);
+            durable_balance_anchors.push(support.observation.latest.anchor);
+            if let Some(anchor) = support.checkpoint {
+                durable_balance_anchors.push(anchor);
+            }
+        }
         Ok(crate::rotation::base::EvidenceCapture {
+            durable_balance_anchors,
             previous_confirmed_covered,
             namespace: self.evidence_namespace,
             wallet: wallet.into(),
@@ -960,31 +1007,47 @@ impl Store {
                     let malformed = format!(
                         "({required} OR (json_type(e.support,'$.checkpoint') IS NOT 'null' AND json_type(e.support,'$.checkpoint') IS NOT 'object') OR (json_type(e.support,'$.checkpoint')='object' AND (json_type(e.support,'$.checkpoint.height') IS NOT 'integer' OR json_type(e.support,'$.checkpoint.hash') IS NOT 'text')))"
                     );
-                    let sql = format!(
-                        "SELECT e.support,CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM payment_admission_evidence e JOIN payment_attempts a ON a.id=e.attempt_id WHERE a.wallet_id=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN 0 WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
-                    );
-                    let conflicting: Option<(String, bool)> = self
-                        .db
-                        .query_row(
-                            &sql,
-                            params![
-                                wallet,
-                                point.anchor.hash,
-                                amount_text,
-                                i64::try_from(point.anchor.height)?
-                            ],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .optional()?;
-                    if let Some((support, malformed)) = conflicting {
-                        let exact = serde_json::from_str::<BalanceSupport>(&support)
-                            .ok()
-                            .filter(|support| support.observation.validate().is_ok());
-                        self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
-                        if malformed || exact.is_none() {
-                            anyhow::bail!(EvidenceFailure::MalformedSupport);
+                    // Every source projects the same exact support columns.
+                    // SQLite flattens the funding projection so both lookups use
+                    // their dedicated hash indexes; no historical JSON sweep.
+                    for (source, owner, missing) in [
+                        (
+                            "payment_admission_evidence e JOIN payment_attempts a ON a.id=e.attempt_id",
+                            "a.wallet_id",
+                            0,
+                        ),
+                        (
+                            "(SELECT wallet_id,readiness_support AS support,readiness_hash AS block_hash,readiness_latest_hash AS latest_hash FROM funding_jobs) e",
+                            "e.wallet_id",
+                            1,
+                        ),
+                    ] {
+                        let sql = format!(
+                            "SELECT COALESCE(e.support,''),CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM {source} WHERE {owner}=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN {missing} WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
+                        );
+                        let conflicting: Option<(String, bool)> = self
+                            .db
+                            .query_row(
+                                &sql,
+                                params![
+                                    wallet,
+                                    point.anchor.hash,
+                                    amount_text,
+                                    i64::try_from(point.anchor.height)?
+                                ],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .optional()?;
+                        if let Some((support, malformed)) = conflicting {
+                            let exact = serde_json::from_str::<BalanceSupport>(&support)
+                                .ok()
+                                .filter(|support| support.observation.validate().is_ok());
+                            self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
+                            if malformed || exact.is_none() {
+                                anyhow::bail!(EvidenceFailure::MalformedSupport);
+                            }
+                            anyhow::bail!(EvidenceFailure::AmountContradiction);
                         }
-                        anyhow::bail!(EvidenceFailure::AmountContradiction);
                     }
                 }
             }
@@ -1101,6 +1164,16 @@ impl Store {
                 ],
             )?;
         }
+        super::funding::dispute_support(
+            &tx,
+            wallet,
+            &anchor.hash,
+            if amount_conflict {
+                "evidence_repair_required"
+            } else {
+                "chain_repair_required"
+            },
+        )?;
         bump_generation(&tx, "wallet", wallet)?;
         tx.commit()?;
         self.evidence_cache.remove(wallet);
@@ -1113,7 +1186,10 @@ impl Store {
             endpoint.len() == 64 && endpoint.bytes().all(|byte| byte.is_ascii_hexdigit()),
             "invalid endpoint identity"
         );
-        bump_generation(&self.db, "endpoint", endpoint)?;
+        let tx = self.db.transaction()?;
+        super::funding::dispute_endpoint_support(&tx, endpoint)?;
+        bump_generation(&tx, "endpoint", endpoint)?;
+        tx.commit()?;
         self.evidence_cache
             .retain(|_, (_, certificate)| certificate.observation().endpoint != endpoint);
         Ok(())
@@ -1121,6 +1197,11 @@ impl Store {
     pub(crate) fn record_base_failure(&mut self, error: &anyhow::Error) -> Result<()> {
         if let Some(failure) = error.downcast_ref::<crate::rotation::base::EndpointMismatch>() {
             self.invalidate_endpoint_evidence(&failure.endpoint)?;
+        }
+        if let Some(failure) =
+            error.downcast_ref::<crate::rotation::base::historical::HistoricalAmountConflict>()
+        {
+            self.invalidate_wallet_evidence(&failure.wallet, &failure.anchor, false, true)?;
         }
         if let Some(failure) = error.downcast_ref::<crate::rotation::base::EvidenceConflict>() {
             ensure!(failure.endpoint.len() == 64, "invalid endpoint identity");
@@ -1133,9 +1214,17 @@ impl Store {
         }
         Ok(())
     }
-    pub(crate) fn record_verified_credit(
+    pub fn record_verified_credit(
         &mut self,
         wallet: &str,
+        view: crate::rotation::base::ChainView,
+    ) -> Result<BalanceSupport> {
+        self.record_verified_funding_credit(wallet, None, view)
+    }
+    pub(crate) fn record_verified_funding_credit(
+        &mut self,
+        wallet: &str,
+        operation: Option<(&str, &str)>,
         view: crate::rotation::base::ChainView,
     ) -> Result<BalanceSupport> {
         let view = self.prepare_evidence_view(view)?;
@@ -1143,13 +1232,123 @@ impl Store {
             .balance_certificates
             .get(wallet)
             .context("missing verified funding evidence")?;
-        let support = check_balance(&self.db, self.evidence_namespace, certificate)?;
-        self.record_credit(
-            wallet,
-            &support.observation.available().to_string(),
-            &support.observation.confirmed.anchor.hash,
-            i64::try_from(support.observation.confirmed.anchor.height)?,
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some((job, operation)) = operation {
+            let bound: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.wallet_id=?2 AND j.operation_id=?3)",params![job,wallet,operation],|r|r.get(0))?;
+            ensure!(bound, "funding operation binding changed");
+        }
+        let support = check_balance(&tx, self.evidence_namespace, certificate)?;
+        tx.execute(
+            "UPDATE wallets SET balance=?2,block_hash=?3,block_height=?4 WHERE id=?1",
+            params![
+                wallet,
+                support.observation.available().to_string(),
+                support.observation.confirmed.anchor.hash,
+                i64::try_from(support.observation.confirmed.anchor.height)?
+            ],
         )?;
+        if super::funding::record_readiness(&tx, wallet, &support)? {
+            super::funding::publish_destination_readiness(&tx, wallet)?;
+        }
+        tx.commit()?;
         Ok(support)
     }
 }
+
+impl Store {
+    /// An endpoint dispute requires exact historical support, even after the
+    /// destination's present balance has been spent. Other disputes need repair.
+    pub(crate) fn funding_readiness_reverification(
+        &self,
+        job: &str,
+        operation: &str,
+    ) -> Result<Option<crate::rotation::base::historical::HistoricalBalanceRequest>> {
+        let (wallet,support,dispute):(String,Option<String>,Option<String>) = self.db.query_row(
+            "SELECT f.wallet_id,f.readiness_support,f.readiness_disputed FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation],
+            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+        let Some(dispute) = dispute else {
+            return Ok(None);
+        };
+        ensure!(
+            dispute == "endpoint_reverification_required",
+            EvidenceFailure::EvidenceRepairRequired
+        );
+        let support: BalanceSupport = serde_json::from_str(
+            support
+                .as_deref()
+                .ok_or(EvidenceFailure::MalformedSupport)?,
+        )
+        .map_err(|_| EvidenceFailure::MalformedSupport)?;
+        support.observation.validate()?;
+        ensure!(
+            support.observation.wallet == wallet,
+            EvidenceFailure::ScopeMismatch
+        );
+        let address: String = self.db.query_row(
+            "SELECT address FROM wallets WHERE id=?1",
+            [&wallet],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            support
+                .observation
+                .address
+                .parse::<alloy_primitives::Address>()?
+                == address.parse::<alloy_primitives::Address>()?,
+            EvidenceFailure::ScopeMismatch
+        );
+        Ok(Some(
+            crate::rotation::base::historical::HistoricalBalanceRequest {
+                capture: self.capture_evidence(&wallet)?,
+                observation: support.observation,
+                checkpoint: support.checkpoint,
+            },
+        ))
+    }
+
+    pub(crate) fn restore_funding_readiness_support(
+        &mut self,
+        job: &str,
+        operation: &str,
+        certificate: crate::rotation::base::historical::HistoricalBalanceCertificate,
+    ) -> Result<()> {
+        let request = certificate.request();
+        let tx = self.db.transaction()?;
+        check_capture(
+            &tx,
+            self.evidence_namespace,
+            &request.capture,
+            &request.observation.endpoint,
+            certificate.endpoint_generation(),
+        )?;
+        ensure!(
+            checkpoint(&tx, &request.capture.wallet)? == request.capture.checkpoint,
+            EvidenceFailure::CompatibilityRequired
+        );
+        let (wallet,support,dispute):(String,String,Option<String>)=tx.query_row(
+            "SELECT f.wallet_id,f.readiness_support,f.readiness_disputed FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2",params![job,operation],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+        ensure!(
+            dispute.as_deref() == Some("endpoint_reverification_required"),
+            EvidenceFailure::Invalidated
+        );
+        let support: BalanceSupport =
+            serde_json::from_str(&support).map_err(|_| EvidenceFailure::MalformedSupport)?;
+        ensure!(
+            wallet == request.capture.wallet
+                && support.observation == request.observation
+                && support.checkpoint == request.checkpoint,
+            EvidenceFailure::ScopeMismatch
+        );
+        // Never alter the original D amount, anchors, timestamp, operation or
+        // qualification capability; this restores only the trust annotation.
+        tx.execute("UPDATE funding_jobs SET readiness_disputed=NULL WHERE id=?1 AND readiness_disputed='endpoint_reverification_required'",[job])?;
+        super::funding::publish_destination_readiness(&tx, &wallet)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod funding_tests;

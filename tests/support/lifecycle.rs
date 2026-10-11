@@ -62,6 +62,12 @@ impl FundingBackend for Funding {
             .await
     }
     async fn quote(&mut self, job: &FundingJob) -> Result<Quote> {
+        let id = job.id.clone();
+        let operation = job.operation_id.clone();
+        let target = job.target.clone();
+        self.store
+            .call(move |s| s.select_quote_terms(&id, &operation, &target, &target))
+            .await?;
         Ok(Quote {
             request: json!({"recipient":job.recipient,"target":job.target,"amount":job.target,"pool":job.pool_name}),
             response: json!({}),
@@ -74,6 +80,16 @@ impl FundingBackend for Funding {
         let job = job.clone();
         self.store
             .call(move |s| {
+                s.begin_funding_preparation(
+                    &job.operation_id,
+                    Some(
+                        &x402_treazury::rotation::transaction::ManagedFundingAuthority {
+                            job_id: job.id.clone(),
+                            auto_fund: true,
+                            max_attempts: 3,
+                        },
+                    ),
+                )?;
                 s.reserve(
                     &job.operation_id,
                     Some(&job.pool_id),
@@ -139,17 +155,9 @@ impl FundingBackend for Funding {
         let view = BaseRpc::new(&format!("{}/rpc", self.base), 12, 120)?
             .view(query)
             .await?;
-        let balance = view.balances[&job.wallet_id].to_string();
         let wallet = job.wallet_id.clone();
         self.store
-            .call(move |s| {
-                s.record_credit(
-                    &wallet,
-                    &balance,
-                    &view.anchor.hash,
-                    i64::try_from(view.anchor.height)?,
-                )
-            })
+            .call(move |s| s.record_verified_credit(&wallet, view).map(|_| ()))
             .await
     }
 }

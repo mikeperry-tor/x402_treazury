@@ -1,5 +1,6 @@
 use super::*;
 use crate::rotation::{store::Store, transaction::TransactionFacts};
+use crate::test_funding_quote as quote_fixture;
 use pepper_sync::wallet::WalletTransaction;
 use zingo_status::confirmation_status::ConfirmationStatus;
 use zingolib::testutils::synthetic_wallet::SyntheticWalletBuilder;
@@ -191,7 +192,10 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
             ]) {
                 let revision = s.status()?.snapshot_revision;
                 s.save_refund_address(&job.id, &address, revision, b"return-fixture")?;
-                s.save_funding_quote(&job.id, b"fixture-quote")?;
+                s.save_funding_quote(
+                    &job.id,
+                    &quote_fixture::bound(&job.target, &job.recipient, "fixture-quote"),
+                )?;
                 s.advance_funding(
                     &job.id,
                     crate::rotation::store::funding::FundingPhase::Quoted,

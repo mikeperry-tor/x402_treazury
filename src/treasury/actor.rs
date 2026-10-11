@@ -14,6 +14,7 @@ enum Command {
     RecoverFunding(
         String,
         u32,
+        bool,
         oneshot::Sender<Result<super::recovery::RecoveryOutcome>>,
     ),
     Refund(String, oneshot::Sender<Result<String>>),
@@ -38,8 +39,9 @@ impl TreasuryHandle {
         &self,
         id: String,
         max_attempts: u32,
+        allow_new_attempt: bool,
     ) -> Result<super::recovery::RecoveryOutcome> {
-        self.call(|reply| Command::RecoverFunding(id, max_attempts, reply))
+        self.call(|reply| Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply))
             .await
     }
 
@@ -90,7 +92,7 @@ impl Treasury {
                 command = commands.receiver.recv() => {
                     let Some(command) = command else { break };
                     match command {
-                        Command::RecoverFunding(id, max_attempts, reply) => { let _ = reply.send(self.recover_funding_job(id, max_attempts, &mut submission, &stop).await); }
+                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_job(id, max_attempts, allow_new_attempt, &mut submission, &stop).await); }
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
@@ -132,7 +134,7 @@ impl Treasury {
 // Observe the real command boundary without substituting a fake FundingBackend.
 #[cfg(test)]
 pub(crate) enum ObservedCommand {
-    RecoverFunding(String, u32),
+    RecoverFunding(String, u32, bool),
     Prepare(PrepareRequest),
     Submit(String, bool),
     Reconcile(String),
@@ -144,11 +146,11 @@ impl TreasuryCommands {
     }
     pub(crate) async fn test_observe(&mut self) -> ObservedCommand {
         match self.receiver.recv().await.expect("command channel closed") {
-            Command::RecoverFunding(id, limit, reply) => {
+            Command::RecoverFunding(id, limit, allow_new_attempt, reply) => {
                 let _ = reply.send(Ok(super::recovery::RecoveryOutcome::Waiting(
                     "waiting_for_transaction_expiry",
                 )));
-                ObservedCommand::RecoverFunding(id, limit)
+                ObservedCommand::RecoverFunding(id, limit, allow_new_attempt)
             }
             Command::Prepare(request, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
@@ -261,6 +263,7 @@ mod tests {
         let (handle, commands) = channel();
         let stop = CancellationToken::new();
         let request = PrepareRequest {
+            managed_funding: None,
             allocation_limits: None,
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
