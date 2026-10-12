@@ -294,11 +294,7 @@ impl ManagedPool {
             .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
         let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
         let omitted = strip_extensions(&mut challenge)?;
-        let offer = select_offer(
-            &challenge,
-            &self.policy,
-            self.policy.max_atomic.unwrap_or(U256::MAX),
-        )?;
+        let offer = select_offer(&challenge, &self.policy)?;
         challenge["accepts"] = serde_json::json!([offer.raw.clone()]);
         if let Some(desc) = challenge.pointer_mut("/resource/description")
             && let Some(text) = desc.as_str()
@@ -575,7 +571,7 @@ fn strip_extensions(challenge: &mut Value) -> Result<bool> {
         .remove("extensions");
     Ok(omitted)
 }
-fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result<Offer> {
+fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
     ensure!(
         challenge["x402Version"] == 2,
         AdmissionError::UnsupportedPayment("only v2 exact Base USDC is supported")
@@ -674,7 +670,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy, target: U256) -> Result
             })
         })();
         if let Ok(offer) = parsed {
-            if offer.amount > target || policy.max_atomic.is_some_and(|cap| offer.amount > cap) {
+            if policy.max_atomic.is_some_and(|cap| offer.amount > cap) {
                 price_rejected = true;
                 continue;
             }
@@ -758,6 +754,50 @@ mod offer_tests {
             "extra":{"name":"USD Coin","version":"2"},"annotation":{"opaque":true}})
     }
     #[test]
+    fn sole_offer_ceiling_is_inclusive_and_unlimited_keeps_asset_validation() {
+        let challenge = serde_json::json!({"x402Version":2,"accepts":[offer("100",1)]});
+        assert_eq!(
+            select_offer(
+                &challenge,
+                &SpendPolicy {
+                    max_atomic: Some(U256::from(100))
+                }
+            )
+            .unwrap()
+            .amount,
+            U256::from(100)
+        );
+        assert!(matches!(
+            select_offer(
+                &challenge,
+                &SpendPolicy {
+                    max_atomic: Some(U256::from(99))
+                }
+            )
+            .err()
+            .unwrap()
+            .downcast_ref::<AdmissionError>(),
+            Some(AdmissionError::PriceLimit(_))
+        ));
+        let mut large =
+            serde_json::json!({"x402Version":2,"accepts":[offer(&U256::MAX.to_string(),1)]});
+        assert_eq!(
+            select_offer(&large, &SpendPolicy { max_atomic: None })
+                .unwrap()
+                .amount,
+            U256::MAX
+        );
+        large["accepts"][0]["asset"] =
+            serde_json::json!("0x0000000000000000000000000000000000000001");
+        assert!(matches!(
+            select_offer(&large, &SpendPolicy { max_atomic: None })
+                .err()
+                .unwrap()
+                .downcast_ref::<AdmissionError>(),
+            Some(AdmissionError::UnsupportedPayment(_))
+        ));
+    }
+    #[test]
     fn lowest_supported_offer_wins_and_equal_prices_keep_exact_challenge_order() {
         let first = offer("100", 1);
         let second = offer("20", 2);
@@ -768,7 +808,6 @@ mod offer_tests {
             &SpendPolicy {
                 max_atomic: Some(U256::from(100)),
             },
-            U256::from(100),
         )
         .unwrap();
         assert_eq!(selected.amount, U256::from(20));
@@ -788,7 +827,6 @@ mod offer_tests {
             &SpendPolicy {
                 max_atomic: Some(U256::from(100)),
             },
-            U256::from(100),
         );
         assert!(matches!(
             error.err().unwrap().downcast_ref::<AdmissionError>(),
@@ -805,7 +843,6 @@ mod offer_tests {
                 &SpendPolicy {
                     max_atomic: Some(U256::from(100))
                 },
-                U256::from(100)
             )
             .unwrap()
             .raw,
@@ -820,8 +857,7 @@ mod offer_tests {
         equal["maxTimeoutSeconds"] = serde_json::json!(0);
         let expected = offer("20", 3);
         let challenge = serde_json::json!({"x402Version":2,"accepts":[cheap,equal,expected]});
-        let selected =
-            select_offer(&challenge, &SpendPolicy { max_atomic: None }, U256::MAX).unwrap();
+        let selected = select_offer(&challenge, &SpendPolicy { max_atomic: None }).unwrap();
         assert_eq!(selected.raw, challenge["accepts"][2]);
     }
 }
