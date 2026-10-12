@@ -52,8 +52,8 @@ pub fn inspect(dir: &Path) -> Result<Outcome> {
     let _owner = Owner(file);
     let path = dir.join("state.sqlite");
     regular(&path, false)?;
-    // Recovery, if needed, touches only a private disposable copy of the
-    // exclusively owned database and its journals, without decrypting payloads.
+    // Clean state is read immutably. Recovery, if needed, touches only a private
+    // disposable copy of the database and journals, without decrypting payloads.
     let snapshot = preflight_snapshot::snapshot(dir)?;
     let db = &snapshot.db;
     db.execute_batch("PRAGMA foreign_keys=ON; BEGIN;")?;

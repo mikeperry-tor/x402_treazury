@@ -761,7 +761,8 @@ for dual-balance evidence, pending-work exclusions and qualification restriction
 
 The one-time [known-state preflight](operator-notes/privacy-local-schema12.md) is a
 separate Rust example, outside the production wallet command tree. It requires
-stopped-service exclusive ownership and inspects a disposable database snapshot
+stopped-service exclusive ownership and inspects immutable state (using a disposable
+copy when journal recovery is needed)
 without loading keys, connecting to a network or changing source state. The
 inspected schema12 source is rejected for missing immutable destination-readiness
 support. No successful transformation is available; ordinary `recover` cannot

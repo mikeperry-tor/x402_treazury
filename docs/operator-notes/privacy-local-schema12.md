@@ -64,9 +64,10 @@ latest journals for incident-specific recovery; neither backups nor retained key
 grant permission to replay uncertain operations.
 
 The stopped-source preflight holds the existing exclusive application owner lock
-and copies the database plus any WAL/rollback journal into a private
-disposable directory. SQLite recovery and query-only inspection use that copy;
-no source shared-memory sidecar is created or modified. The copy contains no
+and reads clean databases directly through SQLite's immutable read-only mode.
+When a WAL or rollback journal contains data, it copies the database and journals
+into a private disposable directory for SQLite recovery and query-only inspection.
+Neither path creates or modifies source shared-memory sidecars. Any copy contains no
 loaded keys and is removed after inspection. Wallet payloads remain encrypted,
 but database metadata is plaintext. A synthetic WAL fixture verifies
 that committed WAL changes affect rejection and that repeated inspection leaves
