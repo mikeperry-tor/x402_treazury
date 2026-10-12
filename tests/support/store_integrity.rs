@@ -67,18 +67,20 @@ fn populated(dir: &Path) -> Store {
     let wallet = &s.status().unwrap().pools[0].addresses[0];
     s.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES ('payment',?1,?2,0,'7','hash','POSSIBLY_SUBMITTED',?3,?3,?4,0,1000,1)",params![pool,wallet.id,wallet.address,format!("0x{:064x}",1)]).unwrap();
     evidence::add_exposure(&s.db, &wallet.id, U256::from(7)).unwrap();
-    s.db.execute(
-        "INSERT INTO payment_anchors VALUES (?1,100,'base-block')",
-        [&pool],
-    )
-    .unwrap();
     s.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund) SELECT 'prior-operation',p.job_id,p.phase,p.quote,r.address FROM funding_progress p JOIN funding_refunds r ON r.job_id=p.job_id ORDER BY p.rowid LIMIT 1",[]).unwrap();
     s
 }
+// Frozen historical schemas still contain these fields. Populate them explicitly
+// in legacy donors instead of making current runtime schemas depend on them.
+fn add_obsolete_metadata(store: &Store) {
+    store.db.execute_batch("CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); INSERT INTO payment_anchors SELECT id,100,'base-block' FROM pools;").unwrap();
+}
+
 #[test]
 fn populated_historical_schemas_require_explicit_conversion_without_mutation() {
     let donor = tempfile::tempdir().unwrap();
     let s = populated(donor.path());
+    add_obsolete_metadata(&s);
     let id = s.id().to_owned();
     drop(s);
     for version in 0..=12 {
@@ -606,6 +608,7 @@ fn admission_skips_retired_balances_but_retains_their_authorizations() {
 fn unsigned_queries_and_rejected_legacy_reopen_preserve_all_journals() {
     let donor = tempfile::tempdir().unwrap();
     let store = populated(donor.path());
+    add_obsolete_metadata(&store);
     let id = store.id().to_owned();
     let pool = store.status().unwrap().pools.remove(0).id;
     store.chain_query(&pool).unwrap();
@@ -999,4 +1002,68 @@ async fn owner_panic_never_acknowledges_or_loses_an_atomic_payment() {
         let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
         assert_atomic_counts(&store, 1 + i64::from(committed), i64::from(committed));
     }
+}
+
+#[test]
+fn obsolete_capacity_metadata_is_optional_and_never_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = populated(dir.path());
+    let pool = store.status().unwrap().pools[0].id.clone();
+    let id = store.id().to_owned();
+    let obsolete_count: i64 = store.db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('payment_anchors','funding_schedule_turn')",[],|r|r.get(0)).unwrap();
+    assert_eq!(obsolete_count, 0);
+    let has_turn: bool = store
+        .db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('funding_progress') WHERE name='turn')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!has_turn);
+    let view = || super::super::base::ChainView {
+        anchor: super::super::base::Anchor {
+            height: 200,
+            hash: "new-observation".into(),
+        },
+        admission_valid_until: u64::MAX,
+        balances: Default::default(),
+        observations: Default::default(),
+        balance_certificates: Default::default(),
+        resolution_certificates: Default::default(),
+        released: vec![],
+        resolutions: Default::default(),
+    };
+    store.publish_scoped_evidence(&pool, view()).unwrap();
+    // Reproduce the old schema16 layout with retained metadata. Opening and
+    // publishing new evidence must neither require nor rewrite these old fields.
+    store.db.execute_batch("CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); UPDATE funding_progress SET turn=7;").unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO payment_anchors VALUES (?1,100,'original')",
+            [&pool],
+        )
+        .unwrap();
+    drop(store);
+    let mut reopened =
+        Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    reopened.publish_scoped_evidence(&pool, view()).unwrap();
+    let anchor: (i64, String) = reopened
+        .db
+        .query_row(
+            "SELECT height,hash FROM payment_anchors WHERE pool_id=?1",
+            [&pool],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(anchor, (100, "original".into()));
+    assert_eq!(
+        reopened
+            .db
+            .query_row("SELECT MIN(turn) FROM funding_progress", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
 }

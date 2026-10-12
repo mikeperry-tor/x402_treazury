@@ -1,4 +1,6 @@
 -- Fresh schema16 only. Legacy conversion has a separate strict preflight.
+-- Older schema16 stores may retain unused payment_anchors and funding_progress.turn.
+-- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
 CREATE TABLE snapshots(revision INTEGER PRIMARY KEY,bytes BLOB NOT NULL);
 CREATE TABLE pools(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,generation INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), payment_limit TEXT, retirement_tolerance TEXT);
@@ -7,10 +9,9 @@ CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REF
 CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT REFERENCES pools(id),day INTEGER NOT NULL,original_day INTEGER NOT NULL,requested INTEGER NOT NULL CHECK(requested>0),reserved INTEGER NOT NULL CHECK(reserved>=0),consumed INTEGER NOT NULL CHECK(consumed>=0));
 CREATE TABLE outgoing(id TEXT PRIMARY KEY REFERENCES budget_entries(id),state TEXT NOT NULL CHECK(state IN ('PREPARED','RESOLVED')),raw BLOB NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER, reconciliation_sequence INTEGER,UNIQUE(wallet_id,nonce));
-CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY REFERENCES pools(id),height INTEGER NOT NULL,hash TEXT NOT NULL);
 CREATE TABLE treasury_sync(singleton INTEGER PRIMARY KEY CHECK(singleton=1),observation TEXT NOT NULL);
 CREATE TABLE treasury_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),facts TEXT NOT NULL,submission TEXT NOT NULL CHECK(submission IN ('PREPARED','BROADCAST_REQUESTED','BROADCAST','UNKNOWN','CONFIRMED')),attempts INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE funding_progress(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),operation_id TEXT NOT NULL UNIQUE,phase TEXT NOT NULL,quote BLOB,attempts INTEGER NOT NULL DEFAULT 0,next_poll INTEGER NOT NULL DEFAULT 0,last_error TEXT,turn INTEGER NOT NULL DEFAULT 0, provider_success INTEGER NOT NULL DEFAULT 0, provider_failed INTEGER NOT NULL DEFAULT 0, provider_refunded INTEGER NOT NULL DEFAULT 0, provider_incomplete INTEGER NOT NULL DEFAULT 0, provider_observed_at INTEGER, quote_target TEXT, quote_ceiling TEXT, accepted_output TEXT, accepted_recipient TEXT);
+CREATE TABLE funding_progress(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),operation_id TEXT NOT NULL UNIQUE,phase TEXT NOT NULL,quote BLOB,attempts INTEGER NOT NULL DEFAULT 0,next_poll INTEGER NOT NULL DEFAULT 0,last_error TEXT, provider_success INTEGER NOT NULL DEFAULT 0, provider_failed INTEGER NOT NULL DEFAULT 0, provider_refunded INTEGER NOT NULL DEFAULT 0, provider_incomplete INTEGER NOT NULL DEFAULT 0, provider_observed_at INTEGER, quote_target TEXT, quote_ceiling TEXT, accepted_output TEXT, accepted_recipient TEXT);
 CREATE TABLE funding_refunds(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),address BLOB NOT NULL);
 CREATE TABLE funding_recovery(operation_id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES funding_jobs(id),phase TEXT NOT NULL,quote BLOB,refund BLOB, provider_success INTEGER NOT NULL DEFAULT 0, provider_failed INTEGER NOT NULL DEFAULT 0, provider_refunded INTEGER NOT NULL DEFAULT 0, provider_incomplete INTEGER NOT NULL DEFAULT 0, provider_observed_at INTEGER, quote_target TEXT, quote_ceiling TEXT, accepted_output TEXT, accepted_recipient TEXT);
 CREATE TABLE refund_outputs(txid TEXT NOT NULL,output_index INTEGER NOT NULL,operation_id TEXT NOT NULL REFERENCES treasury_operations(id),amount INTEGER NOT NULL CHECK(amount>0),height INTEGER NOT NULL,credited INTEGER NOT NULL CHECK(credited>=0),PRIMARY KEY(txid,output_index));
@@ -61,7 +62,6 @@ CREATE INDEX funding_readiness_checkpoint ON funding_jobs(readiness_checkpoint_h
 CREATE INDEX funding_readiness_confirmed ON funding_jobs(readiness_hash,id);
 CREATE INDEX funding_readiness_latest ON funding_jobs(readiness_latest_hash,id);
 CREATE INDEX funding_unfinished_jobs ON funding_jobs(id) WHERE state!='COMPLETE';
-CREATE INDEX funding_schedule_turn ON funding_progress(turn);
 CREATE INDEX funding_actionable_inventory ON funding_jobs(id) WHERE state!='COMPLETE' OR readiness_disputed IS NOT NULL;
 CREATE UNIQUE INDEX one_initial_allocation ON funding_jobs(pool_id) WHERE allocation_kind='initial';
 CREATE INDEX retirement_confirmed_support ON wallet_retirements(confirmed_hash,wallet_id);
