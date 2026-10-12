@@ -3,7 +3,7 @@
 use super::*;
 use crate::rotation::{base::PendingAuthorization, store::history::PAGE_SIZE};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -64,6 +64,53 @@ fn history_delay(failures: u32) -> Duration {
     })
 }
 
+// Bounds retained retry metadata, independently of the four active RPC readers.
+// Never evict active work or an unelapsed backoff to admit another observation.
+const HISTORY_RETRIES: usize = HISTORY_READS * PAGE_SIZE;
+#[derive(Default)]
+struct HistoryRetries(BTreeMap<String, HistoryRetry>);
+struct HistoryRetry {
+    due: Instant,
+    failures: u32,
+}
+impl HistoryRetries {
+    fn admit(&mut self, id: &str, now: Instant, active: &BTreeSet<String>) -> bool {
+        if active.contains(id) {
+            return false;
+        }
+        if let Some(retry) = self.0.get(id) {
+            return now >= retry.due;
+        }
+        if self.0.len() == HISTORY_RETRIES {
+            let expired = self
+                .0
+                .iter()
+                .filter(|(id, retry)| retry.due <= now && !active.contains(*id))
+                .min_by_key(|(_, retry)| retry.due)
+                .map(|(id, _)| id.clone());
+            let Some(expired) = expired else { return false };
+            self.0.remove(&expired);
+        }
+        self.0.insert(
+            id.to_owned(),
+            HistoryRetry {
+                due: now,
+                failures: 0,
+            },
+        );
+        true
+    }
+    fn complete(&mut self, id: &str, failed: bool, now: Instant) {
+        if failed {
+            let retry = self.0.get_mut(id).expect("owned history retry record");
+            retry.failures = retry.failures.saturating_add(1);
+            retry.due = now + history_delay(retry.failures);
+        } else {
+            self.0.remove(id);
+        }
+    }
+}
+
 impl ManagedPool {
     /// A direct caller is a response waiter, not the owner of accepted read work.
     /// Dropping this waiter leaves its bounded pass running and publishing proofs.
@@ -104,7 +151,7 @@ impl ManagedPool {
         let mut priority_initialized = false;
         let mut balance_active = BTreeSet::new();
         let mut history_active = BTreeSet::new();
-        let mut failures = 0u32;
+        let mut history_retries = HistoryRetries::default();
         let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
         let mut first_error = None;
         loop {
@@ -140,10 +187,11 @@ impl ManagedPool {
                 }
             }
             while history_active.len() < HISTORY_READS {
-                let Some(auth) = self.next_history(&mut history, one_pass, failures).await? else {
+                let Some(auth) = self.next_history(&mut history, one_pass).await? else {
                     break;
                 };
-                if history_active.insert(auth.id.clone()) {
+                if history_retries.admit(&auth.id, Instant::now(), &history_active) {
+                    history_active.insert(auth.id.clone());
                     reads.push(
                         self.read_one(Kind::History, auth.id.clone(), Some(auth))
                             .boxed(),
@@ -187,8 +235,7 @@ impl ManagedPool {
                         Kind::Balance=>{balance_active.remove(&done.id);},
                         Kind::History=>{
                             history_active.remove(&done.id);
-                            failures=if done.result.is_err(){failures.saturating_add(1)}else{0};
-                            if done.result.is_err() && history.through.is_none() {history.due=Instant::now()+history_delay(failures);}
+                            history_retries.complete(&done.id, done.result.is_err(), Instant::now());
                         },
                         Kind::Qualification=>{qualification_active=false;qualification_completed=true;qualification_due=Instant::now()+CADENCE;},
                     }
@@ -249,7 +296,6 @@ impl ManagedPool {
         &self,
         pass: &mut Pass<PendingAuthorization>,
         one_pass: bool,
-        failures: u32,
     ) -> Result<Option<PendingAuthorization>> {
         if let Some((sequence, auth)) = pass.queued.pop_front() {
             pass.cursor = sequence;
@@ -270,7 +316,7 @@ impl ManagedPool {
             .call(move |s| s.history_page(&pool, after, through, PAGE_SIZE))
             .await?;
         if page.is_empty() {
-            pass.finish(history_delay(failures));
+            pass.finish(CADENCE);
             return Ok(None);
         }
         pass.queued = page.into();
@@ -516,9 +562,9 @@ mod tests {
                                 nonces.fetch_add(1,Ordering::SeqCst);
                                 let nonce=u64::from_str_radix(&data[data.len()-64..],16).unwrap();
                                 if nonce==1 {started.notify_one();}
-                                if fail.load(Ordering::SeqCst) {return Json(json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32602,"message":"fixture"}}));}
+                                if nonce==1 && fail.load(Ordering::SeqCst) {tokio::time::sleep(Duration::from_millis(500)).await;return Json(json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32602,"message":"fixture"}}));}
                                 if nonce==1 {release.notified().await;}
-                                1
+                                if nonce==2 && fail.load(Ordering::SeqCst) {0} else {1}
                             };
                             json!(format!("0x{value:064x}"))
                         },
@@ -693,6 +739,92 @@ mod tests {
         f.worker.await.unwrap();
         f.server.abort();
     }
+    #[tokio::test]
+    async fn failed_nonce_does_not_backoff_healthy_sibling() {
+        let f = fixture(2).await;
+        f.fail_nonces.store(true, Ordering::SeqCst);
+        let stop = CancellationToken::new();
+        let task = tokio::spawn({
+            let pool = f.pool.clone();
+            let stop = stop.clone();
+            async move { pool.run_reconciliation(stop).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while f.nonce_reads.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // The failed first nonce completes after its healthy unused sibling.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(unfinished(&f).await, 2);
+        f.fail_nonces.store(false, Ordering::SeqCst);
+        let result = tokio::time::timeout(Duration::from_secs(8), async {
+            while unfinished(&f).await != 1 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        // The healthy sibling is released; the failed observation keeps its own
+        // backoff and liability, even though its endpoint has recovered.
+        let reads = f.nonce_reads.load(Ordering::SeqCst);
+        stop.cancel();
+        task.await.unwrap().unwrap();
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+        f.server.abort();
+        assert!(
+            result.is_ok(),
+            "failed nonce delayed healthy sibling reconciliation"
+        );
+        assert_eq!(
+            reads, 3,
+            "failed nonce retried before its own backoff elapsed"
+        );
+    }
+
+    #[test]
+    fn history_retry_deadlines_are_observation_scoped() {
+        let now = Instant::now();
+        let mut retries = HistoryRetries::default();
+        let active = BTreeSet::new();
+        assert!(retries.admit("failed", now, &active));
+        assert!(retries.admit("healthy", now, &active));
+        retries.complete("failed", true, now);
+        retries.complete("healthy", false, now + Duration::from_secs(1));
+        assert!(!retries.admit("failed", now + CADENCE, &active));
+        assert!(retries.admit("healthy", now + CADENCE, &active));
+        assert!(retries.admit("failed", now + Duration::from_secs(30), &active));
+        retries.complete("failed", true, now + Duration::from_secs(30));
+        assert_eq!(retries.0["failed"].failures, 2);
+        assert_eq!(retries.0["failed"].due, now + Duration::from_secs(90));
+    }
+
+    #[test]
+    fn history_retry_saturation_preserves_active_owners_and_unelapsed_backoff() {
+        let now = Instant::now();
+        let mut retries = HistoryRetries::default();
+        let mut active = BTreeSet::new();
+        for n in 0..HISTORY_RETRIES {
+            let id = n.to_string();
+            assert!(retries.admit(&id, now, &active));
+            if n == 0 {
+                active.insert(id);
+            } else {
+                retries.complete(&id, true, now);
+            }
+        }
+        assert!(!retries.admit("new", now + CADENCE, &active));
+        assert!(!retries.admit("0", now + Duration::from_secs(300), &active));
+        assert!(retries.admit("new", now + Duration::from_secs(30), &active));
+        assert!(retries.0.contains_key("0"));
+        assert_eq!(retries.0.len(), HISTORY_RETRIES);
+        retries.complete("new", false, now + Duration::from_secs(30));
+        assert!(retries.admit("next", now + Duration::from_secs(30), &active));
+    }
+
     #[test]
     fn history_backoff_is_bounded_and_never_changes_balance_cadence() {
         assert_eq!(
