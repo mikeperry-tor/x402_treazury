@@ -13,6 +13,14 @@ pub enum RecoveryOutcome {
     OperatorRequired(&'static str),
 }
 
+/// Recovery disposition plus whether this invocation attempted the ordinary
+/// source observation. Early operator dispositions do not abandon that work.
+#[derive(Debug, Clone)]
+pub struct RecoveryObservation {
+    pub outcome: RecoveryOutcome,
+    pub source_observed: bool,
+}
+
 pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
     job.phase == FundingPhase::RecoveryRequired
         || job.phase == FundingPhase::RefundPending
@@ -59,16 +67,42 @@ impl Treasury {
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
     ) -> Result<RecoveryOutcome> {
-        match self
-            .recover_funding_job_inner(job_id, max_attempts, allow_new_attempt, sender, stop)
-            .await
-        {
+        Ok(self
+            .recover_funding_observed(job_id, max_attempts, allow_new_attempt, sender, stop)
+            .await?
+            .outcome)
+    }
+
+    pub(crate) async fn recover_funding_observed(
+        &mut self,
+        job_id: String,
+        max_attempts: u32,
+        allow_new_attempt: bool,
+        sender: &mut impl TransactionSubmission,
+        stop: &CancellationToken,
+    ) -> Result<RecoveryObservation> {
+        let mut source_observed = false;
+        let result = self
+            .recover_funding_job_inner(
+                job_id,
+                max_attempts,
+                allow_new_attempt,
+                sender,
+                stop,
+                &mut source_observed,
+            )
+            .await;
+        let outcome = match result {
             Err(error) => match evidence_outcome(&error) {
-                Some(outcome) => Ok(outcome),
-                None => Err(error),
+                Some(outcome) => outcome,
+                None => return Err(error),
             },
-            result => result,
-        }
+            Ok(outcome) => outcome,
+        };
+        Ok(RecoveryObservation {
+            outcome,
+            source_observed,
+        })
     }
     async fn recover_funding_job_inner(
         &mut self,
@@ -77,6 +111,7 @@ impl Treasury {
         allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
+        source_observed: &mut bool,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
         ensure!(self.healthy, "treasury requires reopen");
@@ -202,6 +237,7 @@ impl Treasury {
         // Submitted/ambiguous work is observed, never resubmitted. Even expired
         // operations must pass the independent two-sync input proof below.
         if operation.attempts > 0 {
+            *source_observed = true;
             if let Err(error) = self
                 .reconcile_prepared(operation_id.clone(), sender, stop)
                 .await

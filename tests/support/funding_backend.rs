@@ -280,7 +280,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert!(!retry);
     let (recovered, observed) = tokio::join!(backend.recover(&job), commands.test_observe());
     assert!(matches!(
-        recovered.unwrap(),
+        recovered.unwrap().map(|result| result.outcome),
         Some(crate::treasury::recovery::RecoveryOutcome::Waiting(
             "waiting_for_transaction_expiry"
         ))

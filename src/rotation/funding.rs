@@ -28,10 +28,12 @@ pub trait FundingBackend: Send + 'static {
     fn allocation_groups(&self) -> Vec<String> {
         Vec::new()
     }
+    /// Reports whether recovery attempted the ordinary source observation.
+    /// The worker reconciles remaining pending work only when it did not.
     fn recover(
         &mut self,
         _job: &FundingJob,
-    ) -> impl Future<Output = Result<Option<crate::treasury::recovery::RecoveryOutcome>>> + Send
+    ) -> impl Future<Output = Result<Option<crate::treasury::recovery::RecoveryObservation>>> + Send
     {
         async { Ok(None) }
     }
@@ -142,10 +144,29 @@ impl<B: FundingBackend> FundingWorker<B> {
         job: &FundingJob,
         clock: &TickClock,
     ) -> Result<Option<<B::Observations as FundingObservations>::QuoteRequest>> {
+        use crate::treasury::recovery::RecoveryOutcome;
         use FundingPhase::*;
+        // Recovery owns the ordinary submitted-source observation when eligible,
+        // including its separate two-sync expiry proof. Do not sync/lookup twice.
+        let recovery =
+            if crate::treasury::recovery::needs_recovery(job) && job.phase != RefundPending {
+                self.backend.lock().await.recover(job).await?
+            } else {
+                None
+            };
+        let source_observed = recovery
+            .as_ref()
+            .is_some_and(|result| result.source_observed);
+        let recovery = recovery.map(|result| result.outcome);
+        if matches!(recovery, Some(RecoveryOutcome::Recovered)) {
+            return Ok(None);
+        }
         let facts = self.facts(job).await?;
         let mut observation_error = None;
-        if facts.source_reconciliation_needed() {
+        // An operator disposition can precede source observation (for example,
+        // conflicting evidence or qualification). Retain that liability's normal
+        // reconciliation; a source already confirmed by recovery needs no repeat.
+        if facts.source_reconciliation_needed() && !source_observed {
             match self.backend.lock().await.reconcile(job).await {
                 Ok(_) => {
                     let id = job.id.clone();
@@ -158,6 +179,12 @@ impl<B: FundingBackend> FundingWorker<B> {
                     observation_error.get_or_insert(error.context("source_reconciliation_failed"));
                 }
             }
+        }
+        if source_observed {
+            let (id, operation) = (job.id.clone(), job.operation_id.clone());
+            self.store
+                .call(move |s| s.reconcile_funding_phase(&id, &operation))
+                .await?;
         }
         if self.finish_if_proven(job).await? {
             return Ok(None);
@@ -188,25 +215,22 @@ impl<B: FundingBackend> FundingWorker<B> {
             );
             return Ok(None);
         }
-        if crate::treasury::recovery::needs_recovery(&current) && current.phase != RefundPending {
-            match self.backend.lock().await.recover(&current).await? {
-                Some(crate::treasury::recovery::RecoveryOutcome::OperatorRequired(reason)) => {
-                    let error = anyhow::anyhow!(RecoveryBlocked(reason));
-                    let diagnostic = safe_error(&error, &current.phase);
-                    let (id, operation) = (current.id.clone(), current.operation_id.clone());
-                    self.store
-                        .call(move |s| {
-                            s.record_source_operator_requirement(&id, &operation, &diagnostic)
-                        })
-                        .await?;
-                    return Err(error);
-                }
-                Some(crate::treasury::recovery::RecoveryOutcome::Recovered) => return Ok(None),
-                Some(crate::treasury::recovery::RecoveryOutcome::Waiting(_)) => {
-                    return observation_error.map_or(Ok(None), Err);
-                }
-                None => {}
+        match recovery {
+            Some(RecoveryOutcome::OperatorRequired(reason)) => {
+                let error = anyhow::anyhow!(RecoveryBlocked(reason));
+                let diagnostic = safe_error(&error, &current.phase);
+                let (id, operation) = (current.id.clone(), current.operation_id.clone());
+                self.store
+                    .call(move |s| {
+                        s.record_source_operator_requirement(&id, &operation, &diagnostic)
+                    })
+                    .await?;
+                return Err(error);
             }
+            Some(RecoveryOutcome::Recovered | RecoveryOutcome::Waiting(_)) => {
+                return observation_error.map_or(Ok(None), Err);
+            }
+            None => {}
         }
         match current.phase {
             Allocated if !facts.readiness_recorded && facts.enabled => {
@@ -407,7 +431,7 @@ impl FundingBackend for Backend {
     async fn recover(
         &mut self,
         job: &FundingJob,
-    ) -> Result<Option<crate::treasury::recovery::RecoveryOutcome>> {
+    ) -> Result<Option<crate::treasury::recovery::RecoveryObservation>> {
         self.treasury
             .recover_funding(
                 job.id.clone(),

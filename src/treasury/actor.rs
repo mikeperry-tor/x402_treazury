@@ -15,7 +15,7 @@ enum Command {
         String,
         u32,
         bool,
-        oneshot::Sender<Result<super::recovery::RecoveryOutcome>>,
+        oneshot::Sender<Result<super::recovery::RecoveryObservation>>,
     ),
     Refund(String, oneshot::Sender<Result<String>>),
     Sync(oneshot::Sender<Result<()>>),
@@ -40,7 +40,7 @@ impl TreasuryHandle {
         id: String,
         max_attempts: u32,
         allow_new_attempt: bool,
-    ) -> Result<super::recovery::RecoveryOutcome> {
+    ) -> Result<super::recovery::RecoveryObservation> {
         self.call(|reply| Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply))
             .await
     }
@@ -92,7 +92,7 @@ impl Treasury {
                 command = commands.receiver.recv() => {
                     let Some(command) = command else { break };
                     match command {
-                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_job(id, max_attempts, allow_new_attempt, &mut submission, &stop).await); }
+                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, &mut submission, &stop).await); }
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
@@ -147,9 +147,12 @@ impl TreasuryCommands {
     pub(crate) async fn test_observe(&mut self) -> ObservedCommand {
         match self.receiver.recv().await.expect("command channel closed") {
             Command::RecoverFunding(id, limit, allow_new_attempt, reply) => {
-                let _ = reply.send(Ok(super::recovery::RecoveryOutcome::Waiting(
-                    "waiting_for_transaction_expiry",
-                )));
+                let _ = reply.send(Ok(super::recovery::RecoveryObservation {
+                    outcome: super::recovery::RecoveryOutcome::Waiting(
+                        "waiting_for_transaction_expiry",
+                    ),
+                    source_observed: true,
+                }));
                 ObservedCommand::RecoverFunding(id, limit, allow_new_attempt)
             }
             Command::Prepare(request, reply) => {
