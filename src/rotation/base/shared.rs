@@ -119,14 +119,13 @@ impl BaseRpc {
                 };
                 tokio::spawn(async move {
                     let _store_owner = store;
-                    let result = std::panic::AssertUnwindSafe(rpc.view_with_owner(
-                        query,
-                        false,
-                        &owner.permit,
-                    ))
-                    .catch_unwind()
-                    .await
-                    .unwrap_or_else(|_| Err(anyhow::anyhow!("Base acquisition owner failed")));
+                    let result =
+                        std::panic::AssertUnwindSafe(rpc.view_with_owner(query, &owner.permit))
+                            .catch_unwind()
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(anyhow::anyhow!("Base acquisition owner failed"))
+                            });
                     sender.send_replace(Some(Arc::new(result.map_err(Arc::new))));
                     drop(owner);
                 });

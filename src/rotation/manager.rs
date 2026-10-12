@@ -142,10 +142,11 @@ impl ManagedPool {
     async fn acquire_view(
         &self,
         query: super::base::ChainQuery,
-        payment: bool,
+        foreground: bool,
     ) -> Result<super::base::ChainView> {
-        let result = if payment {
-            self.base.payment_view(query).await
+        // Foreground reads belong to this call; background reads can share an owner.
+        let result = if foreground {
+            self.base.view(query).await
         } else {
             self.base
                 .shared_balance_view(query, self.store.clone())

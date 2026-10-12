@@ -454,22 +454,12 @@ impl BaseRpc {
         U256::from_str_radix(&s[2..], 16).map_err(|_| RpcFailure::malformed("eth_call").into())
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
-        self.view_with_policy(query, false).await
-    }
-    /// Nonce read outages cannot erase liability or veto spending of unrelated
-    /// remaining capacity. Demonstrated contradictions and required balance/anchor
-    /// failures still reject the view; fallback reacquires a complete view.
-    pub(crate) async fn payment_view(&self, query: ChainQuery) -> Result<ChainView> {
-        self.view_with_policy(query, true).await
-    }
-    async fn view_with_policy(&self, query: ChainQuery, payment: bool) -> Result<ChainView> {
         let owner = resources::query()?;
-        self.view_with_owner(query, payment, &owner).await
+        self.view_with_owner(query, &owner).await
     }
     async fn view_with_owner(
         &self,
         query: ChainQuery,
-        payment: bool,
         _owner: &tokio::sync::SemaphorePermit<'static>,
     ) -> Result<ChainView> {
         // Process-local correlation only; never derived from wallet/pool identities.
@@ -486,9 +476,9 @@ impl BaseRpc {
             let started = std::time::Instant::now();
             let progress = ViewProgress::new();
             // Required evidence failures restart on a configured fallback.
-            // Optional nonce outages retain liability on this endpoint instead
-            // of making another provider's availability a payment prerequisite.
-            let result = endpoint.view_inner(query.clone(), &progress, payment).await;
+            // Foreground balance queries contain no authorization history;
+            // maintenance owns its independent historical acquisitions.
+            let result = endpoint.view_inner(query.clone(), &progress).await;
             match result {
                 Ok(view) => {
                     if index > 0 {
@@ -522,12 +512,7 @@ impl BaseRpc {
         }
         unreachable!("primary Base RPC endpoint always exists")
     }
-    async fn view_inner(
-        &self,
-        query: ChainQuery,
-        progress: &ViewProgress,
-        retain_unavailable: bool,
-    ) -> Result<ChainView> {
+    async fn view_inner(&self, query: ChainQuery, progress: &ViewProgress) -> Result<ChainView> {
         ensure!(
             quantity(
                 &progress
@@ -585,7 +570,6 @@ impl BaseRpc {
         let mut resolution_certificates = BTreeMap::new();
         let selector = &keccak256("authorizationState(address,bytes32)")[..4];
         let selector = alloy_primitives::hex::encode(selector);
-        let mut unavailable = 0usize;
         let read_history = !query.pending.is_empty();
         for auth in query.pending {
             let payer: Address = auth.payer.parse()?;
@@ -596,26 +580,10 @@ impl BaseRpc {
                 alloy_primitives::hex::encode(nonce)
             );
             let scoped = self.for_address(&auth.payer)?;
-            let used = match progress
+            let used = progress
                 .step("authorization_nonce", scoped.call(data, &confirmed))
                 .await
-                .context(VerificationStage("authorization nonce"))
-            {
-                Ok(used) => used,
-                Err(error)
-                    if retain_unavailable
-                        && error
-                            .downcast_ref::<RpcFailure>()
-                            .is_some_and(RpcFailure::can_failover) =>
-                {
-                    // In particular, expiry alone cannot release a nonce whose
-                    // canonical state was not observed. Its full amount stays
-                    // reserved by the store, including across restart.
-                    unavailable += 1;
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
+                .context(VerificationStage("authorization nonce"))?;
             ensure!(used <= U256::from(1), RpcFailure::malformed("eth_call"));
             if used == U256::from(1) || confirmed_time > auth.valid_before {
                 resolutions.insert(
@@ -646,13 +614,6 @@ impl BaseRpc {
                 }
                 released.push(auth.id);
             }
-        }
-        if unavailable > 0 {
-            tracing::warn!(
-                unavailable_authorizations = unavailable,
-                category = "authorization_read_unavailable",
-                "Payment nonce observations unavailable; retaining full liabilities and requiring fresh balance evidence"
-            );
         }
         // Authorization resolution is historical canonical evidence. Its sweep
         // cannot age the independently acquired admission balance view.
