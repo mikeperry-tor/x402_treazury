@@ -83,14 +83,8 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
 
 struct Pending {
     job: FundingJob,
-    credit: bool,
-    status: bool,
-    source: bool,
-}
-impl Pending {
-    fn done(&self) -> bool {
-        !self.credit && !self.status && !self.source
-    }
+    // Quote inventory contains source-owned prerequisites, not quote HTTP reads.
+    lane: Kind,
 }
 
 impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
@@ -191,12 +185,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 .into_iter()
                 .enumerate()
             {
-                let waiting = pending.iter().any(|item| match kind {
-                    Kind::Credit => item.credit,
-                    Kind::Status => item.status,
-                    Kind::Source => item.source && item.job.phase != FundingPhase::Allocated,
-                    Kind::Quote => item.source && item.job.phase == FundingPhase::Allocated,
-                });
+                let waiting = pending.iter().any(|item| item.lane == kind);
                 if !once
                     && exhausted[lane]
                     && !waiting
@@ -241,131 +230,124 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         .call(move |s| s.funding_facts(&id, &operation))
                         .await?;
                     let [credit, status, source, _] = applicable_work(&job, &facts);
-                    let item = Pending {
-                        credit: kind == Kind::Credit && credit,
-                        status: kind == Kind::Status && status,
-                        source: ((kind == Kind::Source && job.phase != FundingPhase::Allocated)
-                            || (kind == Kind::Quote && job.phase == FundingPhase::Allocated))
-                            && source,
-                        job,
+                    let wanted = match kind {
+                        Kind::Credit => credit,
+                        Kind::Status => status,
+                        Kind::Source => job.phase != FundingPhase::Allocated && source,
+                        Kind::Quote => job.phase == FundingPhase::Allocated && source,
                     };
-                    if !item.done() {
-                        pending.push_back(item);
+                    if wanted {
+                        pending.push_back(Pending { job, lane: kind });
                     }
                 }
             }
             if !stopping {
                 for _ in 0..pending.len() {
-                    let mut item = pending.pop_front().unwrap();
-                    for kind in [Kind::Credit, Kind::Status, Kind::Source] {
-                        let wanted = match kind {
-                            Kind::Credit => &mut item.credit,
-                            Kind::Status => &mut item.status,
-                            Kind::Source => &mut item.source,
-                            Kind::Quote => unreachable!(),
-                        };
-                        if !*wanted {
+                    let item = pending.pop_front().unwrap();
+                    let kind = match item.lane {
+                        Kind::Quote => Kind::Source,
+                        kind => kind,
+                    };
+                    if item.lane == Kind::Quote
+                        && (quote_active == QUOTE_READS
+                            || quote_pending.is_some()
+                            || active.contains(&Key {
+                                operation: item.job.operation_id.clone(),
+                                kind: Kind::Quote,
+                            }))
+                    {
+                        // The prerequisite lane keeps its own bounded page;
+                        // occupied quote HTTP slots cannot hold the source
+                        // reconciliation cursor behind unrelated allocations.
+                        pending.push_back(item);
+                        continue;
+                    }
+                    let key = Key {
+                        operation: item.job.operation_id.clone(),
+                        kind,
+                    };
+                    if active.contains(&key) {
+                        continue;
+                    }
+                    // Source is one rolling serialized lane. It never parks
+                    // a page of status/credit behind an occupied treasury.
+                    if kind == Kind::Source && source_active {
+                        // Retain only this source lane's bounded page. Other
+                        // lane cursors continue independently while owned work drains.
+                        pending.push_back(item);
+                        continue;
+                    }
+                    if (kind == Kind::Credit && credit_active == CREDIT_READS)
+                        || (kind == Kind::Status && status_active == STATUS_READS)
+                    {
+                        pending.push_back(item);
+                        continue;
+                    }
+                    let ready = {
+                        let mut state = lease.state.lock().expect("funding schedule lock");
+                        state.admit(&key, &item.job, clock.now(), &active)
+                    };
+                    match ready {
+                        Some(false) => continue,
+                        None => {
+                            pending.push_back(item);
                             continue;
                         }
-                        if kind == Kind::Source
-                            && item.job.phase == FundingPhase::Allocated
-                            && (quote_active == QUOTE_READS
-                                || quote_pending.is_some()
-                                || active.contains(&Key {
-                                    operation: item.job.operation_id.clone(),
-                                    kind: Kind::Quote,
-                                }))
-                        {
-                            // The prerequisite lane keeps its own bounded page;
-                            // occupied quote HTTP slots cannot hold the source
-                            // reconciliation cursor behind unrelated allocations.
-                            continue;
+                        Some(true) => {}
+                    }
+                    active.insert(key);
+                    let job = item.job;
+                    match kind {
+                        Kind::Credit => {
+                            credit_active += 1;
+                            let reader = reader.clone();
+                            reads.push(
+                                async move {
+                                    let result = reader
+                                        .credit(job.clone())
+                                        .await
+                                        .map(|()| Observation::None);
+                                    Completion { job, kind, result }
+                                }
+                                .boxed(),
+                            );
                         }
-                        let key = Key {
-                            operation: item.job.operation_id.clone(),
-                            kind,
-                        };
-                        if active.contains(&key) {
-                            *wanted = false;
-                            continue;
-                        }
-                        // Source is one rolling serialized lane. It never parks
-                        // a page of status/credit behind an occupied treasury.
-                        if kind == Kind::Source && source_active {
-                            // Retain only this source lane's bounded page. Other
-                            // lane cursors continue independently while owned work drains.
-                            continue;
-                        }
-                        if (kind == Kind::Credit && credit_active == CREDIT_READS)
-                            || (kind == Kind::Status && status_active == STATUS_READS)
-                        {
-                            continue;
-                        }
-                        let ready = {
-                            let mut state = lease.state.lock().expect("funding schedule lock");
-                            state.admit(&key, &item.job, clock.now(), &active)
-                        };
-                        match ready {
-                            Some(false) => {
-                                *wanted = false;
-                                continue;
-                            }
-                            None => continue,
-                            Some(true) => {}
-                        }
-                        *wanted = false;
-                        active.insert(key);
-                        let job = item.job.clone();
-                        match kind {
-                            Kind::Credit => {
-                                credit_active += 1;
-                                let reader = reader.clone();
-                                reads.push(
-                                    async move {
-                                        let result = reader
-                                            .credit(job.clone())
-                                            .await
-                                            .map(|()| Observation::None);
-                                        Completion { job, kind, result }
+                        Kind::Status => {
+                            status_active += 1;
+                            let reader = reader.clone();
+                            let store = self.store.clone();
+                            reads.push(
+                                async move {
+                                    let (id, operation) =
+                                        (job.id.clone(), job.operation_id.clone());
+                                    let result = async {
+                                        let quote = store
+                                            .call(move |s| {
+                                                Ok(serde_json::from_slice::<Quote>(
+                                                    &s.funding_quote_for_operation(
+                                                        &id, &operation,
+                                                    )?,
+                                                )?)
+                                            })
+                                            .await?;
+                                        reader.status(quote).await.map(Observation::Status)
                                     }
-                                    .boxed(),
-                                );
-                            }
-                            Kind::Status => {
-                                status_active += 1;
-                                let reader = reader.clone();
-                                let store = self.store.clone();
-                                reads.push(
-                                    async move {
-                                        let (id, operation) =
-                                            (job.id.clone(), job.operation_id.clone());
-                                        let result = async {
-                                            let quote = store
-                                                .call(move |s| {
-                                                    Ok(serde_json::from_slice::<Quote>(
-                                                        &s.funding_quote_for_operation(
-                                                            &id, &operation,
-                                                        )?,
-                                                    )?)
-                                                })
-                                                .await?;
-                                            reader.status(quote).await.map(Observation::Status)
-                                        }
-                                        .await;
-                                        Completion { job, kind, result }
-                                    }
-                                    .boxed(),
-                                );
-                            }
-                            Kind::Quote => unreachable!(),
-                            Kind::Source => {
-                                source_active = true;
-                                let worker = self.clone();
-                                let lease = lease.clone();
-                                let epoch = clock.now();
-                                // An accepted mutable step owns the lease even
-                                // if an outer scheduler error drops its waiter.
-                                let task = tokio::spawn(async move {
+                                    .await;
+                                    Completion { job, kind, result }
+                                }
+                                .boxed(),
+                            );
+                        }
+                        Kind::Quote => unreachable!(),
+                        Kind::Source => {
+                            source_active = true;
+                            let worker = self.clone();
+                            let lease = lease.clone();
+                            let epoch = clock.now();
+                            // An accepted mutable step owns the lease even
+                            // if an outer scheduler error drops its waiter.
+                            let task =
+                                tokio::spawn(async move {
                                     let _lease = lease;
                                     let source_clock = TickClock {
                                         epoch,
@@ -381,12 +363,11 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                                     );
                                     Completion { job, kind, result }
                                 });
-                                reads.push(async move {task.await.expect("funding source owner panicked")}.boxed());
-                            }
+                            reads.push(
+                                async move { task.await.expect("funding source owner panicked") }
+                                    .boxed(),
+                            );
                         }
-                    }
-                    if !item.done() {
-                        pending.push_back(item);
                     }
                 }
             }
@@ -443,15 +424,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 .into_iter()
                 .enumerate()
                 .any(|(lane, kind)| {
-                    !exhausted[lane]
-                        && !pending.iter().any(|item| match kind {
-                            Kind::Credit => item.credit,
-                            Kind::Status => item.status,
-                            Kind::Source => {
-                                item.source && item.job.phase != FundingPhase::Allocated
-                            }
-                            Kind::Quote => item.source && item.job.phase == FundingPhase::Allocated,
-                        })
+                    !exhausted[lane] && !pending.iter().any(|item| item.lane == kind)
                 });
             if needs_page && !stopping {
                 if let Some(Some(completion)) = reads.next().now_or_never() {
