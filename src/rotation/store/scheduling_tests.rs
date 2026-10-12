@@ -14,7 +14,7 @@ fn fixture() -> (tempfile::TempDir, Store) {
 }
 
 fn allocate(store: &mut Store, name: &str) {
-    super::super::test_support::declare_and_allocate(
+    super::super::test_support::declare_two_reserves(
         store,
         name,
         "5",

@@ -201,7 +201,7 @@ async fn paid_fixture() {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         store,
         "cover",
-        crate::rotation::test_capacity::small_reserve("0.01"),
+        crate::rotation::test_capacity::two_reserves("0.01"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -245,15 +245,15 @@ async fn paid_fixture() {
     assert!(result.paid_submission);
     let after = store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.pools[0].addresses.len(), 2);
-    assert_eq!(after.pools[0].addresses[0].role, "RETAINED");
+    assert_eq!(after.pools[0].addresses[0].role, "READY");
     assert_eq!(after.pools[0].addresses[1].role, "ACTIVE");
-    let small = after.pools[0]
+    let consumed = after.pools[0]
         .reserve_claims
         .iter()
-        .find(|c| c.slot == "small")
+        .find(|c| c.slot == "large")
         .unwrap();
-    assert_eq!(small.generation, 1);
-    assert!(small.wallet_id.is_none());
+    assert_eq!(consumed.generation, 1);
+    assert!(consumed.wallet_id.is_none());
     drop(managed);
     drop(store);
     worker.await.unwrap();

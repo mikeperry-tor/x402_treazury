@@ -113,7 +113,7 @@ async fn fixture() -> Fixture {
     let group = crate::rotation::test_capacity::declare_and_allocate!(
         state,
         "hints",
-        crate::rotation::test_capacity::small_reserve("0.01"),
+        crate::rotation::test_capacity::two_reserves("0.01"),
         Some(crate::rotation::config::positive_usdc("0.01").unwrap()),
         0
     )

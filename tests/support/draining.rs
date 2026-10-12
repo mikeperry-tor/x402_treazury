@@ -60,6 +60,9 @@ async fn retained_inventory_setup(two: bool, paused: bool) -> Harness {
     h.store.call(super::lifecycle::synced).await.unwrap();
     let mut worker = super::lifecycle::funder(&h, Arc::default());
     let mut instant = now().unwrap();
+    // Establish ACTIVE through a real first payment before exercising retained history.
+    super::consumption::paid_and_settled(&h, 1).await;
+    super::consumption::fill(&h, &mut worker, &mut instant).await;
     for _ in 0..if two { 2 } else { 1 } {
         let state = group(&h).await;
         let active = state.addresses.iter().find(|w| w.role == "ACTIVE").unwrap();
@@ -343,12 +346,11 @@ async fn cold_learning_with_late_retained_publication(method: &str) {
                 Some(alloy_primitives::U256::from(5_000_000u64)),
                 0,
             )?;
-            for kind in [
-                x402_treazury::rotation::store::AllocationKind::Initial,
+            s.allocate_capacity_kind(
+                &pool,
                 x402_treazury::rotation::store::AllocationKind::Small,
-            ] {
-                s.allocate_capacity_kind(&pool, kind, true)?;
-            }
+                true,
+            )?;
             Ok(pool)
         })
         .await

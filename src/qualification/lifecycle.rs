@@ -493,6 +493,21 @@ mod tests {
         after["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(true);
         after["funding_jobs"][0]["phase"] = json!("SWAPPING");
         assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
+        // A fresh reserve-only pool has no previous ACTIVE payer to retain.
+        let mut fresh_before = before.clone();
+        let mut fresh_after = after.clone();
+        fresh_before["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        fresh_after["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            promotion(&fresh_before, &fresh_after, "p").unwrap(),
+            "replacement"
+        );
         after["pools"][0]["reserve_claims"][0]["generation"] = json!(4);
         assert!(promotion(&before, &after, "p").is_err());
     }

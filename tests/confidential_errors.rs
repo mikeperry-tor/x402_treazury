@@ -71,7 +71,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     crate::capacity_fixture::declare_and_allocate!(
         store,
         "fixture",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

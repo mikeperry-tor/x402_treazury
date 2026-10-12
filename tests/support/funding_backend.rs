@@ -17,7 +17,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         b"fixture",
     )
     .unwrap();
-    crate::rotation::store::test_support::declare_and_allocate(
+    crate::rotation::store::test_support::declare_two_reserves(
         &mut store,
         "pool",
         "5",
@@ -679,13 +679,9 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     owner
         .allocate_capacity_kind(
             pool.clone(),
-            crate::rotation::store::AllocationKind::Initial,
+            crate::rotation::store::AllocationKind::Small,
             true,
         )
-        .await
-        .unwrap();
-    owner
-        .allocate_capacity_kind(pool, crate::rotation::store::AllocationKind::Small, true)
         .await
         .unwrap();
     let store = owner.store_handle();

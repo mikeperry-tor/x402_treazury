@@ -105,7 +105,7 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = crate::rotation::store::test_support::declare_and_allocate(
+        let pool = crate::rotation::store::test_support::declare_two_reserves(
             &mut store,
             "pages",
             "1",
@@ -159,7 +159,7 @@ mod tests {
         let key = dir.path().join("key");
         let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
         let identity = store.id().to_owned();
-        let pool = crate::rotation::store::test_support::declare_and_allocate(
+        let pool = crate::rotation::store::test_support::declare_two_reserves(
             &mut store,
             "pages",
             "1",

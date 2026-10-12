@@ -1,9 +1,9 @@
 # Reserve sizes are funding preferences; the explicit group cap governs every wallet.
-# Initial active funding uses small; refill vacant slots small-first. Retained balances stay usable.
+# Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
 # Size optional large to at least 2x expected maximum payment (prefer 4x); this is not a payment cap.
 # Partial allocations cannot pay until full readiness; accepted insufficient work stays owned.
-# Startup accepts any funded eligible payer; explicit bootstrap waits its captured initial/slot jobs.
+# Startup accepts any funded eligible payer; explicit bootstrap waits its captured slot jobs.
 # Partial credited allocations retain their claims until full readiness; accepted work stays owned.
 # Three private research contexts share one Zcash treasury, but use separate
 # rotating EVM wallet pools and Tor payer identities. Copy this file to privacy.local.toml before editing.
@@ -48,8 +48,9 @@ confidentiality = "public"
 # Leave BASE_RPC_URL unset to use the built-in Base RPC failover list.
 base_rpc_url_env = "BASE_RPC_URL"
 
-# Each pool maintains an active wallet and a funded small reserve. Three groups with $2 active and $2 small reserves
-# require at least $12 worth of ZEC before fees; start with about $15 for headroom.
+# Each pool starts with one small reserve and no separate active wallet.
+# Three groups with $2 small reserves request $6 before fees and accepted bridge minimum increases.
+# Allow additional treasury funds for those costs and replacements after the first payment.
 # Actual deposits may rise with swap minimums. All declared pools initialize, even
 # unused ones: remove unused wallet definitions and update bindings to save funding.
 # max_api_payment_usdc caps one payment, not the total research budget.
@@ -71,7 +72,7 @@ max_api_payment_usdc = "0.05"
 max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
 
-# Company research has its own active wallet and small reserve and Tor payer identities.
+# Company research has its own small reserve and Tor payer identities.
 # $0.10 permits single-company enrichment; larger PDL batches may exceed the cap.
 
 [wallets.social.reserves.small]

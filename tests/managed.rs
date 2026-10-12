@@ -347,7 +347,7 @@ impl Harness {
         let pool = crate::capacity_fixture::declare_and_allocate!(
             store,
             "research",
-            crate::capacity_fixture::small_reserve("5"),
+            crate::capacity_fixture::two_reserves("5"),
             Some(alloy_primitives::U256::from(5_000_000u64)),
             0
         )
@@ -468,6 +468,10 @@ async fn restart(h: Harness) -> Harness {
     }
 }
 async fn exhaust_ready(h: &Harness) {
+    let payer = make_pool(h.store.clone(), h.pool.clone(), &h.base)
+        .candidate()
+        .await
+        .unwrap();
     let status = h.store.call(|s| s.status()).await.unwrap();
     for wallet in status
         .pools
@@ -476,7 +480,7 @@ async fn exhaust_ready(h: &Harness) {
         .unwrap()
         .addresses
         .iter()
-        .filter(|w| w.role == "READY")
+        .filter(|w| w.role == "READY" && w.id != payer.wallet)
     {
         h.f.balances
             .lock()
@@ -935,7 +939,9 @@ async fn cancellation_after_submission_retains_liability() {
     let client = h.client.clone();
     let route = h.route();
     let task = tokio::spawn(async move { client.execute(route).await });
-    h.f.arrived.notified().await;
+    tokio::time::timeout(std::time::Duration::from_secs(10), h.f.arrived.notified())
+        .await
+        .unwrap();
     task.abort();
     let _ = task.await;
     h.f.release.notify_one();
@@ -1282,7 +1288,7 @@ async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "other",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(5_000_000u64)),
                 0
             )
@@ -1335,7 +1341,7 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "research",
-                crate::capacity_fixture::small_reserve("10"),
+                crate::capacity_fixture::two_reserves("10"),
                 Some(alloy_primitives::U256::from(10_000_000u64)),
                 0
             )
@@ -1936,7 +1942,7 @@ async fn explicit_api_cap_independent_of_funding_target_uses_confirmed_capacity(
                 &group,
                 Some(alloy_primitives::U256::from(6_000_000u64)),
                 0,
-                &crate::capacity_fixture::small_reserve("5"),
+                &crate::capacity_fixture::two_reserves("5"),
             )
         })
         .await

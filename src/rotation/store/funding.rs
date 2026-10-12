@@ -299,7 +299,7 @@ fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
 }
 
 impl Store {
-    /// One configured group, three independent vacancy commits. Failure in one
+    /// One configured group, two independent vacancy commits. Failure in one
     /// slot never rolls back another or changes an existing operation.
     pub(crate) fn fill_funding_vacancies(&mut self, name: &str) -> Result<()> {
         let pool: Option<String> = self
@@ -314,11 +314,7 @@ impl Store {
             return Ok(());
         };
         let mut failure = None;
-        for kind in [
-            super::AllocationKind::Initial,
-            super::AllocationKind::Small,
-            super::AllocationKind::Large,
-        ] {
+        for kind in [super::AllocationKind::Small, super::AllocationKind::Large] {
             if let Err(error) = self.allocate_capacity_kind(&pool, kind, true) {
                 failure.get_or_insert(error);
             }
@@ -1450,7 +1446,7 @@ mod completion_tests {
             b"fixture",
         )
         .unwrap();
-        super::super::test_support::declare_and_allocate(
+        super::super::test_support::declare_two_reserves(
             &mut store,
             "pool",
             "0.000010",
@@ -1551,8 +1547,8 @@ mod completion_tests {
             )
             .unwrap();
         assert_eq!(
-            count, 2,
-            "large failure must preserve committed initial and small claims"
+            count, 1,
+            "large failure must preserve the committed small claim"
         );
         store.db.execute_batch("DROP TRIGGER fail_large").unwrap();
         store.deny_new_funding();

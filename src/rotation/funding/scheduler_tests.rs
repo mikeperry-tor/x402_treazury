@@ -185,7 +185,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
         b"fixture",
     )
     .unwrap();
-    crate::rotation::store::test_support::declare_and_allocate(
+    crate::rotation::store::test_support::declare_two_reserves(
         &mut state,
         "pool",
         "5",
@@ -282,7 +282,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                 b"fixture",
             )
             .unwrap();
-            crate::rotation::store::test_support::declare_and_allocate(
+            crate::rotation::store::test_support::declare_two_reserves(
                 &mut state,
                 "pool",
                 "5",
@@ -468,7 +468,7 @@ async fn malformed_readiness_is_local_while_independent_source_work_drains() {
             )
             .unwrap();
         state
-            .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Initial, true)
+            .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Small, true)
             .unwrap();
     }
     let jobs = state.funding_jobs().unwrap();
@@ -636,7 +636,7 @@ async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fat
             b"fixture",
         )
         .unwrap();
-        crate::rotation::store::test_support::declare_and_allocate(
+        crate::rotation::store::test_support::declare_two_reserves(
             &mut state,
             "pool",
             "5",
@@ -781,7 +781,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     )
     .unwrap();
     for i in 0..(RECORDS / 2 + 2) {
-        crate::rotation::store::test_support::declare_and_allocate(
+        crate::rotation::store::test_support::declare_two_reserves(
             &mut store,
             &format!("pool{i}"),
             "5",
@@ -948,7 +948,7 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
         b"fixture",
     )
     .unwrap();
-    crate::rotation::store::test_support::declare_and_allocate(
+    crate::rotation::store::test_support::declare_two_reserves(
         &mut store,
         "pool",
         "5",
@@ -1069,7 +1069,7 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
         b"fixture",
     )
     .unwrap();
-    crate::rotation::store::test_support::declare_and_allocate(
+    crate::rotation::store::test_support::declare_two_reserves(
         &mut store,
         "pool",
         "5",

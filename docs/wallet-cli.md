@@ -60,7 +60,7 @@ x402_treazury wallet bootstrap --config examples/deployments/privacy.local.toml
 ```
 
 This declares configured groups, runs the production treasury/funding workers,
-and waits for confirmed credit on its captured initial allocation and enabled
+and waits for confirmed credit on its captured enabled
 reserve generations. It closes treasury ownership before exiting, requires
 `funding.auto_fund=true`, and respects source, fee, attempt and qualification limits. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
@@ -283,8 +283,8 @@ finish even when a reply receiver is dropped. `rotation/store/funding.rs` journa
 immutable operation IDs, encrypted quotes, guarded phases and persistent fair
 scheduling; status includes funding progress. Preparing a journaled funding job
 commits its PREPARED phase together with the wallet snapshot and signed bytes.
-Managed serving defaults to `[funding].auto_fund = true`: it funds the initial
-initial allocation and configured reserves under per-operation safeguards. Set it false
+Managed serving defaults to `[funding].auto_fund = true`: it funds the configured
+reserves under per-operation safeguards. Set it false
 to pause automatic funding; reconciliation and treasury sync remain available.
 This default applies only to configured managed serving, not wallet commands or
 static wallets. Bounded qualification examples explicitly opt out. `near_api_key_env` names the partner credential;
@@ -457,8 +457,9 @@ applicable. Keep both state and encryption key: a Zcash seed alone cannot restor
 EVM keys or pending funding work. `wallet backup` preserves both in one consistent backup directory; the database
 and key are not interchangeable backups.
 
-Managed groups persist an immutable initial allocation and exact enabled small/large
-reserve claims. Reserve targets are explicit funding preferences. An unsigned NEAR
+Managed groups persist exact enabled small/large reserve claims. Each new group
+starts with one wallet per enabled slot; the first payment promotes its payer and
+allows that slot to refill. Reserve targets are explicit funding preferences. An unsigned NEAR
 quote can raise accepted output to a bridge minimum only within that slot's explicit
 maximum (omission permits no increase); original allocation target and identity stay
 immutable. Source-input and fee safeguards still apply, with actual spendable treasury
@@ -723,7 +724,7 @@ original interpretation; none of these observations grants payment or retry auth
 
 Bootstrap reports `serving_ready_groups`, `inventory_ready_groups`, and
 `captured_completed_groups` separately. The captured command waits only for its
-initial allocation and enabled slot generations, including claims vacant when it
+enabled slot generations, including claims vacant when it
 starts. Successful completion has an empty `incomplete_captured_jobs` list;
 obstruction or cancellation remains an error with persisted work retained. Current
 inventory can become incomplete again after a reserve is consumed.

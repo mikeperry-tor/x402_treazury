@@ -1,6 +1,7 @@
 //! Bounded startup reads over configured groups and their destination paths.
 //! No partial Status, full wallet inventory, refund history, or new readiness ledger.
-pub(super) const STARTUP_CLAIM_SQL: &str = "SELECT f.id FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.pool_id=?1 AND f.allocation_kind=?2 AND f.claim_generation IS ?3";
+pub(super) const STARTUP_CLAIM_SQL: &str =
+    "SELECT id FROM funding_jobs WHERE pool_id=?1 AND allocation_kind=?2 AND claim_generation=?3";
 
 use super::funding::{FundingFacts, FundingJob};
 use super::*;
@@ -23,8 +24,8 @@ pub(crate) struct StartupGroup {
 
 #[derive(Clone, Debug)]
 pub(crate) struct StartupClaim {
-    pub kind: String,
-    pub generation: Option<i64>,
+    pub slot: String,
+    pub generation: i64,
 }
 
 #[derive(Debug)]
@@ -143,34 +144,27 @@ impl Store {
                 )
                 .optional()?
                 .context("bootstrap pool missing from state")?;
-            let mut claims = vec![StartupClaim {
-                kind: "initial".into(),
-                generation: None,
-            }];
             let mut slots = self.db.prepare("SELECT slot,generation FROM reserve_claims WHERE pool_id=?1 AND enabled=1 ORDER BY slot")?;
-            claims.extend(
-                slots
-                    .query_map([&pool], |r| {
-                        Ok(StartupClaim {
-                            kind: r.get(0)?,
-                            generation: Some(r.get(1)?),
-                        })
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?,
-            );
-            ensure!(claims.len() <= 3, "startup claim inventory conflict");
+            let claims = slots
+                .query_map([&pool], |r| {
+                    Ok(StartupClaim {
+                        slot: r.get(0)?,
+                        generation: r.get(1)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            ensure!(claims.len() <= 2, "startup claim inventory conflict");
             let identity = capacity::default_identity(&self.db, &pool)?;
             let serving_ready = identity.is_some();
-            let active_ready = identity.as_ref().is_some_and(|(_, role)| role == "ACTIVE");
-            let mut inventory_ready = active_ready;
-            for claim in claims.iter().filter(|c| c.generation.is_some()) {
-                let wallet:Option<String> = self.db.query_row("SELECT wallet_id FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND enabled=1",params![pool,claim.kind,claim.generation],|r|r.get(0))?;
+            let mut inventory_ready = !claims.is_empty();
+            for claim in &claims {
+                let wallet:Option<String> = self.db.query_row("SELECT wallet_id FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND enabled=1",params![pool,claim.slot,claim.generation],|r|r.get(0))?;
                 let ready = if let Some(wallet) = wallet {
                     match capacity::payment_ownership(&self.db, &pool, &wallet) {
                         Ok(owner) => owner.is_some_and(|owner| {
                             owner.role == "READY"
-                                && owner.slot.as_deref() == Some(claim.kind.as_str())
-                                && owner.claim_generation == claim.generation
+                                && owner.slot.as_deref() == Some(claim.slot.as_str())
+                                && owner.claim_generation == Some(claim.generation)
                         }),
                         Err(error) if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
                             == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) => {
@@ -240,14 +234,14 @@ impl Store {
         pool: &str,
         claims: &[StartupClaim],
     ) -> Result<Vec<StartupPath>> {
-        ensure!(claims.len() <= 3, "startup claim inventory too large");
+        ensure!(claims.len() <= 2, "startup claim inventory too large");
         let mut result = Vec::new();
         for claim in claims {
             let saved: Option<String> = self
                 .db
                 .query_row(
                     STARTUP_CLAIM_SQL,
-                    params![pool, claim.kind, claim.generation],
+                    params![pool, claim.slot, claim.generation],
                     |r| r.get(0),
                 )
                 .optional()?;
@@ -326,7 +320,7 @@ mod tests {
         let pool = crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "configured",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -374,7 +368,7 @@ mod tests {
             crate::rotation::test_capacity::declare_and_allocate!(
                 store,
                 &format!("unrelated_{n}"),
-                crate::rotation::test_capacity::small_reserve("5"),
+                crate::rotation::test_capacity::two_reserves("5"),
                 Some(alloy_primitives::U256::from(1_000_000u64)),
                 0
             )

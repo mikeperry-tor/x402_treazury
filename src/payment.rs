@@ -53,7 +53,7 @@ mod hint_binding_tests {
         let first = crate::rotation::test_capacity::declare_and_allocate!(
             state,
             "first",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(crate::rotation::config::positive_usdc("5").unwrap()),
             0
         )
@@ -61,7 +61,7 @@ mod hint_binding_tests {
         let second = crate::rotation::test_capacity::declare_and_allocate!(
             state,
             "second",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(crate::rotation::config::positive_usdc("5").unwrap()),
             0
         )

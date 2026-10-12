@@ -202,11 +202,7 @@ async fn run_case(
     let pool = store
         .ensure_capacity_group("handoff", &reserves, None, 0)
         .unwrap();
-    for kind in [
-        AllocationKind::Initial,
-        AllocationKind::Small,
-        AllocationKind::Large,
-    ] {
+    for kind in [AllocationKind::Small, AllocationKind::Large] {
         store
             .allocate_capacity_kind(&pool, kind, true)
             .unwrap()
@@ -298,7 +294,7 @@ async fn run_case(
     assert_eq!(rows, requests.iter().filter(|r| r.signed).count() as i64);
     assert_eq!(
         store.call(|s| Ok(s.funding_jobs()?.len())).await.unwrap(),
-        3,
+        2,
         "handoff cannot allocate"
     );
     assert_eq!(f.redirects.load(Ordering::SeqCst), 0);

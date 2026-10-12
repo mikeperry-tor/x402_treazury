@@ -9,15 +9,18 @@ pub(crate) fn reserves(target: &str) -> crate::rotation::config::ReservesConfig 
         large: None,
     }
 }
-pub(crate) fn declare_and_allocate(
+/// Two independent reserve operations for scheduler/concurrency fixtures.
+pub(crate) fn declare_two_reserves(
     store: &mut Store,
     name: &str,
     target: &str,
     cap: Option<U256>,
     tolerance: u64,
 ) -> Result<String> {
-    let pool = store.ensure_capacity_group(name, &reserves(target), cap, tolerance)?;
-    store.allocate_capacity_kind(&pool, AllocationKind::Initial, true)?;
+    let mut settings = reserves(target);
+    settings.large = Some(settings.small.clone());
+    let pool = store.ensure_capacity_group(name, &settings, cap, tolerance)?;
     store.allocate_capacity_kind(&pool, AllocationKind::Small, true)?;
+    store.allocate_capacity_kind(&pool, AllocationKind::Large, true)?;
     Ok(pool)
 }

@@ -10,6 +10,11 @@ pub(crate) fn small_reserve(target: &str) -> ReservesConfig {
         large: None,
     }
 }
+pub(crate) fn two_reserves(target: &str) -> ReservesConfig {
+    let mut config = small_reserve(target);
+    config.large = Some(config.small.clone());
+    config
+}
 // Macro permits normal receiver reborrowing for both Store and &mut Store.
 // Every caller supplies the cap and remainder tolerance explicitly.
 macro_rules! declare_and_allocate {
@@ -18,12 +23,12 @@ macro_rules! declare_and_allocate {
             let pool = $store.ensure_capacity_group($name, &$reserves, $cap, $tolerance)?;
             $store.allocate_capacity_kind(
                 &pool,
-                x402_treazury::rotation::store::AllocationKind::Initial,
+                x402_treazury::rotation::store::AllocationKind::Small,
                 true,
             )?;
             $store.allocate_capacity_kind(
                 &pool,
-                x402_treazury::rotation::store::AllocationKind::Small,
+                x402_treazury::rotation::store::AllocationKind::Large,
                 true,
             )?;
             Ok(pool)
@@ -41,19 +46,19 @@ pub(crate) async fn treasury_pair(
     tolerance: u64,
 ) -> anyhow::Result<String> {
     let pool = owner
-        .ensure_capacity_group(name.into(), small_reserve(target), cap, tolerance)
+        .ensure_capacity_group(name.into(), two_reserves(target), cap, tolerance)
         .await?;
     owner
         .allocate_capacity_kind(
             pool.clone(),
-            x402_treazury::rotation::store::AllocationKind::Initial,
+            x402_treazury::rotation::store::AllocationKind::Small,
             true,
         )
         .await?;
     owner
         .allocate_capacity_kind(
             pool.clone(),
-            x402_treazury::rotation::store::AllocationKind::Small,
+            x402_treazury::rotation::store::AllocationKind::Large,
             true,
         )
         .await?;

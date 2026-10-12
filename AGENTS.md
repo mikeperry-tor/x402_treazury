@@ -177,7 +177,7 @@ serving. Keep these modes in the shared Clap tree; only `serve` accepts listener
 authentication and supervised funding options. Wallet commands
 accept the same deployment file without loading catalogs or requiring listener
 tokens. `wallet bootstrap` also consumes wallet assignments/funding settings and
-funds the captured initial allocation and enabled reserve claims; other wallet administration never starts funding
+funds the captured enabled reserve claims; other wallet administration never starts funding
 workers. `wallet recover --config FILE` performs one recovery pass without new
 allocations or submissions. Bootstrap/automatic funding share its eligibility logic:
 known unprepared failures or canonically expired signed operations only; uncertain

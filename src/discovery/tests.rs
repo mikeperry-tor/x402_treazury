@@ -915,7 +915,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         store,
         "shared",
-        crate::rotation::test_capacity::small_reserve("5"),
+        crate::rotation::test_capacity::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

@@ -54,7 +54,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     let pool = crate::capacity_fixture::declare_and_allocate!(
         store,
         "fixture",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -508,7 +508,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     crate::capacity_fixture::declare_and_allocate!(
         store,
         "web",
-        crate::capacity_fixture::small_reserve("2"),
+        crate::capacity_fixture::two_reserves("2"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

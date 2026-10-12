@@ -14,7 +14,7 @@ async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch()
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         state,
         "direct",
-        crate::rotation::test_capacity::small_reserve("5"),
+        crate::rotation::test_capacity::two_reserves("5"),
         Some(crate::rotation::config::positive_usdc("5").unwrap()),
         0
     )

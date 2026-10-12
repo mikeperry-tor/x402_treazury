@@ -35,7 +35,11 @@ pub fn depletion_estimate(
     let wallets = pool["addresses"]
         .as_array()
         .context("observed wallets missing")?;
-    let active = wallet(wallets, "ACTIVE")?;
+    let active = if state["schema_version"] == 2 && !wallets.iter().any(|w| w["role"] == "ACTIVE") {
+        None
+    } else {
+        Some(wallet(wallets, "ACTIVE")?)
+    };
     let ready = if state["schema_version"] == 2 {
         let claims = pool["reserve_claims"]
             .as_array()
@@ -63,7 +67,7 @@ pub fn depletion_estimate(
         wallet(wallets, "READY")?
     };
     ensure!(
-        active["id"] != ready["id"],
+        active.is_none_or(|active| active["id"] != ready["id"]),
         "active and standby identities coincide"
     );
     let balances = &observation["balances"];
@@ -75,7 +79,10 @@ pub fn depletion_estimate(
         .as_str()
         .context("fresh balance hash missing")?
         .parse::<B256>()?;
-    let available = available_balance(balances, active)?;
+    let available = active
+        .map(|active| available_balance(balances, active))
+        .transpose()?
+        .unwrap_or(U256::ZERO);
     let standby = available_balance(balances, ready)?;
     ensure!(
         standby >= price,
@@ -112,7 +119,7 @@ pub fn depletion_estimate(
         .context("depletion fee estimate overflow")?;
     Ok(
         json!({"pool":observation["pool"],"pool_name":observation["pool_name"],
-        "active":active["id"],"standby":ready["id"],"generation":pool["generation"],
+        "active":active.map(|active| &active["id"]),"standby":ready["id"],"generation":pool["generation"],
         "active_available_atomic":available.to_string(),"standby_available_atomic":standby.to_string(),
         "expected_price_atomic":price.to_string(),"estimated_calls":needed.to::<u64>(),
         "estimated_depletion_fees_atomic":fees.to_string(),"planned_calls":planned_calls,
@@ -177,6 +184,28 @@ mod tests {
     fn observation() -> Value {
         json!({"pool":"p","pool_name":"pool","state":{"pools":[{"id":"p","name":"pool","generation":3,"addresses":[{"id":"a","role":"ACTIVE"},{"id":"b","role":"READY"}]}]},"balances":{"block_height":12,"block_hash":format!("0x{:064x}",1),"confirmed":{"a":"80","b":"200"},"unresolved":{}}})
     }
+    #[test]
+    fn ready_only_start_estimates_the_first_payment_as_the_promotion() {
+        let mut value = observation();
+        value["state"]["schema_version"] = json!(2);
+        value["state"]["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        value["state"]["pools"][0]["reserve_claims"] =
+            json!([{"slot":"small","enabled":true,"destination_ready":true,"wallet_id":"b"}]);
+        let estimate = depletion_estimate(&value, "20", 1).unwrap();
+        assert!(estimate["active"].is_null());
+        assert_eq!(estimate["active_available_atomic"], "0");
+        assert_eq!(estimate["standby"], "b");
+        assert_eq!(estimate["estimated_calls"], 1);
+        assert_eq!(estimate["estimated_depletion_fees_atomic"], "20");
+        assert!(depletion_estimate(&value, "20", 0).is_err());
+        assert!(depletion_estimate(&value, "201", 1).is_err());
+        value["state"]["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(false);
+        assert!(depletion_estimate(&value, "20", 1).is_err());
+    }
+
     #[test]
     fn versioned_pool_observations_estimate_from_conservative_balances() {
         let mut value = observation();

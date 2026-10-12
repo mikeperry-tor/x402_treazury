@@ -651,7 +651,7 @@ fn unsigned_identity_child() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         store,
         "history",
-        crate::capacity_fixture::small_reserve("1"),
+        crate::capacity_fixture::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -805,7 +805,7 @@ async fn managed_identity_child() {
     let alpha = crate::capacity_fixture::declare_and_allocate!(
         store,
         "alpha",
-        crate::capacity_fixture::small_reserve("1"),
+        crate::capacity_fixture::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -813,7 +813,7 @@ async fn managed_identity_child() {
     crate::capacity_fixture::declare_and_allocate!(
         store,
         "beta",
-        crate::capacity_fixture::small_reserve("1"),
+        crate::capacity_fixture::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

@@ -189,7 +189,7 @@ mod tests {
         let state = dir.path().join("state");
         let key = dir.path().join("key");
         let mut s = Store::create(&state, &key, 1, b"snapshot")?;
-        super::super::test_support::declare_and_allocate(
+        super::super::test_support::declare_two_reserves(
             &mut s,
             "return_history",
             "5",

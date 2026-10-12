@@ -60,7 +60,7 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
         b"fixture",
     )
     .unwrap();
-    let pool = crate::rotation::store::test_support::declare_and_allocate(
+    let pool = crate::rotation::store::test_support::declare_two_reserves(
         &mut store,
         "readiness",
         "5",

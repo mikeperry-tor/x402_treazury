@@ -28,20 +28,31 @@ fn indexed_lookups_preserve_retirement_null_claims_and_refresh_exclusions() {
     );
 
     db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind) VALUES ('initial','wallet-1','QUEUED','1','pool','initial')", []).unwrap();
-    assert_eq!(
+    // Historical initial jobs are recoverable, but never captured reserve claims.
+    assert!(
         inspect(
             &db,
             bootstrap::STARTUP_CLAIM_SQL,
             params!["pool", "initial", Option::<i64>::None]
         )
+        .0
+        .is_empty()
+    );
+    db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES ('reserve','wallet-3','QUEUED','1','pool','small',0)", []).unwrap();
+    assert_eq!(
+        inspect(
+            &db,
+            bootstrap::STARTUP_CLAIM_SQL,
+            params!["pool", "small", 0]
+        )
         .0,
-        vec![vec![Value::Text("initial".into())]]
+        vec![vec![Value::Text("reserve".into())]]
     );
     assert!(
         inspect(
             &db,
             bootstrap::STARTUP_CLAIM_SQL,
-            params!["pool", "initial", 0]
+            params!["pool", "small", 1]
         )
         .0
         .is_empty()

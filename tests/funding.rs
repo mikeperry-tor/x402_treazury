@@ -209,7 +209,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000)),
         0
     )
@@ -309,7 +309,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000)),
         0
     )
@@ -401,7 +401,7 @@ async fn fixture() -> (
     crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000)),
         0
     )
@@ -849,7 +849,7 @@ async fn coordinator_prepares_the_committed_bridge_target_without_requoting() {
         .store
         .call(|s| {
             let pool = s.status()?.pools[0].id.clone();
-            let mut reserves = capacity_fixture::small_reserve("5");
+            let mut reserves = capacity_fixture::two_reserves("5");
             reserves.small.max_funding_amount_usdc = Some("6".into());
             s.configure_capacity_group(
                 &pool,
@@ -980,7 +980,7 @@ async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() 
         let pool = crate::capacity_fixture::declare_and_allocate!(
             s,
             "a",
-            crate::capacity_fixture::small_reserve("5"),
+            crate::capacity_fixture::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000)),
             0
         )
@@ -1047,7 +1047,7 @@ async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() 
         crate::capacity_fixture::declare_and_allocate!(
             s,
             "b",
-            crate::capacity_fixture::small_reserve("5"),
+            crate::capacity_fixture::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000)),
             0
         )
@@ -1092,7 +1092,7 @@ async fn in_flight_credit_completion_cannot_overwrite_reconciled_wallets() {
         let pool = crate::capacity_fixture::declare_and_allocate!(
             s,
             "a",
-            crate::capacity_fixture::small_reserve("5"),
+            crate::capacity_fixture::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000)),
             0
         )

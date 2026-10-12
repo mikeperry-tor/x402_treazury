@@ -31,11 +31,7 @@ async fn inventory() -> (
                 Some(alloy_primitives::U256::from(10 * USDC_UNIT)),
                 10_000,
             )?;
-            for kind in [
-                AllocationKind::Initial,
-                AllocationKind::Small,
-                AllocationKind::Large,
-            ] {
+            for kind in [AllocationKind::Small, AllocationKind::Large] {
                 s.allocate_capacity_kind(&pool, kind, true)?;
             }
             super::lifecycle::synced(s)?;
@@ -56,11 +52,7 @@ pub(super) async fn fill(
     let pool = h.pool.clone();
     h.store
         .call(move |s| {
-            for kind in [
-                AllocationKind::Initial,
-                AllocationKind::Small,
-                AllocationKind::Large,
-            ] {
+            for kind in [AllocationKind::Small, AllocationKind::Large] {
                 s.allocate_capacity_kind(&pool, kind, true)?;
             }
             Ok(())
@@ -253,23 +245,23 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
         paid_and_settled(&h, 6 * USDC_UNIT).await;
         accounting(
             &h,
-            (4 + 10 * calls) * USDC_UNIT,
+            (2 + 10 * calls) * USDC_UNIT,
             6 * calls * USDC_UNIT,
-            (4 + 4 * calls) * USDC_UNIT,
+            (2 + 4 * calls) * USDC_UNIT,
         )
         .await;
         let state = h.store.call(|s| s.status()).await.unwrap();
         let group = state.pools.iter().find(|p| p.id == h.pool).unwrap();
         assert!(group.addresses.iter().all(|w| w.role != "RETIRED"));
         if calls == 9 {
-            accounting(&h, 94 * USDC_UNIT, 54 * USDC_UNIT, 40 * USDC_UNIT).await;
+            accounting(&h, 92 * USDC_UNIT, 54 * USDC_UNIT, 38 * USDC_UNIT).await;
             assert_eq!(
                 group
                     .addresses
                     .iter()
                     .filter(|w| w.role == "RETAINED")
                     .count(),
-                9
+                8
             );
             assert_eq!(
                 group
@@ -285,7 +277,7 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
             );
         }
         if calls == 10 {
-            accounting(&h, 104 * USDC_UNIT, 60 * USDC_UNIT, 44 * USDC_UNIT).await;
+            accounting(&h, 102 * USDC_UNIT, 60 * USDC_UNIT, 42 * USDC_UNIT).await;
         }
     }
     h.store
@@ -305,16 +297,9 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
             .count()
             >= 9
     );
-    let expected = group
-        .addresses
-        .iter()
-        .find(|w| w.role == "RETAINED" && w.target == "2000000")
-        .unwrap()
-        .address
-        .clone();
     let cheap = binding(&h, "POST", "many-retained-paused");
     for learning in [true, false] {
-        *h.f.challenge.lock().unwrap() = challenge("100000");
+        *h.f.challenge.lock().unwrap() = challenge("3000000");
         let unsigned_before =
             h.f.traces
                 .lock()
@@ -323,6 +308,21 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
                 .filter(|(_, k, _)| k == "unsigned")
                 .count();
         let inventory = h.store.call(|s| s.status()).await.unwrap();
+        let expected = inventory
+            .pools
+            .iter()
+            .find(|p| p.id == h.pool)
+            .unwrap()
+            .addresses
+            .iter()
+            .filter(|w| {
+                w.role == "RETAINED" && h.f.balances.lock().unwrap()[&w.address] >= 3_000_000
+            })
+            // Equal balances/roles use wallet identity, not allocation order.
+            .min_by_key(|w| &w.id)
+            .unwrap()
+            .address
+            .clone();
         assert_eq!(cheap.invoke(&serde_json::Map::new()).await.unwrap(), "paid");
         let signed = h.f.signed.lock().unwrap().last().unwrap().clone();
         assert_original_journal_claim(&h, &inventory, &signed);
@@ -347,7 +347,7 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
                 1
             );
         }
-        settle_last(&h, 100000).await;
+        settle_last(&h, 3000000).await;
     }
     let after = h.store.call(|s| s.status()).await.unwrap();
     assert_eq!(before.funding_jobs.len(), after.funding_jobs.len());
@@ -418,16 +418,16 @@ async fn naturally_expired_mixed_price_hints_preserve_fragmentation_and_continue
         }
         let spent = wallets * 8_250_000;
         if wallets == 9 {
-            accounting(&h, 94_000_000, 74_250_000, 19_750_000).await;
+            accounting(&h, 92_000_000, 74_250_000, 17_750_000).await;
         }
         if wallets == 10 {
-            accounting(&h, 104_000_000, 82_500_000, 21_500_000).await;
+            accounting(&h, 102_000_000, 82_500_000, 19_500_000).await;
         }
         accounting(
             &h,
-            (4 + 10 * wallets) * USDC_UNIT,
+            (2 + 10 * wallets) * USDC_UNIT,
             spent,
-            (4 + 10 * wallets) * USDC_UNIT - spent,
+            (2 + 10 * wallets) * USDC_UNIT - spent,
         )
         .await;
     }
@@ -467,9 +467,9 @@ async fn actual_spendable_exhaustion_preserves_claim_and_resumes_after_capacity_
         .lock()
         .await
         .capital
-        .store(300, Ordering::SeqCst);
+        .store(200, Ordering::SeqCst);
     h.store
-        .call(|s| super::lifecycle::synced_capacity(s, 300))
+        .call(|s| super::lifecycle::synced_capacity(s, 200))
         .await
         .unwrap();
     fill(&h, &mut worker, &mut instant).await;
@@ -504,7 +504,7 @@ async fn actual_spendable_exhaustion_preserves_claim_and_resumes_after_capacity_
         paused.treasury_operations.len(),
         "zero spendable capital grants no new preparation"
     );
-    accounting(&h, 14 * USDC_UNIT, 6 * USDC_UNIT, 8 * USDC_UNIT).await;
+    accounting(&h, 12 * USDC_UNIT, 6 * USDC_UNIT, 6 * USDC_UNIT).await;
     worker
         .backend
         .lock()
@@ -517,7 +517,7 @@ async fn actual_spendable_exhaustion_preserves_claim_and_resumes_after_capacity_
         .unwrap();
     fill(&h, &mut worker, &mut instant).await;
     paid_and_settled(&h, 6 * USDC_UNIT).await;
-    accounting(&h, 24 * USDC_UNIT, 12 * USDC_UNIT, 12 * USDC_UNIT).await;
+    accounting(&h, 22 * USDC_UNIT, 12 * USDC_UNIT, 10 * USDC_UNIT).await;
     drop(worker);
     h.close().await;
 }
@@ -636,10 +636,16 @@ impl FinancialModel {
         let balances: BTreeMap<_, _> = group
             .addresses
             .iter()
-            .map(|w| (w.id.clone(), w.target.parse::<u64>().unwrap()))
+            .map(|w| (w.id.clone(), h.f.balances.lock().unwrap()[&w.address]))
             .collect();
+        let credited: u64 = group
+            .addresses
+            .iter()
+            .map(|w| w.target.parse::<u64>().unwrap())
+            .sum();
+        let debited = credited - balances.values().sum::<u64>();
         Self {
-            credited: balances.values().sum(),
+            credited,
             balances,
             roles: group
                 .addresses
@@ -652,7 +658,7 @@ impl FinancialModel {
                 .map(|c| (c.slot.clone(), (c.wallet_id.clone(), c.generation)))
                 .collect(),
             pending: None,
-            debited: 0,
+            debited,
         }
     }
     async fn submitted(&mut self, h: &Harness, amount: u64) {
@@ -749,6 +755,7 @@ impl FinancialModel {
 async fn seeded_financial_model_preserves_claims_liabilities_retirement_and_reopen() {
     let (mut h, mut worker, mut instant) = inventory().await;
     fill(&h, &mut worker, &mut instant).await;
+    paid_and_settled(&h, 1).await;
     drop(worker);
     h.store
         .call(|s| {
@@ -761,6 +768,7 @@ async fn seeded_financial_model_preserves_claims_liabilities_retirement_and_reop
     // First create genuine uncertain seller work; reopening cannot release it.
     *h.f.challenge.lock().unwrap() = challenge("6000000");
     h.f.challenge.lock().unwrap()["accepts"][0]["maxTimeoutSeconds"] = json!(5);
+    h.f.used.store(false, Ordering::SeqCst);
     h.f.reject.store(true, Ordering::SeqCst);
     assert!(h.client.execute(h.route()).await.is_err());
     model.submitted(&h, 6_000_000).await;
@@ -792,10 +800,10 @@ async fn seeded_financial_model_preserves_claims_liabilities_retirement_and_reop
     model.check(&h).await;
     let tool = binding(&h, "POST", "seeded-variable-price");
     // The same trusted key changes from $6 to $0.10 to $2, then seeded
-    // prices. Learning the cheap price selects the retained $2 wallet on
+    // prices. Learning the cheap price selects the retained $1.999999 wallet on
     // the third call, whose actual larger challenge drains it exactly.
     let mut seed = 0x402_cafe_u64;
-    let mut prices = vec![6_000_000, 100_000, 2_000_000];
+    let mut prices = vec![6_000_000, 100_000, 1_999_999];
     for _ in 0..8 {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         prices.push((1 + ((seed >> 32) % 3)) * 100_000);

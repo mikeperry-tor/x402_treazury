@@ -172,9 +172,11 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             if !resumed {
                 let wallets = array(pool, "addresses")?;
                 ensure!(
-                    wallets.iter().any(|w| w["role"] == "ACTIVE")
-                        && (existing_funds_only || wallets.iter().any(|w| w["role"] == "READY")),
-                    "funded start needs active and standby; repair must be explicit"
+                    wallets.iter().any(|w| matches!(
+                        w["role"].as_str(),
+                        Some("ACTIVE" | "RETAINED" | "READY")
+                    )),
+                    "funded start needs an eligible payer; repair must be explicit"
                 );
             }
         }
@@ -190,9 +192,9 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
                 profile["reserves"]["small"].is_object(),
                 "pinned small reserve missing"
             );
-            bootstrap.extend([(pool_name.as_str(), 0), (pool_name.as_str(), 1)]);
+            bootstrap.push((pool_name.as_str(), 0));
             if profile["reserves"]["large"].is_object() {
-                bootstrap.push((pool_name.as_str(), 2));
+                bootstrap.push((pool_name.as_str(), 1));
             }
         }
     }
@@ -415,6 +417,26 @@ mod tests {
     }
 
     #[test]
+    fn funded_start_accepts_ready_only_bootstrap_but_not_unfunded_roles() {
+        let (_dir, guard, db, mut state) = fixture();
+        state["treasury_status"]["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        state["treasury_status"]["funding_jobs"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        baseline(&db, &state);
+        guard.validate_state(&state).unwrap();
+        for role in ["ALLOCATED", "RETIRED"] {
+            state["treasury_status"]["pools"][0]["addresses"][0]["role"] = json!(role);
+            baseline(&db, &state);
+            assert!(guard.validate_state(&state).is_err());
+        }
+    }
+
+    #[test]
     fn zero_funding_run_can_use_active_wallet_while_prior_unprepared_refill_stays_owned() {
         let (_dir, guard, db, mut state) = fixture();
         db.execute(
@@ -605,36 +627,34 @@ mod tests {
             0,
             "first pool must not consume authority when the second cannot fit"
         );
-        db.execute("UPDATE authorizations SET jobs=5,source=500", [])
+        db.execute("UPDATE authorizations SET jobs=3,source=300", [])
             .unwrap();
-        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',5,'$.limits.source_exposure_zec','0.000003')", []).unwrap();
+        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',3,'$.limits.source_exposure_zec','0.000002')", []).unwrap();
         assert!(guard.validate_state(&state).is_err());
         assert_eq!(count(), 0, "source exposure refusal is also atomic");
         db.execute(
-            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000005')",
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000003')",
             [],
         )
         .unwrap();
         guard.validate_state(&state).unwrap();
-        assert_eq!(count(), 5);
-        let first = guard
-            .reserve_allocations("treasury", "pool", &[0, 1])
-            .unwrap();
+        assert_eq!(count(), 3);
+        let first = guard.reserve_allocations("treasury", "pool", &[0]).unwrap();
         let second = guard
-            .reserve_allocations("treasury", "second", &[0, 1, 2])
+            .reserve_allocations("treasury", "second", &[0, 1])
             .unwrap();
         assert_ne!(first, second);
         let restarted = RegistryPermits::new(guard.binding.clone());
         restarted.validate_state(&state).unwrap();
         assert_eq!(
             restarted
-                .reserve_allocations("treasury", "second", &[0, 1, 2])
+                .reserve_allocations("treasury", "second", &[0, 1])
                 .unwrap(),
             second
         );
         assert_eq!(
             count(),
-            5,
+            3,
             "orphan reservations survive and are reused without a second charge"
         );
     }
@@ -658,10 +678,7 @@ mod tests {
                         json!([{"id":"unknown","state":"POSSIBLY_SUBMITTED"}])
                 }
                 6 => changed["treasury_status"]["snapshot_revision"] = json!(0),
-                _ => {
-                    changed["treasury_status"]["pools"][0]["addresses"][1]["role"] =
-                        json!("RETIRED")
-                }
+                _ => changed["treasury_status"]["pools"][0]["inventory_ready"] = json!(false),
             }
             assert!(
                 guard.validate_state(&changed).is_err(),

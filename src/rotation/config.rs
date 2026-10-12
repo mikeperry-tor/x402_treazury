@@ -103,9 +103,9 @@ impl ReservesConfig {
         }
         Ok(())
     }
-    /// Configured initial active plus reserves, not current usable capacity.
+    /// Configured reserve inventory before the first payment, not current usable capacity.
     pub fn initial_inventory_target_atomic(&self) -> Result<U256> {
-        Ok(U256::from(self.small.target_atomic()?) * U256::from(2)
+        Ok(U256::from(self.small.target_atomic()?)
             + U256::from(
                 self.large
                     .as_ref()

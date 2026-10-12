@@ -122,6 +122,7 @@ pub struct PoolStatus {
     pub retirement_accounting: RetirementAccounting,
     pub serving_ready: bool,
     pub inventory_ready: bool,
+    /// Historical initial jobs only; new groups start with reserve claims.
     pub initial_destination_recorded: bool,
     pub reserve_claims: Vec<ReserveClaimStatus>,
     pub retained_wallets: usize,
@@ -1148,10 +1149,6 @@ fn read_status(db: &Connection) -> Result<Status> {
                 .transpose()?
                 .unwrap_or(false);
             pool.inventory_ready = pool.enabled
-                && pool
-                    .addresses
-                    .iter()
-                    .any(|wallet| wallet.role == "ACTIVE" && wallet.destination_recorded)
                 && pool.reserve_claims.iter().any(|c| c.enabled)
                 && pool
                     .reserve_claims

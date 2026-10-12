@@ -404,14 +404,14 @@ async fn obsolete_admission_timeout_is_accepted_but_not_exposed_as_effective_con
 fn reserve_shape_has_required_small_optional_large_and_explicit_output_ceilings() {
     use x402_treazury::rotation::config::ReservesConfig;
     for (text, expected) in [
-        ("[small]\nfunding_amount_usdc='2'", "4000000"),
+        ("[small]\nfunding_amount_usdc='2'", "2000000"),
         (
             "[small]\nfunding_amount_usdc='2'\n[large]\nfunding_amount_usdc='10'",
-            "14000000",
+            "12000000",
         ),
         (
             "[small]\nfunding_amount_usdc='2'\n[large]\nfunding_amount_usdc='2'",
-            "6000000",
+            "4000000",
         ),
     ] {
         let reserves: ReservesConfig = toml::from_str(text).unwrap();

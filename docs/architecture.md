@@ -58,7 +58,7 @@ do not disable unrelated targets. Local bootstrap metadata avoids
 a catalog dependency cycle. `deployment/bootstrap.rs` supervises initial funding
 and confirmation before ordinary managed serving loads catalogs, and also powers
 `wallet bootstrap`. It retains the same treasury actor and funding worker into serving;
-completed initial allocations are not funded again; reserve vacancies follow their exact current claims. Warming starts no funding workers. Origin freshness and relay provenance
+reserve vacancies follow their exact current claims; there is no separate initial allocation. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#paid-discovery-relay).
 

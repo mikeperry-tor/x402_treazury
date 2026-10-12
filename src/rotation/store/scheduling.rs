@@ -168,7 +168,7 @@ mod tests {
         crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "pool",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -277,7 +277,7 @@ mod source_disposition_tests {
         crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "pool",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -314,7 +314,7 @@ mod source_disposition_tests {
         crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "pool",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )

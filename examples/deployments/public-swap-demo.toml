@@ -1,5 +1,5 @@
 # Reserve sizes are funding preferences; the explicit group cap governs every wallet.
-# Initial active funding uses small; refill vacant slots small-first. Retained balances stay usable.
+# Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
 # Partial credited allocations retain their claims until full readiness; accepted work stays owned.
 # One pool, one listener, one cheap tool. Follow ../../docs/public-swap-demo.md.

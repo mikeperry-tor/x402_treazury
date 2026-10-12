@@ -125,7 +125,7 @@ async fn race(race: Race) {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         state,
         "combined",
-        crate::rotation::test_capacity::small_reserve("5"),
+        crate::rotation::test_capacity::two_reserves("5"),
         Some(crate::rotation::config::positive_usdc("5").unwrap()),
         0
     )
@@ -363,13 +363,13 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
         let pool = state
             .ensure_capacity_group(
                 "debit_expiry",
-                &crate::rotation::test_capacity::small_reserve("10"),
+                &crate::rotation::test_capacity::two_reserves("10"),
                 Some(U256::from(20_000_000)),
                 0,
             )
             .unwrap();
         let job = state
-            .allocate_capacity_kind(&pool, AllocationKind::Initial, true)
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
             .unwrap()
             .unwrap();
         let wallet = state.funding_job(&job).unwrap().unwrap().wallet_id;

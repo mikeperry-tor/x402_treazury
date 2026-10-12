@@ -26,8 +26,8 @@ You can also optionally grant your agent a set of tools to discover and add x402
 > calls before rotation. Identifying request contents across these rotations can
 > also link activity.
 
-Each managed wallet group has an active Base USDC wallet, a small reserve and an
-optional large reserve. Funded retained wallets remain available for payments.
+Each managed wallet group starts with one small Base USDC reserve and an
+optional large reserve, without a separate active allocation. Funded retained wallets remain available for payments.
 Validated recent price estimates can choose the smallest sufficient wallet before
 the ordinary request. A reserve's first journaled payment makes it active and
 leaves its slot vacant; the previous active becomes retained. Ordinary authorized
@@ -35,7 +35,7 @@ funding fills each vacancy independently of payment and retirement.
 Funding, confirmation and payment uncertainty are persisted across restarts.
 
 Configure each reserve's target explicitly. A group with a $2 small reserve and
-no large reserve starts with $4 across its initial active and small reserve, plus
+no large reserve starts with one $2 wallet, plus
 swap and network fees. An optional large reserve adds its configured target.
 Bridge-minimum increases require explicit per-slot headroom. Actual spendable
 Zcash treasury funds govern enabled funding; the API payment cap is separate.
@@ -152,9 +152,9 @@ target/release/x402_treazury wallet addresses \
 ```
 
 Send ZEC to the treasury's **shielded receive address**. The privacy example conf defines
-**three wallet groups**, each configured with an initial allocation and a small reserve:
-**3 x 2 x $2 = $12 USDC** for initial allocations. The treasury therefore needs
-**at least $12 worth of ZEC before fees; about $15 is a practical starting preload**.
+**three wallet groups**, each starting with one small reserve:
+**3 × $2 = $6 USDC** before fees and accepted bridge minimum increases.
+Allow additional treasury funds for those costs and subsequent replacements.
 
 Allow more if the bridge minimum exceeds $2 or exchange rates and fees change.
 This preload funds initial wallets, not unlimited calls or replacements.
@@ -165,8 +165,8 @@ or rebind any servers/sources referencing them.
 > **NOTE:**
 >
 > Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
-> not eliminate that pool's funding setup. Keeping one pool requires two $2 allocations
-> (about $4 before fees); sharing it across multiple MCP servers preserves
+> not eliminate that pool's funding setup. Keeping one pool requires one $2 reserve
+> (about $2 before fees); sharing it across multiple MCP servers preserves
 > separate toolsets but shares their payment identity and Tor circuit usage.
 
 After sending ZEC, sync the treasury and check its confirmed spendable balance:
@@ -177,15 +177,14 @@ target/release/x402_treazury wallet sync \
 target/release/x402_treazury wallet status --config examples/deployments/privacy.local.toml
 ```
 
-Once `wallet status` shows sufficient confirmed spendable ZEC, fund the initial
-initial USDC allocations and configured reserves:
+Once `wallet status` shows sufficient confirmed spendable ZEC, fund the configured reserves:
 
 ```sh
 target/release/x402_treazury wallet bootstrap \
   --config examples/deployments/privacy.local.toml
 ```
 
-Bootstrap uses actual spendable treasury funds under per-operation safeguards and waits for confirmed USDC credit to its captured initial and reserve claims.
+Bootstrap uses actual spendable treasury funds under per-operation safeguards and waits for confirmed USDC credit to its captured reserve claims.
 Repeating it observes current configured inventory and resumes unfinished funding work,
 including eligible automatic recovery. Prepared deposits that missed their quote
 window wait for verified transaction expiry before funding retries. For a single
@@ -229,7 +228,7 @@ target/release/x402_treazury config show \
   --config examples/deployments/privacy.local.toml
 ```
 
-The example requests **2 USDC** for initial active/small-reserve wallets and
+The example requests **2 USDC** for small-reserve wallets and
 permits accepted bridge minimums up to **3 USDC**. Ordinary enabled funding uses
 actual spendable Zcash treasury funds after confirmations, reservations and fees;
 there is no daily or cumulative allocation setting. Individual payments remain
@@ -239,7 +238,7 @@ fee safeguards. Reservations and accepted transaction bytes survive restarts.
 
 Changes apply on reopen. A partially funded allocation stays unavailable for
 payments until its readiness requirement is satisfied, including while funding is
-paused. Explicit bootstrap waits for its captured initial and reserve jobs;
+paused. Explicit bootstrap waits for its captured reserve jobs;
 ordinary serving requires one funded eligible payer. See [configuration and startup
 outcomes](docs/configuration.md) for claim ownership and accepted-operation limits.
 
@@ -296,7 +295,7 @@ Ensuring that wallets only serve payments up to 25% of their initial allocation
 size reduces the risk of fragmentation: balances left across several wallets
 cannot be combined for one payment. Retained balances can still serve smaller
 calls, but selection may also keep cheap calls on a sufficient large wallet.
-See the [fragmentation examples and bounds](docs/plans/wallet_capacity_and_draining.md#recommended-reserve-sizing) for the detailed math and assumptions.
+See the [fragmentation examples and bounds](docs/configuration.md#reserve-sizing-and-fragmentation) for the detailed math and assumptions.
 
 We provide a separate large wallet option for expensive APIs (rather than simply
 increasing the small wallet size), because this allows quicker rotation of

@@ -225,7 +225,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "lifecycle",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(5_000_000)),
                 0
             )
@@ -238,7 +238,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "other",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(5_000_000)),
                 0
             )?;
@@ -268,14 +268,14 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
     let old_active = research
         .addresses
         .iter()
-        .find(|a| a.role == "ACTIVE")
+        .find(|a| a.role == "READY")
         .unwrap()
         .address
         .clone();
     let standby = research
         .addresses
         .iter()
-        .find(|a| a.role == "READY")
+        .find(|a| a.role == "READY" && a.address != old_active)
         .unwrap()
         .address
         .clone();
@@ -361,7 +361,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
             .iter()
             .all(|j| j.phase == FundingPhase::Complete)
     );
-    assert_eq!(sends.lock().unwrap().len(), 5);
+    assert_eq!(sends.lock().unwrap().len(), 6);
     assert!(sends.lock().unwrap().contains(&replacement.operation_id));
     let research = status.pools.iter().find(|p| p.id == h.pool).unwrap();
     assert_eq!(
@@ -379,7 +379,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
             .iter()
             .filter(|a| a.role == "READY")
             .count(),
-        1
+        2
     );
     assert_eq!(
         research
@@ -421,7 +421,7 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "refund",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(5_000_000)),
                 0
             )?;
@@ -454,8 +454,8 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
     let consumed: i64 = db
         .query_row("SELECT SUM(consumed) FROM budget_entries", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(consumed, 200);
-    assert_eq!(sends.lock().unwrap().len(), 2);
+    assert_eq!(consumed, 300);
+    assert_eq!(sends.lock().unwrap().len(), 3);
     h.f.used.store(true, Ordering::SeqCst);
     let active = status
         .pools
@@ -493,7 +493,7 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
             let p = crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "background",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(5_000_000)),
                 0
             )?;
@@ -514,9 +514,8 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
                 .unwrap()
                 .pools
                 .iter()
-                .find(|p| p.id == other)
-                .unwrap()
-                .inventory_ready
+                .filter(|p| p.id == other || p.id == h.pool)
+                .all(|p| p.inventory_ready)
             {
                 break;
             }
@@ -533,7 +532,15 @@ async fn funding_and_reconciliation_progress_while_another_pool_payment_is_held(
             .unwrap()
             .inventory_ready
     );
-    assert_eq!(sends.lock().unwrap().len(), 2);
+    assert!(
+        state
+            .pools
+            .iter()
+            .find(|p| p.id == h.pool)
+            .unwrap()
+            .inventory_ready
+    );
+    assert_eq!(sends.lock().unwrap().len(), 3);
     assert!(
         !payment.is_finished(),
         "funding must complete before the held payment is released"

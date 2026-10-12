@@ -196,7 +196,7 @@ mod tests {
             b"fixture",
         )
         .unwrap();
-        let pool = crate::rotation::store::test_support::declare_and_allocate(
+        let pool = crate::rotation::store::test_support::declare_two_reserves(
             &mut store,
             "shared",
             "5",

@@ -329,7 +329,7 @@ Each pass checks one queued receipt per pool; pending receipts rotate to the bac
 and backlog size is logged. Proofs persist against the exact case and attempt.
 Reports reject mismatched or duplicate attribution. A consumed authorization
 without a debit proof cannot qualify a run or unlock dependent phases; a
-successful paid case that never pays likewise cannot qualify a funded test. Startup validation reserves the missing initial and enabled reserve-slot jobs in one registry transaction before allocation; a rejected batch leaves no partial reservations.
+successful paid case that never pays likewise cannot qualify a funded test. Startup validation reserves the missing enabled reserve-slot jobs in one registry transaction before allocation; a rejected batch leaves no partial reservations.
 Funding-enabled launches additionally require `auto_fund=true`. Treasury-only
 starts wait for production bootstrap before dispatch, with progress logs and the
 phase/run deadline. An adopted bootstrapped pool may have a partly spent active

@@ -26,7 +26,7 @@ fn state_is_encrypted_exclusive_and_recovers_identity_and_revisions() {
     crate::capacity_fixture::declare_and_allocate!(
         store,
         "research",
-        crate::capacity_fixture::small_reserve("5.00"),
+        crate::capacity_fixture::two_reserves("5.00"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -62,7 +62,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
     let a = crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5.00"),
+        crate::capacity_fixture::two_reserves("5.00"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -70,7 +70,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
     let b = crate::capacity_fixture::declare_and_allocate!(
         s,
         "b",
-        crate::capacity_fixture::small_reserve("10.00"),
+        crate::capacity_fixture::two_reserves("10.00"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -93,7 +93,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
         crate::capacity_fixture::declare_and_allocate!(
             s,
             "a",
-            crate::capacity_fixture::small_reserve("7.00"),
+            crate::capacity_fixture::two_reserves("7.00"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -117,8 +117,8 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
     );
     let now = s.status().unwrap();
     assert_eq!(now.pools[0].addresses.len(), 3);
-    assert_eq!(now.pools[0].addresses[0].role, "RETAINED");
-    assert_eq!(now.pools[0].addresses[1].role, "ACTIVE");
+    assert_eq!(now.pools[0].addresses[0].role, "ACTIVE");
+    assert_eq!(now.pools[0].addresses[1].role, "READY");
     assert_eq!(now.pools[0].addresses[1].target, "5000000");
     assert_eq!(now.pools[0].addresses[2].target, "7000000");
     assert_eq!(now.pools[1].addresses.len(), 2);
@@ -142,7 +142,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
         crate::capacity_fixture::declare_and_allocate!(
             s,
             "a",
-            crate::capacity_fixture::small_reserve("7"),
+            crate::capacity_fixture::two_reserves("7"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -160,7 +160,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
         crate::capacity_fixture::declare_and_allocate!(
             s,
             "b",
-            crate::capacity_fixture::small_reserve("10"),
+            crate::capacity_fixture::two_reserves("10"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -177,7 +177,7 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
     let a = crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -185,7 +185,7 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
     let b = crate::capacity_fixture::declare_and_allocate!(
         s,
         "b",
-        crate::capacity_fixture::small_reserve("10"),
+        crate::capacity_fixture::two_reserves("10"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -238,7 +238,7 @@ async fn concurrent_pool_requests_and_source_reservations_serialize() {
                 crate::capacity_fixture::declare_and_allocate!(
                     s,
                     "same",
-                    crate::capacity_fixture::small_reserve("5"),
+                    crate::capacity_fixture::two_reserves("5"),
                     Some(alloy_primitives::U256::from(1_000_000u64)),
                     0
                 )
@@ -259,7 +259,7 @@ async fn concurrent_pool_requests_and_source_reservations_serialize() {
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "other",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(1_000_000u64)),
                 0
             )
@@ -289,7 +289,7 @@ fn failed_refill_preserves_committed_payment_roles_and_keys_restore() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -313,8 +313,8 @@ fn failed_refill_preserves_committed_payment_roles_and_keys_restore() {
     let now = s.status().unwrap();
     assert_eq!(now.pools[0].generation, 0);
     assert_eq!(now.pools[0].addresses.len(), 2);
-    assert_eq!(now.pools[0].addresses[0].role, "RETAINED");
-    assert_eq!(now.pools[0].addresses[1].role, "ACTIVE");
+    assert_eq!(now.pools[0].addresses[0].role, "ACTIVE");
+    assert_eq!(now.pools[0].addresses[1].role, "READY");
     db.execute_batch("DROP TRIGGER fail_job").unwrap();
     drop(db);
     let id = s.id().to_owned();
@@ -351,7 +351,7 @@ async fn cancelling_a_waiter_does_not_cancel_an_accepted_store_transaction() {
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "survives",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(1_000_000u64)),
                 0
             )
@@ -377,7 +377,7 @@ fn committed_crash_child() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         s,
         "crash",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -422,7 +422,7 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
         crate::capacity_fixture::declare_and_allocate!(
             s,
             "crash",
-            crate::capacity_fixture::small_reserve("5"),
+            crate::capacity_fixture::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -648,7 +648,7 @@ fn funding_journal_keeps_quote_identity_and_observation_health_after_restart() {
     crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -656,7 +656,7 @@ fn funding_journal_keeps_quote_identity_and_observation_health_after_restart() {
     crate::capacity_fixture::declare_and_allocate!(
         s,
         "b",
-        crate::capacity_fixture::small_reserve("7"),
+        crate::capacity_fixture::two_reserves("7"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -724,7 +724,7 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -774,7 +774,7 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         s,
         "a",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -824,7 +824,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         s,
         "identity",
-        crate::capacity_fixture::small_reserve("5"),
+        crate::capacity_fixture::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -1052,7 +1052,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     crate::capacity_fixture::declare_and_allocate!(
         s,
         "minimum",
-        crate::capacity_fixture::small_reserve("2"),
+        crate::capacity_fixture::two_reserves("2"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -1162,7 +1162,7 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     let pool = crate::capacity_fixture::declare_and_allocate!(
         store,
         "drain",
-        crate::capacity_fixture::small_reserve("1"),
+        crate::capacity_fixture::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

@@ -25,7 +25,7 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Action {
-    /// Fund captured initial allocations and enabled reserve claims; wait for confirmed USDC without discovery.
+    /// Fund captured enabled reserve claims; wait for confirmed USDC without discovery.
     Bootstrap,
     /// Create a new treasury; discovers its birthday unless supplied.
     Init {

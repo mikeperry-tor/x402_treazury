@@ -128,7 +128,7 @@ async fn saturation_child() {
         let group = crate::rotation::test_capacity::declare_and_allocate!(
             state,
             name,
-            crate::rotation::test_capacity::small_reserve("0.01"),
+            crate::rotation::test_capacity::two_reserves("0.01"),
             Some(U256::from(10_000)),
             0
         )

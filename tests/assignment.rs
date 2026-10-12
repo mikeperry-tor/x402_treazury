@@ -51,10 +51,10 @@ async fn show(dir: &std::path::Path, text: &str) -> Value {
 async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() {
     let dir = tempfile::tempdir().unwrap();
     for (scope, count, capital) in [
-        ("deployment", 1, "10.000002"),
-        ("server", 2, "20.000004"),
-        ("source", 2, "20.000004"),
-        ("binding", 4, "40.000008"),
+        ("deployment", 1, "5.000001"),
+        ("server", 2, "10.000002"),
+        ("source", 2, "10.000002"),
+        ("binding", 4, "20.000004"),
     ] {
         let shown = show(dir.path(), &config(scope)).await;
         assert_eq!(shown["wallet_summary"]["managed_pool_count"], count);
@@ -124,7 +124,7 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
     assert!(
         String::from_utf8(output.stdout)
             .unwrap()
-            .contains("4 managed pools (4 automatic); initial inventory target: 40.000008 USDC")
+            .contains("4 managed pools (4 automatic); initial inventory target: 20.000004 USDC")
     );
     assert!(!dir.path().join("state").exists());
 }
@@ -173,7 +173,7 @@ funding_amount_usdc='100'
     assert_eq!(shown["wallet_summary"]["managed_pool_count"], 2);
     assert_eq!(
         shown["wallet_summary"]["initial_inventory_target_usdc"],
-        "16.000002"
+        "8.000001"
     );
     let text = config("source")
         .replace("[servers.one]", "[servers.one]\nwallet='shared'")
@@ -281,9 +281,9 @@ async fn seed_managed_inventory(
         let pool = store
             .ensure_capacity_group(name, &reserves, cap, 0)
             .unwrap();
-        for kind in [AllocationKind::Initial, AllocationKind::Small] {
-            store.allocate_capacity_kind(&pool, kind, true).unwrap();
-        }
+        store
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap();
         if let Some(rpc) = rpc {
             let query = store.chain_query(&pool).unwrap();
             let view = BaseRpc::new(rpc, 12, 120)
@@ -615,11 +615,11 @@ async fn initial_inventory_summary_includes_optional_large_once_per_group() {
     let shown = show(dir.path(), &text).await;
     assert_eq!(
         shown["wallet_summary"]["initial_inventory_target_atomic"],
-        "20000002"
+        "15000001"
     );
     assert_eq!(
         shown["wallet_summary"]["initial_inventory_target_usdc"],
-        "20.000002"
+        "15.000001"
     );
     assert!(
         shown["wallet_summary"]

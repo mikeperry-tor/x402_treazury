@@ -7,7 +7,7 @@ fn populated(dir: &Path) -> Store {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         s,
         "fixture",
-        crate::rotation::test_capacity::small_reserve("5"),
+        crate::rotation::test_capacity::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -65,6 +65,10 @@ fn populated(dir: &Path) -> Store {
             .unwrap();
     }
     let wallet = &s.status().unwrap().pools[0].addresses[0];
+    // This donor models an established payer, including its consumed reserve claim.
+    let tx = s.db.transaction().unwrap();
+    capacity::consume_reserve(&tx, &pool, &wallet.id).unwrap();
+    tx.commit().unwrap();
     s.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES ('payment',?1,?2,0,'7','hash','POSSIBLY_SUBMITTED',?3,?3,?4,0,1000,1)",params![pool,wallet.id,wallet.address,format!("0x{:064x}",1)]).unwrap();
     evidence::add_exposure(&s.db, &wallet.id, U256::from(7)).unwrap();
     s.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund) SELECT 'prior-operation',p.job_id,p.phase,p.quote,r.address FROM funding_progress p JOIN funding_refunds r ON r.job_id=p.job_id ORDER BY p.rowid LIMIT 1",[]).unwrap();
@@ -425,7 +429,7 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
         let pool = crate::rotation::test_capacity::declare_and_allocate!(
             s,
             "test",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -518,7 +522,7 @@ fn expired_admission_evidence_preserves_prior_balance_without_role_change_or_res
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         store,
         "freshness",
-        crate::rotation::test_capacity::small_reserve("5"),
+        crate::rotation::test_capacity::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

@@ -82,7 +82,7 @@ async fn fixture(retained_count: usize) -> Fixture {
         .ensure_capacity_group("selection", &reserves, Some(U256::from(100_000_000u64)), 0)
         .unwrap();
     let initial = store
-        .allocate_capacity_kind(&pool, AllocationKind::Initial, true)
+        .allocate_capacity_kind(&pool, AllocationKind::Small, true)
         .unwrap()
         .unwrap();
     let large_job = store
@@ -98,6 +98,14 @@ async fn fixture(retained_count: usize) -> Fixture {
         )
         .unwrap()
     };
+    // Seed an already-consumed small claim for selection tests over established
+    // inventory. Exact readiness below still comes from the real RPC fixture.
+    db.execute(
+        "UPDATE wallets SET role='ACTIVE' WHERE id=?1",
+        [wallet_for(&initial)],
+    )
+    .unwrap();
+    db.execute("UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1 WHERE pool_id=?1 AND slot='small'", [&pool]).unwrap();
     let mut retained = Vec::new();
     for _ in 0..retained_count {
         let job = store
@@ -1149,7 +1157,7 @@ async fn initial_identity_and_startup_isolate_malformed_wallet_readiness() {
             assert_eq!(candidate.unwrap().wallet, *expected);
             let groups = startup.unwrap();
             assert!(groups[0].serving_ready);
-            assert!(!groups[0].inventory_ready);
+            assert_eq!(groups[0].inventory_ready, corrupt == "active");
         }
         let after: Vec<(String, String)> = f
             .db()
@@ -1321,7 +1329,7 @@ async fn retirement_payment_order(payment_first: bool) {
                 }
             }));
     let seller = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let http = reqwest::Client::new();
+    let http = crate::network::discovery(&url, std::time::Duration::from_secs(60)).unwrap();
     let response = http.get(&url).send().await.unwrap();
     let retry = http.get(&url).build().unwrap();
     {

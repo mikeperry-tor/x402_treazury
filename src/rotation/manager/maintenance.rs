@@ -556,7 +556,7 @@ mod tests {
         let id = crate::rotation::test_capacity::declare_and_allocate!(
             state,
             "rolling",
-            crate::rotation::test_capacity::small_reserve("5"),
+            crate::rotation::test_capacity::two_reserves("5"),
             Some(crate::rotation::config::positive_usdc("5").unwrap()),
             0
         )

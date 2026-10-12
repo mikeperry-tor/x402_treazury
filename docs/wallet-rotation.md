@@ -61,7 +61,7 @@ funding_amount_usdc = "10.00"
 
 | Setting | Meaning |
 | --- | --- |
-| `reserves.small.funding_amount_usdc` | Required positive target for the small reserve and initial active allocation. |
+| `reserves.small.funding_amount_usdc` | Required positive target for the small reserve. |
 | `reserves.large.funding_amount_usdc` | Optional large target, at least as large as small. |
 | Slot `max_funding_amount_usdc` | Maximum accepted output after a bridge-minimum increase; omission permits no increase above that slot's target. |
 | `max_api_payment_usdc` | Required explicit cap for each payment by every group wallet, independently of reserve sizes. |
@@ -77,8 +77,8 @@ fields are rejected; historical charges and exact reservations remain intact.
 
 A group cap may exceed its reserve targets, and targets may exceed the cap.
 Neither case promises that initial funding can serve every allowed price. The
-fresh initial-inventory target is `2*S + L`, or `2*S` without large: $2/$10 requests
-$14 before accepted minimum increases and fees. Report actual credits, output
+fresh initial-inventory target is `S + L`, or `S` without large: $2/$10 requests
+$12 before accepted minimum increases and fees. Report actual credits, output
 ceilings, retained holdings and costs separately. Smaller reserve sizes offer more
 cheap-call rotation opportunities; larger sizes support expensive calls but can
 keep more traffic on an address. See [sizing and selection limits](configuration.md).

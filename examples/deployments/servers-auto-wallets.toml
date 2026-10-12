@@ -1,12 +1,12 @@
 # Reserve sizes are funding preferences; the explicit group cap governs every wallet.
-# Initial active funding uses small; refill vacant slots small-first. Retained balances stay usable.
+# Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
 # Size optional large to at least 2x expected maximum payment (prefer 4x); this is not a payment cap.
 # Partial allocations cannot pay until full readiness; accepted insufficient work stays owned.
-# Startup accepts any funded eligible payer; explicit bootstrap waits its captured initial/slot jobs.
+# Startup accepts any funded eligible payer; explicit bootstrap waits its captured slot jobs.
 # Partial credited allocations retain their claims until full readiness; accepted work stays owned.
 # Initialize the treasury first; build the server with scripts/zcash.sh.
-# This example creates two pools, each targeting 5 USDC active + 5 USDC small reserve.
+# This example creates two pools, each starting with one 5 USDC small reserve.
 # Serving funds the initial inventories and subsequent replacements under actual spendable treasury capacity and per-operation safeguards.
 version = 1
 

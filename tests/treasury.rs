@@ -138,7 +138,7 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
         crate::capacity_fixture::declare_and_allocate!(
             store,
             "research",
-            crate::capacity_fixture::small_reserve("5"),
+            crate::capacity_fixture::two_reserves("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )

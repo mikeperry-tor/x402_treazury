@@ -25,7 +25,7 @@ fn fixture() -> (tempfile::TempDir, Store, String) {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         s,
         "fixture",
-        crate::rotation::test_capacity::small_reserve("5"),
+        crate::rotation::test_capacity::two_reserves("5"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -61,7 +61,7 @@ fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
         assert_eq!(
             s.ensure_capacity_group(
                 "fixture",
-                &crate::rotation::test_capacity::small_reserve("5"),
+                &crate::rotation::test_capacity::two_reserves("5"),
                 Some(U256::from(1_000_000)),
                 0
             )
@@ -71,12 +71,12 @@ fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
         let declared = s
             .ensure_capacity_group(
                 "new_pool",
-                &crate::rotation::test_capacity::small_reserve("5"),
+                &crate::rotation::test_capacity::two_reserves("5"),
                 Some(U256::from(1_000_000)),
                 0,
             )
             .unwrap();
-        denied(s.allocate_capacity_kind(&declared, AllocationKind::Initial, true));
+        denied(s.allocate_capacity_kind(&declared, AllocationKind::Small, true));
         denied(s.reserve("new", Some(&pool), 1, 100));
         denied(s.reserve("shield", None, 1, 100));
         denied(s.require_spend_ready(10, 100));
@@ -282,7 +282,7 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
     denied(crate::rotation::test_capacity::declare_and_allocate!(
         s,
         "a",
-        crate::rotation::test_capacity::small_reserve("1"),
+        crate::rotation::test_capacity::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     ));
@@ -294,7 +294,7 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
         crate::rotation::test_capacity::declare_and_allocate!(
             s,
             "a",
-            crate::rotation::test_capacity::small_reserve("1"),
+            crate::rotation::test_capacity::two_reserves("1"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -318,7 +318,7 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         s,
         "a",
-        crate::rotation::test_capacity::small_reserve("1"),
+        crate::rotation::test_capacity::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )
@@ -368,7 +368,7 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
         crate::rotation::test_capacity::declare_and_allocate!(
             reopened,
             "a",
-            crate::rotation::test_capacity::small_reserve("1"),
+            crate::rotation::test_capacity::two_reserves("1"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -400,7 +400,7 @@ fn uncertain_preparation_keeps_the_same_operation_and_permit_after_restart() {
     let pool = crate::rotation::test_capacity::declare_and_allocate!(
         store,
         "a",
-        crate::rotation::test_capacity::small_reserve("1"),
+        crate::rotation::test_capacity::two_reserves("1"),
         Some(alloy_primitives::U256::from(1_000_000u64)),
         0
     )

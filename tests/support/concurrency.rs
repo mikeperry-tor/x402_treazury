@@ -23,7 +23,7 @@ pub(super) async fn other_pool(h: &Harness) -> PaidClient {
             crate::capacity_fixture::declare_and_allocate!(
                 s,
                 "other",
-                crate::capacity_fixture::small_reserve("5"),
+                crate::capacity_fixture::two_reserves("5"),
                 Some(alloy_primitives::U256::from(5_000_000u64)),
                 0
             )
@@ -373,4 +373,138 @@ async fn tor_burst_child() {
         rpc > 0,
         "actual readiness/acquisition RPC retains payer isolation"
     );
+}
+
+#[tokio::test]
+async fn fresh_small_only_group_promotes_once_under_concurrent_first_payments() {
+    let mut h = Harness::new().await;
+    let pool = h
+        .store
+        .call(|s| {
+            let pool = s.ensure_capacity_group(
+                "fresh_single",
+                &crate::capacity_fixture::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000)),
+                0,
+            )?;
+            s.allocate_capacity_kind(
+                &pool,
+                x402_treazury::rotation::store::AllocationKind::Small,
+                true,
+            )?;
+            Ok(pool)
+        })
+        .await
+        .unwrap();
+    h.pool = pool.clone();
+    let selected = pool.clone();
+    let wallet = h
+        .store
+        .call(move |s| {
+            Ok(s.status()?
+                .pools
+                .into_iter()
+                .find(|p| p.id == selected)
+                .unwrap()
+                .addresses
+                .remove(0))
+        })
+        .await
+        .unwrap();
+    h.f.balances
+        .lock()
+        .unwrap()
+        .insert(wallet.address.clone(), 5_000_000);
+    let manager = make_pool(h.store.clone(), pool.clone(), &h.base);
+    manager.reconcile().await.unwrap();
+    h.client = make_client(h.store.clone(), pool.clone(), &h.base);
+    h.f.free.store(true, Ordering::SeqCst);
+    h.client.execute(h.route()).await.unwrap();
+    h.f.free.store(false, Ordering::SeqCst);
+    let selected = pool.clone();
+    h.store
+        .call(move |s| {
+            let status = s.status()?;
+            let group = status.pools.iter().find(|p| p.id == selected).unwrap();
+            assert!(group.inventory_ready && group.serving_ready);
+            assert_eq!(group.addresses.len(), 1);
+            assert_eq!(group.addresses[0].role, "READY");
+            assert_eq!(group.reserve_claims[0].generation, 0);
+            assert!(!group.initial_destination_recorded);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(h.f.signed.lock().unwrap().is_empty());
+    *h.f.challenge.lock().unwrap() = challenge("1000000");
+    let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
+    a.unwrap();
+    b.unwrap();
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    {
+        let signed = h.f.signed.lock().unwrap();
+        assert_ne!(
+            signed[0]["payload"]["authorization"]["nonce"],
+            signed[1]["payload"]["authorization"]["nonce"]
+        );
+        let db = rusqlite::Connection::open(&h.f.db).unwrap();
+        let roles: Vec<String> = db.prepare("SELECT e.payer_role FROM payment_admission_evidence e JOIN payment_attempts p ON p.id=e.attempt_id WHERE p.pool_id=?1 ORDER BY p.rowid").unwrap().query_map([&pool], |r|r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(roles, ["READY", "ACTIVE"]);
+    }
+    let selected = pool.clone();
+    h.store
+        .call(move |s| {
+            let status = s.status()?;
+            let group = status.pools.iter().find(|p| p.id == selected).unwrap();
+            assert_eq!(group.addresses.len(), 1);
+            assert_eq!(group.addresses[0].role, "ACTIVE");
+            assert_eq!(group.reserve_claims[0].generation, 1);
+            assert!(group.reserve_claims[0].wallet_id.is_none());
+            assert!(!group.inventory_ready);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let results = futures_util::future::join_all((0..16).map(|_| {
+        let pool = pool.clone();
+        h.store.call(move |s| {
+            s.allocate_capacity_kind(
+                &pool,
+                x402_treazury::rotation::store::AllocationKind::Small,
+                true,
+            )
+        })
+    }))
+    .await;
+    assert_eq!(
+        results
+            .into_iter()
+            .map(Result::unwrap)
+            .filter(Option::is_some)
+            .count(),
+        1
+    );
+    let selected = pool.clone();
+    h.store
+        .call(move |s| {
+            let status = s.status()?;
+            let group = status.pools.iter().find(|p| p.id == selected).unwrap();
+            assert_eq!(group.addresses.len(), 2);
+            assert_eq!(group.reserve_claims[0].generation, 1);
+            assert!(group.reserve_claims[0].wallet_id.is_some());
+            assert_eq!(
+                status
+                    .funding_jobs
+                    .iter()
+                    .filter(|j| j.pool_id == selected)
+                    .count(),
+                2
+            );
+            assert!(!status.outgoing_pending);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(manager);
+    h.close().await;
 }

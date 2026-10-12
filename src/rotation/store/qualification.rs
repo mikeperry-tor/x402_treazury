@@ -235,7 +235,7 @@ mod tests {
         let pool = crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "pool",
-            crate::rotation::test_capacity::small_reserve("100"),
+            crate::rotation::test_capacity::two_reserves("100"),
             Some(U256::from(100000000u64)),
             0
         )
@@ -419,7 +419,7 @@ mod tests {
         let pool = crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "pool",
-            crate::rotation::test_capacity::small_reserve("1"),
+            crate::rotation::test_capacity::two_reserves("1"),
             Some(U256::from(1000000u64)),
             0
         )
