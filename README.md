@@ -237,21 +237,6 @@ capped at **0.05 USDC for web/social** and **0.10 USDC for company**.
 Conversion overhead is limited to **5%**, with separate per-transfer and network
 fee safeguards. Reservations and accepted transaction bytes survive restarts.
 
-Each group can optionally configure a larger reserve. Initial requested capital
-is `2*S + L` (or `2*S` without large), not total current holdings. Small-funded
-wallets offer cheap-call rotation opportunities; large reserves support occasional
-expensive calls. Retained balances remain usable, but cannot be combined for one
-payment. Larger wallets can still pay cheap calls, and reuse/network observations
-can link activity; reserve sizing does not guarantee privacy.
-
-Size the large reserve to at least twice the largest expected payment, preferably
-four times when prices vary. A $10 wallet paying $6 leaves $4 that cannot combine
-with other addresses for another $6 payment. With small $2/large $10, nine such
-calls and eight refills spend $54 from $94 gross allocation, leaving $40 spread
-across addresses. Valid learned prices can route cheap calls to smaller usable
-remainders; cold calls or unavailable evidence may stay on a sufficient large payer.
-No hint reuses a payment challenge or grants spending authority.
-
 Changes apply on reopen. A partially funded allocation stays unavailable for
 payments until its readiness requirement is satisfied, including while funding is
 paused. Explicit bootstrap waits for its captured initial and reserve jobs;
@@ -290,6 +275,33 @@ exclusive ownership must run while serving is stopped. Local example copies,
 > For funding failures, refunds, backup restoration and RPC configuration, use the
 > [wallet reference](docs/wallet-cli.md) and [rotation guide](docs/wallet-rotation.md).
 > For bounded paid test runs, use the [live integration runbook](tests/live/INTEGRATION.md).
+
+## Large wallets for expensive APIs
+
+The privacy quickstart uses small $2 USDC wallets and no large reserve wallet.
+If any of your APIs cost more than **$0.50 per call (25% of $2)**, consider
+adding a large reserve to that wallet group. Aim for a **2-4x multiple your
+largest expected API payment**, preferring 4x when prices vary. For example, a
+$2 maximum expected payment suggests a **$8 large reserve**.
+
+To enable a large USDC wallet reserve, configure the target as
+`funding_amount_usdc` under `[wallets.NAME.reserves.large]`, keeping the small
+reserve for cheaper calls.  The large target must be at least the small target.
+Set `max_api_payment_usdc` separately to authorize the intended payments; adding
+a large reserve does not raise that cap. The extra reserve requires additional
+treasury funds. See the [configuration reference](docs/configuration.md) for
+reserve settings, initial funding requirements and how changes apply on reopen.
+
+Ensuring that wallets only serve payments up to 25% of their initial allocation
+size reduces the risk of fragmentation: balances left across several wallets
+cannot be combined for one payment. Retained balances can still serve smaller
+calls, but selection may also keep cheap calls on a sufficient large wallet.
+See the [fragmentation examples and bounds](docs/plans/wallet_capacity_and_draining.md#recommended-reserve-sizing) for the detailed math and assumptions.
+
+We provide a separate large wallet option for expensive APIs (rather than simply
+increasing the small wallet size), because this allows quicker rotation of
+wallets, which reduces linkability, Larger wallets can therefore mean more calls
+sharing a payment address; reserve sizing does not guarantee privacy.
 
 ## Choose what shares a wallet
 
