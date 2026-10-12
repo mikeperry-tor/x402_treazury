@@ -6,14 +6,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 
 static FOREGROUND: Semaphore = Semaphore::const_new(128);
 tokio::task_local! {
-    static RETAINED: ();
     static HAS_FOREGROUND: ();
-}
-pub(crate) fn retained() -> bool {
-    RETAINED.try_with(|_| ()).is_ok()
-}
-pub(crate) async fn scope<T>(work: impl Future<Output = T>) -> T {
-    RETAINED.scope((), work).await
 }
 pub(crate) fn foreground() -> Result<Option<SemaphorePermit<'static>>> {
     if HAS_FOREGROUND.try_with(|_| ()).is_ok() {
@@ -31,7 +24,7 @@ pub(crate) fn run<T: Send + 'static>(
 ) -> impl Future<Output = Result<T>> + Send + '_ {
     let work = Box::pin(work);
     async move {
-        if retained() {
+        if crate::server::work::retained() {
             return owner.run(work).await;
         }
         let permit = foreground()?;

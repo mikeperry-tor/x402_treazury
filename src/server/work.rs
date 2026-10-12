@@ -14,6 +14,14 @@ struct Inner {
     tasks: TaskTracker,
 }
 
+tokio::task_local! {
+    static OWNERS: Vec<Arc<Inner>>;
+}
+
+pub(crate) fn retained() -> bool {
+    OWNERS.try_with(|_| ()).is_ok()
+}
+
 impl Work {
     pub fn run<T: Send + 'static>(
         &self,
@@ -21,13 +29,21 @@ impl Work {
     ) -> impl std::future::Future<Output = anyhow::Result<T>> + Send + '_ {
         let work = Box::pin(work);
         async move {
-            if crate::payment::ownership::retained() {
+            let mut owners = OWNERS.try_with(Clone::clone).unwrap_or_default();
+            if owners.iter().any(|owner| Arc::ptr_eq(owner, &self.inner)) {
+                // This workflow already holds admission and tracking for this
+                // owner. Closing admission cannot reject its remaining steps.
+                return Ok(work.await);
+            }
+            let nested = !owners.is_empty();
+            owners.push(self.inner.clone());
+            if nested {
                 let _tracked = {
                     let closed = self.inner.closed.lock().expect("work admission lock");
                     anyhow::ensure!(!*closed, "work owner is draining; new calls are refused");
                     self.inner.tasks.token()
                 };
-                return Ok(work.await);
+                return Ok(OWNERS.scope(owners, work).await);
             }
             let handle = {
                 let closed = self.inner.closed.lock().expect("work admission lock");
@@ -35,7 +51,8 @@ impl Work {
                 // Spawn and close are serialized. Dropping a response waiter does
                 // not drop the task's ownership or its durable qualification claim.
                 self.inner.tasks.spawn(
-                    crate::payment::ownership::scope(work)
+                    OWNERS
+                        .scope(owners, work)
                         .in_current_span()
                         .with_current_subscriber(),
                 )

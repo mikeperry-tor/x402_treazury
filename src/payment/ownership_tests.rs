@@ -180,3 +180,69 @@ async fn direct_owner_reuses_existing_foreground_permit_for_managed_signing() {
     owner.drain().await;
     assert!(ownership::foreground().unwrap().is_some());
 }
+
+#[tokio::test]
+async fn accepted_work_reenters_same_owner_during_drain_but_not_a_closed_other_owner() {
+    let owner = crate::server::work::Work::default();
+    let other = crate::server::work::Work::default();
+    let entered = Arc::new(Notify::new());
+    let resume = Arc::new(Notify::new());
+    let nested_entered = Arc::new(Notify::new());
+    let finish = Arc::new(Notify::new());
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+    let waiter = tokio::spawn({
+        let (owner, other) = (owner.clone(), other.clone());
+        let (entered, resume, nested_entered, finish) = (
+            entered.clone(),
+            resume.clone(),
+            nested_entered.clone(),
+            finish.clone(),
+        );
+        async move {
+            let nested = owner.clone();
+            ownership::run(&owner, async move {
+                entered.notify_one();
+                resume.notified().await;
+                assert!(
+                    ownership::run(&other, async { panic!("closed other owner ran") })
+                        .await
+                        .is_err()
+                );
+                let result = ownership::run(&nested, async move {
+                    nested_entered.notify_one();
+                    finish.notified().await;
+                    7
+                })
+                .await;
+                result_tx.send(result).unwrap();
+            })
+            .await
+            .unwrap();
+        }
+    });
+    entered.notified().await;
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    owner.close();
+    other.close();
+    let drain = tokio::spawn({
+        let owner = owner.clone();
+        async move { owner.drain().await }
+    });
+    resume.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), nested_entered.notified())
+        .await
+        .unwrap();
+    assert!(!drain.is_finished());
+    finish.notify_one();
+    assert_eq!(result_rx.await.unwrap().unwrap(), 7);
+    tokio::time::timeout(std::time::Duration::from_secs(5), drain)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        ownership::run(&owner, async { panic!("new work ran") })
+            .await
+            .is_err()
+    );
+}
