@@ -413,10 +413,6 @@ full readiness requirement is met; disabling it does not detach the claim or fre
 its liabilities. Insufficient accepted source work remains owned for reconciliation,
 not automatically abandoned or replaced.
 
-Existing historical `initial` jobs keep their identities, accepted terms and
-recovery obligations, but no new initial job is created. Their completion cannot
-replace an active wallet selected by a payment.
-
 Reopen applies changed caps, targets and slot enablement. Existing accepted terms,
 job identities and original targets remain immutable; current policy is rechecked
 before new quote acceptance/preparation. Configuration edits do not convert state.

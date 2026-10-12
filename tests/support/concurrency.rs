@@ -430,7 +430,6 @@ async fn fresh_small_only_group_promotes_once_under_concurrent_first_payments() 
             assert_eq!(group.addresses.len(), 1);
             assert_eq!(group.addresses[0].role, "READY");
             assert_eq!(group.reserve_claims[0].generation, 0);
-            assert!(!group.initial_destination_recorded);
             Ok(())
         })
         .await

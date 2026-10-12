@@ -3,7 +3,7 @@ use super::*;
 use rusqlite::{Params, StatementStatus, types::Value};
 
 #[test]
-fn indexed_lookups_preserve_retirement_null_claims_and_refresh_exclusions() {
+fn indexed_lookups_preserve_retirement_claim_generations_and_refresh_exclusions() {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(SCHEMA).unwrap();
     db.execute("INSERT INTO pools(id,name) VALUES ('pool','pool')", [])
@@ -27,17 +27,6 @@ fn indexed_lookups_preserve_retirement_null_claims_and_refresh_exclusions() {
         Value::Integer(3)
     );
 
-    db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind) VALUES ('initial','wallet-1','QUEUED','1','pool','initial')", []).unwrap();
-    // Historical initial jobs are recoverable, but never captured reserve claims.
-    assert!(
-        inspect(
-            &db,
-            bootstrap::STARTUP_CLAIM_SQL,
-            params!["pool", "initial", Option::<i64>::None]
-        )
-        .0
-        .is_empty()
-    );
     db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES ('reserve','wallet-3','QUEUED','1','pool','small',0)", []).unwrap();
     assert_eq!(
         inspect(
@@ -58,7 +47,7 @@ fn indexed_lookups_preserve_retirement_null_claims_and_refresh_exclusions() {
         .is_empty()
     );
     for id in ["legacy", "refresh"] {
-        db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,'initial','\"QUOTED\"')", [id]).unwrap();
+        db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,'reserve','\"QUOTED\"')", [id]).unwrap();
     }
     db.execute(
         "INSERT INTO funding_quote_refreshes(operation_id) VALUES ('refresh')",
@@ -66,7 +55,7 @@ fn indexed_lookups_preserve_retirement_null_claims_and_refresh_exclusions() {
     )
     .unwrap();
     assert_eq!(
-        inspect(&db, funding::RECOVERY_COUNT_SQL, ["initial"]).0,
+        inspect(&db, funding::RECOVERY_COUNT_SQL, ["reserve"]).0,
         vec![vec![Value::Integer(1)]]
     );
 }

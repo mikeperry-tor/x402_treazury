@@ -730,8 +730,7 @@ obstruction or cancellation remains an error with persisted work retained. Curre
 inventory can become incomplete again after a reserve is consumed.
 
 Status replaces the old pool `deposit_atomic` and `bootstrapped` fields with current
-payment authority, retirement tolerance, exact `reserve_claims`, readiness and
-historical initial-credit observations. Original wallet `target` and last saved
+payment authority, retirement tolerance, exact `reserve_claims` and readiness. Original wallet `target` and last saved
 `confirmed_balance` are descriptive history, not fresh available capacity. Signed
 exposure, financial repair blocks, destination discrepancies and retirement
 observations are reported separately. Null authority means unconfigured; explicit

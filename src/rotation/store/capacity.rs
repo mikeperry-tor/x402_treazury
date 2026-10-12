@@ -35,10 +35,8 @@ pub(crate) struct FundingClaim {
 /// Current authority for accepting a quote or entering preparation. Accepted
 /// prepared work uses its original capability instead of this new-work predicate.
 pub(super) fn current_funding_claim(db: &Connection, job: &str) -> Result<Option<FundingClaim>> {
-    // Existing initial jobs retain recovery authority under the small settings;
-    // new allocations always own an exact reserve claim.
     let row: Option<(String, String)> = db.query_row(
-        "SELECT c.target,c.maximum_output FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id AND w.pool_id=f.pool_id JOIN pools p ON p.id=w.pool_id JOIN reserve_claims c ON c.pool_id=p.id AND c.slot=CASE f.allocation_kind WHEN 'initial' THEN 'small' ELSE f.allocation_kind END WHERE f.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND c.enabled=1 AND f.readiness_requirement IS NULL AND (f.allocation_kind='initial' OR (c.wallet_id=f.wallet_id AND c.generation=f.claim_generation))",
+        "SELECT c.target,c.maximum_output FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id AND w.pool_id=f.pool_id JOIN pools p ON p.id=w.pool_id JOIN reserve_claims c ON c.pool_id=p.id AND c.slot=f.allocation_kind WHERE f.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND c.enabled=1 AND f.readiness_requirement IS NULL AND (c.wallet_id=f.wallet_id AND c.generation=f.claim_generation)",
         [job], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
     row.map(|(target, maximum)| {
         Ok(FundingClaim {
@@ -132,39 +130,25 @@ pub(super) fn consume_reserve(
 /// Shared role publication after immutable destination readiness has been
 /// recorded in this same transaction. Financial completion is independent.
 pub(super) fn publish_funded_role(db: &Connection, job: &str) -> Result<()> {
-    let (wallet,pool,kind,generation,role,ready,enabled): (String,String,String,Option<i64>,String,bool,bool) = db.query_row(
-        "SELECT w.id,w.pool_id,f.allocation_kind,f.claim_generation,w.role,f.readiness_requirement IS NOT NULL,p.enabled FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1",
-        [job], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?;
+    let (wallet,pool,kind,generation,role,ready): (String,String,String,i64,String,bool) = db.query_row(
+        "SELECT w.id,w.pool_id,f.allocation_kind,f.claim_generation,w.role,f.readiness_requirement IS NOT NULL FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.id=?1",
+        [job], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
     ensure!(ready, "destination_readiness_missing");
     // Repeat completion cannot restore consumed inventory or overwrite retirement.
     if role != "ALLOCATED" {
         return Ok(());
     }
-    let next_role = if kind == "initial" {
-        // Completion of historical jobs only; new groups have no initial allocation.
-        let active: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM wallets WHERE pool_id=?1 AND role='ACTIVE')",
-            [&pool],
-            |r| r.get(0),
-        )?;
-        if active || !enabled {
-            "RETAINED"
-        } else {
-            "ACTIVE"
-        }
+    let claim: Option<(bool,i64)> = db.query_row("SELECT c.enabled=1 AND p.enabled=1,c.generation FROM reserve_claims c JOIN pools p ON p.id=c.pool_id WHERE c.pool_id=?1 AND c.slot=?2 AND c.wallet_id=?3",params![pool,kind,wallet],|r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+    let (enabled, current) = claim.context("funded_reserve_claim_missing")?;
+    ensure!(current == generation, "funded_reserve_claim_conflict");
+    let next_role = if enabled {
+        "READY"
     } else {
-        let claim: Option<(bool,i64)> = db.query_row("SELECT c.enabled=1 AND p.enabled=1,c.generation FROM reserve_claims c JOIN pools p ON p.id=c.pool_id WHERE c.pool_id=?1 AND c.slot=?2 AND c.wallet_id=?3",params![pool,kind,wallet],|r| Ok((r.get(0)?,r.get(1)?))).optional()?;
-        let (enabled, current) = claim.context("funded_reserve_claim_missing")?;
-        ensure!(Some(current) == generation, "funded_reserve_claim_conflict");
-        if enabled {
-            "READY"
-        } else {
-            let next = current
-                .checked_add(1)
-                .context("reserve_generation_overflow")?;
-            db.execute("UPDATE reserve_claims SET wallet_id=NULL,generation=?4 WHERE pool_id=?1 AND slot=?2 AND wallet_id=?3",params![pool,kind,wallet,next])?;
-            "RETAINED"
-        }
+        let next = current
+            .checked_add(1)
+            .context("reserve_generation_overflow")?;
+        db.execute("UPDATE reserve_claims SET wallet_id=NULL,generation=?4 WHERE pool_id=?1 AND slot=?2 AND wallet_id=?3",params![pool,kind,wallet,next])?;
+        "RETAINED"
     };
     db.execute(
         "UPDATE wallets SET role=?2 WHERE id=?1 AND role='ALLOCATED'",
@@ -351,8 +335,8 @@ impl Store {
             pool,
             sequence,
             &job,
-            kind.as_str(),
-            Some(generation),
+            kind,
+            generation,
             &target,
         )?;
         ensure!(tx.execute("UPDATE reserve_claims SET wallet_id=?4 WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND wallet_id IS NULL AND enabled=1",params![pool,slot,generation,wallet])?==1,"reserve_claim_conflict");
@@ -476,8 +460,8 @@ fn allocate_claim(
     pool: &str,
     sequence: i64,
     job: &str,
-    kind: &str,
-    generation: Option<i64>,
+    kind: AllocationKind,
+    generation: i64,
     target: &str,
 ) -> Result<String> {
     let signer = PrivateKeySigner::random();
@@ -489,7 +473,7 @@ fn allocate_claim(
         &secret,
     )?;
     db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,?2,?3,?4,?5,?6,'ALLOCATED')",params![wallet,pool,sequence,signer.address().to_string(),encrypted,target])?;
-    db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES (?1,?2,'QUEUED',?3,?4,?5,?6)",params![job,wallet,target,pool,kind,generation])?;
+    db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES (?1,?2,'QUEUED',?3,?4,?5,?6)",params![job,wallet,target,pool,kind.as_str(),generation])?;
     db.execute(
         "INSERT INTO funding_progress(job_id,operation_id,phase) VALUES (?1,?2,'\"ALLOCATED\"')",
         params![job, Uuid::new_v4().to_string()],
@@ -536,17 +520,17 @@ mod tests {
         } else {
             "2000000"
         };
-        let generation: Option<i64> = if kind == "initial" {
-            None
-        } else {
-            Some(
-                db.query_row(
-                    "SELECT generation FROM reserve_claims WHERE pool_id='pool' AND slot=?1",
-                    [kind],
-                    |r| r.get(0),
-                )
-                .unwrap(),
+        let generation: i64 = db
+            .query_row(
+                "SELECT generation FROM reserve_claims WHERE pool_id='pool' AND slot=?1",
+                [kind],
+                |r| r.get(0),
             )
+            .unwrap();
+        let allocation_kind = match kind {
+            "small" => AllocationKind::Small,
+            "large" => AllocationKind::Large,
+            _ => panic!("invalid test reserve"),
         };
         let wallet = allocate_claim(
             db,
@@ -556,14 +540,20 @@ mod tests {
             "pool",
             seq,
             &job,
-            kind,
+            allocation_kind,
             generation,
             target,
         )
         .unwrap();
-        if kind != "initial" {
-            assert_eq!(db.execute("UPDATE reserve_claims SET wallet_id=?2 WHERE pool_id='pool' AND slot=?1 AND wallet_id IS NULL",params![kind,wallet]).unwrap(),1);
-        }
+        assert_eq!(db.execute("UPDATE reserve_claims SET wallet_id=?2 WHERE pool_id='pool' AND slot=?1 AND wallet_id IS NULL",params![kind,wallet]).unwrap(),1);
+        job
+    }
+    fn active(db: &Connection) -> String {
+        let job = allocation(db, "small");
+        funded(db, &job);
+        consume_reserve(db, "pool", &wallet(db, &job))
+            .unwrap()
+            .unwrap();
         job
     }
     fn wallet(db: &Connection, job: &str) -> String {
@@ -631,42 +621,9 @@ mod tests {
     }
 
     #[test]
-    fn historical_initial_completion_orders_preserve_exact_jobs_and_inventory() {
-        for order in [
-            [0, 1, 2],
-            [0, 2, 1],
-            [1, 0, 2],
-            [1, 2, 0],
-            [2, 0, 1],
-            [2, 1, 0],
-        ] {
-            let mut db = database();
-            let tx = db.transaction().unwrap();
-            let jobs = [
-                allocation(&tx, "initial"),
-                allocation(&tx, "small"),
-                allocation(&tx, "large"),
-            ];
-            for i in order {
-                funded(&tx, &jobs[i]);
-            }
-            assert_eq!(role(&tx, &jobs[0]), "ACTIVE");
-            assert_eq!(role(&tx, &jobs[1]), "READY");
-            assert_eq!(role(&tx, &jobs[2]), "READY");
-            assert_eq!(
-                tx.query_row("SELECT COUNT(*) FROM funding_jobs", [], |r| r
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                3
-            );
-            assert_eq!(tx.query_row("SELECT COUNT(*) FROM reserve_claims WHERE wallet_id IS NOT NULL AND generation=0",[],|r|r.get::<_,i64>(0)).unwrap(),2);
-            tx.commit().unwrap();
-        }
-    }
-    #[test]
     fn unsigned_reserve_selection_is_read_only_and_payment_consumes_atomically() {
         let mut db = database();
-        let initial = allocation(&db, "initial");
+        let prior = active(&db);
         let small = allocation(&db, "small");
         funded(&db, &small);
         let payer = wallet(&db, &small);
@@ -688,11 +645,11 @@ mod tests {
         assert_eq!(role(&db, &small), "READY");
         let tx = db.transaction().unwrap();
         let transition = consume_reserve(&tx, "pool", &payer).unwrap().unwrap();
-        assert_eq!((transition.generation, transition.next_generation), (0, 1));
+        assert_eq!((transition.generation, transition.next_generation), (1, 2));
         pending_payment(&tx, "attempt", &payer);
         tx.commit().unwrap();
-        funded(&db, &initial);
-        assert_eq!(role(&db, &initial), "RETAINED");
+        funded(&db, &prior);
+        assert_eq!(role(&db, &prior), "RETAINED");
         assert_eq!(role(&db, &small), "ACTIVE");
         let replacement = allocation(&db, "small");
         funded(&db, &replacement);
@@ -780,28 +737,28 @@ mod tests {
     #[test]
     fn retirement_uses_maximum_dual_zero_and_exact_destination_obligations() {
         let mut db = database();
-        let initial = allocation(&db, "initial");
+        let prior = active(&db);
         let small = allocation(&db, "small");
-        funded(&db, &initial);
+        funded(&db, &prior);
         funded(&db, &small);
         let tx = db.transaction().unwrap();
         consume_reserve(&tx, "pool", &wallet(&tx, &small)).unwrap();
         tx.commit().unwrap();
-        let retired = wallet(&db, &initial);
-        let one = support(&db, &initial, 0, 1);
+        let retired = wallet(&db, &prior);
+        let one = support(&db, &prior, 0, 1);
         assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
         db.execute("UPDATE pools SET retirement_tolerance='1'", [])
             .unwrap();
         db.execute(
             "UPDATE funding_progress SET quote=x'00' WHERE job_id=?1",
-            [&initial],
+            [&prior],
         )
         .unwrap();
         assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
-        db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=?1) WHERE id=?1",[&initial]).unwrap();
+        db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=?1) WHERE id=?1",[&prior]).unwrap();
         db.execute(
             "UPDATE funding_progress SET provider_success=1,accepted_output='2000000',accepted_recipient=(SELECT address FROM wallets WHERE id=?2) WHERE job_id=?1",
-            params![initial,retired],
+            params![prior,retired],
         )
         .unwrap();
         pending_payment(&db, "pending", &retired);
@@ -812,14 +769,14 @@ mod tests {
         let tx = db.transaction().unwrap();
         assert!(retire_with_support(&tx, "pool", &retired, &one, 100).unwrap());
         tx.commit().unwrap();
-        assert_eq!(role(&db, &initial), "RETIRED");
+        assert_eq!(role(&db, &prior), "RETIRED");
         assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
         let record:(String,String,String)=db.query_row("SELECT confirmed_amount,latest_amount,observed_bound FROM wallet_retirements WHERE wallet_id=?1",[&retired],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(record, ("0".into(), "1".into(), "1".into()));
         assert_eq!(
             db.query_row(
                 "SELECT state FROM funding_jobs WHERE id=?1",
-                [&initial],
+                [&prior],
                 |r| r.get::<_, String>(0)
             )
             .unwrap(),
@@ -834,8 +791,8 @@ mod tests {
             .unwrap()
         );
         assert!(payment_ownership(&db, "pool", &retired).unwrap().is_none());
-        funded(&db, &initial);
-        assert_eq!(role(&db, &initial), "RETIRED");
+        funded(&db, &prior);
+        assert_eq!(role(&db, &prior), "RETIRED");
     }
     #[test]
     fn retirement_rechecks_role_enablement_freshness_and_both_exact_amounts() {
@@ -852,7 +809,7 @@ mod tests {
             (0, 0, 0, "RETAINED", true, 201, false),
         ] {
             let mut db = database();
-            let job = allocation(&db, "initial");
+            let job = active(&db);
             funded(&db, &job);
             let wallet = wallet(&db, &job);
             db.execute(
@@ -887,55 +844,39 @@ mod tests {
         }
     }
     #[test]
-    fn allocation_identity_is_immutable_and_initial_is_unique() {
-        let mut db = database();
-        let job = allocation(&db, "initial");
-        assert!(
-            db.execute(
-                "UPDATE funding_jobs SET allocation_kind='small',claim_generation=0 WHERE id=?1",
-                [&job]
-            )
-            .is_err()
-        );
-        assert!(
-            db.execute("UPDATE funding_jobs SET target='999' WHERE id=?1", [&job])
-                .is_err()
-        );
-        {
-            let tx = db.transaction().unwrap();
+    fn allocation_identity_is_immutable_and_requires_a_reserve_generation() {
+        let db = database();
+        let job = allocation(&db, "small");
+        for change in [
+            "allocation_kind='large'",
+            "claim_generation=1",
+            "target='999'",
+        ] {
             assert!(
-                allocate_claim(
-                    &tx,
-                    &[0; 32],
-                    "test",
-                    TreasuryNetwork::Mainnet,
-                    "pool",
-                    1,
-                    "duplicate",
-                    "initial",
-                    None,
-                    "2"
+                db.execute(
+                    &format!("UPDATE funding_jobs SET {change} WHERE id=?1"),
+                    [&job]
                 )
                 .is_err()
             );
         }
-        assert_eq!(
-            db.query_row("SELECT COUNT(*) FROM wallets", [], |r| r.get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
+        let payer = wallet(&db, &job);
+        db.execute("DELETE FROM funding_progress WHERE job_id=?1", [&job])
+            .unwrap();
+        db.execute("DELETE FROM funding_jobs WHERE id=?1", [&job])
+            .unwrap();
+        for (kind, generation) in [("initial", Some(0)), ("small", None), ("large", Some(-1))] {
+            assert!(db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES ('invalid',?1,'QUEUED','2','pool',?2,?3)", params![payer,kind,generation]).is_err());
+        }
     }
 
     #[test]
     fn current_funding_authority_preserves_original_target_and_exact_claim() {
         let db = database();
-        let initial = allocation(&db, "initial");
+        let small = allocation(&db, "small");
         let large = allocation(&db, "large");
         assert_eq!(
-            current_funding_claim(&db, &initial)
-                .unwrap()
-                .unwrap()
-                .target,
+            current_funding_claim(&db, &small).unwrap().unwrap().target,
             U256::from(2_000_000)
         );
         assert_eq!(
@@ -963,7 +904,7 @@ mod tests {
         funded(&db, &large);
         assert!(current_funding_claim(&db, &large).unwrap().is_none());
         db.execute("UPDATE pools SET enabled=0", []).unwrap();
-        assert!(current_funding_claim(&db, &initial).unwrap().is_none());
+        assert!(current_funding_claim(&db, &small).unwrap().is_none());
     }
     #[test]
     fn independent_allocations_keep_committed_siblings_when_another_slot_fails() {
@@ -1041,16 +982,13 @@ mod tests {
     #[test]
     fn disabled_group_late_credit_detaches_only_the_fulfilled_reserve() {
         let db = database();
-        let initial = allocation(&db, "initial");
         let small = allocation(&db, "small");
         let large = allocation(&db, "large");
         let large_wallet = wallet(&db, &large);
         db.execute("UPDATE pools SET enabled=0", []).unwrap();
         let partial = support(&db, &large, 1, 1);
         assert!(!funding::record_readiness(&db, &large_wallet, &partial).unwrap());
-        funded(&db, &initial);
         funded(&db, &small);
-        assert_eq!(role(&db, &initial), "RETAINED");
         assert_eq!(role(&db, &small), "RETAINED");
         assert_eq!(role(&db, &large), "ALLOCATED");
         assert_eq!(
@@ -1083,7 +1021,7 @@ mod tests {
     #[test]
     fn retirement_rejects_exposure_disputed_readiness_and_corrupted_support() {
         let db = database();
-        let job = allocation(&db, "initial");
+        let job = active(&db);
         funded(&db, &job);
         let wallet = wallet(&db, &job);
         db.execute(
@@ -1118,7 +1056,7 @@ mod tests {
     #[test]
     fn payment_authority_is_explicit_and_independent_of_allocation_target() {
         let db = database();
-        let job = allocation(&db, "initial");
+        let job = active(&db);
         funded(&db, &job);
         let wallet = wallet(&db, &job);
         for cap in [U256::ZERO, U256::from(1), U256::from(50_000_000), U256::MAX] {
@@ -1145,13 +1083,13 @@ mod tests {
     #[test]
     fn active_reconstruction_prefers_sequence_and_never_consumes_ready() {
         let mut db = database();
-        let initial = allocation(&db, "initial");
+        let prior = active(&db);
         let small = allocation(&db, "small");
         let large = allocation(&db, "large");
-        for job in [&initial, &small, &large] {
+        for job in [&prior, &small, &large] {
             funded(&db, job);
         }
-        let first = wallet(&db, &initial);
+        let first = wallet(&db, &prior);
         let second = wallet(&db, &small);
         db.execute(
             "UPDATE wallets SET role='RETAINED' WHERE id IN (?1,?2)",
@@ -1163,7 +1101,7 @@ mod tests {
             assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
             // Cancellation/failure of the enclosing owner commit preserves roles.
         }
-        assert_eq!(role(&db, &initial), "RETAINED");
+        assert_eq!(role(&db, &prior), "RETAINED");
         let tx = db.transaction().unwrap();
         assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
         tx.commit().unwrap();
@@ -1194,7 +1132,7 @@ mod tests {
         let tx = db.transaction().unwrap();
         assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
         tx.commit().unwrap();
-        assert_eq!(role(&db, &initial), "ACTIVE");
+        assert_eq!(role(&db, &prior), "ACTIVE");
         assert_eq!(role(&db, &small), "RETAINED");
         db.execute("UPDATE pools SET payment_limit='0'", [])
             .unwrap();
@@ -1206,9 +1144,9 @@ mod tests {
     fn identity_lookup_work_is_independent_of_retired_and_retained_history() {
         use rusqlite::StatementStatus;
         let mut db = database();
-        let initial = allocation(&db, "initial");
-        funded(&db, &initial);
-        let first = wallet(&db, &initial);
+        let prior = active(&db);
+        funded(&db, &prior);
+        let first = wallet(&db, &prior);
         let inspect = |db: &Connection, role: &str| {
             let mut stmt = db.prepare(ROLE_IDENTITY_SQL).unwrap();
             let chosen: Option<(String, String)> = stmt
@@ -1385,142 +1323,6 @@ mod reserve_bootstrap_tests {
                 assert_eq!(store.funding_jobs().unwrap().len(), count + 1);
             }
         }
-    }
-
-    #[test]
-    fn historical_prepared_initial_job_survives_reopen_without_becoming_a_bootstrap_claim() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join("state");
-        let key = dir.path().join("key");
-        let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
-        let pool = store
-            .ensure_capacity_group(
-                "legacy",
-                &super::super::test_support::reserves("2"),
-                None,
-                0,
-            )
-            .unwrap();
-        let id = store.id().to_owned();
-        // Reproduce a persisted job from the previous release, without a runtime
-        // entry point that can create new initial jobs.
-        let wallet = allocate_claim(
-            &store.db,
-            &store.key,
-            &id,
-            store.network,
-            &pool,
-            0,
-            "historical",
-            "initial",
-            None,
-            "2000000",
-        )
-        .unwrap();
-        let job = store.funding_job("historical").unwrap().unwrap();
-        store
-            .save_funding_quote(
-                &job.id,
-                &crate::test_funding_quote::bound(&job.target, &job.recipient, "historical"),
-            )
-            .unwrap();
-        store
-            .advance_funding(
-                &job.id,
-                funding::FundingPhase::Quoted,
-                funding::FundingPhase::Preparing,
-            )
-            .unwrap();
-        store
-            .reserve(&job.operation_id, Some(&pool), 1, 100)
-            .unwrap();
-        let revision = store.snapshot().unwrap().0;
-        store
-            .prepare_with_facts(
-                &job.operation_id,
-                revision,
-                b"prepared",
-                b"signed",
-                Some(crate::rotation::transaction::TransactionFacts {
-                    txid: "historical-tx".into(),
-                    expiry_height: 100,
-                    amount_zatoshis: 80,
-                    fee_zatoshis: 20,
-                    deadline: 1000,
-                }),
-            )
-            .unwrap();
-        drop(store);
-        let mut store = Store::open(&state, &key, &id).unwrap();
-        assert_eq!(
-            store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"signed"
-        );
-        assert!(current_funding_claim(&store.db, &job.id).unwrap().is_some());
-        store.fill_funding_vacancies("legacy").unwrap();
-        let group = store.startup_groups(&["legacy".into()]).unwrap().remove(0);
-        assert_eq!(group.claims.len(), 1);
-        assert_eq!(group.claims[0].slot, "small");
-        let reserve = store
-            .funding_jobs()
-            .unwrap()
-            .into_iter()
-            .find(|j| j.id != job.id)
-            .unwrap();
-        store
-            .record_credit(&reserve.wallet_id, &reserve.target, "fixture", 100)
-            .unwrap();
-        assert!(
-            store
-                .startup_claim_paths(&pool, &group.claims)
-                .unwrap()
-                .iter()
-                .all(|p| p.destination_ready)
-        );
-        {
-            let tx = store.db.transaction().unwrap();
-            consume_reserve(&tx, &pool, &reserve.wallet_id)
-                .unwrap()
-                .unwrap();
-            tx.commit().unwrap();
-        }
-        store
-            .record_credit(&wallet, &job.target, "fixture", 100)
-            .unwrap();
-        let status = store.status().unwrap();
-        assert_eq!(
-            status.pools[0]
-                .addresses
-                .iter()
-                .find(|w| w.id == wallet)
-                .unwrap()
-                .role,
-            "RETAINED"
-        );
-        assert_eq!(
-            status.pools[0]
-                .addresses
-                .iter()
-                .find(|w| w.id == reserve.wallet_id)
-                .unwrap()
-                .role,
-            "ACTIVE"
-        );
-        assert_eq!(
-            store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"signed"
-        );
-        assert_eq!(
-            store
-                .db
-                .query_row(
-                    "SELECT reserved FROM budget_entries WHERE id=?1",
-                    [&job.operation_id],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
-            100
-        );
     }
 
     #[tokio::test]

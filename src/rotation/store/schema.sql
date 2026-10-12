@@ -5,7 +5,7 @@ CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version
 CREATE TABLE snapshots(revision INTEGER PRIMARY KEY,bytes BLOB NOT NULL);
 CREATE TABLE pools(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,generation INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), payment_limit TEXT, retirement_tolerance TEXT);
 CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),sequence INTEGER NOT NULL,address TEXT UNIQUE NOT NULL,key BLOB NOT NULL,target TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('ALLOCATED','READY','ACTIVE','RETAINED','RETIRED')),balance TEXT NOT NULL DEFAULT '0',block_hash TEXT,block_height INTEGER, financial_height INTEGER, financial_hash TEXT, debit_height INTEGER, debit_hash TEXT, evidence_repair TEXT, unresolved_exposure TEXT NOT NULL DEFAULT '0',UNIQUE(pool_id,sequence));
-CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REFERENCES wallets(id),state TEXT NOT NULL CHECK(state IN ('QUEUED','COMPLETE')),target TEXT NOT NULL, readiness_operation TEXT, readiness_requirement TEXT, readiness_capacity TEXT, readiness_hash TEXT, readiness_height INTEGER, readiness_support TEXT, readiness_latest_hash TEXT, readiness_endpoint TEXT, readiness_checkpoint_hash TEXT, readiness_disputed TEXT, completion_outcome TEXT, pool_id TEXT NOT NULL REFERENCES pools(id), allocation_kind TEXT NOT NULL CHECK(allocation_kind IN ('initial','small','large')), claim_generation INTEGER CHECK(claim_generation>=0));
+CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REFERENCES wallets(id),state TEXT NOT NULL CHECK(state IN ('QUEUED','COMPLETE')),target TEXT NOT NULL, readiness_operation TEXT, readiness_requirement TEXT, readiness_capacity TEXT, readiness_hash TEXT, readiness_height INTEGER, readiness_support TEXT, readiness_latest_hash TEXT, readiness_endpoint TEXT, readiness_checkpoint_hash TEXT, readiness_disputed TEXT, completion_outcome TEXT, pool_id TEXT NOT NULL REFERENCES pools(id), allocation_kind TEXT NOT NULL CHECK(allocation_kind IN ('small','large')), claim_generation INTEGER NOT NULL CHECK(claim_generation>=0));
 CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT REFERENCES pools(id),day INTEGER NOT NULL,original_day INTEGER NOT NULL,requested INTEGER NOT NULL CHECK(requested>0),reserved INTEGER NOT NULL CHECK(reserved>=0),consumed INTEGER NOT NULL CHECK(consumed>=0));
 CREATE TABLE outgoing(id TEXT PRIMARY KEY REFERENCES budget_entries(id),state TEXT NOT NULL CHECK(state IN ('PREPARED','RESOLVED')),raw BLOB NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
 CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER, reconciliation_sequence INTEGER,UNIQUE(wallet_id,nonce));
@@ -63,7 +63,6 @@ CREATE INDEX funding_readiness_confirmed ON funding_jobs(readiness_hash,id);
 CREATE INDEX funding_readiness_latest ON funding_jobs(readiness_latest_hash,id);
 CREATE INDEX funding_unfinished_jobs ON funding_jobs(id) WHERE state!='COMPLETE';
 CREATE INDEX funding_actionable_inventory ON funding_jobs(id) WHERE state!='COMPLETE' OR readiness_disputed IS NOT NULL;
-CREATE UNIQUE INDEX one_initial_allocation ON funding_jobs(pool_id) WHERE allocation_kind='initial';
 CREATE INDEX retirement_confirmed_support ON wallet_retirements(confirmed_hash,wallet_id);
 CREATE INDEX retirement_latest_support ON wallet_retirements(latest_hash,wallet_id);
 CREATE INDEX retirement_endpoint_support ON wallet_retirements(endpoint,wallet_id);
@@ -73,7 +72,6 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
  BEGIN SELECT RAISE(ABORT,'immutable allocation'); END;
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
- OR (NEW.allocation_kind='initial') != (NEW.claim_generation IS NULL)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
 PRAGMA user_version=16;
 

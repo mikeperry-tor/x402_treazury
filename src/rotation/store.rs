@@ -122,8 +122,6 @@ pub struct PoolStatus {
     pub retirement_accounting: RetirementAccounting,
     pub serving_ready: bool,
     pub inventory_ready: bool,
-    /// Historical initial jobs only; new groups start with reserve claims.
-    pub initial_destination_recorded: bool,
     pub reserve_claims: Vec<ReserveClaimStatus>,
     pub retained_wallets: usize,
     pub retired_wallets: usize,
@@ -1060,7 +1058,6 @@ fn read_status(db: &Connection) -> Result<Status> {
             retirement_accounting: RetirementAccounting::default(),
             serving_ready: false,
             inventory_ready: false,
-            initial_destination_recorded: false,
             reserve_claims: Vec::new(),
             retained_wallets: 0,
             retired_wallets: 0,
@@ -1143,11 +1140,6 @@ fn read_status(db: &Connection) -> Result<Status> {
                         });
                 }
             }
-            let initial:Option<String> = db.query_row("SELECT wallet_id FROM funding_jobs WHERE pool_id=?1 AND allocation_kind='initial'",[&pool.id],|r|r.get(0)).optional()?;
-            pool.initial_destination_recorded = initial
-                .map(|wallet| funding::readiness_recorded_valid(db, &wallet))
-                .transpose()?
-                .unwrap_or(false);
             pool.inventory_ready = pool.enabled
                 && pool.reserve_claims.iter().any(|c| c.enabled)
                 && pool
