@@ -21,7 +21,6 @@ pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised 
 pub struct PaymentCandidateHandle {
     pub wallet: String,
     pub address: String,
-    pub generation: i64,
 }
 #[derive(Debug)]
 pub(crate) struct PayerHandoff(pub PaymentCandidateHandle);

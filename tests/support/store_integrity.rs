@@ -556,7 +556,7 @@ fn expired_admission_evidence_preserves_prior_balance_without_role_change_or_res
     let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     let after = store.payment_candidate(&pool).unwrap();
     assert_eq!(after.wallet, candidate.wallet);
-    assert_eq!(after.generation, candidate.generation);
+    assert_eq!(after.address, candidate.address);
     assert_eq!(store.funding_jobs().unwrap().len(), 2);
     let attempts: i64 = store
         .db
@@ -817,6 +817,43 @@ fn assert_atomic_counts(store: &Store, signed: i64, evidence: i64) {
                 sum.checked_add(amount(&value.unwrap()).unwrap()).unwrap()
             });
         assert_eq!(amount(&aggregate).unwrap(), journal);
+    }
+}
+
+#[test]
+fn legacy_pool_generation_is_report_metadata_not_admission_authority() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = populated(dir.path());
+    let prepared = prepared_payment(&mut store);
+    store
+        .db
+        .execute(
+            "UPDATE pools SET generation=7 WHERE id=?1",
+            [&prepared.pool],
+        )
+        .unwrap();
+    store
+        .journal_authorization(&prepared, prepared_authorization(&prepared), None)
+        .unwrap();
+    let id = store.id().to_owned();
+    for reopened in [false, true] {
+        if reopened {
+            drop(store);
+            store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+        }
+        assert_atomic_counts(&store, 2, 1);
+        assert_eq!(store.status().unwrap().pools[0].generation, 7);
+        for (attempt, expected) in [("payment", 0), (prepared.id.as_str(), 7)] {
+            let generation: i64 = store
+                .db
+                .query_row(
+                    "SELECT generation FROM payment_attempts WHERE id=?1",
+                    [attempt],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(generation, expected);
+        }
     }
 }
 

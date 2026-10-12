@@ -146,15 +146,9 @@ impl Store {
             if capacity < cost {
                 continue;
             }
-            let generation =
-                self.db
-                    .query_row("SELECT generation FROM pools WHERE id=?1", [pool], |row| {
-                        row.get(0)
-                    })?;
             let candidate = PaymentCandidateHandle {
                 wallet: wallet.clone(),
                 address: support.observation.address.clone(),
-                generation,
             };
             let view = payment_view(wallet, certificate, support.observation);
             if bound == Some(wallet.as_str()) {

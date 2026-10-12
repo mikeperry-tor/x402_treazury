@@ -130,7 +130,6 @@ async fn fixture(retained_count: usize) -> Fixture {
                 |r| r.get(0),
             )
             .unwrap(),
-        generation: 0,
     };
     drop(db);
     let balances = Arc::new(StdMutex::new(BTreeMap::<String, u64>::new()));

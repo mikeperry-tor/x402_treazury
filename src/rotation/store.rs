@@ -113,6 +113,7 @@ impl SyncObservation {
 pub struct PoolStatus {
     pub id: String,
     pub name: String,
+    /// Legacy reporting metadata, not payment admission authority.
     pub generation: i64,
     pub enabled: bool,
     /// None is unconfigured; U256::MAX represents explicit unlimited authority.
@@ -1373,7 +1374,6 @@ fn admission_schema(db: &Connection) -> Result<()> {
 pub(crate) struct PreparedPayment {
     pub id: String,
     pub wallet: String,
-    pub generation: i64,
     pub address: String,
     pub key: Zeroizing<Vec<u8>>,
     pool: String,
@@ -1615,7 +1615,18 @@ impl Store {
                 .context(AdmissionError::WalletNotReady(
                     "funded payment identity unavailable",
                 ))?;
-        self.db.query_row("SELECT w.address,p.generation FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2", params![wallet,pool], |r| Ok(super::manager::PaymentCandidateHandle { wallet: wallet.clone(), address:r.get(0)?, generation:r.get(1)? })).map_err(Into::into)
+        self.db
+            .query_row(
+                "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
+                params![wallet, pool],
+                |r| {
+                    Ok(super::manager::PaymentCandidateHandle {
+                        wallet: wallet.clone(),
+                        address: r.get(0)?,
+                    })
+                },
+            )
+            .map_err(Into::into)
     }
     #[cfg(test)]
     pub(crate) fn admit_for(
@@ -1656,11 +1667,12 @@ impl Store {
             cost <= ownership.payment_limit,
             AdmissionError::PriceLimit("payment exceeds configured API payment ceiling")
         );
-        let (generation, address): (i64, String) = tx.query_row("SELECT p.generation,w.address FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2", params![wallet,pool], |r| Ok((r.get(0)?,r.get(1)?)))?;
-        ensure!(
-            generation == expected.generation && address == expected.address,
-            AdmissionError::PayerChanged
-        );
+        let address: String = tx.query_row(
+            "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
+            params![wallet, pool],
+            |r| r.get(0),
+        )?;
+        ensure!(address == expected.address, AdmissionError::PayerChanged);
         let valid_until = view
             .observations
             .get(&wallet)
@@ -1709,7 +1721,6 @@ impl Store {
             ),
             valid_until,
             wallet,
-            generation,
             address,
             key,
         })
@@ -1736,15 +1747,14 @@ impl Store {
                     .map(|support| &support.observation),
             "payment_evidence_changed"
         );
-        let (enabled, generation, role, address, balance, height, hash): (bool, i64, String, String, String, i64, String) = tx.query_row(
-            "SELECT p.enabled,p.generation,w.role,w.address,w.balance,w.block_height,w.block_hash FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2",
+        let (enabled, role, address, balance, height, hash): (bool, String, String, String, i64, String) = tx.query_row(
+            "SELECT p.enabled,w.role,w.address,w.balance,w.block_height,w.block_hash FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2",
             params![admission.wallet, admission.pool],
-            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
         )?;
         ensure!(
             enabled
                 && role == admission.ownership.role
-                && generation == admission.generation
                 && address == admission.address
                 && amount(&balance)? == admission.balance
                 && height == i64::try_from(admission.anchor.height)?
@@ -1782,7 +1792,8 @@ impl Store {
             clock <= admission.valid_until && clock < auth.valid_before,
             AdmissionExpired
         );
-        tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,?4,?5,?6,'POSSIBLY_SUBMITTED',?7,?8,?9,?10,?11,?12)",params![admission.id,admission.pool,admission.wallet,admission.generation,admission.cost.to_string(),admission.requirements_hash,auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?,evidence::next_sequence(&tx)?])?;
+        // Preserve legacy report metadata without using it as admission authority.
+        tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,(SELECT generation FROM pools WHERE id=?2),?4,?5,'POSSIBLY_SUBMITTED',?6,?7,?8,?9,?10,?11)",params![admission.id,admission.pool,admission.wallet,admission.cost.to_string(),admission.requirements_hash,auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?,evidence::next_sequence(&tx)?])?;
         evidence::add_exposure(&tx, &admission.wallet, admission.cost)?;
         tx.execute(
             "INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role,reserve_slot,claim_generation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
