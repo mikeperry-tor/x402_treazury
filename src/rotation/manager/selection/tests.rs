@@ -828,3 +828,146 @@ async fn chain_order_wins_over_cache_publication_order() {
     assert_eq!(*f.calls.lock().unwrap(), calls);
     f.close().await;
 }
+
+#[tokio::test]
+async fn wallet_local_repair_preserves_healthy_selection_and_negative_diagnostic() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    for sufficient in [false, true] {
+        let mut f = fixture(0).await;
+        if sufficient {
+            f.balance(&f.small, 10);
+        }
+        f.db()
+            .execute(
+                "UPDATE wallets SET evidence_repair='chain_repair_required' WHERE id=?1",
+                [&f.bound.wallet],
+            )
+            .unwrap();
+        let finished = Arc::new(tokio::sync::Notify::new());
+        let first = Arc::new(AtomicBool::new(true));
+        let bound = f.bound.wallet.clone();
+        f.manager.test_admission_hook = Some(Arc::new(move |stage| {
+            let (finished, first, bound) = (finished.clone(), first.clone(), bound.clone());
+            Box::pin(async move {
+                match stage {
+                    AdmissionTestStage::CandidateReadCompleted { wallet } if wallet == bound => {
+                        finished.notify_one()
+                    }
+                    AdmissionTestStage::CandidateEvaluated
+                        if first.swap(false, Ordering::SeqCst) =>
+                    {
+                        finished.notified().await
+                    }
+                    _ => {}
+                }
+            })
+        }));
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            f.manager.acquire_candidate(&f.bound, U256::from(5)),
+        )
+        .await
+        .unwrap();
+        match result {
+            Ok(CandidatePassResult::Selected(selected)) if sufficient => {
+                assert_eq!(selected.candidate.wallet, f.small);
+                drop(selected);
+            }
+            Err(error) if !sufficient => assert_eq!(
+                error.downcast_ref::<EvidenceFailure>(),
+                Some(&EvidenceFailure::ChainRepairRequired)
+            ),
+            _ => panic!("wallet-local failure escaped its scope or lost its diagnostic"),
+        }
+        let db = f.db();
+        assert_eq!(
+            db.query_row(
+                "SELECT evidence_repair FROM wallets WHERE id=?1",
+                [&f.bound.wallet],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "chain_repair_required"
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM reserve_claims WHERE wallet_id IS NOT NULL",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        drop(db);
+        f.close().await;
+    }
+}
+
+#[test]
+fn endpoint_failure_still_aborts_after_wallet_local_failure() {
+    use crate::rotation::base::{EndpointMismatch, evidence::EvidenceFailure};
+    let mut completed = Vec::new();
+    let mut failure = None;
+    assert!(
+        completion_is_incomplete(
+            Err(EvidenceFailure::ChainRepairRequired.into()),
+            &mut completed,
+            &mut failure
+        )
+        .unwrap()
+    );
+    let error = completion_is_incomplete(
+        Err(EndpointMismatch {
+            endpoint: "a".repeat(64),
+        }
+        .into()),
+        &mut completed,
+        &mut failure,
+    )
+    .unwrap_err();
+    assert!(error.is::<EndpointMismatch>());
+    assert!(failure.unwrap().is::<EvidenceFailure>());
+    assert!(completed.is_empty());
+}
+
+#[tokio::test]
+async fn healthy_selection_does_not_wait_for_late_wallet_local_failure() {
+    let mut f = fixture(0).await;
+    f.balance(&f.small, 10);
+    f.db()
+        .execute(
+            "UPDATE wallets SET evidence_repair='chain_repair_required' WHERE id=?1",
+            [&f.bound.wallet],
+        )
+        .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let first = Arc::new(AtomicBool::new(true));
+    let bound = f.bound.wallet.clone();
+    f.manager.test_admission_hook = Some(Arc::new(move |stage| {
+        let (entered, first, bound) = (entered.clone(), first.clone(), bound.clone());
+        Box::pin(async move {
+            match stage {
+                AdmissionTestStage::CandidateReadCompleted { wallet } if wallet == bound => {
+                    entered.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                AdmissionTestStage::CandidateEvaluated if first.swap(false, Ordering::SeqCst) => {
+                    entered.notified().await
+                }
+                _ => {}
+            }
+        })
+    }));
+    let CandidatePassResult::Selected(selected) = select(&f).await else {
+        panic!("healthy reserve must not wait for unrelated rejected evidence");
+    };
+    assert_eq!(selected.candidate.wallet, f.small);
+    drop(selected);
+    f.close().await;
+}

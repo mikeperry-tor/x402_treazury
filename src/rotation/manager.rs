@@ -57,6 +57,7 @@ mod selection;
 enum AdmissionTestStage {
     CandidateScan,
     CandidateEvaluated,
+    CandidateReadCompleted { wallet: String },
     CandidateWaiting,
     Acquired,
     Journaled,

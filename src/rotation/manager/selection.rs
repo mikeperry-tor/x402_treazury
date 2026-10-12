@@ -55,6 +55,7 @@ impl ManagedPool {
         let mut cursor = -1;
         let mut exhausted = false;
         let mut incomplete = false;
+        let mut wallet_failure = None;
         let mut reads =
             tokio::task::JoinSet::<Result<(CandidateEvidenceState, Option<ChainView>)>>::new();
 
@@ -71,6 +72,7 @@ impl ManagedPool {
                 incomplete |= completion_is_incomplete(
                     result.context("candidate acquisition task failed")?,
                     &mut completed,
+                    &mut wallet_failure,
                 )?;
             }
             // This is the actual gated selection, not a provisional winner.
@@ -132,7 +134,14 @@ impl ManagedPool {
                     let owner = self.clone();
                     let context = crate::qualification::capture_case();
                     reads.spawn(crate::qualification::inherit_case(context, async move {
-                        owner.acquire_candidate_wallet(wallet).await
+                        let result = owner.acquire_candidate_wallet(wallet.clone()).await;
+                        #[cfg(test)]
+                        owner
+                            .admission_test_stage(AdmissionTestStage::CandidateReadCompleted {
+                                wallet,
+                            })
+                            .await;
+                        result
                     }));
                 }
                 #[cfg(test)]
@@ -146,6 +155,7 @@ impl ManagedPool {
                     incomplete |= completion_is_incomplete(
                         result.context("candidate acquisition task failed")?,
                         &mut completed,
+                        &mut wallet_failure,
                     )?;
                 }
                 evaluated_since_selection += 1;
@@ -184,6 +194,7 @@ impl ManagedPool {
                 incomplete |= completion_is_incomplete(
                     result.context("candidate acquisition task failed")?,
                     &mut completed,
+                    &mut wallet_failure,
                 )?;
                 continue;
             }
@@ -195,6 +206,9 @@ impl ManagedPool {
                     .await?
                 {
                     return Ok(CandidatePassResult::Selected(Box::new(selected)));
+                }
+                if let Some(error) = wallet_failure {
+                    return Err(error);
                 }
                 return Ok(if incomplete {
                     CandidatePassResult::Incomplete
@@ -256,11 +270,13 @@ impl ManagedPool {
     }
 }
 
-// Integrity rejection is not a new acquisition allowance or permission to shop
-// around a rejected proof. Acquisition failures leave a negative pass incomplete.
+// Wallet-local rejection preserves its diagnostic without vetoing independently
+// verified wallets. It grants no new acquisition or fallback for the failed proof.
+// Endpoint trust failures still stop the pass after shared-store invalidation.
 fn completion_is_incomplete(
     result: Result<(CandidateEvidenceState, Option<ChainView>)>,
     completed: &mut Vec<ChainView>,
+    wallet_failure: &mut Option<anyhow::Error>,
 ) -> Result<bool> {
     use crate::rotation::base::{EndpointMismatch, EvidenceConflict, evidence::EvidenceFailure};
     match result {
@@ -271,8 +287,10 @@ fn completion_is_incomplete(
             Ok(state == CandidateEvidenceState::Missing)
         }
         Err(error) => {
+            if error.is::<EndpointMismatch>() {
+                return Err(error);
+            }
             if error.is::<EvidenceConflict>()
-                || error.is::<EndpointMismatch>()
                 || matches!(
                     error.downcast_ref::<EvidenceFailure>(),
                     Some(
@@ -289,7 +307,8 @@ fn completion_is_incomplete(
                     )
                 )
             {
-                return Err(error);
+                tracing::warn!(category = %super::super::base::safe_diagnostic(&error), "candidate wallet evidence rejected; checking independent capacity");
+                wallet_failure.get_or_insert(error);
             }
             Ok(true)
         }
