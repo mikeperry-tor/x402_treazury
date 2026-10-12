@@ -1235,3 +1235,189 @@ async fn initial_identity_skips_malformed_retained_and_preserves_active_role() {
     assert!(f.calls.lock().unwrap().is_empty());
     f.close().await;
 }
+
+#[tokio::test]
+async fn retirement_and_payment_serialize_both_orders_for_the_same_retained_wallet() {
+    for payment_first in [true, false] {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            retirement_payment_order(payment_first),
+        )
+        .await
+        .unwrap();
+    }
+}
+
+async fn retirement_payment_order(payment_first: bool) {
+    let mut f = fixture(1).await;
+    let wallet = f.retained[0].clone();
+    f.balance(&wallet, 5);
+    f.db()
+        .execute("UPDATE pools SET retirement_tolerance='5'", [])
+        .unwrap();
+    let candidate = PaymentCandidateHandle {
+        wallet: wallet.clone(),
+        address: f
+            .db()
+            .query_row("SELECT address FROM wallets WHERE id=?1", [&wallet], |r| {
+                r.get(0)
+            })
+            .unwrap(),
+    };
+    // Acquire the retirement observation before either contender takes
+    // the gate. Publication must recheck liabilities added afterwards.
+    let (pool, id) = (f.manager.pool.clone(), wallet.clone());
+    let query = f
+        .manager
+        .store
+        .call(move |s| s.scoped_chain_query(&pool, vec![id], vec![]))
+        .await
+        .unwrap();
+    let view = f.manager.base.view(query).await.unwrap();
+    let acquired = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    let signed = Arc::new(AtomicUsize::new(0));
+    f.manager.test_admission_hook = Some(Arc::new({
+        let (acquired, resume, signed) = (acquired.clone(), resume.clone(), signed.clone());
+        move |stage| {
+            let (acquired, resume, signed) = (acquired.clone(), resume.clone(), signed.clone());
+            async move {
+                match stage {
+                    AdmissionTestStage::Acquired if payment_first => {
+                        acquired.notify_one();
+                        resume.notified().await;
+                    }
+                    AdmissionTestStage::Signed { .. } => {
+                        signed.fetch_add(1, Ordering::SeqCst);
+                    }
+                    _ => {}
+                }
+            }
+            .boxed()
+        }
+    }));
+    let sent = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/pay", listener.local_addr().unwrap());
+    let app = Router::new().route("/pay", axum::routing::get({
+                let sent = sent.clone();
+                let db = f.dir.path().join("state/state.sqlite");
+                move |headers: axum::http::HeaderMap| {
+                    let (sent, db) = (sent.clone(), db.clone());
+                    async move {
+                        use axum::response::IntoResponse;
+                        if let Some(signature) = headers.get("payment-signature") {
+                            let payload: Value = serde_json::from_slice(&STANDARD.decode(signature.as_bytes()).unwrap()).unwrap();
+                            let nonce = payload["payload"]["authorization"]["nonce"].as_str().unwrap();
+                            let db = rusqlite::Connection::open(db).unwrap();
+                            let count: i64 = db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE nonce=?1 AND state='POSSIBLY_SUBMITTED'", [nonce], |r| r.get(0)).unwrap();
+                            assert_eq!(count, 1, "journal must precede signed dispatch");
+                            sent.fetch_add(1, Ordering::SeqCst);
+                            return "paid".into_response();
+                        }
+                        let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+                        (axum::http::StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(challenge.to_string()))]).into_response()
+                    }
+                }
+            }));
+    let seller = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let http = reqwest::Client::new();
+    let response = http.get(&url).send().await.unwrap();
+    let retry = http.get(&url).build().unwrap();
+    {
+        let manager = f.manager.clone();
+        let progress = crate::payment::SubmissionProgress::default();
+        let mut recovery = RecoveryAllowance::default();
+        // Fixed payer is the production path after an identity handoff:
+        // another wallet cannot hide a failure to reject this retired payer.
+        let payment = manager.pay_with_cover_observed(
+            &http,
+            candidate,
+            retry,
+            response,
+            None,
+            AdmissionObservation {
+                fixed_payer: true,
+                progress: &progress,
+                recovery: &mut recovery,
+                hint: None,
+            },
+        );
+        tokio::pin!(payment);
+        let pool = f.manager.pool.clone();
+        let result = if payment_first {
+            tokio::select! {
+                _ = acquired.notified() => {}
+                result = &mut payment => panic!("payment completed before gate checkpoint: {}", result.is_ok()),
+            }
+            let retirement = async {
+                let guard = Arc::new(f.manager.gate.clone().lock_owned().await);
+                f.manager
+                    .store
+                    .call_with_guard(guard, move |s| s.publish_scoped_evidence(&pool, view))
+                    .await
+            };
+            tokio::pin!(retirement);
+            assert!(
+                retirement.as_mut().now_or_never().is_none(),
+                "retirement must wait for signing/journaling ownership"
+            );
+            resume.notify_one();
+            let (result, retired) = tokio::join!(&mut payment, retirement);
+            retired.unwrap();
+            result
+        } else {
+            let guard = Arc::new(f.manager.gate.clone().lock_owned().await);
+            assert!(
+                payment.as_mut().now_or_never().is_none(),
+                "payment must wait for retirement ownership"
+            );
+            f.manager
+                .store
+                .call_with_guard(guard.clone(), move |s| {
+                    s.publish_scoped_evidence(&pool, view)
+                })
+                .await
+                .unwrap();
+            drop(guard);
+            payment.as_mut().await
+        };
+        assert_eq!(result.is_ok(), payment_first, "{result:?}");
+        assert_eq!(signed.load(Ordering::SeqCst), usize::from(payment_first));
+        assert_eq!(sent.load(Ordering::SeqCst), usize::from(payment_first));
+        let db = f.db();
+        let (role, exposure): (String, String) = db
+            .query_row(
+                "SELECT role,unresolved_exposure FROM wallets WHERE id=?1",
+                [&wallet],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(role, if payment_first { "RETAINED" } else { "RETIRED" });
+        assert_eq!(exposure, if payment_first { "1" } else { "0" });
+        for (sql, expected) in [
+            (
+                "SELECT COUNT(*) FROM payment_attempts",
+                i64::from(payment_first),
+            ),
+            (
+                "SELECT COUNT(*) FROM wallet_retirements",
+                i64::from(!payment_first),
+            ),
+            ("SELECT COUNT(*) FROM funding_jobs", 4),
+            (
+                "SELECT COUNT(*) FROM reserve_claims WHERE wallet_id IS NOT NULL",
+                2,
+            ),
+        ] {
+            assert_eq!(
+                db.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap(),
+                expected,
+                "{sql}"
+            );
+        }
+        drop(db);
+        seller.abort();
+    }
+    f.close().await;
+}
