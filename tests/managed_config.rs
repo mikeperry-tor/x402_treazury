@@ -523,3 +523,38 @@ fn managed_cap_is_explicit_and_independent_of_reserve_targets() {
         "1.00"
     );
 }
+
+#[test]
+fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
+    use serde::{Serialize, de::DeserializeOwned};
+    use x402_treazury::rotation::config::{FundingConfig, TreasuryConfig};
+    fn roundtrip<T: Serialize + DeserializeOwned>(text: &str) -> serde_json::Value {
+        let config: T = toml::from_str(text).unwrap();
+        let json = serde_json::to_value(&config).unwrap();
+        let decoded: T = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), json);
+        let decoded: T = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), json);
+        let mut unknown = json.clone();
+        unknown["misspelled_setting"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<T>(unknown).is_err());
+        json
+    }
+    let wallet = roundtrip::<WalletConfig>("mode='static'\nprivate_key_env='KEY'");
+    assert_eq!(wallet["max_api_payment_usdc"], "1.00");
+    let wallet = roundtrip::<WalletConfig>(
+        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\nwait_seconds=123\n[reserves.small]\nfunding_amount_usdc='2'",
+    );
+    assert_eq!(wallet["max_attempts"], 3);
+    assert_eq!(wallet["max_retirement_remainder_usdc"], "0");
+    assert!(wallet.get("wait_seconds").is_none());
+    let treasury = roundtrip::<TreasuryConfig>("state_dir='state'");
+    assert_eq!(treasury["confirmations"], 3);
+    assert_eq!(treasury["max_funding_transaction_fee_zec"], "0.0003");
+    assert!(treasury.get("id").is_none());
+    assert!(treasury.get("key_file").is_none());
+    let funding = roundtrip::<FundingConfig>("");
+    assert_eq!(funding["auto_fund"], true);
+    assert_eq!(funding["base_confirmations"], 12);
+    assert_eq!(funding["quote_deadline_seconds"], 7200);
+}

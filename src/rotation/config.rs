@@ -128,8 +128,33 @@ pub fn retirement_remainder(s: &str) -> Result<u64> {
     Ok(amount.to::<u64>())
 }
 
-#[derive(Clone, Serialize)]
-#[serde(tag = "mode", deny_unknown_fields)]
+// Derive the schema once, while inspecting removed keys before typed parsing.
+// Remote Self generates inherent serde helpers; these trait adapters retain the
+// migration errors even when an obsolete setting has a malformed value.
+macro_rules! impl_config_serde {
+    ($config:ident) => {
+        impl Serialize for $config {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                Self::serialize(self, serializer)
+            }
+        }
+        impl<'de> Deserialize<'de> for $config {
+            fn deserialize<D: serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> std::result::Result<Self, D::Error> {
+                let value = serde_json::Value::deserialize(deserializer)?;
+                reject_replaced_settings::<D::Error>(&value, stringify!($config))?;
+                Self::deserialize(value).map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(remote = "Self", tag = "mode", deny_unknown_fields)]
 pub enum WalletConfig {
     #[serde(rename = "static")]
     Static {
@@ -153,40 +178,7 @@ pub enum WalletConfig {
         max_attempts: u32,
     },
 }
-#[derive(Deserialize)]
-#[serde(remote = "WalletConfig", tag = "mode", deny_unknown_fields)]
-enum WalletConfigFields {
-    #[serde(rename = "static")]
-    Static {
-        private_key_env: String,
-        #[serde(default = "cap")]
-        max_api_payment_usdc: String,
-    },
-    #[serde(rename = "zcash_rotation")]
-    ZcashRotation {
-        reserves: ReservesConfig,
-        max_api_payment_usdc: String,
-        #[serde(default = "no_remainder")]
-        max_retirement_remainder_usdc: String,
-        #[serde(default)]
-        max_funding_spend_zec: Option<String>,
-        max_conversion_overhead_percent: u32,
-        /// Compatibility only: admission no longer has an elapsed-time deadline.
-        #[serde(default, skip_serializing)]
-        wait_seconds: Option<u64>,
-        #[serde(default = "attempts")]
-        max_attempts: u32,
-    },
-}
-impl<'de> Deserialize<'de> for WalletConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        reject_replaced_settings::<D::Error>(&value, "WalletConfig")?;
-        WalletConfigFields::deserialize(value).map_err(serde::de::Error::custom)
-    }
-}
+impl_config_serde!(WalletConfig);
 
 impl WalletConfig {
     pub fn managed(&self) -> bool {
@@ -293,8 +285,8 @@ fn empty_path(path: &Path) -> bool {
 fn nonempty_path<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<PathBuf, D::Error> {
     nonempty_string(d).map(PathBuf::from)
 }
-#[derive(Clone, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct TreasuryConfig {
     /// Optional expected identity; empty until resolved from existing state at runtime.
     #[serde(
@@ -333,55 +325,7 @@ pub struct TreasuryConfig {
     #[serde(default = "sync_age")]
     pub max_sync_age_seconds: u64,
 }
-#[derive(Deserialize)]
-#[serde(remote = "TreasuryConfig", deny_unknown_fields)]
-struct TreasuryConfigFields {
-    /// Optional expected identity; empty until resolved from existing state at runtime.
-    #[serde(
-        default,
-        deserialize_with = "nonempty_string",
-        skip_serializing_if = "String::is_empty"
-    )]
-    pub id: String,
-    pub state_dir: PathBuf,
-    #[serde(
-        default,
-        deserialize_with = "nonempty_path",
-        skip_serializing_if = "empty_path"
-    )]
-    pub key_file: PathBuf,
-    #[serde(
-        default,
-        deserialize_with = "nonempty_string",
-        skip_serializing_if = "String::is_empty"
-    )]
-    pub indexer_url_env: String,
-    #[serde(
-        default,
-        deserialize_with = "nonempty_string",
-        skip_serializing_if = "String::is_empty"
-    )]
-    pub submission_url_env: String,
-    pub indexer_url: Option<String>,
-    pub submission_url: Option<String>,
-    #[serde(default = "network_fee_limit")]
-    pub max_funding_transaction_fee_zec: String,
-    #[serde(default = "network_fee_limit")]
-    pub max_refund_shielding_fee_zec: String,
-    #[serde(default = "confirmations")]
-    pub confirmations: u64,
-    #[serde(default = "sync_age")]
-    pub max_sync_age_seconds: u64,
-}
-impl<'de> Deserialize<'de> for TreasuryConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        reject_replaced_settings::<D::Error>(&value, "TreasuryConfig")?;
-        TreasuryConfigFields::deserialize(value).map_err(serde::de::Error::custom)
-    }
-}
+impl_config_serde!(TreasuryConfig);
 
 impl TreasuryConfig {
     pub fn indexer_endpoint(&self, lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
@@ -474,8 +418,8 @@ impl TreasuryConfig {
         }
     }
 }
-#[derive(Clone, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct FundingConfig {
     /// Managed serving funds bootstrap and replacement wallets unless disabled.
     #[serde(default = "enabled")]
@@ -502,43 +446,7 @@ pub struct FundingConfig {
     #[serde(default = "quote_window")]
     pub quote_deadline_seconds: u64,
 }
-#[derive(Deserialize)]
-#[serde(remote = "FundingConfig", deny_unknown_fields)]
-struct FundingConfigFields {
-    /// Managed serving funds bootstrap and replacement wallets unless disabled.
-    #[serde(default = "enabled")]
-    pub auto_fund: bool,
-    pub near_user_session_env: Option<String>,
-    #[serde(default = "base_rpc_env")]
-    pub base_rpc_url_env: String,
-    #[serde(default)]
-    pub base_rpc_fallback_url_envs: Option<Vec<String>>,
-    #[serde(default = "base_confirmations")]
-    pub base_confirmations: u64,
-    #[serde(default = "block_age")]
-    pub base_max_block_age_seconds: u64,
-    #[serde(default = "confidentiality")]
-    pub confidentiality: String,
-    pub near_api_key_env: Option<String>,
-    #[serde(default = "slippage")]
-    pub slippage_bps: u32,
-    #[serde(default = "poll")]
-    pub poll_seconds: u64,
-    /// Health warning only: reconciliation continues with a 60-second polling floor.
-    #[serde(default = "deadline")]
-    pub swap_timeout_seconds: u64,
-    #[serde(default = "quote_window")]
-    pub quote_deadline_seconds: u64,
-}
-impl<'de> Deserialize<'de> for FundingConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        reject_replaced_settings::<D::Error>(&value, "FundingConfig")?;
-        FundingConfigFields::deserialize(value).map_err(serde::de::Error::custom)
-    }
-}
+impl_config_serde!(FundingConfig);
 
 impl FundingConfig {
     /// Runtime resolution shared by serving and qualification. Inspection never reads env.
