@@ -996,6 +996,9 @@ impl Deployment {
             Err(error) => {
                 #[cfg(feature = "zcash")]
                 if let Some(initialized) = self.initialized.take() {
+                    // Source relay clients retain store handles. Release them
+                    // before shutdown waits for the treasury worker to exit.
+                    drop(self);
                     initialized.shutdown().await?;
                 }
                 return Err(error);
@@ -1085,6 +1088,7 @@ impl Deployment {
                 #[cfg(feature = "zcash")]
                 {
                     drop(managed_pools);
+                    drop(self);
                     if let Some(supervisor) = supervisor {
                         supervisor.shutdown().await?;
                     }
