@@ -69,6 +69,15 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
     );
     let refunds = collect_refunds(&wallet, &accounting, 4, 2).unwrap().credits;
     assert_eq!(refunds.len(), 2);
+    store.record_refund(refunds[0].clone()).unwrap();
+    accounting.credited = store.return_accounting().unwrap().credited;
+    let mixed = collect_refunds(&wallet, &accounting, 4, 2).unwrap();
+    assert_eq!(mixed.observed_outputs, 2);
+    assert_eq!(mixed.credits.len(), 1);
+    assert_eq!(
+        (&mixed.credits[0].txid, mixed.credits[0].output_index),
+        (&refunds[1].txid, refunds[1].output_index)
+    );
     for refund in &refunds {
         store.record_refund(refund.clone()).unwrap();
         store.record_refund(refund.clone()).unwrap();
@@ -84,13 +93,14 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
         spending,
         WalletTransaction::new_for_test(spending, ConfirmationStatus::Confirmed(10.into())),
     );
+    let shielded = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
     assert_eq!(
-        collect_refunds(&wallet, &accounting, 20, 2)
-            .unwrap()
-            .credits
-            .len(),
-        2,
+        shielded.observed_outputs, 2,
         "shielding cannot erase origin evidence"
+    );
+    assert!(
+        shielded.credits.is_empty(),
+        "known outputs need no duplicate publication"
     );
     accounting
         .bindings
@@ -251,6 +261,7 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
         ReturnAccountingIssue::AmbiguousOriginalBinding { operation_id } if operation_id != &independent_operation)));
     let second = session.reconcile_refunds(20, 2).await.unwrap();
     assert_eq!(first.issues, second.issues);
+    assert_eq!(second.observed_outputs, first.observed_outputs);
     let status = session.store.call(|s| s.status()).await.unwrap();
     assert_eq!(status.refunds.len(), 1);
     assert_eq!(status.refunds[0].operation_id, independent_operation);

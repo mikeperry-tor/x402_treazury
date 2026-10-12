@@ -26,6 +26,7 @@ pub(crate) struct ReturnReconciliation {
 }
 #[derive(Debug)]
 struct ReturnObservation {
+    observed_outputs: usize,
     credits: Vec<RefundStatus>,
     issues: Vec<ReturnAccountingIssue>,
 }
@@ -40,17 +41,19 @@ impl SyncSession {
         let observation = collect_refunds(&wallet, &accounting, height, confirmations)?;
         drop(wallet);
         let report = ReturnReconciliation {
-            observed_outputs: observation.credits.len(),
+            observed_outputs: observation.observed_outputs,
             issues: observation.issues,
         };
-        self.store
-            .call(move |s| {
-                for refund in observation.credits {
-                    s.record_refund(refund)?;
-                }
-                Ok(())
-            })
-            .await?;
+        if !observation.credits.is_empty() {
+            self.store
+                .call(move |s| {
+                    for refund in observation.credits {
+                        s.record_refund(refund)?;
+                    }
+                    Ok(())
+                })
+                .await?;
+        }
         // Only fixed categories/counts go to stderr. Exact operation identities
         // remain in the typed result for dependent accounting/status consumers.
         for (reason, count) in [
@@ -110,6 +113,7 @@ fn collect_refunds(
     };
     // Known credits are canonical financial support, including outputs already
     // spent or shielded. Missing origins or changed amounts must block readiness.
+    let mut known = std::collections::HashSet::with_capacity(accounting.credited.len());
     for credited in &accounting.credited {
         let txid = zcash_primitives::transaction::TxId::from_hex(&credited.txid)
             .context("invalid credited return transaction identity")?;
@@ -128,6 +132,7 @@ fn collect_refunds(
                 && accounting.confirmed.contains(&credited.operation_id),
             "treasury_refund_reorg: credited refund requires recovery"
         );
+        known.insert((txid, credited.output_index));
         // A positive contradictory ownership claim undermines credited accounting.
         // Missing/ambiguous correlation alone retains the old credit and its review
         // obligation; it cannot erase canonical money or block unrelated readiness.
@@ -143,6 +148,7 @@ fn collect_refunds(
         }
     }
     let mut refunds = vec![];
+    let mut observed_outputs = 0;
     // The pinned dependency has no incremental unknown-output feed. Inspect its
     // resident history once without copying it; matching is keyed by address.
     for record in wallet.wallet_transactions.values() {
@@ -165,6 +171,12 @@ fn collect_refunds(
             {
                 continue;
             }
+            observed_outputs += 1;
+            // Known outputs were revalidated above, including spent/shielded
+            // origins. Only discoveries need another store publication.
+            if known.contains(&(coin.output_id().txid(), coin.output_id().output_index())) {
+                continue;
+            }
             refunds.push(RefundStatus {
                 txid: coin.output_id().txid().to_string(),
                 output_index: coin.output_id().output_index(),
@@ -175,6 +187,7 @@ fn collect_refunds(
         }
     }
     Ok(ReturnObservation {
+        observed_outputs,
         credits: refunds,
         issues: issues.into_iter().collect(),
     })
