@@ -73,13 +73,23 @@ struct HistoryRetry {
     due: Instant,
     failures: u32,
 }
+#[derive(Debug, PartialEq, Eq)]
+enum HistoryAdmission {
+    Ready,
+    Skip,
+    CapacityUnavailable,
+}
 impl HistoryRetries {
-    fn admit(&mut self, id: &str, now: Instant, active: &BTreeSet<String>) -> bool {
+    fn admit(&mut self, id: &str, now: Instant, active: &BTreeSet<String>) -> HistoryAdmission {
         if active.contains(id) {
-            return false;
+            return HistoryAdmission::Skip;
         }
         if let Some(retry) = self.0.get(id) {
-            return now >= retry.due;
+            return if now >= retry.due {
+                HistoryAdmission::Ready
+            } else {
+                HistoryAdmission::Skip
+            };
         }
         if self.0.len() == HISTORY_RETRIES {
             let expired = self
@@ -88,7 +98,9 @@ impl HistoryRetries {
                 .filter(|(id, retry)| retry.due <= now && !active.contains(*id))
                 .min_by_key(|(_, retry)| retry.due)
                 .map(|(id, _)| id.clone());
-            let Some(expired) = expired else { return false };
+            let Some(expired) = expired else {
+                return HistoryAdmission::CapacityUnavailable;
+            };
             self.0.remove(&expired);
         }
         self.0.insert(
@@ -98,7 +110,7 @@ impl HistoryRetries {
                 failures: 0,
             },
         );
-        true
+        HistoryAdmission::Ready
     }
     fn complete(&mut self, id: &str, failed: bool, now: Instant) {
         if failed {
@@ -187,16 +199,23 @@ impl ManagedPool {
                 }
             }
             while history_active.len() < HISTORY_READS {
-                let Some(auth) = self.next_history(&mut history, one_pass).await? else {
+                let Some(auth) = self
+                    .next_admitted_history(
+                        &mut history,
+                        one_pass,
+                        &mut history_retries,
+                        &history_active,
+                        Instant::now(),
+                    )
+                    .await?
+                else {
                     break;
                 };
-                if history_retries.admit(&auth.id, Instant::now(), &history_active) {
-                    history_active.insert(auth.id.clone());
-                    reads.push(
-                        self.read_one(Kind::History, auth.id.clone(), Some(auth))
-                            .boxed(),
-                    );
-                }
+                history_active.insert(auth.id.clone());
+                reads.push(
+                    self.read_one(Kind::History, auth.id.clone(), Some(auth))
+                        .boxed(),
+                );
             }
             if !qualification_active
                 && instant >= qualification_due
@@ -291,6 +310,29 @@ impl ManagedPool {
                 .map(|(sequence, id, _)| (sequence, id))
                 .collect();
         }
+    }
+    async fn next_admitted_history(
+        &self,
+        pass: &mut Pass<PendingAuthorization>,
+        one_pass: bool,
+        retries: &mut HistoryRetries,
+        active: &BTreeSet<String>,
+        now: Instant,
+    ) -> Result<Option<PendingAuthorization>> {
+        while let Some(auth) = self.next_history(pass, one_pass).await? {
+            match retries.admit(&auth.id, now, active) {
+                HistoryAdmission::Ready => return Ok(Some(auth)),
+                HistoryAdmission::Skip => {}
+                HistoryAdmission::CapacityUnavailable => {
+                    // Retain this row in the existing bounded page. Restarting
+                    // traversal would let earlier failures renew every backoff
+                    // before this authorization could claim a retry record.
+                    pass.queued.push_front((pass.cursor, auth));
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(None)
     }
     async fn next_history(
         &self,
@@ -791,8 +833,14 @@ mod tests {
         for healthy_first in [false, true] {
             let mut retries = HistoryRetries::default();
             let active = BTreeSet::new();
-            assert!(retries.admit("failed", now, &active));
-            assert!(retries.admit("healthy", now, &active));
+            assert_eq!(
+                retries.admit("failed", now, &active),
+                HistoryAdmission::Ready
+            );
+            assert_eq!(
+                retries.admit("healthy", now, &active),
+                HistoryAdmission::Ready
+            );
             let completions = if healthy_first {
                 [("healthy", false), ("failed", true)]
             } else {
@@ -801,9 +849,18 @@ mod tests {
             for (id, failed) in completions {
                 retries.complete(id, failed, now);
             }
-            assert!(!retries.admit("failed", now + CADENCE, &active));
-            assert!(retries.admit("healthy", now + CADENCE, &active));
-            assert!(retries.admit("failed", now + Duration::from_secs(30), &active));
+            assert_eq!(
+                retries.admit("failed", now + CADENCE, &active),
+                HistoryAdmission::Skip
+            );
+            assert_eq!(
+                retries.admit("healthy", now + CADENCE, &active),
+                HistoryAdmission::Ready
+            );
+            assert_eq!(
+                retries.admit("failed", now + Duration::from_secs(30), &active),
+                HistoryAdmission::Ready
+            );
             retries.complete("failed", true, now + Duration::from_secs(30));
             assert_eq!(retries.0["failed"].failures, 2);
             assert_eq!(retries.0["failed"].due, now + Duration::from_secs(90));
@@ -817,20 +874,131 @@ mod tests {
         let mut active = BTreeSet::new();
         for n in 0..HISTORY_RETRIES {
             let id = n.to_string();
-            assert!(retries.admit(&id, now, &active));
+            assert_eq!(retries.admit(&id, now, &active), HistoryAdmission::Ready);
             if n == 0 {
                 active.insert(id);
             } else {
                 retries.complete(&id, true, now);
             }
         }
-        assert!(!retries.admit("new", now + CADENCE, &active));
-        assert!(!retries.admit("0", now + Duration::from_secs(300), &active));
-        assert!(retries.admit("new", now + Duration::from_secs(30), &active));
+        assert_eq!(
+            retries.admit("new", now + CADENCE, &active),
+            HistoryAdmission::CapacityUnavailable
+        );
+        assert_eq!(
+            retries.admit("0", now + Duration::from_secs(300), &active),
+            HistoryAdmission::Skip
+        );
+        assert_eq!(
+            retries.admit("new", now + Duration::from_secs(30), &active),
+            HistoryAdmission::Ready
+        );
         assert!(retries.0.contains_key("0"));
         assert_eq!(retries.0.len(), HISTORY_RETRIES);
         retries.complete("new", false, now + Duration::from_secs(30));
-        assert!(retries.admit("next", now + Duration::from_secs(30), &active));
+        assert_eq!(
+            retries.admit("next", now + Duration::from_secs(30), &active),
+            HistoryAdmission::Ready
+        );
+    }
+
+    #[tokio::test]
+    async fn saturated_history_retains_cursor_until_later_authorization_can_progress() {
+        for one_pass in [false, true] {
+            let f = fixture(HISTORY_RETRIES + 1).await;
+            let mut pass = Pass::new(0);
+            let mut retries = HistoryRetries::default();
+            let active = BTreeSet::new();
+            let now = Instant::now();
+            // Fast failures in sequence order occupy every record before the
+            // next page's healthy authorization is reached.
+            for sequence in 1..=HISTORY_RETRIES {
+                let auth = f
+                    .pool
+                    .next_admitted_history(&mut pass, one_pass, &mut retries, &active, now)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(auth.id, format!("attempt-{sequence}"));
+                retries.complete(&auth.id, true, now);
+            }
+            for seconds in [0, 5, 15, 29] {
+                assert!(
+                    f.pool
+                        .next_admitted_history(
+                            &mut pass,
+                            one_pass,
+                            &mut retries,
+                            &active,
+                            now + Duration::from_secs(seconds)
+                        )
+                        .await
+                        .unwrap()
+                        .is_none()
+                );
+                assert_eq!(pass.cursor, (HISTORY_RETRIES + 1) as i64);
+                assert_eq!(pass.queued.len(), 1);
+                assert!(!pass.completed, "capacity wait is not a completed pass");
+                assert_eq!(retries.0.len(), HISTORY_RETRIES);
+            }
+            // The next admission must be the deferred row, before earlier
+            // failures can run again and renew their backoff records.
+            let auth = f
+                .pool
+                .next_admitted_history(
+                    &mut pass,
+                    one_pass,
+                    &mut retries,
+                    &active,
+                    now + Duration::from_secs(30),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(auth.id, format!("attempt-{}", HISTORY_RETRIES + 1));
+            let done = f
+                .pool
+                .read_one(Kind::History, auth.id.clone(), Some(auth))
+                .await;
+            done.result.unwrap();
+            retries.complete(&done.id, false, now + Duration::from_secs(30));
+            assert!(
+                f.pool
+                    .next_admitted_history(
+                        &mut pass,
+                        one_pass,
+                        &mut retries,
+                        &active,
+                        now + Duration::from_secs(30)
+                    )
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(pass.completed);
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                HISTORY_RETRIES as i64
+            );
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM payment_resolutions", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get::<_, String>(0)).unwrap(), HISTORY_RETRIES.to_string());
+            drop(db);
+            drop(f.pool);
+            drop(f.store);
+            f.worker.await.unwrap();
+            f.server.abort();
+        }
     }
 
     #[test]
