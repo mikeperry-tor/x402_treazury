@@ -94,14 +94,14 @@ max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
 [sources.social]
 extends = "../../providers/socialfetch.toml"
-instructions_text = "Research people and communities using SocialFetch tools for Bluesky, Facebook, Instagram, LinkedIn, Reddit, Telegram, Threads, TikTok, Truth Social, Twitter (X), and Yelp. This listener uses on-demand tool discovery: search x402_treazury_tools_search for the platform name (use Twitter for X) and inspect the returned descriptions and schemas, then invoke the selected tool_ref with x402_treazury_tool_call. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live payment challenge controls the charge. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
+instructions_text = "Research people and communities using SocialFetch tools for Bluesky, Facebook, Instagram, LinkedIn, Reddit, Telegram, Threads, TikTok, Truth Social, Twitter (X), and Yelp. This listener uses on-demand tool discovery: search x402_treazury_tools_search for the platform name (use Twitter for X) and inspect the returned descriptions and schemas, then invoke the selected tool_ref with x402_treazury_tool_call. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
 tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Yelp"]
 exclude_tools = ["socialfetch_help"]
 
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
-instructions_text = "Research websites, developer communities, business reviews and Reddit using this SocialFetch subset. This source belongs to the web research context; social-platform queries on the social listener use a separate payment wallet. Treazury handles x402 payment without a vendor API key. Prices are in credits with usage-dependent surcharges; the live challenge controls the charge. Preserve argument casing, lookupStatus, partial-result and provenance fields. Use Exa for broader web discovery and page retrieval."
-tags = ["Web"]
+instructions_text = "Additional web access tools are available under socialfetch_web_*."
+tags = ["Web", "Reddit"]
 exclude_tools = ["socialfetch_help"]
 
 # Exa is reused unchanged across web and company listeners. Its complete
@@ -109,7 +109,7 @@ exclude_tools = ["socialfetch_help"]
 # Its source-level guidance appears on both listeners under the same [exa] label.
 [sources.exa]
 extends = "../../providers/exa.toml"
-instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. This source is shared by the web and company listeners, each with its own payment wallet. Treazury handles x402 without an Exa API key. Prefer small result/page counts and highlights; charges vary with options and the live challenge is authoritative. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
+instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. This source is shared by the web and company listeners, each with its own payment wallet. Prefer small result/page counts and highlights; charges vary with options and the live challenge is authoritative. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
 # above the shared $0.10 cap; paid matches require a deliberate cap increase.
