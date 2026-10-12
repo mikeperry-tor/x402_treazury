@@ -276,15 +276,19 @@ exclusive ownership must run while serving is stopped. Local example copies,
 ## Using Expensive APIs
 
 The max API payments of the privacy example are set relatively low, which
-excludes some APIs in the set. Increse `max_api_payment_usdc` on the main wallet
+excludes some APIs in the set (especially company and grant data searches, which can run from $0.15 up to $5 each). Increse `max_api_payment_usdc` on the main wallet
 group definitions to allow larger API payments.
 
 If any of your APIs cost more than **$0.50 per call**, consider
-adding a large reserve wallet to that wallet group. We provide a separate large wallet option for expensive APIs (rather than simply increasing the small wallet `funding_amount_usdc`), because this uses fewer API calls per rotation of both wallets, which reduces usage tracking and linkability.
+adding a large reserve wallet to that wallet group.
 
 To enable a large reserve wallet for a wallet group, add a reserve block for that group name under a new stanza `[wallets.NAME.reserves.large]`, and configure the target amount as `funding_amount_usdc`.
 
-Aim for a **4x multiple your largest expected API payment**. For example, a $2.50 maximum API payment suggests a **$10 large reserve**:
+> **NOTE: Why Separate Large Wallets?**
+>
+> We provide a separate large wallet option for expensive APIs (rather than simply increasing the small wallet `funding_amount_usdc`), because this uses fewer API calls per rotation of both wallets, which reduces usage tracking and linkability.
+
+When sizing the large wallet, aim for a **4x multiple your largest expected API payment**. For example, a $2.50 maximum API payment suggests a **$10 large reserve**:
 
 ```toml
 # Add a large wallet to the company group in examples/deployments/privacy.toml
