@@ -1054,6 +1054,61 @@ pub(super) fn advance_checkpoint(
     Ok(())
 }
 
+/// Six fixed indexed lookups shared by every publication. Building their JSON
+/// predicates once keeps statement construction out of the serialized hot path.
+fn balance_support_queries() -> &'static [String; 6] {
+    static QUERIES: std::sync::LazyLock<[String; 6]> = std::sync::LazyLock::new(|| {
+        let required = [
+            ("observation.wallet", "text"),
+            ("observation.address", "text"),
+            ("observation.network", "text"),
+            ("observation.asset", "text"),
+            ("observation.endpoint", "text"),
+            ("observation.confirmations", "integer"),
+            ("observation.confirmed.amount", "text"),
+            ("observation.confirmed.anchor.height", "integer"),
+            ("observation.confirmed.anchor.hash", "text"),
+            ("observation.latest.amount", "text"),
+            ("observation.latest.anchor.height", "integer"),
+            ("observation.latest.anchor.hash", "text"),
+            ("observation.valid_until", "integer"),
+        ]
+        .into_iter()
+        .map(|(field, kind)| format!("json_type(e.support,'$.{field}') IS NOT '{kind}'"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+        let malformed = format!(
+            "({required} OR (json_type(e.support,'$.checkpoint') IS NOT 'null' AND json_type(e.support,'$.checkpoint') IS NOT 'object') OR (json_type(e.support,'$.checkpoint')='object' AND (json_type(e.support,'$.checkpoint.height') IS NOT 'integer' OR json_type(e.support,'$.checkpoint.hash') IS NOT 'text')))"
+        );
+        let sources = [
+            (
+                "payment_admission_evidence e JOIN payment_attempts a ON a.id=e.attempt_id",
+                "a.wallet_id",
+                0,
+            ),
+            (
+                "(SELECT wallet_id,readiness_support AS support,readiness_hash AS block_hash,readiness_latest_hash AS latest_hash FROM funding_jobs) e",
+                "e.wallet_id",
+                1,
+            ),
+            (
+                "(SELECT wallet_id,support,confirmed_hash AS block_hash,latest_hash FROM wallet_retirements) e",
+                "e.wallet_id",
+                1,
+            ),
+        ];
+        std::array::from_fn(|index| {
+            let (column, path) =
+                [("block_hash", "confirmed"), ("latest_hash", "latest")][index / 3];
+            let (source, owner, missing) = sources[index % 3];
+            format!(
+                "SELECT COALESCE(e.support,''),CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM {source} WHERE {owner}=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN {missing} WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
+            )
+        })
+    });
+    &QUERIES
+}
+
 impl Store {
     /// Complete observations are retained only as a bounded optimization. Exact
     /// financial support is separately committed with each durable disposition.
@@ -1105,77 +1160,31 @@ impl Store {
             for point in [&observation.confirmed, &observation.latest] {
                 let encoded = serde_json::to_value(point.amount)?;
                 let amount_text = encoded.as_str().context("invalid encoded balance amount")?;
-                for (column, path) in [("block_hash", "confirmed"), ("latest_hash", "latest")] {
-                    let required = [
-                        ("observation.wallet", "text"),
-                        ("observation.address", "text"),
-                        ("observation.network", "text"),
-                        ("observation.asset", "text"),
-                        ("observation.endpoint", "text"),
-                        ("observation.confirmations", "integer"),
-                        ("observation.confirmed.amount", "text"),
-                        ("observation.confirmed.anchor.height", "integer"),
-                        ("observation.confirmed.anchor.hash", "text"),
-                        ("observation.latest.amount", "text"),
-                        ("observation.latest.anchor.height", "integer"),
-                        ("observation.latest.anchor.hash", "text"),
-                        ("observation.valid_until", "integer"),
-                    ]
-                    .into_iter()
-                    .map(|(field, kind)| {
-                        format!("json_type(e.support,'$.{field}') IS NOT '{kind}'")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" OR ");
-                    let malformed = format!(
-                        "({required} OR (json_type(e.support,'$.checkpoint') IS NOT 'null' AND json_type(e.support,'$.checkpoint') IS NOT 'object') OR (json_type(e.support,'$.checkpoint')='object' AND (json_type(e.support,'$.checkpoint.height') IS NOT 'integer' OR json_type(e.support,'$.checkpoint.hash') IS NOT 'text')))"
-                    );
-                    // Every source projects the same exact support columns.
-                    // SQLite flattens the funding projection so both lookups use
-                    // their dedicated hash indexes; no historical JSON sweep.
-                    for (source, owner, missing) in [
-                        (
-                            "payment_admission_evidence e JOIN payment_attempts a ON a.id=e.attempt_id",
-                            "a.wallet_id",
-                            0,
-                        ),
-                        (
-                            "(SELECT wallet_id,readiness_support AS support,readiness_hash AS block_hash,readiness_latest_hash AS latest_hash FROM funding_jobs) e",
-                            "e.wallet_id",
-                            1,
-                        ),
-                        (
-                            "(SELECT wallet_id,support,confirmed_hash AS block_hash,latest_hash FROM wallet_retirements) e",
-                            "e.wallet_id",
-                            1,
-                        ),
-                    ] {
-                        let sql = format!(
-                            "SELECT COALESCE(e.support,''),CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM {source} WHERE {owner}=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN {missing} WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
-                        );
-                        let conflicting: Option<(String, bool)> = self
-                            .db
-                            .query_row(
-                                &sql,
-                                params![
-                                    wallet,
-                                    point.anchor.hash,
-                                    amount_text,
-                                    i64::try_from(point.anchor.height)?
-                                ],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
-                            )
-                            .optional()?;
-                        if let Some((support, malformed)) = conflicting {
-                            let exact = serde_json::from_str::<BalanceSupport>(&support)
-                                .ok()
-                                .filter(|support| support.observation.validate().is_ok());
-                            self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
-                            if malformed || exact.is_none() {
-                                anyhow::bail!(EvidenceFailure::MalformedSupport);
-                            }
-                            anyhow::bail!(EvidenceFailure::AmountContradiction);
+                // SQLite flattens the funding/retirement projections so each
+                // lookup retains its dedicated hash index and malformed-JSON guard.
+                for sql in balance_support_queries() {
+                    let conflicting: Option<(String, bool)> = self
+                        .db
+                        .prepare_cached(sql)?
+                        .query_row(
+                            params![
+                                wallet,
+                                point.anchor.hash,
+                                amount_text,
+                                i64::try_from(point.anchor.height)?
+                            ],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?;
+                    if let Some((support, malformed)) = conflicting {
+                        let exact = serde_json::from_str::<BalanceSupport>(&support)
+                            .ok()
+                            .filter(|support| support.observation.validate().is_ok());
+                        self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
+                        if malformed || exact.is_none() {
+                            anyhow::bail!(EvidenceFailure::MalformedSupport);
                         }
+                        anyhow::bail!(EvidenceFailure::AmountContradiction);
                     }
                 }
             }
