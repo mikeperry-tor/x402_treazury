@@ -207,6 +207,8 @@ impl SubmissionProgress {
 pub(crate) mod ownership;
 #[cfg(test)]
 mod ownership_tests;
+#[cfg(test)]
+mod saturation_tests;
 
 #[derive(Clone)]
 pub struct PaidClient {

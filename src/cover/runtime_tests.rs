@@ -68,6 +68,8 @@ async fn paid_fixture() {
     let held_range = held.clone();
     let balances = Arc::new(Mutex::new(BTreeMap::<String, u64>::new()));
     let rpc_balances = balances.clone();
+    // Block timestamps are immutable, including across response-time boundaries.
+    let block_timestamp = crate::rotation::base::now().unwrap();
     let app=axum::Router::new()
         .route("/rpc",axum::routing::post(move |h:HeaderMap,axum::Json(v):axum::Json<serde_json::Value>| {let balances=rpc_balances.clone();async move{
             assert!(!h.contains_key("x-example-padding")&&!h.contains_key("payment-signature"));
@@ -75,7 +77,7 @@ async fn paid_fixture() {
                 "eth_chainId"=>json!("0x2105"),
                 "eth_getBlockByNumber"=>{
                     let height=if v["params"][0]=="latest" {112} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
-                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{block_timestamp:x}")})
                 },
                 "eth_call"=>{let data=v["params"][0]["data"].as_str().unwrap();let value=if data.starts_with("0x70a08231"){let key=format!("0x{}",&data[data.len()-40..]).to_lowercase();*balances.lock().unwrap().get(&key).unwrap_or(&0)}else{0};json!(format!("0x{value:064x}"))},
                 _=>panic!("unexpected fixture RPC")
