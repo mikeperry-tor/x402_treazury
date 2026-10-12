@@ -36,11 +36,15 @@ impl ManagedPool {
     ) -> Result<CandidatePassResult> {
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let (pool, wallet) = (self.pool.clone(), bound.wallet.clone());
-        let (through, priority) = self
+        let (through, priority, changes) = self
             .store
             .call_with_guard(guard, move |s| {
                 let through = s.wallet_boundary(&pool)?;
-                Ok((through, s.candidate_priority(&pool, &wallet, through)?))
+                Ok((
+                    through,
+                    s.candidate_priority(&pool, &wallet, through)?,
+                    s.capacity_changes(&pool),
+                ))
             })
             .await?;
         // Fixed small priority list is also the traversal dedup set. Keyset
@@ -54,6 +58,11 @@ impl ManagedPool {
         let mut reads = tokio::task::JoinSet::<Result<CandidateEvidenceState>>::new();
 
         loop {
+            // Register before inspecting evidence to avoid a publication between
+            // the last gated scan and the wait being lost. Wake all group waiters.
+            let changed = changes.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
             while let Some(result) = reads.try_join_next() {
                 incomplete |=
                     completion_is_incomplete(result.context("candidate acquisition task failed")?)?;
@@ -148,7 +157,14 @@ impl ManagedPool {
             {
                 return Ok(CandidatePassResult::Selected(Box::new(selected)));
             }
-            if let Some(result) = reads.join_next().await {
+            #[cfg(test)]
+            self.admission_test_stage(AdmissionTestStage::CandidateWaiting)
+                .await;
+            let completion = tokio::select! {
+                result = reads.join_next() => result,
+                _ = &mut changed, if !reads.is_empty() => continue,
+            };
+            if let Some(result) = completion {
                 incomplete |=
                     completion_is_incomplete(result.context("candidate acquisition task failed")?)?;
                 continue;

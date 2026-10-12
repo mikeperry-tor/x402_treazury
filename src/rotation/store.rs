@@ -200,6 +200,7 @@ pub struct Store {
     evidence_namespace: Uuid,
     evidence_cache: std::collections::BTreeMap<String, (u64, super::base::BalanceCertificate)>,
     evidence_order: u64,
+    group_gates: GroupGates,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
     _lock: ownership::Owner,
@@ -387,6 +388,7 @@ impl Store {
             evidence_namespace: Uuid::new_v4(),
             evidence_cache: Default::default(),
             evidence_order: 0,
+            group_gates: Default::default(),
             db,
             _lock: owner,
             key,
@@ -448,6 +450,7 @@ impl Store {
             evidence_namespace: Uuid::new_v4(),
             evidence_cache: Default::default(),
             evidence_order: 0,
+            group_gates: Default::default(),
             db,
             _lock: owner,
             key,
@@ -1252,6 +1255,7 @@ type Work = Box<dyn FnOnce(&mut Store) + Send>;
 struct GroupOwners {
     payment: std::sync::Arc<tokio::sync::Mutex<()>>,
     reconciliation: std::sync::Arc<tokio::sync::Mutex<()>>,
+    capacity_changed: std::sync::Arc<tokio::sync::Notify>,
 }
 type GroupGates = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, GroupOwners>>>;
 #[derive(Clone)]
@@ -1265,6 +1269,7 @@ pub struct StoreHandle {
 impl StoreHandle {
     pub fn spawn(store: Store) -> (Self, tokio::task::JoinHandle<()>) {
         let evidence_namespace = store.evidence_namespace;
+        let group_gates = store.group_gates.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Work>(32);
         let task = tokio::task::spawn_blocking(move || {
             let mut store = store;
@@ -1276,7 +1281,7 @@ impl StoreHandle {
             Self {
                 evidence_namespace,
                 sender,
-                group_gates: Default::default(),
+                group_gates,
                 #[cfg(feature = "zcash")]
                 funding_owner: Default::default(),
             },
@@ -1541,7 +1546,9 @@ impl Store {
             false,
             retirement_allowed,
         )?;
-        commit_chain_view(tx, pool, &view, &depleted)
+        commit_chain_view(tx, pool, &view, &depleted)?;
+        self.notify_capacity_changed(pool);
+        Ok(())
     }
 
     /// Bind an operation's network identity before calculation; bindings are immutable.

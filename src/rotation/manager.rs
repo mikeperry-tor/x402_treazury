@@ -57,6 +57,7 @@ mod selection;
 enum AdmissionTestStage {
     CandidateScan,
     CandidateEvaluated,
+    CandidateWaiting,
     Acquired,
     Journaled,
     Signed { nonce: String, valid_before: u64 },

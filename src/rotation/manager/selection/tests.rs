@@ -137,6 +137,7 @@ async fn fixture(retained_count: usize) -> Fixture {
     let release = Arc::new(tokio::sync::Notify::new());
     let unavailable = Arc::new(AtomicBool::new(false));
     let initializing = Arc::new(AtomicBool::new(true));
+    let timestamp = now().unwrap();
     let app=Router::new().route("/",post({
         let (balances,blocked,started,release,unavailable,initializing)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone());
         move |Json(v):Json<Value>| {
@@ -148,7 +149,7 @@ async fn fixture(retained_count: usize) -> Fixture {
                     "eth_getBlockByNumber"=>{
                         let tag=v["params"][0].as_str().unwrap();
                         let height=if tag=="latest"{if initializing.load(Ordering::SeqCst){100}else{200}}else{u64::from_str_radix(&tag[2..],16).unwrap()};
-                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     },
                     "eth_call"=>{
                         let data=v["params"][0]["data"].as_str().unwrap();
@@ -509,5 +510,74 @@ async fn independent_publication_is_selected_before_waiting_for_blocked_reads() 
             .is_subset(&f.started.lock().unwrap())
     );
     drop(selected);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn independent_publication_wakes_all_blocked_passes_without_new_acquisition() {
+    let mut f = fixture(2).await;
+    for wallet in [&f.bound.wallet, &f.small, &f.large, &f.retained[0]] {
+        f.block(wallet);
+    }
+    let target = f.retained[1].clone();
+    f.balance(&target, 10);
+    let waiting = Arc::new(tokio::sync::Semaphore::new(0));
+    let evaluated = Arc::new(AtomicUsize::new(0));
+    f.manager.test_admission_hook = Some(Arc::new({
+        let (waiting, evaluated) = (waiting.clone(), evaluated.clone());
+        move |stage| {
+            if matches!(stage, AdmissionTestStage::CandidateWaiting) {
+                waiting.add_permits(1);
+            }
+            if matches!(stage, AdmissionTestStage::CandidateEvaluated) {
+                evaluated.fetch_add(1, Ordering::SeqCst);
+            }
+            std::future::ready(()).boxed()
+        }
+    }));
+    let launch = || {
+        let (manager, bound) = (f.manager.clone(), f.bound.clone());
+        tokio::spawn(async move {
+            let CandidatePassResult::Selected(selected) = manager
+                .acquire_candidate(&bound, U256::from(5))
+                .await
+                .unwrap()
+            else {
+                panic!("published candidate must wake selection")
+            };
+            selected.candidate.wallet.clone()
+        })
+    };
+    let first = launch();
+    let second = launch();
+    tokio::time::timeout(std::time::Duration::from_secs(5), waiting.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    // Both passes have reached the wait; publication must also be safe if it
+    // races the transition from the last scan into polling the notification.
+    assert!(matches!(
+        f.manager
+            .acquire_candidate_wallet(target.clone())
+            .await
+            .unwrap(),
+        CandidateEvidenceState::Usable
+    ));
+    for task in [first, second] {
+        let wallet = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(wallet, target);
+    }
+    assert_eq!(evaluated.load(Ordering::SeqCst), 2 * READS);
+    assert_eq!(
+        f.db()
+            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
     f.close().await;
 }

@@ -1242,6 +1242,14 @@ impl Store {
             self.evidence_order = self.evidence_order.saturating_add(1);
             self.evidence_cache
                 .insert(wallet.clone(), (self.evidence_order, incoming.clone()));
+            // A wakeup grants no authority; the waiter rechecks under its group
+            // gate after this accepted store job has finished.
+            let pool: String =
+                self.db
+                    .query_row("SELECT pool_id FROM wallets WHERE id=?1", [wallet], |row| {
+                        row.get(0)
+                    })?;
+            self.notify_capacity_changed(&pool);
             if self.evidence_cache.len() > 256 {
                 let oldest = self
                     .evidence_cache

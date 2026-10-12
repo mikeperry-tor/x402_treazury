@@ -214,3 +214,67 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?)
     }
 }
+
+impl Store {
+    pub(crate) fn capacity_changes(&self, pool: &str) -> std::sync::Arc<tokio::sync::Notify> {
+        self.group_gates
+            .lock()
+            .expect("group ownership lock")
+            .entry(pool.to_owned())
+            .or_default()
+            .capacity_changed
+            .clone()
+    }
+
+    pub(super) fn notify_capacity_changed(&self, pool: &str) {
+        if let Some(owner) = self
+            .group_gates
+            .lock()
+            .expect("group ownership lock")
+            .get(pool)
+        {
+            owner.capacity_changed.notify_waiters();
+        }
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+    use futures_util::FutureExt;
+
+    #[tokio::test]
+    async fn capacity_notifications_are_group_scoped_and_cancel_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let changes = store.capacity_changes("one");
+        let other = store.capacity_changes("two");
+        let first = changes.notified();
+        let second = changes.notified();
+        tokio::pin!(first, second);
+        first.as_mut().enable();
+        second.as_mut().enable();
+        store.notify_capacity_changed("two");
+        assert!(first.as_mut().now_or_never().is_none());
+        assert!(second.as_mut().now_or_never().is_none());
+        store.notify_capacity_changed("one");
+        assert!(first.as_mut().now_or_never().is_some());
+        assert!(second.as_mut().now_or_never().is_some());
+        // A dropped subscription owns neither evidence nor a future notification.
+        let mut cancelled = Box::pin(changes.notified());
+        cancelled.as_mut().enable();
+        drop(cancelled);
+        let next = changes.notified();
+        tokio::pin!(next);
+        next.as_mut().enable();
+        store.notify_capacity_changed("one");
+        next.await;
+        assert!(!std::sync::Arc::ptr_eq(&changes, &other));
+    }
+}

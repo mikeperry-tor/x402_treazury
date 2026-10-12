@@ -200,6 +200,7 @@ async fn race(race: Race) {
                 match stage {
                     AdmissionTestStage::CandidateScan
                     | AdmissionTestStage::CandidateEvaluated
+                    | AdmissionTestStage::CandidateWaiting
                     | AdmissionTestStage::Journaled => {}
                     AdmissionTestStage::Acquired => {
                         acquired.notify_one();
