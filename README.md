@@ -304,7 +304,7 @@ funding_amount_usdc = "10.00"
 > calls, but selection may also keep cheap calls on a sufficient large wallet.
 > See the [fragmentation examples and bounds](docs/configuration.md#reserve-sizing-and-fragmentation) for the detailed math and assumptions.
 
-## Choose what shares a wallet
+## Wallet Sharing and Automatic Assignment
 
 A wallet group determines which API calls reuse a payment identity until rotation.
 Grouping related tools saves funding overhead; separate pools reduce address reuse
@@ -319,30 +319,47 @@ payment-related Tor isolation identity.
 | Several sources reference one wallet | Your own provider groups |
 | One wallet per server/source binding | Separate pool for each binding |
 
-Explicit source wallets override server defaults. Automatic assignment can create
-pools from one template, avoiding repeated wallet definitions:
+You may want to create many independent and Tor-isolated wallet groups with the same settings, rather than using the same group for multiple MCP server endpoints. This is accomplished using **wallet templates**.
+
+A **wallet template** defines reusable settings that can be applied to any wallet group to set
+payment cap, reserve sizes, and funding safeguards to common values. The template itself creates
+no wallets. A `wallet_assignment` policy chooses where to create separate groups
+using those template settings: per deployment, MCP server, source or server/source binding.
+
+Each generated group has its own wallets and payment identity; using the same
+template does not make the groups share funds or addresses.
+
+For example, this `research` template gives each source its own group with a $2
+small reserve and a $10 large reserve. It permits payments up to $2.50, following
+the 4x large-wallet sizing guidance above:
 
 ```toml
-[wallet_templates.small]
+[wallet_templates.research]
 mode = "zcash_rotation"
-max_api_payment_usdc = "0.05"
+max_api_payment_usdc = "2.50"
 max_retirement_remainder_usdc = "0"
-max_funding_spend_zec = "0.006"
+max_funding_spend_zec = "0.006" # adjust for the intended USDC target and ZEC price
 max_conversion_overhead_percent = 5
 
-[wallet_templates.small.reserves.small]
+[wallet_templates.research.reserves.small]
 funding_amount_usdc = "2.00"
 
+[wallet_templates.research.reserves.large]
+funding_amount_usdc = "10.00"
+
 [wallet_assignment]
-scope = "source" # deployment, server, source, or binding
-template = "small"
+scope = "server" # deployment, server, source, or binding
+template = "research"
 ```
 
 This is an alternative to explicit wallet assignments in the quickstart. Remove
-those assignments where you want the automatic policy to apply; explicit references
-retain priority. `config show` displays the resolved bindings and combined
-initial-inventory target before allocating anything. That target excludes fees
-and bridge-minimum increases.
+those explicit wallet group assignments where you want the `wallet_assignment` policy to apply; explicit references
+retain priority.
+
+Each generated group in this example starts with $12 of requested
+USDC inventory, so the three automatically assigned MCP servers wallets would request $36 in total.
+`config show` displays the resolved bindings and combined initial-inventory target
+before allocating anything. That target excludes fees and bridge-minimum increases.
 
 See [automatic wallets](examples/deployments/servers-auto-wallets.toml),
 [multiple managed listeners](examples/deployments/servers-managed.toml), and the
@@ -369,15 +386,15 @@ with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage gu
 Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
 entire large catalog to the agent.
 
-For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to
-advertise search/call wrappers instead of every API schema. Agents retrieve full
-descriptions and schemas as needed; filters and payment routing still apply.
-The default remains eager listing. This also works without source management;
-see [on-demand discovery](docs/agent-sources.md).
+For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to provide the agent with search+call wrapper tools instead of every API schema. Agents retrieve full
+descriptions and schemas as needed via the `x402_treazury_tools_search()` tool, and can
+make calls to discovered tools via the `x402_treazury_tool_call()` tool.
+
+See [on-demand discovery](docs/agent-sources.md) for more details.
 
 ### Let agents discover and add APIs
 
-Set `source_management = true` on each HTTP endpoint that should support agent-added
+Set `source_management = true` on each MCP server endpoint that should support agent-added
 APIs. Registrations belong only to that endpoint, even when endpoints share a wallet.
 Start with the [managed-wallet example](examples/deployments/agent-sources-managed.toml)
 or [static-wallet example](examples/deployments/agent-sources.toml).
