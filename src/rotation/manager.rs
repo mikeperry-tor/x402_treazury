@@ -55,6 +55,8 @@ mod selection;
 #[cfg(test)]
 #[derive(Clone)]
 enum AdmissionTestStage {
+    CandidateScan,
+    CandidateEvaluated,
     Acquired,
     Journaled,
     Signed { nonce: String, valid_before: u64 },

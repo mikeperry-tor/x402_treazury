@@ -198,7 +198,9 @@ async fn race(race: Race) {
             let signatures = signatures.clone();
             async move {
                 match stage {
-                    AdmissionTestStage::Journaled => {}
+                    AdmissionTestStage::CandidateScan
+                    | AdmissionTestStage::CandidateEvaluated
+                    | AdmissionTestStage::Journaled => {}
                     AdmissionTestStage::Acquired => {
                         acquired.notify_one();
                         release_acquired.notified().await;

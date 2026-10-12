@@ -6,12 +6,13 @@ use crate::rotation::{
     store::{AllocationKind, Store},
 };
 use axum::{Json, Router, routing::post};
+use futures_util::FutureExt;
 use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
         Mutex as StdMutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
@@ -328,6 +329,184 @@ async fn gated_selection_rechecks_current_liabilities_and_all_completed_candidat
     assert!(
         f.manager.gate.try_lock().is_err(),
         "selection must retain signing ownership"
+    );
+    drop(selected);
+    f.close().await;
+}
+
+async fn cache_balances(f: &Fixture, skip: Option<&str>) {
+    for wallet in [&f.bound.wallet, &f.small, &f.large]
+        .into_iter()
+        .chain(&f.retained)
+        .filter(|wallet| Some(wallet.as_str()) != skip)
+    {
+        assert!(matches!(
+            f.manager
+                .acquire_candidate_wallet(wallet.clone())
+                .await
+                .unwrap(),
+            CandidateEvidenceState::Usable
+        ));
+    }
+    f.started.lock().unwrap().clear();
+}
+
+#[tokio::test]
+async fn cached_negative_pass_batches_scans_without_reacquiring_balances() {
+    let mut f = fixture(PAGE_SIZE + 9).await;
+    cache_balances(&f, None).await;
+    let scans = Arc::new(AtomicUsize::new(0));
+    let evaluated = Arc::new(AtomicUsize::new(0));
+    f.manager.test_admission_hook = Some(Arc::new({
+        let (scans, evaluated) = (scans.clone(), evaluated.clone());
+        move |stage| {
+            match stage {
+                AdmissionTestStage::CandidateScan => {
+                    scans.fetch_add(1, Ordering::SeqCst);
+                }
+                AdmissionTestStage::CandidateEvaluated => {
+                    evaluated.fetch_add(1, Ordering::SeqCst);
+                }
+                _ => {}
+            }
+            std::future::ready(()).boxed()
+        }
+    }));
+    assert!(matches!(
+        select(&f).await,
+        CandidatePassResult::CompleteNegative
+    ));
+    let wallets = f.retained.len() + 3;
+    assert_eq!(evaluated.load(Ordering::SeqCst), wallets);
+    assert!(scans.load(Ordering::SeqCst) <= 2 + wallets / PAGE_SIZE);
+    assert!(
+        f.started.lock().unwrap().is_empty(),
+        "cached insufficient evidence must not trigger new RPC reads"
+    );
+    assert_eq!(
+        f.db()
+            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn batched_scan_sees_independent_publication_before_reaching_that_wallet() {
+    let mut f = fixture(PAGE_SIZE + 9).await;
+    let target = f.retained.last().unwrap().clone();
+    cache_balances(&f, Some(&target)).await;
+    f.balance(&target, 10);
+    let (paused, resume, evaluated) = pause_after_evaluation(&mut f, 1);
+    let (manager, bound) = (f.manager.clone(), f.bound.clone());
+    let task = tokio::spawn(async move { manager.acquire_candidate(&bound, U256::from(5)).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), paused.notified())
+        .await
+        .unwrap();
+    // A different owner publishes while the foreground walks cached rows.
+    assert!(matches!(
+        f.manager
+            .acquire_candidate_wallet(target.clone())
+            .await
+            .unwrap(),
+        CandidateEvidenceState::Usable
+    ));
+    resume.notify_one();
+    let CandidatePassResult::Selected(selected) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("independent completed evidence must be considered during traversal")
+    };
+    assert_eq!(selected.candidate.wallet, target);
+    assert!(
+        evaluated.load(Ordering::SeqCst) <= PAGE_SIZE,
+        "do not wait until the target's inventory row or pass exhaustion"
+    );
+    assert!(f.manager.gate.try_lock().is_err());
+    drop(selected);
+    assert_eq!(
+        *f.started.lock().unwrap(),
+        BTreeSet::from([f.address(&target)])
+    );
+    f.close().await;
+}
+
+fn pause_after_evaluation(
+    f: &mut Fixture,
+    at: usize,
+) -> (
+    Arc<tokio::sync::Notify>,
+    Arc<tokio::sync::Notify>,
+    Arc<AtomicUsize>,
+) {
+    let paused = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    let evaluated = Arc::new(AtomicUsize::new(0));
+    f.manager.test_admission_hook = Some(Arc::new({
+        let (paused, resume, evaluated) = (paused.clone(), resume.clone(), evaluated.clone());
+        move |stage| {
+            let (paused, resume, evaluated) = (paused.clone(), resume.clone(), evaluated.clone());
+            async move {
+                if matches!(stage, AdmissionTestStage::CandidateEvaluated)
+                    && evaluated.fetch_add(1, Ordering::SeqCst) + 1 == at
+                {
+                    paused.notify_one();
+                    resume.notified().await;
+                }
+            }
+            .boxed()
+        }
+    }));
+    (paused, resume, evaluated)
+}
+
+#[tokio::test]
+async fn independent_publication_is_selected_before_waiting_for_blocked_reads() {
+    let mut f = fixture(2).await;
+    for wallet in [&f.bound.wallet, &f.small, &f.large, &f.retained[0]] {
+        f.block(wallet);
+    }
+    let target = f.retained[1].clone();
+    f.balance(&target, 10);
+    let (paused, resume, evaluated) = pause_after_evaluation(&mut f, READS);
+    let (manager, bound) = (f.manager.clone(), f.bound.clone());
+    let task = tokio::spawn(async move { manager.acquire_candidate(&bound, U256::from(5)).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), paused.notified())
+        .await
+        .unwrap();
+    assert!(matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            f.manager.acquire_candidate_wallet(target.clone())
+        )
+        .await
+        .unwrap()
+        .unwrap(),
+        CandidateEvidenceState::Usable
+    ));
+    resume.notify_one();
+    let CandidatePassResult::Selected(selected) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("independent capacity must not wait for the four stalled acquisitions")
+    };
+    assert_eq!(selected.candidate.wallet, target);
+    assert_eq!(evaluated.load(Ordering::SeqCst), READS);
+    assert!(
+        f.blocked
+            .lock()
+            .unwrap()
+            .is_subset(&f.started.lock().unwrap())
     );
     drop(selected);
     f.close().await;

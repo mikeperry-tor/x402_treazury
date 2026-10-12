@@ -67,6 +67,7 @@ impl ManagedPool {
                 // `reads` is dropped now, without waiting for unrelated EOF.
                 return Ok(CandidatePassResult::Selected(Box::new(selected)));
             }
+            let mut evaluated_since_selection = 0;
             while reads.len() < READS {
                 let next = if let Some(wallet) = priority.pop_front() {
                     Some(wallet)
@@ -110,19 +111,42 @@ impl ManagedPool {
                         owner.acquire_candidate_wallet(wallet).await
                     }));
                 }
+                #[cfg(test)]
+                self.admission_test_stage(AdmissionTestStage::CandidateEvaluated)
+                    .await;
                 // Poll independently ready acquisitions while walking cached or
                 // ineligible rows, so a long inventory cannot hide a completion.
+                let mut completed = false;
                 while let Some(result) = reads.try_join_next() {
+                    completed = true;
                     incomplete |= completion_is_incomplete(
                         result.context("candidate acquisition task failed")?,
                     )?;
                 }
-                if let Some(selected) = self
+                evaluated_since_selection += 1;
+                // Recheck immediately after our reads complete. Otherwise batch
+                // the full cache scan at the existing inventory page size: this
+                // also notices independent evidence/liability changes without
+                // rescanning the same cache for every unchanged inventory row.
+                if completed || evaluated_since_selection == PAGE_SIZE {
+                    if let Some(selected) = self
+                        .select_completed_candidate(&bound.wallet, cost, through)
+                        .await?
+                    {
+                        return Ok(CandidatePassResult::Selected(Box::new(selected)));
+                    }
+                    evaluated_since_selection = 0;
+                }
+            }
+            // Independent publication during this batch must be considered
+            // before waiting on potentially stalled acquisitions.
+            if evaluated_since_selection > 0
+                && !reads.is_empty()
+                && let Some(selected) = self
                     .select_completed_candidate(&bound.wallet, cost, through)
                     .await?
-                {
-                    return Ok(CandidatePassResult::Selected(Box::new(selected)));
-                }
+            {
+                return Ok(CandidatePassResult::Selected(Box::new(selected)));
             }
             if let Some(result) = reads.join_next().await {
                 incomplete |=
@@ -153,6 +177,9 @@ impl ManagedPool {
         cost: U256,
         through: i64,
     ) -> Result<Option<SelectedCandidate>> {
+        #[cfg(test)]
+        self.admission_test_stage(AdmissionTestStage::CandidateScan)
+            .await;
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let (pool, bound) = (self.pool.clone(), bound.to_owned());
         let selected = self

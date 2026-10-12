@@ -252,6 +252,11 @@ active identity remains the default. Once its actual challenge is known, a
 sufficient bound payer stays selected. Otherwise a bounded rolling pass considers
 eligible retained and ready wallets. Holdings are never summed to authorize one
 payment; unavailable evidence differs from a completed insufficient-capacity pass.
+The pass checks the completed cache initially, after acquisition completions, after
+each page-sized batch of evaluated wallets, before waiting on outstanding reads,
+and once before returning a negative result. Batch rechecks include independently
+published evidence and changed liabilities; each selection revalidates current
+capacity under the group gate.
 
 Runtime hints expire 300 seconds after the unsigned response was received and
 retain at most 512 fixed-size entries per process. Their trusted key includes
