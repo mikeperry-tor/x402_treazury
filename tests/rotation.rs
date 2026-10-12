@@ -640,7 +640,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
 }
 
 #[test]
-fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
+fn funding_journal_keeps_quote_identity_and_observation_health_after_restart() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
@@ -661,12 +661,16 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
         0
     )
     .unwrap();
-    let mut picked = std::collections::BTreeSet::new();
-    for _ in 0..4 {
-        picked.insert(s.next_funding_job(0).unwrap().unwrap().id);
-    }
-    assert_eq!(picked.len(), 4);
-    let job = s.next_funding_job(0).unwrap().unwrap();
+    let jobs = s.funding_jobs().unwrap();
+    assert_eq!(jobs.len(), 4);
+    assert_eq!(
+        jobs.iter()
+            .map(|job| &job.operation_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        4
+    );
+    let job = &jobs[0];
     s.save_funding_quote(
         &job.id,
         &quote_fixture::bound(&job.target, &job.recipient, "sensitive-bound-quote"),
@@ -688,7 +692,7 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
     s.defer_funding(&job.id, 42, Some("pending"), false)
         .unwrap();
     drop(s);
-    let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     let restored = s
         .funding_jobs()
         .unwrap()
@@ -701,8 +705,13 @@ fn funding_journal_keeps_quote_identity_and_schedules_fairly_after_restart() {
         s.funding_quote(&job.id).unwrap().as_slice(),
         quote_fixture::bound(&job.target, &job.recipient, "sensitive-bound-quote").as_slice()
     );
-    for _ in 0..4 {
-        assert_ne!(s.next_funding_job(41).unwrap().unwrap().id, job.id);
+    assert_eq!(restored.next_poll, 42);
+    assert_eq!(restored.last_error.as_deref(), Some("pending"));
+    for expected in &jobs {
+        assert_eq!(
+            s.funding_job(&expected.id).unwrap().unwrap().operation_id,
+            expected.operation_id
+        );
     }
     assert_eq!(s.status().unwrap().funding_jobs.len(), 4);
 }

@@ -357,6 +357,11 @@ Remaining work is scoped in [managed wallet follow-ups](plans/deferred/managed_w
 
 ## Funding and source safety
 
+Allocations and their exact operation journals commit atomically. Inventory reads
+never create missing journals or substitute operation IDs; missing provenance
+requires repair. The runtime funding owner schedules work through captured,
+paged inventory and independent observation lanes.
+
 `rotation/funding.rs` drives the durable outbox through the states defined in
 `rotation/store/funding.rs`:
 

@@ -572,8 +572,8 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     .unwrap();
     let id = treasury.status().await.unwrap().treasury_id;
     treasury.close().await.unwrap();
-    // Materialize journal jobs without network or a funding worker.
-    let mut store = x402_treazury::rotation::store::Store::open(
+    // Read the atomically allocated journals without network or a funding worker.
+    let store = x402_treazury::rotation::store::Store::open(
         &dir.path().join("state"),
         &dir.path().join("key"),
         &id,

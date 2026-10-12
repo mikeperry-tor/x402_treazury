@@ -280,7 +280,7 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .unwrap()
         .unwrap();
     server.abort();
-    let mut reopened = crate::rotation::store::Store::open(
+    let reopened = crate::rotation::store::Store::open(
         &state,
         &key,
         &crate::rotation::store::status(&state).unwrap().treasury_id,

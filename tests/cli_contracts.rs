@@ -132,7 +132,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
         good(run(dir, &recover, &[]).await),
         json!({"funding_attempt_closed":true})
     );
-    let mut store = Store::open(&state, &key, &id).unwrap();
+    let store = Store::open(&state, &key, &id).unwrap();
     let now = store.funding_jobs().unwrap();
     assert_eq!(
         now.iter()

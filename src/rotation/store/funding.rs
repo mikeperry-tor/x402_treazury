@@ -1112,21 +1112,10 @@ impl Store {
     pub fn funding_job(&self, id: &str) -> Result<Option<FundingJob>> {
         Ok(read_jobs_matching(&self.db, Some(id))?.into_iter().next())
     }
-    /// Materialize a journal row for every allocation, including databases created
-    /// before the worker existed. Never discard jobs for disabled pools.
-    pub fn funding_jobs(&mut self) -> Result<Vec<FundingJob>> {
-        self.materialize_funding_jobs()?;
+    /// Read exact operation journals committed atomically with allocation.
+    /// Missing provenance is corruption, never permission to invent an attempt.
+    pub fn funding_jobs(&self) -> Result<Vec<FundingJob>> {
         read_jobs(&self.db)
-    }
-    fn materialize_funding_jobs(&mut self) -> Result<()> {
-        let tx = self.db.transaction()?;
-        let missing: Vec<String> = tx.prepare("SELECT id FROM funding_jobs WHERE id NOT IN (SELECT job_id FROM funding_progress) ORDER BY rowid")?
-            .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        for id in missing {
-            tx.execute("INSERT INTO funding_progress(job_id,operation_id,phase) VALUES (?1,?2,'\"ALLOCATED\"')", params![id, Uuid::new_v4().to_string()])?;
-        }
-        tx.commit()?;
-        Ok(())
     }
     /// Persist a quote encrypted; it links treasury refunds to destination keys.
     /// Repeated delivery must match exactly and cannot replace an accepted quote.
@@ -1326,20 +1315,6 @@ impl Store {
     pub fn check_funding_capacity(&self, instant: u64, input: u64) -> Result<()> {
         self.require_spend_ready(instant, input)
     }
-    /// Fair persistent ordering: every selected job moves behind all other jobs,
-    /// including siblings in the same pool. Disabled pools may only be recovered.
-    pub fn next_funding_job(&mut self, now: u64) -> Result<Option<FundingJob>> {
-        self.materialize_funding_jobs()?;
-        let tx = self.db.transaction()?;
-        let id: Option<String> = tx.query_row("SELECT f.id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE (f.state!='COMPLETE' OR f.readiness_disputed IS NOT NULL OR j.last_error LIKE 'funding_integrity_conflict;%') AND j.next_poll<=?1 ORDER BY j.turn,f.rowid LIMIT 1", [i64::try_from(now)?], |r| r.get(0)).optional()?;
-        if let Some(id) = &id {
-            tx.execute("UPDATE funding_progress SET turn=(SELECT COALESCE(MAX(turn),0)+1 FROM funding_progress) WHERE job_id=?1", [id])?;
-        }
-        tx.commit()?;
-        id.map(|id| self.funding_job(&id))
-            .transpose()
-            .map(Option::flatten)
-    }
     pub fn defer_funding(
         &mut self,
         id: &str,
@@ -1391,7 +1366,7 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
 fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJob>> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let query = format!(
-        "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,CASE WHEN {version}<15 AND f.state='COMPLETE' THEN '\"COMPLETE\"' ELSE j.phase END,j.operation_id,j.attempts,j.next_poll,j.last_error FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id"
+        "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,CASE WHEN {version}<15 AND f.state='COMPLETE' THEN '\"COMPLETE\"' ELSE j.phase END,j.operation_id,j.attempts,j.next_poll,j.last_error FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id"
     );
     let query = if job.is_some() {
         format!("{query} WHERE f.id=?1")
@@ -1427,7 +1402,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
             attempts,
             next_poll,
             last_error,
-        ) = r?;
+        ) = r.context("missing or invalid funding operation journal")?;
         let (started_at,error_streak,timed_out): (Option<i64>,u32,bool) = if version >= 9 {
             db.query_row("SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?.unwrap_or((None,0,false))
         } else {(None,0,false)};
@@ -1482,6 +1457,68 @@ mod completion_tests {
         .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         (dir, store, job)
+    }
+
+    #[test]
+    fn missing_operation_journal_is_never_synthesized_or_hidden() {
+        let (dir, mut store, job) = fixture();
+        let treasury = store.id().to_owned();
+        let other = store
+            .funding_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|other| other.id != job.id)
+            .unwrap();
+        store
+            .db
+            .execute("DELETE FROM funding_progress WHERE job_id=?1", [&job.id])
+            .unwrap();
+        for reopened in [false, true] {
+            if reopened {
+                drop(store);
+                store = Store::open(
+                    &dir.path().join("state"),
+                    &dir.path().join("key"),
+                    &treasury,
+                )
+                .unwrap();
+            }
+            let boundary = store.funding_work_boundary().unwrap();
+            for _ in 0..2 {
+                assert!(
+                    store
+                        .funding_job(&job.id)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("funding operation journal")
+                );
+                assert!(
+                    store
+                        .funding_jobs()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("funding operation journal")
+                );
+                assert!(store.funding_work_page("", boundary).is_err());
+                assert!(store.status().is_err());
+                assert!(store.funding_job("unknown").unwrap().is_none());
+                assert_eq!(
+                    store.funding_job(&other.id).unwrap().unwrap().operation_id,
+                    other.operation_id
+                );
+                assert_eq!(
+                    store
+                        .db
+                        .query_row(
+                            "SELECT COUNT(*) FROM funding_progress WHERE job_id=?1",
+                            [&job.id],
+                            |r| r.get::<_, i64>(0)
+                        )
+                        .unwrap(),
+                    0
+                );
+            }
+        }
     }
 
     #[test]

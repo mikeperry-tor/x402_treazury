@@ -81,7 +81,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
         .defer_funding(&job.id, 100, Some(&err.to_string()), false)
         .unwrap();
     drop(store);
-    let mut store = x402_treazury::rotation::store::Store::open(&db, &key, &id).unwrap();
+    let store = x402_treazury::rotation::store::Store::open(&db, &key, &id).unwrap();
     let jobs = store.funding_jobs().unwrap();
     clean(&serde_json::to_string(&jobs).unwrap());
     assert_eq!(jobs[0].last_error.as_deref(), Some(diagnostic.as_str()));
