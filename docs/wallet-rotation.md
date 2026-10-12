@@ -323,6 +323,11 @@ or an expired authorization proven unused can release its reservation through th
 store's canonical reconciliation transaction. An unused but still-valid signature
 remains a liability. Reorg contradictions cannot silently reset accounting.
 
+Balance-only acquisition reads one fresh latest/confirmed header pair, pins both
+balance calls to those hashes, and rechecks their canonical anchors. A view that
+also scans historical authorizations acquires a new header pair after that scan;
+finishing the scan never renews the earlier observation's timestamp.
+
 Historical liability release and fresh spending capacity have separate anchors.
 A confirmed USED proof requires a new balance observation at or beyond its debit
 block before that released amount can contribute to capacity. EXPIRED_UNUSED can

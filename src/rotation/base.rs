@@ -556,6 +556,7 @@ impl BaseRpc {
         let selector = &keccak256("authorizationState(address,bytes32)")[..4];
         let selector = alloy_primitives::hex::encode(selector);
         let mut unavailable = 0usize;
+        let read_history = !query.pending.is_empty();
         for auth in query.pending {
             let payer: Address = auth.payer.parse()?;
             let nonce: B256 = auth.nonce.parse()?;
@@ -625,7 +626,7 @@ impl BaseRpc {
         }
         // Authorization resolution is historical canonical evidence. Its sweep
         // cannot age the independently acquired admission balance view.
-        let resolution_anchor = confirmed;
+        let resolution_anchor = confirmed.clone();
         if query.wallets.is_empty() {
             let (canonical, _) = progress
                 .step(
@@ -667,26 +668,34 @@ impl BaseRpc {
                 resolutions,
             });
         }
-        let (latest, timestamp) = progress
-            .step("admission_latest_block", self.block("latest"))
-            .await?;
-        validate_timestamp(timestamp, now()?, self.max_age)?;
-        let height = latest
-            .height
-            .checked_sub(self.confirmations)
-            .context("insufficient Base confirmations")?;
-        let (confirmed, confirmed_time) = progress
-            .step(
-                "admission_confirmed_block",
-                self.block(&format!("0x{height:x}")),
-            )
-            .await?;
-        ensure!(
-            confirmed.height == height
-                && confirmed_time <= timestamp
-                && confirmed.height >= resolution_anchor.height,
-            "invalid admission block"
-        );
+        // Only a historical nonce sweep needs a new admission observation.
+        // Balance-only acquisition already has a coherent fresh pair of headers;
+        // retain their timestamps and the canonical rechecks below.
+        let (latest, timestamp, confirmed) = if read_history {
+            let (latest, timestamp) = progress
+                .step("admission_latest_block", self.block("latest"))
+                .await?;
+            validate_timestamp(timestamp, now()?, self.max_age)?;
+            let height = latest
+                .height
+                .checked_sub(self.confirmations)
+                .context("insufficient Base confirmations")?;
+            let (confirmed, confirmed_time) = progress
+                .step(
+                    "admission_confirmed_block",
+                    self.block(&format!("0x{height:x}")),
+                )
+                .await?;
+            ensure!(
+                confirmed.height == height
+                    && confirmed_time <= timestamp
+                    && confirmed.height >= resolution_anchor.height,
+                "invalid admission block"
+            );
+            (latest, timestamp, confirmed)
+        } else {
+            (latest, timestamp, confirmed)
+        };
         use futures_util::{StreamExt, TryStreamExt};
         let observations: BTreeMap<_, _> =
             futures_util::stream::iter(query.wallets.clone().into_iter().map(|(id, address)| {
@@ -893,3 +902,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod view_tests;
