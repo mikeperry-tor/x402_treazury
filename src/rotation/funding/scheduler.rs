@@ -1,5 +1,6 @@
 //! One retained funding owner; observations never borrow the source backend.
 use super::*;
+use crate::rotation::store::funding::FundingFacts;
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -62,6 +63,24 @@ struct Completion<Q> {
     kind: Kind,
     result: Result<Observation<Q>>,
 }
+// Scheduling and health reporting evaluate the same current facts. The source
+// step includes quote prerequisites; the Quote kind is the subsequent HTTP read.
+fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
+    [
+        !facts.readiness_recorded || facts.readiness_disputed,
+        facts.status_needed(),
+        facts.source_reconciliation_needed()
+            || crate::treasury::recovery::needs_recovery(job)
+            || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
+            || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
+                && (facts.enabled || (facts.readiness_recorded && !facts.readiness_disputed))),
+        job.phase == FundingPhase::Allocated
+            && facts.enabled
+            && !facts.readiness_recorded
+            && !facts.accepted_quote,
+    ]
+}
+
 struct Pending {
     job: FundingJob,
     credit: bool,
@@ -221,23 +240,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         .store
                         .call(move |s| s.funding_facts(&id, &operation))
                         .await?;
+                    let [credit, status, source, _] = applicable_work(&job, &facts);
                     let item = Pending {
-                        credit: kind == Kind::Credit
-                            && (!facts.readiness_recorded || facts.readiness_disputed),
-                        status: kind == Kind::Status && facts.status_needed(),
+                        credit: kind == Kind::Credit && credit,
+                        status: kind == Kind::Status && status,
                         source: ((kind == Kind::Source && job.phase != FundingPhase::Allocated)
                             || (kind == Kind::Quote && job.phase == FundingPhase::Allocated))
-                            && (facts.source_reconciliation_needed()
-                                || crate::treasury::recovery::needs_recovery(&job)
-                                || matches!(
-                                    job.phase,
-                                    FundingPhase::Preparing | FundingPhase::Prepared
-                                )
-                                || (matches!(
-                                    job.phase,
-                                    FundingPhase::Allocated | FundingPhase::Quoted
-                                ) && (facts.enabled
-                                    || (facts.readiness_recorded && !facts.readiness_disputed)))),
+                            && source,
                         job,
                     };
                     if !item.done() {
@@ -557,25 +566,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     return Ok([false; 4]);
                 }
                 let facts = s.funding_facts(&id, &operation)?;
-                Ok([
-                    !facts.readiness_recorded || facts.readiness_disputed,
-                    facts.status_needed(),
-                    facts.source_reconciliation_needed()
-                        || crate::treasury::recovery::needs_recovery(&current)
-                        || matches!(
-                            current.phase,
-                            FundingPhase::Preparing | FundingPhase::Prepared
-                        )
-                        || (matches!(
-                            current.phase,
-                            FundingPhase::Allocated | FundingPhase::Quoted
-                        ) && (facts.enabled
-                            || (facts.readiness_recorded && !facts.readiness_disputed))),
-                    current.phase == FundingPhase::Allocated
-                        && facts.enabled
-                        && !facts.readiness_recorded
-                        && !facts.accepted_quote,
-                ])
+                Ok(applicable_work(&current, &facts))
             })
             .await?;
         let (next, streak, health) = {
