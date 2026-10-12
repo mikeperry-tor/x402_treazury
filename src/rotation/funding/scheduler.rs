@@ -426,36 +426,35 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 .any(|(lane, kind)| {
                     !exhausted[lane] && !pending.iter().any(|item| item.lane == kind)
                 });
-            if needs_page && !stopping {
-                if let Some(Some(completion)) = reads.next().now_or_never() {
-                    match completion.kind {
-                        Kind::Credit => credit_active -= 1,
-                        Kind::Status => status_active -= 1,
-                        Kind::Source => source_active = false,
-                        Kind::Quote => quote_active -= 1,
-                    }
-                    active.remove(&Key {
-                        operation: completion.job.operation_id.clone(),
-                        kind: completion.kind,
-                    });
-                    if let Some(ready) = self
-                        .publish_observation(&lease, completion, clock.now())
-                        .await?
-                    {
-                        quote_pending = Some(ready);
-                    }
+            let completion = if needs_page && !stopping {
+                reads.next().now_or_never().flatten()
+            } else {
+                tokio::select! {
+                    completion = reads.next(), if !reads.is_empty() => completion,
+                    _ = stop.cancelled(), if !stopping => {
+                        stopping = true;
+                        None
+                    },
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if !stopping => None,
                 }
-                continue;
-            }
-            tokio::select! {
-                completion=reads.next(),if !reads.is_empty()=>{
-                    let completion=completion.unwrap();
-                    match completion.kind {Kind::Credit=>credit_active-=1,Kind::Status=>status_active-=1,Kind::Source=>source_active=false,Kind::Quote=>quote_active-=1}
-                    active.remove(&Key{operation:completion.job.operation_id.clone(),kind:completion.kind});
-                    if let Some(ready) = self.publish_observation(&lease,completion,clock.now()).await? { quote_pending = Some(ready); }
-                },
-                _=stop.cancelled(),if !stopping=>stopping=true,
-                _=tokio::time::sleep(std::time::Duration::from_secs(1)),if !stopping=>{},
+            };
+            if let Some(completion) = completion {
+                match completion.kind {
+                    Kind::Credit => credit_active -= 1,
+                    Kind::Status => status_active -= 1,
+                    Kind::Source => source_active = false,
+                    Kind::Quote => quote_active -= 1,
+                }
+                active.remove(&Key {
+                    operation: completion.job.operation_id.clone(),
+                    kind: completion.kind,
+                });
+                if let Some(ready) = self
+                    .publish_observation(&lease, completion, clock.now())
+                    .await?
+                {
+                    quote_pending = Some(ready);
+                }
             }
         }
     }
