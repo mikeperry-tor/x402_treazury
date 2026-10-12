@@ -93,6 +93,8 @@ pub struct FundingWorker<B> {
     pub store: StoreHandle,
     pub backend: std::sync::Arc<tokio::sync::Mutex<B>>,
     pub poll_seconds: u64,
+    #[cfg(test)]
+    inventory_test_hook: Option<std::sync::Arc<scheduler::InventoryTestHook>>,
 }
 impl<B> Clone for FundingWorker<B> {
     fn clone(&self) -> Self {
@@ -100,6 +102,8 @@ impl<B> Clone for FundingWorker<B> {
             store: self.store.clone(),
             backend: self.backend.clone(),
             poll_seconds: self.poll_seconds,
+            #[cfg(test)]
+            inventory_test_hook: self.inventory_test_hook.clone(),
         }
     }
 }
@@ -109,6 +113,8 @@ impl<B: FundingBackend> FundingWorker<B> {
             store,
             backend: std::sync::Arc::new(tokio::sync::Mutex::new(backend)),
             poll_seconds,
+            #[cfg(test)]
+            inventory_test_hook: None,
         }
     }
     pub async fn run(self, stop: CancellationToken) -> Result<()> {

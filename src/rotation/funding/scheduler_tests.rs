@@ -176,7 +176,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
 }
 
 #[tokio::test]
-async fn late_quote_completion_cannot_mutate_a_replacement_operation() {
+async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
     let dir = tempfile::tempdir().unwrap();
     let mut state = Store::create(
         &dir.path().join("state"),
@@ -223,21 +223,32 @@ async fn late_quote_completion_cannot_mutate_a_replacement_operation() {
         1,
     );
     let lease = Arc::new(store.funding_owner().lock_owned().await);
-    assert!(
-        worker
-            .publish_observation(
-                &lease,
-                Completion {
-                    result: Ok(Observation::Quote(quote(&old))),
-                    job: old.clone(),
-                    kind: Kind::Quote,
-                },
-                1000
-            )
-            .await
-            .unwrap()
-            .is_none()
-    );
+    for (kind, result) in [
+        (Kind::Quote, Ok(Observation::Quote(quote(&old)))),
+        (Kind::Source, Ok(Observation::Prerequisite(quote(&old)))),
+        (Kind::Status, Ok(Observation::Status(SwapStatus::Success))),
+        (Kind::Credit, Ok(Observation::None)),
+        (
+            Kind::Source,
+            Err(anyhow::anyhow!("obsolete source failure")),
+        ),
+    ] {
+        assert!(
+            worker
+                .publish_observation(
+                    &lease,
+                    Completion {
+                        result,
+                        job: old.clone(),
+                        kind,
+                    },
+                    1000
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
     store
         .call(move |s| {
             let current = s.funding_job(&old.id)?.unwrap();
@@ -257,6 +268,148 @@ async fn late_quote_completion_cannot_mutate_a_replacement_operation() {
     drop(worker);
     drop(store);
     actor.await.unwrap();
+}
+
+#[tokio::test]
+async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings_running() {
+    for lane in [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote] {
+        for refresh in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut state = Store::create(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                1,
+                b"fixture",
+            )
+            .unwrap();
+            crate::rotation::store::test_support::declare_and_allocate(
+                &mut state,
+                "pool",
+                "5",
+                Some(alloy_primitives::U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+            let jobs = state.funding_jobs().unwrap();
+            let old = jobs[0].clone();
+            let sibling = jobs[1].clone();
+            state
+                .save_funding_quote(&old.id, &serde_json::to_vec(&quote(&old)).unwrap())
+                .unwrap();
+            submitted(&mut state, &sibling);
+            let treasury = state.id().to_owned();
+            let (store, actor) = StoreHandle::spawn(state);
+            let (statuses, mut status_events) = mpsc::unbounded_channel();
+            let (started, _source_events) = mpsc::unbounded_channel();
+            let credits = Arc::new(AtomicUsize::new(0));
+            let mut worker = FundingWorker::new(
+                store.clone(),
+                Source {
+                    store: store.clone(),
+                    reads: Reads {
+                        credits: Arc::new(Semaphore::new(64)),
+                        credit_calls: credits.clone(),
+                        statuses,
+                        status_gates: Default::default(),
+                        failed_job: Default::default(),
+                        processing: false,
+                    },
+                    gate: Arc::new(Semaphore::new(64)),
+                    started,
+                },
+                1,
+            );
+            let (captured, captured_rx) = tokio::sync::oneshot::channel();
+            let (resume, resume_rx) = tokio::sync::oneshot::channel();
+            worker.inventory_test_hook = Some(Arc::new(InventoryTestHook {
+                lane,
+                barrier: Mutex::new(Some((captured, resume_rx))),
+            }));
+            let running = tokio::spawn({
+                let worker = worker.clone();
+                async move { worker.tick(1000).await }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(5), captured_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            // The same store owner commits the transitions used by source
+            // recovery/refresh while the scheduler owns an older inventory page.
+            let target = old.clone();
+            let replacement = store
+                .call(move |s| {
+                    if refresh {
+                        s.refresh_unprepared_quote_for_operation(&target.id, &target.operation_id)?;
+                    } else {
+                        s.close_unprepared_funding_for_operation(&target.id, &target.operation_id)?;
+                        s.reauthorize_closed_funding_for_operation(
+                            &target.id,
+                            &target.operation_id,
+                            3,
+                        )?;
+                    }
+                    Ok(s.funding_job(&target.id)?.unwrap().operation_id)
+                })
+                .await
+                .unwrap();
+            assert_ne!(replacement, old.operation_id);
+            resume.send(()).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(5), running)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(status_events.try_recv().unwrap(), sibling.id);
+            assert!(credits.load(Ordering::SeqCst) >= 2);
+            // Reuse the actual owner after the raced pass. Any new work must
+            // bind to the replacement; captured stale work cannot prepare/send.
+            worker.tick(2000).await.unwrap();
+            let old_check = old.clone();
+            let sibling_check = sibling.clone();
+            let expected = replacement.clone();
+            store
+                .call(move |s| {
+                    let current = s.funding_job(&old_check.id)?.unwrap();
+                    assert_eq!(current.operation_id, expected);
+                    assert_eq!(current.phase, FundingPhase::Quoted);
+                    let facts = s.funding_facts(&current.id, &current.operation_id)?;
+                    assert!(facts.accepted_quote);
+                    assert!(!facts.provider_success && !facts.readiness_recorded);
+                    assert!(facts.source_submission.is_none());
+                    assert_eq!(facts.source_attempts, 0);
+                    assert_eq!(s.funding_recovery_count(&current.id)?, u64::from(!refresh));
+                    assert!(
+                        s.funding_facts(&sibling_check.id, &sibling_check.operation_id)?
+                            .provider_success
+                    );
+                    let operations = s.status()?.treasury_operations;
+                    assert_eq!(operations.len(), 1);
+                    assert_eq!(operations[0].operation_id, sibling_check.operation_id);
+                    assert_eq!(operations[0].attempts, 1);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            drop(worker);
+            drop(store);
+            actor.await.unwrap();
+            let reopened = Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &treasury,
+            )
+            .unwrap();
+            assert_eq!(
+                reopened.funding_job(&old.id).unwrap().unwrap().operation_id,
+                replacement
+            );
+            assert_eq!(
+                reopened.funding_recovery_count(&old.id).unwrap(),
+                u64::from(!refresh)
+            );
+            assert_eq!(reopened.status().unwrap().treasury_operations.len(), 1);
+        }
+    }
 }
 fn submitted(store: &mut Store, job: &FundingJob) {
     store

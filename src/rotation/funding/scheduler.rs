@@ -1,6 +1,6 @@
 //! One retained funding owner; observations never borrow the source backend.
 use super::*;
-use crate::rotation::store::funding::FundingFacts;
+use crate::rotation::store::{funding::FundingFacts, scheduling::FundingWork};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -85,6 +85,30 @@ struct Pending {
     job: FundingJob,
     // Quote inventory contains source-owned prerequisites, not quote HTTP reads.
     lane: Kind,
+}
+
+#[cfg(test)]
+pub(super) struct InventoryTestHook {
+    lane: Kind,
+    barrier: Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
+}
+#[cfg(test)]
+impl InventoryTestHook {
+    async fn captured(&self, lane: Kind) {
+        if self.lane != lane {
+            return;
+        }
+        let barrier = self.barrier.lock().unwrap().take();
+        if let Some((captured, resume)) = barrier {
+            captured.send(()).unwrap();
+            resume.await.unwrap();
+        }
+    }
 }
 
 impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
@@ -210,8 +234,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     pass_due[lane] = clock.now().saturating_add(self.poll_seconds.max(1));
                     continue;
                 }
-                cursors[lane] = page.last().unwrap().id.clone();
-                for mut job in page {
+                #[cfg(test)]
+                if let Some(hook) = &self.inventory_test_hook {
+                    hook.captured(kind).await;
+                }
+                cursors[lane] = page.last().unwrap().job.id.clone();
+                for FundingWork { mut job, facts } in page {
                     if job
                         .started_at
                         .is_some_and(|started| clock.now().saturating_sub(started) >= health_after)
@@ -224,11 +252,6 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                             .await?;
                         job.timed_out = true;
                     }
-                    let (id, operation) = (job.id.clone(), job.operation_id.clone());
-                    let facts = self
-                        .store
-                        .call(move |s| s.funding_facts(&id, &operation))
-                        .await?;
                     let [credit, status, source, _] = applicable_work(&job, &facts);
                     let wanted = match kind {
                         Kind::Credit => credit,

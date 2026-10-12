@@ -1,8 +1,19 @@
 //! Indexed funding inventory and reporting; runtime due times own scheduling.
-use super::funding::FundingJob;
+use super::funding::{FundingFacts, FundingJob};
 use super::*;
 
 pub(crate) const PAGE_SIZE: usize = 64;
+
+/// One scheduling snapshot, captured entirely by the serialized store owner.
+/// It is not authority for later work: operation-bound commits still revalidate.
+pub(crate) struct FundingWork {
+    pub job: FundingJob,
+    pub facts: FundingFacts,
+}
+
+#[cfg(test)]
+#[path = "scheduling_tests.rs"]
+mod inventory_tests;
 
 impl Store {
     /// Rows are never deleted. Capture committed insertion order independently
@@ -15,7 +26,7 @@ impl Store {
             })?)
     }
 
-    pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingJob>> {
+    pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingWork>> {
         let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_actionable_inventory WHERE (state!='COMPLETE' OR readiness_disputed IS NOT NULL) AND id>?1 AND rowid<=?2 ORDER BY id LIMIT ?3")?
             .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -23,10 +34,13 @@ impl Store {
         for id in ids {
             // Current allocations create their exact operation journal atomically.
             // Missing current-schema provenance is an error, never a new attempt.
-            jobs.push(
-                self.funding_job(&id)?
-                    .context("funding inventory changed")?,
-            );
+            let job = self
+                .funding_job(&id)?
+                .context("funding inventory changed")?;
+            // Recovery cannot replace the operation between these reads. Keep
+            // phase and facts together rather than looking up facts after delivery.
+            let facts = self.funding_facts(&id, &job.operation_id)?;
+            jobs.push(FundingWork { job, facts });
         }
         Ok(jobs)
     }
