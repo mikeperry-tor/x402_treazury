@@ -436,6 +436,9 @@ is not canonical source or return evidence.
 One retained funding owner schedules independent status, credit and prerequisite-
 complete unsigned quote observations in bounded lanes, alongside serialized treasury
 commands. Per-operation/kind backoff cannot stall another group's observations.
+Malformed destination-readiness support retains an operation-local integrity
+diagnostic and cannot stop independent funding. Completion storage failures still
+stop the shared owner; rejected proofs never release liabilities or authorize retries.
 Historical work uses captured boundaries and keyset pages, not full reporting
 snapshots; wallet count is not a deadline. Read-only readiness and quote prerequisites
 precede proposal mutation or reservation. The same treasury actor and worker survive

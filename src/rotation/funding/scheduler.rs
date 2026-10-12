@@ -539,7 +539,48 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             Kind::Source => job.phase.clone(),
             Kind::Quote => FundingPhase::Allocated,
         };
-        let failure = result.err();
+        let (id, operation) = (job.id.clone(), job.operation_id.clone());
+        let completion = self
+            .store
+            .call(move |s| {
+                let Some(current) = s.funding_job(&id)? else {
+                    return Ok(None);
+                };
+                if current.operation_id != operation {
+                    return Ok(None);
+                }
+                // Completion consumes wallet-local readiness evidence. Its typed
+                // rejection must not terminate observation of independent jobs.
+                // Untyped/storage failures still stop the shared owner.
+                let failure = match s.finish_funding_if_proven(&id, &operation) {
+                    Ok(_) => None,
+                    Err(error)
+                        if error
+                            .downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                            == Some(
+                                &super::super::base::evidence::EvidenceFailure::MalformedSupport,
+                            ) =>
+                    {
+                        Some(error)
+                    }
+                    Err(error) => return Err(error),
+                };
+                let current = s.funding_job(&id)?.context("funding job missing")?;
+                let facts = s.funding_facts(&id, &operation)?;
+                let mut applicable = applicable_work(&current, &facts);
+                // Even a terminal provider outcome cannot hide a rejected local
+                // completion proof when it makes its observation lane unnecessary.
+                applicable[kind as usize] |= failure.is_some();
+                Ok(Some((applicable, failure)))
+            })
+            .await?;
+        let Some((applicable, completion_failure)) = completion else {
+            return Ok(None);
+        };
+        if completion_failure.is_some() {
+            prerequisite = None;
+        }
+        let failure = completion_failure.or_else(|| result.err());
         let wait = failure
             .as_ref()
             .and_then(|error| waiting_reason(error, &phase));
@@ -552,18 +593,6 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         if let Some(category) = &error {
             tracing::warn!(job_id=%job.id,pool_id=%job.pool_id,phase=?phase,category,"funding observation failed; retaining owned work and backing off this observation");
         }
-        let (id, operation) = (job.id.clone(), job.operation_id.clone());
-        let applicable = self
-            .store
-            .call(move |s| {
-                let current = s.funding_job(&id)?.context("funding job missing")?;
-                if current.operation_id != operation {
-                    return Ok([false; 4]);
-                }
-                let facts = s.funding_facts(&id, &operation)?;
-                Ok(applicable_work(&current, &facts))
-            })
-            .await?;
         let (next, streak, health) = {
             let mut state = lease.state.lock().expect("funding schedule lock");
             state.complete(&job, kind, instant, self.poll_seconds, error);
@@ -579,7 +608,6 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 {
                     return Ok(None);
                 }
-                s.finish_funding_if_proven(&id, &operation)?;
                 s.record_funding_observation_health(
                     &id,
                     &operation,
@@ -705,15 +733,24 @@ impl State {
             .unwrap_or(0);
         // Keep the fixed leading category consumed by startup and recovery.
         // Per-kind errors remain independently retained in the bounded owner;
-        // source/quote policy obstructions take precedence over read outages.
-        let error = [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit]
-            .into_iter()
-            .find_map(|kind| {
-                entries
-                    .iter()
-                    .find(|(key, record)| key.kind == kind && record.error.is_some())
-                    .and_then(|(_, record)| record.error.clone())
-            });
+        // integrity failures precede source/quote policy obstructions and outages.
+        let integrity = entries.iter().find_map(|(_, record)| {
+            record
+                .error
+                .as_ref()
+                .filter(|error| error.starts_with("funding_integrity_conflict;"))
+                .cloned()
+        });
+        let error = integrity.or_else(|| {
+            [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit]
+                .into_iter()
+                .find_map(|kind| {
+                    entries
+                        .iter()
+                        .find(|(key, record)| key.kind == kind && record.error.is_some())
+                        .and_then(|(_, record)| record.error.clone())
+                })
+        });
         (due, streak, error)
     }
 }

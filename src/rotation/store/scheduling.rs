@@ -142,7 +142,7 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN last_error LIKE 'funding_integrity_conflict;%' THEN last_error WHEN phase='\"COMPLETE\"' THEN NULL WHEN last_error LIKE 'funding_recovery_requires_operator;%' THEN last_error WHEN phase IN ('\"RECOVERY_REQUIRED\"','\"PREPARING\"') THEN last_error ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
+        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN last_error LIKE 'funding_integrity_conflict;%' THEN last_error WHEN ?4 LIKE 'funding_integrity_conflict;%' THEN ?4 WHEN phase='\"COMPLETE\"' THEN NULL WHEN last_error LIKE 'funding_recovery_requires_operator;%' THEN last_error WHEN phase IN ('\"RECOVERY_REQUIRED\"','\"PREPARING\"') THEN last_error ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
         if changed == 1 {
             tx.execute("INSERT INTO funding_health(job_id,error_streak) SELECT ?1,CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?2 END FROM funding_progress WHERE job_id=?1 ON CONFLICT(job_id) DO UPDATE SET error_streak=excluded.error_streak",params![job,streak])?;
         }

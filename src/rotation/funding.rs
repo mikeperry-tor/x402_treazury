@@ -852,6 +852,11 @@ fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'stati
 /// Only fixed categories reach status. Never copy upstream bodies, URLs, keys,
 /// quote addresses or arbitrary error prose into the public journal.
 fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
+    if error.downcast_ref::<super::base::evidence::EvidenceFailure>()
+        == Some(&super::base::evidence::EvidenceFailure::MalformedSupport)
+    {
+        return "funding_integrity_conflict; malformed_durable_evidence_support; inspect this wallet's readiness evidence; original work remains owned".into();
+    }
     if let Some(blocked) = error.downcast_ref::<RecoveryBlocked>() {
         return format!("funding_recovery_requires_operator; {}", blocked.0);
     }
