@@ -1077,6 +1077,162 @@ async fn selection_does_not_swallow_database_failures() {
         .unwrap();
     assert!(error.is::<rusqlite::Error>());
     assert!(!error.is::<crate::rotation::base::evidence::EvidenceFailure>());
+    assert!(
+        f.manager
+            .candidate_for(None)
+            .await
+            .unwrap_err()
+            .is::<rusqlite::Error>()
+    );
+    assert!(
+        f.manager
+            .store
+            .call(|s| s.startup_groups(&["selection".into()]))
+            .await
+            .unwrap_err()
+            .is::<rusqlite::Error>()
+    );
+    assert!(f.calls.lock().unwrap().is_empty());
+    f.close().await;
+}
+
+#[tokio::test]
+async fn initial_identity_and_startup_isolate_malformed_wallet_readiness() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    for corrupt in ["active", "small", "large", "active_and_small", "all"] {
+        let f = fixture(0).await;
+        for (name, wallet) in [
+            ("active", &f.bound.wallet),
+            ("small", &f.small),
+            ("large", &f.large),
+        ] {
+            if corrupt == "all"
+                || corrupt == name
+                || (corrupt == "active_and_small" && name != "large")
+            {
+                f.db()
+                    .execute(
+                        "UPDATE funding_jobs SET readiness_support='{}' WHERE wallet_id=?1",
+                        [wallet],
+                    )
+                    .unwrap();
+            }
+        }
+        let before: Vec<(String, String)> = f
+            .db()
+            .prepare("SELECT id,role FROM wallets ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let candidate = f.manager.candidate_for(None).await;
+        let startup = f
+            .manager
+            .store
+            .call(|s| s.startup_groups(&["selection".into()]))
+            .await;
+        if corrupt == "all" {
+            assert_eq!(
+                candidate.unwrap_err().downcast_ref::<EvidenceFailure>(),
+                Some(&EvidenceFailure::MalformedSupport)
+            );
+            assert_eq!(
+                startup.unwrap_err().downcast_ref::<EvidenceFailure>(),
+                Some(&EvidenceFailure::MalformedSupport)
+            );
+        } else {
+            let expected = match corrupt {
+                "active" => &f.small,
+                "active_and_small" => &f.large,
+                _ => &f.bound.wallet,
+            };
+            assert_eq!(candidate.unwrap().wallet, *expected);
+            let groups = startup.unwrap();
+            assert!(groups[0].serving_ready);
+            assert!(!groups[0].inventory_ready);
+        }
+        let after: Vec<(String, String)> = f
+            .db()
+            .prepare("SELECT id,role FROM wallets ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            f.db()
+                .query_row(
+                    "SELECT COUNT(*) FROM reserve_claims WHERE wallet_id IS NOT NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            f.db()
+                .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(f.calls.lock().unwrap().is_empty());
+        f.close().await;
+    }
+}
+
+#[tokio::test]
+async fn initial_identity_skips_malformed_retained_and_preserves_active_role() {
+    let f = fixture(2).await;
+    for wallet in [&f.bound.wallet, &f.retained[0]] {
+        f.db()
+            .execute(
+                "UPDATE funding_jobs SET readiness_support=NULL WHERE wallet_id=?1",
+                [wallet],
+            )
+            .unwrap();
+    }
+    let candidate = f.manager.candidate_for(None).await.unwrap();
+    assert_eq!(candidate.wallet, f.retained[1]);
+    assert_eq!(
+        f.db()
+            .query_row(
+                "SELECT role FROM wallets WHERE id=?1",
+                [&f.retained[1]],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "RETAINED"
+    );
+    // No balance RPC is needed even for a real cold-cache free provider call.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/free", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route("/free", axum::routing::get(|| async { "free" })),
+        )
+        .await
+        .unwrap();
+    });
+    let client = crate::payment::PaidClient::managed(Arc::new(f.manager.clone()));
+    assert_eq!(
+        client
+            .execute(crate::catalog::RoutedRequest {
+                method: "GET".into(),
+                url,
+                query: Default::default(),
+                body: None
+            })
+            .await
+            .unwrap(),
+        "free"
+    );
+    client.drain().await;
+    drop(client);
+    server.abort();
     assert!(f.calls.lock().unwrap().is_empty());
     f.close().await;
 }

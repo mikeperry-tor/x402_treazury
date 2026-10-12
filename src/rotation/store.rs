@@ -1610,15 +1610,11 @@ impl Store {
         &mut self,
         pool: &str,
     ) -> Result<super::manager::PaymentCandidateHandle> {
-        let active = self.reconstruct_active(pool)?;
-        let wallet = match active {
-            Some(wallet) => wallet,
-            None => self.db.query_row("SELECT w.id FROM wallets w JOIN reserve_claims c ON c.wallet_id=w.id JOIN funding_jobs f ON f.wallet_id=w.id WHERE w.pool_id=?1 AND w.role='READY' AND c.enabled=1 AND c.generation=f.claim_generation AND c.slot=f.allocation_kind ORDER BY CASE c.slot WHEN 'small' THEN 0 ELSE 1 END,w.sequence LIMIT 1", [pool], |r| r.get::<_, String>(0)).optional()?.context(AdmissionError::WalletNotReady("funded payment identity unavailable"))?,
-        };
-        ensure!(
-            capacity::payment_ownership(&self.db, pool, &wallet)?.is_some(),
-            AdmissionError::WalletNotReady("funded payment identity unavailable")
-        );
+        let wallet =
+            self.resolve_payment_identity(pool)?
+                .context(AdmissionError::WalletNotReady(
+                    "funded payment identity unavailable",
+                ))?;
         self.db.query_row("SELECT w.address,p.generation FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2", params![wallet,pool], |r| Ok(super::manager::PaymentCandidateHandle { wallet: wallet.clone(), address:r.get(0)?, generation:r.get(1)? })).map_err(Into::into)
     }
     #[cfg(test)]

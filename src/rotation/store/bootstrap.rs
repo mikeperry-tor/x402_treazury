@@ -159,37 +159,26 @@ impl Store {
                     .collect::<rusqlite::Result<Vec<_>>>()?,
             );
             ensure!(claims.len() <= 3, "startup claim inventory conflict");
-            // Role-specific index ranges avoid sorting all retained history
-            // before returning the active or ready default identity.
-            let mut serving_ready = false;
-            let mut active_ready = false;
-            let mut remaining = 64;
-            for role in ["ACTIVE", "READY", "RETAINED"] {
-                let mut statement = self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1 AND role=?2 ORDER BY sequence LIMIT ?3")?;
-                let mut rows = statement.query(params![pool, role, remaining])?;
-                while let Some(row) = rows.next()? {
-                    remaining -= 1;
-                    let wallet: String = row.get(0)?;
-                    if let Some(ownership) = capacity::payment_ownership(&self.db, &pool, &wallet)?
-                    {
-                        serving_ready = true;
-                        active_ready = ownership.role == "ACTIVE";
-                        break;
-                    }
-                }
-                if serving_ready || remaining == 0 {
-                    break;
-                }
-            }
+            let identity = capacity::default_identity(&self.db, &pool)?;
+            let serving_ready = identity.is_some();
+            let active_ready = identity.as_ref().is_some_and(|(_, role)| role == "ACTIVE");
             let mut inventory_ready = active_ready;
             for claim in claims.iter().filter(|c| c.generation.is_some()) {
                 let wallet:Option<String> = self.db.query_row("SELECT wallet_id FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND enabled=1",params![pool,claim.kind,claim.generation],|r|r.get(0))?;
                 let ready = if let Some(wallet) = wallet {
-                    capacity::payment_ownership(&self.db, &pool, &wallet)?.is_some_and(|owner| {
-                        owner.role == "READY"
-                            && owner.slot.as_deref() == Some(claim.kind.as_str())
-                            && owner.claim_generation == claim.generation
-                    })
+                    match capacity::payment_ownership(&self.db, &pool, &wallet) {
+                        Ok(owner) => owner.is_some_and(|owner| {
+                            owner.role == "READY"
+                                && owner.slot.as_deref() == Some(claim.kind.as_str())
+                                && owner.claim_generation == claim.generation
+                        }),
+                        Err(error) if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                            == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) => {
+                                tracing::warn!(category = "malformed_durable_evidence_support", "Reserve readiness rejected; serving eligibility uses independent funded identities");
+                                false
+                            },
+                        Err(error) => return Err(error),
+                    }
                 } else {
                     false
                 };

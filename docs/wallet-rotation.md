@@ -248,7 +248,11 @@ with visible diagnostics; seller rejection remains possible.
 Fresh compatible balances minus unresolved signed exposure govern each wallet's
 available capacity. A recent actual-price hint can select the smallest sufficient
 cached wallet without RPC or a pricing probe. Without a usable hint, the existing
-active identity remains the default. Once its actual challenge is known, a
+active identity remains the default. Malformed readiness support excludes the affected
+wallet from default selection and serving readiness without blocking independent
+funded wallets. Selection preserves the diagnostic if no eligible identity remains;
+choosing a fallback does not consume a reserve or replace an existing active role.
+Once its actual challenge is known, a
 sufficient bound payer stays selected. Otherwise a bounded rolling pass considers
 eligible retained and ready wallets. Holdings are never summed to authorize one
 payment; unavailable evidence differs from a completed insufficient-capacity pass.

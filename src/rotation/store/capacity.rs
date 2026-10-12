@@ -268,13 +268,14 @@ impl Store {
         tx.commit()?;
         Ok(id)
     }
-    /// Reconstruct unsigned identity from owned funded roles under the group gate.
+    /// Resolve unsigned identity under the group gate, reconstructing an absent
+    /// active role only from eligible retained capacity.
     /// Balance freshness and liabilities belong to later payment admission.
-    pub(crate) fn reconstruct_active(&mut self, pool: &str) -> Result<Option<String>> {
+    pub(crate) fn resolve_payment_identity(&mut self, pool: &str) -> Result<Option<String>> {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let chosen = reconstruct_from_roles(&tx, pool)?;
+        let chosen = resolve_identity(&tx, pool)?;
         tx.commit()?;
         Ok(chosen)
     }
@@ -373,31 +374,56 @@ impl Store {
     }
 }
 
-const ROLE_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE p.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND w.role=?2 ORDER BY w.sequence LIMIT 1";
+const ROLE_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE p.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND w.role=?2 ORDER BY w.sequence";
+const READY_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN reserve_claims c ON c.wallet_id=w.id WHERE w.pool_id=?1 AND w.role=?2 AND c.enabled=1 ORDER BY CASE c.slot WHEN 'small' THEN 0 ELSE 1 END,w.sequence";
 
-fn reconstruct_from_roles(db: &Connection, pool: &str) -> Result<Option<String>> {
-    // Separate indexed role lookups keep the usual ACTIVE path independent of
-    // retained/retired history. Sequence is unique within the group.
-    let find = |role: &str| -> Result<Option<(String, String)>> {
-        Ok(db
-            .query_row(ROLE_IDENTITY_SQL, params![pool, role], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .optional()?)
-    };
-    let chosen = match find("ACTIVE")? {
-        Some(active) => Some(active),
-        None => find("RETAINED")?,
-    };
-    let Some((wallet, role)) = chosen else {
+/// Read-only default identity selection, also used by startup. A malformed
+/// wallet cannot hide independent funded capacity; retain its diagnostic when
+/// there is no eligible alternative. No balance acquisition or role change.
+pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(String, String)>> {
+    let mut failure = None;
+    for role in ["ACTIVE", "RETAINED", "READY"] {
+        let sql = if role == "READY" {
+            READY_IDENTITY_SQL
+        } else {
+            ROLE_IDENTITY_SQL
+        };
+        let mut statement = db.prepare(sql)?;
+        let mut rows = statement.query(params![pool, role])?;
+        while let Some(row) = rows.next()? {
+            let wallet: String = row.get(0)?;
+            match payment_ownership(db, pool, &wallet) {
+                Ok(Some(_)) => return Ok(Some((wallet, role.to_owned()))),
+                Ok(None) => {}
+                Err(error)
+                    if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                        == Some(
+                            &super::super::base::evidence::EvidenceFailure::MalformedSupport,
+                        ) =>
+                {
+                    if failure.is_none() {
+                        tracing::warn!(
+                            category = "malformed_durable_evidence_support",
+                            "Default wallet readiness rejected; checking independent funded identities"
+                        );
+                        failure = Some(error);
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    failure.map_or(Ok(None), Err)
+}
+
+fn resolve_identity(db: &Connection, pool: &str) -> Result<Option<String>> {
+    let Some((wallet, role)) = default_identity(db, pool)? else {
         return Ok(None);
     };
-    ensure!(
-        payment_ownership(db, pool, &wallet)?.is_some(),
-        "active_reconstruction_binding_invalid"
-    );
+    // A rejected active identity retains its role and history. Choosing a healthy
+    // fallback does not promote it or consume its reserve claim.
     if role == "RETAINED" {
-        ensure!(db.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1 AND pool_id=?2 AND role='RETAINED' AND NOT EXISTS(SELECT 1 FROM wallets WHERE pool_id=?2 AND role='ACTIVE')",params![wallet,pool])? == 1, "active_reconstruction_conflict");
+        db.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1 AND pool_id=?2 AND role='RETAINED' AND NOT EXISTS(SELECT 1 FROM wallets WHERE pool_id=?2 AND role='ACTIVE')",params![wallet,pool])?;
     }
     Ok(Some(wallet))
 }
@@ -1161,18 +1187,12 @@ mod tests {
         .unwrap();
         {
             let tx = db.transaction().unwrap();
-            assert_eq!(
-                reconstruct_from_roles(&tx, "pool").unwrap(),
-                Some(first.clone())
-            );
+            assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
             // Cancellation/failure of the enclosing owner commit preserves roles.
         }
         assert_eq!(role(&db, &initial), "RETAINED");
         let tx = db.transaction().unwrap();
-        assert_eq!(
-            reconstruct_from_roles(&tx, "pool").unwrap(),
-            Some(first.clone())
-        );
+        assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
         tx.commit().unwrap();
         assert_eq!(role(&db, &large), "READY");
         assert_eq!(
@@ -1199,18 +1219,15 @@ mod tests {
         )
         .unwrap();
         let tx = db.transaction().unwrap();
-        assert_eq!(
-            reconstruct_from_roles(&tx, "pool").unwrap(),
-            Some(first.clone())
-        );
+        assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
         tx.commit().unwrap();
         assert_eq!(role(&db, &initial), "ACTIVE");
         assert_eq!(role(&db, &small), "RETAINED");
         db.execute("UPDATE pools SET payment_limit='0'", [])
             .unwrap();
-        assert_eq!(reconstruct_from_roles(&db, "pool").unwrap(), Some(first));
+        assert_eq!(resolve_identity(&db, "pool").unwrap(), Some(first));
         db.execute("UPDATE pools SET enabled=0", []).unwrap();
-        assert!(reconstruct_from_roles(&db, "pool").unwrap().is_none());
+        assert!(resolve_identity(&db, "pool").unwrap().is_none());
     }
     #[test]
     fn identity_lookup_work_is_independent_of_retired_and_retained_history() {
@@ -1244,7 +1261,7 @@ mod tests {
         let retained = inspect(&db, "RETAINED");
         assert_eq!(retained.0.unwrap().0, first);
         assert!(retained.1 < 100, "retained fallback scanned history");
-        assert_eq!(reconstruct_from_roles(&db, "pool").unwrap(), Some(first));
+        assert_eq!(resolve_identity(&db, "pool").unwrap(), Some(first));
     }
 
     #[test]
