@@ -373,10 +373,22 @@ impl Store {
     }
 }
 
+const ROLE_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE p.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND w.role=?2 ORDER BY w.sequence LIMIT 1";
+
 fn reconstruct_from_roles(db: &Connection, pool: &str) -> Result<Option<String>> {
-    let chosen: Option<(String,String)> = db.query_row(
-        "SELECT w.id,w.role FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE p.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND w.role IN ('ACTIVE','RETAINED') ORDER BY CASE w.role WHEN 'ACTIVE' THEN 0 ELSE 1 END,w.sequence,w.id LIMIT 1",
-        [pool], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+    // Separate indexed role lookups keep the usual ACTIVE path independent of
+    // retained/retired history. Sequence is unique within the group.
+    let find = |role: &str| -> Result<Option<(String, String)>> {
+        Ok(db
+            .query_row(ROLE_IDENTITY_SQL, params![pool, role], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()?)
+    };
+    let chosen = match find("ACTIVE")? {
+        Some(active) => Some(active),
+        None => find("RETAINED")?,
+    };
     let Some((wallet, role)) = chosen else {
         return Ok(None);
     };
@@ -1199,5 +1211,69 @@ mod tests {
         assert_eq!(reconstruct_from_roles(&db, "pool").unwrap(), Some(first));
         db.execute("UPDATE pools SET enabled=0", []).unwrap();
         assert!(reconstruct_from_roles(&db, "pool").unwrap().is_none());
+    }
+    #[test]
+    fn identity_lookup_work_is_independent_of_retired_and_retained_history() {
+        use rusqlite::StatementStatus;
+        let mut db = database();
+        let initial = allocation(&db, AllocationKind::Initial);
+        funded(&db, &initial);
+        let first = wallet(&db, &initial);
+        let inspect = |db: &Connection, role: &str| {
+            let mut stmt = db.prepare(ROLE_IDENTITY_SQL).unwrap();
+            let chosen: Option<(String, String)> = stmt
+                .query_row(params!["pool", role], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()
+                .unwrap();
+            assert_eq!(stmt.get_status(StatementStatus::FullscanStep), 0);
+            assert_eq!(stmt.get_status(StatementStatus::Sort), 0);
+            (chosen, stmt.get_status(StatementStatus::VmStep))
+        };
+        let before = inspect(&db, "ACTIVE");
+        let tx = db.transaction().unwrap();
+        for n in 1000..21000 {
+            tx.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,'pool',?2,?1,X'00','1',?3)",params![format!("history-{n}"),n,if n%2==0 {"RETIRED"} else {"RETAINED"}]).unwrap();
+        }
+        tx.commit().unwrap();
+        let after = inspect(&db, "ACTIVE");
+        assert_eq!(before, after);
+        assert_eq!(after.0.unwrap().0, first);
+        db.execute("UPDATE wallets SET role='RETAINED' WHERE id=?1", [&first])
+            .unwrap();
+        assert!(inspect(&db, "ACTIVE").0.is_none());
+        let retained = inspect(&db, "RETAINED");
+        assert_eq!(retained.0.unwrap().0, first);
+        assert!(retained.1 < 100, "retained fallback scanned history");
+        assert_eq!(reconstruct_from_roles(&db, "pool").unwrap(), Some(first));
+    }
+
+    #[test]
+    fn reopening_schema16_adds_role_index_without_changing_inventory() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
+        let id = store.id().to_owned();
+        let pool = store
+            .ensure_capacity_group("index_reopen", &reserves(true), Some(U256::from(100)), 0)
+            .unwrap();
+        store
+            .allocate_capacity_kind(&pool, AllocationKind::Initial, true)
+            .unwrap();
+        let before = serde_json::to_value(store.status().unwrap()).unwrap();
+        store
+            .db
+            .execute_batch("DROP INDEX wallet_role_sequence")
+            .unwrap();
+        drop(store);
+        for _ in 0..2 {
+            let reopened = Store::open(&state, &key, &id).unwrap();
+            let exists: bool = reopened.db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='wallet_role_sequence')",[],|r|r.get(0)).unwrap();
+            assert!(exists);
+            assert_eq!(
+                serde_json::to_value(reopened.status().unwrap()).unwrap(),
+                before
+            );
+        }
     }
 }

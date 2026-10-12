@@ -46,6 +46,7 @@ CREATE TABLE wallet_retirements(
  disputed TEXT,
  reason TEXT NOT NULL CHECK(reason='automatic'),
  recorded_at INTEGER NOT NULL);
+CREATE INDEX wallet_role_sequence ON wallets(pool_id,role,sequence);
 CREATE UNIQUE INDEX one_active ON wallets(pool_id) WHERE role='ACTIVE';
 CREATE UNIQUE INDEX one_outgoing ON outgoing((1)) WHERE state='PREPARED';
 CREATE UNIQUE INDEX payment_reconciliation_sequence ON payment_attempts(reconciliation_sequence);

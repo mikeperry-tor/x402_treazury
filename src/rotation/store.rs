@@ -1358,6 +1358,11 @@ fn admission_schema(db: &Connection) -> Result<()> {
         version == 16,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
+    // Additive lookup optimization for existing schema16 stores; financial
+    // records and the state format are unchanged.
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS wallet_role_sequence ON wallets(pool_id,role,sequence);",
+    )?;
     Ok(())
 }
 pub(crate) struct PreparedPayment {

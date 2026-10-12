@@ -208,10 +208,26 @@ impl Store {
         bound: &str,
         through: i64,
     ) -> Result<Vec<String>> {
-        let mut stmt = self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1 AND sequence<=?3 AND (id=?2 OR (role='READY' AND EXISTS(SELECT 1 FROM reserve_claims r WHERE r.pool_id=?1 AND r.wallet_id=wallets.id AND r.enabled=1))) ORDER BY CASE WHEN id=?2 THEN 0 ELSE 1 END,sequence LIMIT 3")?;
-        Ok(stmt
-            .query_map(params![pool, bound, through], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?)
+        let mut priority = Vec::with_capacity(3);
+        let bound: Option<String> = self
+            .db
+            .query_row(
+                "SELECT id FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3",
+                params![bound, pool, through],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(bound) = bound {
+            priority.push(bound);
+        }
+        let mut stmt = self.db.prepare("SELECT w.id FROM reserve_claims c JOIN wallets w ON w.id=c.wallet_id WHERE c.pool_id=?1 AND c.enabled=1 AND w.pool_id=?1 AND w.role='READY' AND w.sequence<=?2 ORDER BY w.sequence")?;
+        for wallet in stmt.query_map(params![pool, through], |r| r.get::<_, String>(0))? {
+            let wallet = wallet?;
+            if !priority.contains(&wallet) {
+                priority.push(wallet);
+            }
+        }
+        Ok(priority)
     }
 }
 

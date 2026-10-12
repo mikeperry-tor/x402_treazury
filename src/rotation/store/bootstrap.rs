@@ -157,17 +157,25 @@ impl Store {
                     .collect::<rusqlite::Result<Vec<_>>>()?,
             );
             ensure!(claims.len() <= 3, "startup claim inventory conflict");
-            let mut statement = self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','RETAINED','READY') ORDER BY CASE role WHEN 'ACTIVE' THEN 0 WHEN 'READY' THEN 1 ELSE 2 END,sequence LIMIT 64")?;
-            // Bounded candidate page; short-circuit at the first funded identity.
-            // This indexed walk does not copy history or require admission freshness.
-            let mut rows = statement.query([&pool])?;
+            // Role-specific index ranges avoid sorting all retained history
+            // before returning the active or ready default identity.
             let mut serving_ready = false;
             let mut active_ready = false;
-            while let Some(row) = rows.next()? {
-                let wallet: String = row.get(0)?;
-                if let Some(ownership) = capacity::payment_ownership(&self.db, &pool, &wallet)? {
-                    serving_ready = true;
-                    active_ready = ownership.role == "ACTIVE";
+            let mut remaining = 64;
+            for role in ["ACTIVE", "READY", "RETAINED"] {
+                let mut statement = self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1 AND role=?2 ORDER BY sequence LIMIT ?3")?;
+                let mut rows = statement.query(params![pool, role, remaining])?;
+                while let Some(row) = rows.next()? {
+                    remaining -= 1;
+                    let wallet: String = row.get(0)?;
+                    if let Some(ownership) = capacity::payment_ownership(&self.db, &pool, &wallet)?
+                    {
+                        serving_ready = true;
+                        active_ready = ownership.role == "ACTIVE";
+                        break;
+                    }
+                }
+                if serving_ready || remaining == 0 {
                     break;
                 }
             }

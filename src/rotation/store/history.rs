@@ -81,7 +81,7 @@ impl Store {
         through: i64,
     ) -> Result<Vec<(i64, String, String)>> {
         let mut statement = self.db.prepare(
-            "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND (role='ACTIVE' OR (role='READY' AND EXISTS(SELECT 1 FROM reserve_claims r WHERE r.pool_id=?1 AND r.wallet_id=wallets.id AND r.enabled=1))) AND sequence<=?2 ORDER BY CASE role WHEN 'ACTIVE' THEN 0 ELSE 1 END,sequence LIMIT 3",
+            "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','READY') AND (role='ACTIVE' OR (role='READY' AND EXISTS(SELECT 1 FROM reserve_claims r WHERE r.pool_id=?1 AND r.wallet_id=wallets.id AND r.enabled=1))) AND sequence<=?2 ORDER BY CASE role WHEN 'ACTIVE' THEN 0 ELSE 1 END,sequence LIMIT 3",
         )?;
         Ok(statement
             .query_map(params![pool, through], |row| {
