@@ -906,6 +906,14 @@ async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
     assert!(h.client.execute(h.route()).await.is_err());
     h.f.wrong_chain.store(false, Ordering::SeqCst);
     h.client.execute(h.route()).await.unwrap();
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    h.close().await;
+
+    // An undisputed historical anchor must detect its first replacement. The
+    // wrong-chain case above already disputes readiness and intentionally permits
+    // independent fresh capacity without clearing that historical dispute.
+    let h = Harness::new().await;
+    h.client.execute(h.route()).await.unwrap();
     h.f.reorg.store(true, Ordering::SeqCst);
     let h = restart(h).await;
     assert!(

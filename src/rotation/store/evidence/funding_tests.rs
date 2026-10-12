@@ -6,19 +6,28 @@ use std::sync::{Arc, Mutex};
 
 #[tokio::test]
 async fn readiness_support_survives_spend_and_requires_exact_historical_endpoint_reverification() {
-    // head, wrong chain, changed historical amount, changed historical hash
-    let state = Arc::new(Mutex::new((100u64, false, false, false)));
+    disputed_readiness_allows_fresh_capacity(88).await;
+}
+
+#[tokio::test]
+async fn latest_only_readiness_dispute_allows_fresh_capacity_after_restart() {
+    disputed_readiness_allows_fresh_capacity(100).await;
+}
+
+async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
+    // head, wrong chain, changed historical amount/hash, current capacity
+    let state = Arc::new(Mutex::new((100u64, false, false, false, 0u64)));
     let rpc_state = state.clone();
     let app=Router::new().route("/",post(move |Json(v):Json<Value>| {
         let state=rpc_state.clone();
         async move {
-            let (head,wrong,amount_conflict,hash_conflict)=*state.lock().unwrap();
+            let (head,wrong,amount_conflict,hash_conflict,current)=*state.lock().unwrap();
             let result=match v["method"].as_str().unwrap() {
                 "eth_chainId"=>json!(if wrong {"0x1"}else{"0x2105"}),
                 "eth_getBlockByNumber"=>{
                     let tag=v["params"][0].as_str().unwrap();
                     let height=if tag=="latest"{head}else{u64::from_str_radix(&tag[2..],16).unwrap()};
-                    let hash=if hash_conflict && height==88 {999}else{height};
+                    let hash=if hash_conflict && height==conflict_height {999}else{height};
                     let timestamp=if head>100 && height<=100 {now().unwrap()-500}else{now().unwrap()};
                     json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{timestamp:x}")})
                 },
@@ -27,7 +36,7 @@ async fn readiness_support_survives_spend_and_requires_exact_historical_endpoint
                     assert_eq!(v["params"][1]["requireCanonical"],true);
                     let hash=v["params"][1]["blockHash"].as_str().unwrap();
                     let height=u64::from_str_radix(&hash[2..],16).unwrap();
-                    let amount=if height<=100 {5_000_000u64+u64::from(amount_conflict)}else{0};
+                    let amount=if height<=100 {5_000_000u64+u64::from(amount_conflict)}else{current};
                     json!(format!("0x{amount:064x}"))
                 },
                 method=>panic!("unexpected historical support mutation {method}"),
@@ -222,6 +231,81 @@ async fn readiness_support_survives_spend_and_requires_exact_historical_endpoint
             )
             .unwrap(),
         original
+    );
+    // Neither a confirmed nor a latest-only readiness discrepancy is a
+    // financial checkpoint. Persist the dispute across another restart, then
+    // acquire independent current capacity without rewriting historical D.
+    drop(store);
+    let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    state.lock().unwrap().4 = 6_000_000;
+    store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('outstanding',?1,?2,0,'2000000','fixture','POSSIBLY_SUBMITTED')",params![pool,job.wallet_id]).unwrap();
+    add_exposure(&store.db, &job.wallet_id, U256::from(2_000_000)).unwrap();
+    let query = store
+        .scoped_chain_query(&pool, vec![job.wallet_id.clone()], vec![])
+        .unwrap();
+    let view = rpc.view(query).await.unwrap();
+    store
+        .publish_candidate_evidence(&pool, &job.wallet_id, view)
+        .unwrap();
+    assert!(
+        store
+            .cached_payment_candidate(&pool, U256::from(4_000_000), None)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        store
+            .cached_payment_candidate(&pool, U256::from(4_000_001), None)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        exposure(&store.db, &job.wallet_id).unwrap(),
+        U256::from(2_000_000)
+    );
+    let (saved, dispute, repair): (String, String, Option<String>) = store.db.query_row(
+        "SELECT f.readiness_support,f.readiness_disputed,w.evidence_repair FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.id=?1",
+        [&job.id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(saved, original);
+    assert_eq!(dispute, "chain_repair_required");
+    assert!(repair.is_none());
+
+    // An actual financial dependency at that same historical anchor must still
+    // block acquisition and mark durable repair; fresh balances cannot clear it.
+    store
+        .db
+        .execute(
+            "UPDATE wallets SET financial_height=?2,financial_hash=?3 WHERE id=?1",
+            params![
+                job.wallet_id,
+                i64::try_from(conflict_height).unwrap(),
+                format!("0x{conflict_height:064x}")
+            ],
+        )
+        .unwrap();
+    let query = store
+        .scoped_chain_query(&pool, vec![job.wallet_id.clone()], vec![])
+        .unwrap();
+    let error = rpc.view(query).await.err().unwrap();
+    store.record_base_failure(&error).unwrap();
+    assert!(
+        store
+            .cached_payment_view(&pool, &job.wallet_id)
+            .unwrap()
+            .is_none()
+    );
+    let repair: String = store
+        .db
+        .query_row(
+            "SELECT evidence_repair FROM wallets WHERE id=?1",
+            [&job.wallet_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(repair, "chain_repair_required");
+    assert_eq!(
+        exposure(&store.db, &job.wallet_id).unwrap(),
+        U256::from(2_000_000)
     );
     server.abort();
 }

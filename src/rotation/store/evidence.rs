@@ -754,10 +754,11 @@ impl Store {
                 });
         // Exactly one funding job owns a wallet. This keyed read is bounded;
         // immutable support remains relevant after ordinary cache eviction.
-        let saved:Option<(Option<String>,Option<String>)>=self.db.query_row(
-            "SELECT readiness_requirement,readiness_support FROM funding_jobs WHERE wallet_id=?1",[wallet],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+        let saved: Option<(Option<String>, Option<String>, Option<String>)> = self.db.query_row(
+            "SELECT readiness_requirement,readiness_support,readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
+            [wallet], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
         let mut durable_balance_anchors = Vec::new();
-        if let Some((Some(_), support)) = saved {
+        if let Some((Some(_), support, disputed)) = saved {
             let support: BalanceSupport = serde_json::from_str(
                 support
                     .as_deref()
@@ -782,21 +783,26 @@ impl Store {
                     == address.parse::<alloy_primitives::Address>()?,
                 EvidenceFailure::ScopeMismatch
             );
-            durable_balance_anchors.push(support.observation.confirmed.anchor);
-            durable_balance_anchors.push(support.observation.latest.anchor);
-            if let Some(anchor) = support.checkpoint {
-                durable_balance_anchors.push(anchor);
+            // A known-disputed historical balance is retained for review, not
+            // a dependency of fresh capacity. Financial checkpoints are captured
+            // independently above and remain mandatory even at the same anchor.
+            if disputed.is_none() {
+                durable_balance_anchors.push(support.observation.confirmed.anchor);
+                durable_balance_anchors.push(support.observation.latest.anchor);
+                if let Some(anchor) = support.checkpoint {
+                    durable_balance_anchors.push(anchor);
+                }
             }
         }
-        let retired: Option<String> = self
+        let retired: Option<(String, Option<String>)> = self
             .db
             .query_row(
-                "SELECT support FROM wallet_retirements WHERE wallet_id=?1",
+                "SELECT support,disputed FROM wallet_retirements WHERE wallet_id=?1",
                 [wallet],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if let Some(retired) = retired {
+        if let Some((retired, disputed)) = retired {
             let support: BalanceSupport =
                 serde_json::from_str(&retired).map_err(|_| EvidenceFailure::MalformedSupport)?;
             support.observation.validate()?;
@@ -817,10 +823,15 @@ impl Store {
                     == address.parse::<alloy_primitives::Address>()?,
                 EvidenceFailure::ScopeMismatch
             );
-            durable_balance_anchors.push(support.observation.confirmed.anchor);
-            durable_balance_anchors.push(support.observation.latest.anchor);
-            if let Some(anchor) = support.checkpoint {
-                durable_balance_anchors.push(anchor);
+            // A known-disputed historical balance is retained for review, not
+            // a dependency of fresh capacity. Financial checkpoints are captured
+            // independently above and remain mandatory even at the same anchor.
+            if disputed.is_none() {
+                durable_balance_anchors.push(support.observation.confirmed.anchor);
+                durable_balance_anchors.push(support.observation.latest.anchor);
+                if let Some(anchor) = support.checkpoint {
+                    durable_balance_anchors.push(anchor);
+                }
             }
         }
         Ok(crate::rotation::base::EvidenceCapture {

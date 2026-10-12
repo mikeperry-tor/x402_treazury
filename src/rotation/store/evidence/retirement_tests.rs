@@ -228,11 +228,26 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
     );
     state.lock().unwrap().1 = false;
     state.lock().unwrap().3 = true;
+    state.lock().unwrap().0 = 300;
+    // The already-disputed retirement remains immutable. Independent current
+    // evidence may be acquired, but can neither clear the dispute nor reactivate.
     let query = store
         .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
         .unwrap();
-    let error = rpc.view(query).await.err().unwrap();
-    store.record_base_failure(&error).unwrap();
+    let view = rpc.view(query).await.unwrap();
+    store.publish_scoped_evidence(&pool, view).unwrap();
+    assert!(store.cached_payment_view(&pool, &wallet).unwrap().is_none());
+    assert_eq!(
+        store
+            .db
+            .query_row(
+                "SELECT disputed FROM wallet_retirements WHERE wallet_id=?1",
+                [&wallet],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "evidence_repair_required"
+    );
     assert_eq!(role(&store, &wallet), "RETIRED");
     assert_eq!(
         store

@@ -336,7 +336,11 @@ anchors. Malformed acquisition alone does not invalidate earlier independent
 evidence. A demonstrated endpoint contradiction invalidates its affected support
 across groups. Historical readiness or retirement discrepancies remain separate
 from invalidated liability-release/accounting support: fresh observations cannot
-silently clear a durable financial repair block or reactivate a retiree.
+silently clear a durable financial repair block or reactivate a retiree. Once a
+historical balance is disputed, its anchors no longer gate independent fresh
+capacity; the original support and dispute remain durable. Current payment
+admission still subtracts all unresolved liabilities and verifies every actual
+financial checkpoint, including one at the same disputed historical anchor.
 
 The configured RPC policy defaults to PublicNode, dRPC and Base. Availability
 failure can restart an entire bounded view at another configured endpoint; it
