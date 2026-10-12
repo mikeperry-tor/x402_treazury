@@ -627,10 +627,6 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-
-    pub fn funding_status_needed(&self, job: &str, operation: &str) -> Result<bool> {
-        Ok(self.db.query_row("SELECT provider_success=0 AND provider_refunded=0 FROM funding_progress WHERE job_id=?1 AND operation_id=?2", params![job,operation], |r| r.get(0))?)
-    }
 }
 
 fn source_accounted(db: &Connection, operation: &str) -> Result<bool> {
@@ -2240,40 +2236,115 @@ mod completion_tests {
     }
 
     #[cfg(feature = "zcash")]
-    #[test]
-    fn incomplete_deposit_keeps_observing_until_a_terminal_provider_fact() {
-        use crate::rotation::near::SwapStatus;
-        let (_dir, mut store, job) = fixture();
-        let quote = serde_json::to_vec(
-            &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
-        )
-        .unwrap();
-        store.save_funding_quote(&job.id, &quote).unwrap();
+    fn submit_source_for_status(store: &mut Store, job: &FundingJob) {
+        use crate::rotation::transaction::{ManagedFundingAuthority, TransactionFacts};
+        assert!(
+            !store
+                .funding_facts(&job.id, &job.operation_id)
+                .unwrap()
+                .status_needed(),
+            "a quote alone must not trigger status I/O"
+        );
         store
-            .record_provider_outcome(
-                &job.id,
+            .begin_funding_preparation(
                 &job.operation_id,
-                &SwapStatus::IncompleteDeposit,
-                1,
+                Some(&ManagedFundingAuthority {
+                    job_id: job.id.clone(),
+                    auto_fund: true,
+                    max_attempts: 3,
+                }),
+            )
+            .unwrap();
+        store
+            .reserve(&job.operation_id, Some(&job.pool_id), 1, 100)
+            .unwrap();
+        let revision = store.snapshot().unwrap().0;
+        store
+            .prepare_with_facts(
+                &job.operation_id,
+                revision,
+                b"snapshot",
+                b"signed fixture bytes",
+                Some(TransactionFacts {
+                    txid: "transaction".into(),
+                    expiry_height: 100,
+                    amount_zatoshis: 50,
+                    fee_zatoshis: 10,
+                    deadline: u64::MAX,
+                }),
             )
             .unwrap();
         assert!(
-            store
-                .funding_status_needed(&job.id, &job.operation_id)
+            !store
+                .funding_facts(&job.id, &job.operation_id)
                 .unwrap()
+                .status_needed(),
+            "private prepared bytes must not trigger status I/O"
         );
         store
-            .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 2)
+            .request_broadcast(&job.operation_id, 1, 1, false)
             .unwrap();
         assert!(
-            !store
-                .funding_status_needed(&job.id, &job.operation_id)
+            store
+                .funding_facts(&job.id, &job.operation_id)
                 .unwrap()
+                .status_needed()
         );
-        assert_eq!(
-            store.funding_job(&job.id).unwrap().unwrap().phase,
-            FundingPhase::RecoveryRequired
-        );
+    }
+
+    #[cfg(feature = "zcash")]
+    #[test]
+    fn incomplete_deposit_keeps_observing_until_a_terminal_provider_fact() {
+        use crate::rotation::near::SwapStatus;
+        for terminal in [SwapStatus::Success, SwapStatus::Refunded] {
+            let (_dir, mut store, job) = fixture();
+            assert!(
+                !store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .status_needed()
+            );
+            let quote = serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
+            )
+            .unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            submit_source_for_status(&mut store, &job);
+            store.disable_pool(&job.pool_name).unwrap();
+            for (n, status) in [
+                SwapStatus::Processing,
+                SwapStatus::IncompleteDeposit,
+                SwapStatus::Failed,
+            ]
+            .iter()
+            .enumerate()
+            {
+                store
+                    .record_provider_outcome(&job.id, &job.operation_id, status, n as u64 + 1)
+                    .unwrap();
+                assert!(
+                    store
+                        .funding_facts(&job.id, &job.operation_id)
+                        .unwrap()
+                        .status_needed(),
+                    "pause or a nonterminal observation must not abandon submitted work"
+                );
+            }
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, &terminal, 4)
+                .unwrap();
+            assert!(
+                !store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .status_needed()
+            );
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().phase,
+                FundingPhase::RecoveryRequired
+            );
+            assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+        }
     }
 
     #[cfg(feature = "zcash")]
@@ -2290,13 +2361,15 @@ mod completion_tests {
                 .unwrap(),
             )
             .unwrap();
+        submit_source_for_status(&mut store, &job);
         store
             .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 1)
             .unwrap();
         assert!(
             !store
-                .funding_status_needed(&job.id, &job.operation_id)
+                .funding_facts(&job.id, &job.operation_id)
                 .unwrap()
+                .status_needed()
         );
         store
             .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Processing, 2)

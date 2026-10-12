@@ -120,6 +120,9 @@ mod tests {
                 deadline: 1000,
             }),
         )?;
+        assert!(!s.funding_facts(&job.id, &job.operation_id)?.status_needed());
+        s.request_broadcast(&job.operation_id, 1, 1, false)?;
+        assert!(s.funding_facts(&job.id, &job.operation_id)?.status_needed());
         let observation = SyncObservation {
             phase: SyncPhase::Ready,
             last_error: None,
@@ -157,6 +160,12 @@ mod tests {
         assert!(s.resolve_expired(&job.operation_id, revision, 401).is_err());
         s.resolve_expired(&job.operation_id, revision, 100)?;
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
+        let facts = s.funding_facts(&job.id, &job.operation_id)?;
+        assert!(facts.archived && facts.accepted_quote && facts.source_attempts == 1);
+        assert!(
+            !facts.status_needed(),
+            "archived operations cannot trigger status I/O"
+        );
         assert!(!s.operation_pending(&job.operation_id)?);
         let next = s.funding_jobs()?.remove(0);
         assert_eq!(next.operation_id, job.operation_id);
