@@ -7,7 +7,7 @@ any working directory unless a command explicitly supplies relative data paths.
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
 | `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
-| `check.sh` | Format, vendor provenance, default Zcash tests, all-feature Clippy and compatibility suite |
+| `check.sh` | Format, vendor provenance, default Zcash tests, offline refund-accounting tests, all-feature Clippy and compatibility suite |
 | `check.sh --no-default-features` | Explicit opt-in only: tests and Clippy without the embedded wallet, plus format/provenance |
 | `python3 scripts/complexity.py` | Pinned source complexity metrics; ranked Markdown and complete JSON/CSV under `target/complexity` |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
@@ -24,6 +24,9 @@ requested. The standard build includes Zcash; static-wallet deployments need no 
 configuration. If both variants are requested, run them sequentially: CLI tests share
 `target/debug/x402_treazury`.
 `check.sh` leaves the Zcash-enabled executable available at that path.
+It also runs the feature-gated `treasury::refunds::tests` with `zcash-testutils`
+after the default suite, exercising return attribution and canonical credit
+revalidation through local sync fixtures.
 All default checks use local fixtures and public test keys; none reads `.env` or
 performs funded transactions. Local socket tests require permission to bind localhost.
 Cargo and Zingolib may download dependencies/public proving parameters on first build.
