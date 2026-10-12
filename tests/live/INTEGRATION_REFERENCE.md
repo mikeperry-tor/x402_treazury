@@ -628,6 +628,17 @@ are not active capacity; unanchored default zeros are unobserved. Saved observat
 are not fresh chain queries or costs attributable exclusively to the selected run.
 Missing/crashed sessions have no final snapshot.
 
+Current qualification pool balances use `schema_version=2` and a `wallets` map.
+Each wallet records exact `confirmed_balance_atomic` and `latest_balance_atomic`
+with their separate block heights/hashes, plus `conservative_balance_atomic`
+(the minimum) for capacity calculations. Admission `balance_evidence` uses the
+same versioned fields alongside its original exposure and immutable support.
+Depletion estimates and admission arithmetic use the conservative amount, never
+the exact confirmed amount alone. Historical unversioned records remain readable:
+their `confirmed` map and `confirmed_balance_atomic` field held conservative
+values and must not be interpreted as exact confirmed-block observations.
+Admissions without saved exact support retain that historical representation.
+
 Run attribution uses immutable operation-permit bindings captured with the snapshot,
 never later mutable releases. Separate conservative registry ceilings from treasury
 reservations and consumed costs. Missing budget evidence does not prove zero cost.

@@ -72,6 +72,23 @@ pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> 
         let support: super::evidence::BalanceSupport =
             serde_json::from_str(encoded).context("malformed exact admission support")?;
         support.observation.validate()?;
+        ensure!(
+            balance == support.observation.available()
+                && evidence["block_height"].as_u64()
+                    == Some(support.observation.confirmed.anchor.height)
+                && evidence["block_hash"].as_str()
+                    == Some(support.observation.confirmed.anchor.hash.as_str()),
+            "admission balance disagrees with exact support"
+        );
+        evidence
+            .as_object_mut()
+            .context("admission evidence missing")?
+            .extend(
+                crate::qualification::observed_balance(&support.observation)
+                    .as_object()
+                    .expect("balance evidence object")
+                    .clone(),
+            );
         evidence["support"] = serde_json::to_value(support)?;
     }
     payment["ownership_evidence_version"] = json!(1);
@@ -307,6 +324,59 @@ mod tests {
             store.qualification_payment("new").unwrap()["balance_evidence"],
             evidence["balance_evidence"]
         );
+        // The same historical admission gains exact labels only when its saved
+        // support establishes them. Current wallet balances cannot supply them.
+        let support = super::super::evidence::BalanceSupport {
+            observation: crate::rotation::base::evidence::BalanceObservation {
+                wallet: wallet.clone(),
+                address: store.status().unwrap().pools[0].addresses[0]
+                    .address
+                    .clone(),
+                network: "eip155:8453".into(),
+                asset: crate::payment::USDC.into(),
+                endpoint: "a".repeat(64),
+                confirmations: 12,
+                confirmed: crate::rotation::base::evidence::BalancePoint {
+                    anchor: Anchor {
+                        height: 12,
+                        hash: hash.clone(),
+                    },
+                    amount: U256::from(300),
+                },
+                latest: crate::rotation::base::evidence::BalancePoint {
+                    anchor: Anchor {
+                        height: 24,
+                        hash: format!("0x{:064x}", 2),
+                    },
+                    amount: U256::from(100),
+                },
+                valid_until: 1000,
+            },
+            checkpoint: None,
+        };
+        store
+            .db
+            .execute(
+                "UPDATE payment_admission_evidence SET support=?1 WHERE attempt_id='new'",
+                [serde_json::to_string(&support).unwrap()],
+            )
+            .unwrap();
+        let exact = store.qualification_payment("new").unwrap();
+        assert_eq!(exact["balance_evidence"]["schema_version"], 2);
+        assert_eq!(exact["balance_evidence"]["confirmed_balance_atomic"], "300");
+        assert_eq!(exact["balance_evidence"]["latest_balance_atomic"], "100");
+        assert_eq!(
+            exact["balance_evidence"]["conservative_balance_atomic"],
+            "100"
+        );
+        assert_eq!(exact["balance_evidence"]["available_after_atomic"], "83");
+        store
+            .db
+            .execute(
+                "UPDATE payment_admission_evidence SET support=NULL WHERE attempt_id='new'",
+                [],
+            )
+            .unwrap();
         store
             .db
             .execute(

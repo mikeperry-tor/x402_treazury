@@ -2,6 +2,7 @@
 //! The parent owns the registry lock. This child may only claim an already
 //! dispatched case, once, and append its application observations.
 mod balance;
+pub(crate) use balance::{conservative_balance, observed_balance};
 mod observation;
 pub(crate) use observation::pool_observation;
 pub mod lifecycle;

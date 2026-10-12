@@ -469,7 +469,7 @@ impl ManagedPool {
             let through = self.store.call(move |s| s.wallet_boundary(&pool)).await?;
             let mut cursor = -1;
             let mut anchor = None;
-            let mut confirmed = std::collections::BTreeMap::new();
+            let mut wallets = std::collections::BTreeMap::new();
             loop {
                 let pool = self.pool.clone();
                 let page = self
@@ -497,13 +497,11 @@ impl ManagedPool {
                     "qualification_full_inventory_anchor_changed"
                 );
                 anchor = Some(view.anchor.clone());
-                confirmed.extend(
-                    view.balances
-                        .iter()
-                        .map(|(id, value)| (id.clone(), value.to_string())),
-                );
+                wallets.extend(view.observations.iter().map(|(id, value)| {
+                    (id.clone(), crate::qualification::observed_balance(value))
+                }));
                 ensure!(
-                    serde_json::to_vec(&confirmed)?.len() <= crate::qualification::LIMIT,
+                    serde_json::to_vec(&wallets)?.len() <= crate::qualification::LIMIT,
                     "qualification pool evidence exceeds byte limit"
                 );
                 let pool = self.pool.clone();
@@ -517,7 +515,7 @@ impl ManagedPool {
             let guard = Arc::new(self.gate.clone().lock_owned().await);
             self.store.call_with_guard(guard,move |s| {
                 ensure!(s.wallet_boundary(&pool)?==through,"qualification inventory changed during observation");
-                let evidence=serde_json::json!({"block_height":anchor.height,"block_hash":anchor.hash,"confirmed":confirmed,"unresolved":s.qualification_exposure(&pool)?});
+                let evidence=serde_json::json!({"schema_version":2,"block_height":anchor.height,"block_hash":anchor.hash,"wallets":wallets,"unresolved":s.qualification_exposure(&pool)?});
                 observation.record(s.qualification_lifecycle()?,evidence)
             }).await?;
         }

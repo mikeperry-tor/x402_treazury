@@ -137,11 +137,24 @@ fn available_balance(balances: &Value, wallet: &Value) -> Result<U256> {
     let id = wallet["id"]
         .as_str()
         .context("observed wallet ID missing")?;
-    let confirmed = number(
-        balances["confirmed"][id]
-            .as_str()
-            .context("wallet was not refreshed by observed RPC view")?,
-    )?;
+    let conservative = match balances.get("schema_version") {
+        None => number(
+            balances["confirmed"][id]
+                .as_str()
+                .context("wallet was not refreshed by observed RPC view")?,
+        )?,
+        Some(version) if version.as_u64() == Some(2) => {
+            let evidence = &balances["wallets"][id];
+            ensure!(
+                evidence["schema_version"] == 2
+                    && evidence["block_height"] == balances["block_height"]
+                    && evidence["block_hash"] == balances["block_hash"],
+                "wallet balance lacks the observed pool anchor"
+            );
+            super::conservative_balance(evidence)?
+        }
+        _ => anyhow::bail!("unknown pool balance evidence version"),
+    };
     let unresolved = balances["unresolved"]
         .as_object()
         .context("unresolved exposure missing")?
@@ -149,9 +162,9 @@ fn available_balance(balances: &Value, wallet: &Value) -> Result<U256> {
         .map(|v| number(v.as_str().context("invalid unresolved exposure")?))
         .transpose()?
         .unwrap_or(U256::ZERO);
-    let available = confirmed
+    let available = conservative
         .checked_sub(unresolved)
-        .context("unresolved exposure exceeds confirmed balance")?;
+        .context("unresolved exposure exceeds conservative balance")?;
     ensure!(
         unresolved == U256::ZERO,
         "depletion baseline has unresolved authorizations; await canonical reconciliation before estimating rotation"
@@ -163,6 +176,40 @@ mod tests {
     use super::*;
     fn observation() -> Value {
         json!({"pool":"p","pool_name":"pool","state":{"pools":[{"id":"p","name":"pool","generation":3,"addresses":[{"id":"a","role":"ACTIVE"},{"id":"b","role":"READY"}]}]},"balances":{"block_height":12,"block_hash":format!("0x{:064x}",1),"confirmed":{"a":"80","b":"200"},"unresolved":{}}})
+    }
+    #[test]
+    fn versioned_pool_observations_estimate_from_conservative_balances() {
+        let mut value = observation();
+        let balances = &mut value["balances"];
+        balances["schema_version"] = json!(2);
+        balances.as_object_mut().unwrap().remove("confirmed");
+        for (wallet, confirmed, latest) in [("a", 80, 30), ("b", 200, 250)] {
+            balances["wallets"][wallet] = json!({
+                "schema_version":2,"confirmed_balance_atomic":confirmed.to_string(),
+                "latest_balance_atomic":latest.to_string(),
+                "conservative_balance_atomic":confirmed.min(latest).to_string(),
+                "block_height":12,"block_hash":format!("0x{:064x}",1),
+                "latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2)
+            });
+        }
+        let estimate = depletion_estimate(&value, "20", 2).unwrap();
+        assert_eq!(estimate["estimated_calls"], 2);
+        assert_eq!(estimate["active_available_atomic"], "30");
+        assert_eq!(estimate["standby_available_atomic"], "200");
+        for (pointer, replacement) in [
+            ("/balances/schema_version", json!(3)),
+            (
+                "/balances/wallets/a/conservative_balance_atomic",
+                json!("80"),
+            ),
+            ("/balances/wallets/a/block_height", json!(11)),
+            ("/balances/wallets/a/latest_block_hash", Value::Null),
+            ("/balances/wallets/a/schema_version", Value::Null),
+        ] {
+            let mut invalid = value.clone();
+            *invalid.pointer_mut(pointer).unwrap() = replacement;
+            assert!(depletion_estimate(&invalid, "20", 10).is_err(), "{pointer}");
+        }
     }
     #[test]
     fn current_inventory_estimate_includes_retained_capacity_and_multiple_reserves() {
