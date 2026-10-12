@@ -194,19 +194,38 @@ pub(crate) enum CandidateEvidenceState {
 }
 
 impl Store {
-    pub(crate) fn candidate_evidence_state(
+    /// Capture eligibility and its exact cached view once in this store job.
+    pub(crate) fn candidate_evidence(
         &self,
         pool: &str,
         wallet: &str,
-    ) -> Result<CandidateEvidenceState> {
+    ) -> Result<(
+        CandidateEvidenceState,
+        Option<super::super::base::ChainView>,
+    )> {
         if payment_ownership(&self.db, pool, wallet)?.is_none() {
-            return Ok(CandidateEvidenceState::Ineligible);
+            return Ok((CandidateEvidenceState::Ineligible, None));
         }
-        Ok(if self.cached_payment_view(pool, wallet)?.is_some() {
-            CandidateEvidenceState::Usable
-        } else {
-            CandidateEvidenceState::Missing
-        })
+        let missing = (CandidateEvidenceState::Missing, None);
+        let Some((_, certificate)) = self.evidence_cache.get(wallet) else {
+            return Ok(missing);
+        };
+        let support = match evidence::check_balance(&self.db, self.evidence_namespace, certificate)
+        {
+            Ok(support) => support,
+            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                return Ok(missing);
+            }
+            Err(error) => return Err(error),
+        };
+        let observation = support.observation;
+        if super::super::base::now()? > observation.valid_until {
+            return Ok(missing);
+        }
+        Ok((
+            CandidateEvidenceState::Usable,
+            Some(payment_view(wallet, certificate, observation)),
+        ))
     }
 
     pub(crate) fn cached_payment_view(
@@ -214,25 +233,7 @@ impl Store {
         pool: &str,
         wallet: &str,
     ) -> Result<Option<super::super::base::ChainView>> {
-        if payment_ownership(&self.db, pool, wallet)?.is_none() {
-            return Ok(None);
-        }
-        let Some((_, certificate)) = self.evidence_cache.get(wallet) else {
-            return Ok(None);
-        };
-        let support = match evidence::check_balance(&self.db, self.evidence_namespace, certificate)
-        {
-            Ok(support) => support,
-            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
-                return Ok(None);
-            }
-            Err(error) => return Err(error),
-        };
-        let observation = support.observation;
-        if super::super::base::now()? > observation.valid_until {
-            return Ok(None);
-        }
-        Ok(Some(payment_view(wallet, certificate, observation)))
+        Ok(self.candidate_evidence(pool, wallet)?.1)
     }
 
     /// Runtime evidence publication alone cannot consume a reserve or retire a wallet.
@@ -241,7 +242,10 @@ impl Store {
         pool: &str,
         wallet: &str,
         view: super::super::base::ChainView,
-    ) -> Result<CandidateEvidenceState> {
+    ) -> Result<(
+        CandidateEvidenceState,
+        Option<super::super::base::ChainView>,
+    )> {
         ensure!(
             view.balance_certificates.len() == 1
                 && view.balance_certificates.contains_key(wallet)
@@ -251,7 +255,7 @@ impl Store {
             "candidate evidence scope mismatch"
         );
         self.prepare_evidence_view(view)?;
-        self.candidate_evidence_state(pool, wallet)
+        self.candidate_evidence(pool, wallet)
     }
 
     /// Bound payer and at most two enabled ready reserves leave a read lane for traversal.

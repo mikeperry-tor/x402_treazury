@@ -620,7 +620,7 @@ async fn completed_sufficient_candidate_survives_cache_churn() {
                 assert!(matches!(
                     owner
                         .store
-                        .call(move |s| s.candidate_evidence_state(&pool, &bound))
+                        .call(move |s| s.candidate_evidence(&pool, &bound).map(|result| result.0))
                         .await
                         .unwrap(),
                     CandidateEvidenceState::Missing
@@ -678,7 +678,9 @@ async fn cached_candidate_survives_eviction_between_evaluation_and_batched_selec
                         assert!(matches!(
                             owner
                                 .store
-                                .call(move |s| s.candidate_evidence_state(&pool, &target))
+                                .call(move |s| s
+                                    .candidate_evidence(&pool, &target)
+                                    .map(|result| result.0))
                                 .await
                                 .unwrap(),
                             CandidateEvidenceState::Missing
@@ -730,7 +732,7 @@ async fn evicted_owned_proof_keeps_expiry_and_rechecks_liabilities_and_invalidat
     assert!(matches!(
         f.manager
             .store
-            .call(move |s| s.candidate_evidence_state(&pool, &wallet))
+            .call(move |s| s.candidate_evidence(&pool, &wallet).map(|result| result.0))
             .await
             .unwrap(),
         CandidateEvidenceState::Missing

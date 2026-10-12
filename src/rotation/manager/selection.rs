@@ -119,12 +119,7 @@ impl ManagedPool {
                 let (pool, id) = (self.pool.clone(), wallet.clone());
                 let state = self
                     .store
-                    .call_with_guard(guard, move |s| {
-                        Ok((
-                            s.candidate_evidence_state(&pool, &id)?,
-                            s.cached_payment_view(&pool, &id)?,
-                        ))
-                    })
+                    .call_with_guard(guard, move |s| s.candidate_evidence(&pool, &id))
                     .await;
                 let state = match state {
                     Ok(state) => state,
@@ -282,8 +277,7 @@ impl ManagedPool {
         let pool = self.pool.clone();
         self.store
             .call_with_guard(guard, move |s| {
-                let state = s.publish_candidate_evidence(&pool, &wallet, view)?;
-                Ok((state, s.cached_payment_view(&pool, &wallet)?))
+                s.publish_candidate_evidence(&pool, &wallet, view)
             })
             .await
     }
