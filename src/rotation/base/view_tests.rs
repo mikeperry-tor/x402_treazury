@@ -203,6 +203,90 @@ async fn historical_resolution_and_compatibility_share_identical_anchors() {
 }
 
 #[tokio::test]
+async fn history_replacement_retains_readiness_only_conflict_scope() {
+    let (rpc, _, server, _) = fixture(true).await;
+    let mut query = query(true);
+    query.wallets.clear();
+    let mut captured = capture("wallet", None);
+    captured.durable_balance_anchors.push(anchor(88));
+    query.captures.insert("wallet".into(), captured);
+    let error = rpc.view(query).await.err().unwrap();
+    let conflict = error
+        .downcast_ref::<EvidenceConflict>()
+        .expect("historical readiness conflict must remain typed");
+    assert_eq!(conflict.wallet, "wallet");
+    assert_eq!(conflict.anchor, anchor(88));
+    assert!(!conflict.financial_checkpoint);
+    assert!(!conflict.latest_only);
+    server.abort();
+}
+
+#[tokio::test]
+async fn historical_balance_reverification_shares_only_within_each_state_read_phase() {
+    for reorg in [false, true] {
+        let (rpc, requests, server, _) = fixture(reorg).await;
+        let observation = evidence::BalanceObservation {
+            wallet: "wallet".into(),
+            address: format!("0x{:040x}", 1),
+            network: "eip155:8453".into(),
+            asset: USDC.into(),
+            endpoint: rpc.endpoint_id(),
+            confirmations: 12,
+            confirmed: evidence::BalancePoint {
+                anchor: anchor(88),
+                amount: U256::from(10),
+            },
+            latest: evidence::BalancePoint {
+                anchor: anchor(100),
+                amount: U256::from(10),
+            },
+            // Historical reverification must neither require fresh amounts nor
+            // turn these deliberately expired observations into payment authority.
+            valid_until: 1,
+        };
+        let request = historical::HistoricalBalanceRequest {
+            capture: capture("wallet", Some(anchor(88))),
+            observation: observation.clone(),
+            checkpoint: Some(anchor(88)),
+        };
+        let result = rpc.verify_historical_balance(request).await;
+        if reorg {
+            let error = result.err().unwrap();
+            let conflict = error.downcast_ref::<EvidenceConflict>().unwrap();
+            assert!(conflict.financial_checkpoint);
+        } else {
+            assert_eq!(result.unwrap().request().observation, observation);
+            assert_eq!(header_reads(&requests, 100), 2);
+        }
+        assert_eq!(
+            header_reads(&requests, 88),
+            2,
+            "one pre-state and one post-state check"
+        );
+        let reads = requests.lock().unwrap();
+        let balances: Vec<_> = reads
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r["method"] == "eth_call")
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(
+            balances.len(),
+            2,
+            "reorg must be detected after acquiring historical amounts"
+        );
+        let confirmations: Vec<_> = reads
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r["method"] == "eth_getBlockByNumber" && r["params"][0] == "0x58")
+            .map(|(n, _)| n)
+            .collect();
+        assert!(confirmations[0] < balances[0] && confirmations[1] > balances[1]);
+        server.abort();
+    }
+}
+
+#[tokio::test]
 async fn balance_only_reads_one_header_pair_and_rechecks_both_anchors() {
     let (rpc, requests, server, stamp) = fixture(false).await;
     let view = rpc.view(query(false)).await.unwrap();

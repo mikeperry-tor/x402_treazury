@@ -53,7 +53,7 @@ impl BaseRpc {
         let mut capture = request.capture.clone();
         capture.previous = None;
         capture.durable_balance_anchors.clear();
-        endpoint
+        let mut rechecked = endpoint
             .verify_recheck(&capture, &observation.endpoint)
             .await?;
         let mut anchors = vec![
@@ -69,7 +69,14 @@ impl BaseRpc {
         let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
         for pass in 0..2 {
             for anchor in &anchors {
-                let (canonical, _) = endpoint.block(&format!("0x{:x}", anchor.height)).await?;
+                let canonical = endpoint
+                    .recheck_anchor(
+                        anchor.height,
+                        &mut rechecked,
+                        &ViewProgress::new(),
+                        "historical_anchor_recheck",
+                    )
+                    .await?;
                 ensure!(
                     canonical == *anchor,
                     EvidenceConflict {
@@ -93,6 +100,9 @@ impl BaseRpc {
                         }
                     );
                 }
+                // State reads separate canonical verification phases: a header
+                // checked before them cannot certify their post-read provenance.
+                rechecked.clear();
             }
         }
         let endpoint_generation = request

@@ -15,7 +15,9 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
         async move {
             logs.lock().unwrap().push((mode.clone(), v.clone()));
             let method = v["method"].as_str().unwrap();
-            if mode == "slow" { tokio::time::sleep(std::time::Duration::from_secs(2)).await; }
+            // Keep the whole progressing view beyond the former 15-second
+            // deadline even after redundant canonical header reads are removed.
+            if mode == "slow" { tokio::time::sleep(std::time::Duration::from_millis(2500)).await; }
             if mode == "stall" { tokio::time::sleep(std::time::Duration::from_secs(60)).await; }
             if mode == "malformed" { return "private invalid JSON".into_response(); }
             // Fail only after some useful-looking evidence has been read.

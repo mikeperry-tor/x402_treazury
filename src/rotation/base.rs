@@ -668,17 +668,18 @@ impl BaseRpc {
                 )
                 .await?;
             if canonical != resolution_anchor {
-                if let Some(capture) = query
-                    .captures
-                    .values()
-                    .find(|capture| capture.checkpoint.as_ref() == Some(&resolution_anchor))
-                {
+                if let Some(capture) = query.captures.values().find(|capture| {
+                    capture.checkpoint.as_ref() == Some(&resolution_anchor)
+                        || capture.durable_balance_anchors.contains(&resolution_anchor)
+                }) {
+                    let financial_checkpoint =
+                        capture.checkpoint.as_ref() == Some(&resolution_anchor);
                     return Err(EvidenceConflict {
                         wallet: capture.wallet.clone(),
                         endpoint: endpoint.clone(),
                         anchor: resolution_anchor,
                         latest_only: false,
-                        financial_checkpoint: true,
+                        financial_checkpoint,
                     }
                     .into());
                 }

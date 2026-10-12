@@ -177,10 +177,9 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
     assert!(started.elapsed() > std::time::Duration::from_secs(15));
     assert_eq!(view.balances.len(), 2);
     let calls = logs.lock().unwrap();
-    // Chain identity, two latest/confirmed anchor pairs, four wallet balance
-    // reads and two distinct canonical anchor rechecks. The historical anchor
-    // equals the stable block and is checked once.
-    assert_eq!(calls.len(), 11);
+    // Chain identity, one latest/confirmed pair, four wallet balance reads,
+    // and two distinct post-state canonical anchor rechecks.
+    assert_eq!(calls.len(), 9);
     assert!(calls.iter().all(|(mode, _)| mode == "slow"));
     server.abort();
 }

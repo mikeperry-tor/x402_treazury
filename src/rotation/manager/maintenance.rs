@@ -788,18 +788,26 @@ mod tests {
     #[test]
     fn history_retry_deadlines_are_observation_scoped() {
         let now = Instant::now();
-        let mut retries = HistoryRetries::default();
-        let active = BTreeSet::new();
-        assert!(retries.admit("failed", now, &active));
-        assert!(retries.admit("healthy", now, &active));
-        retries.complete("failed", true, now);
-        retries.complete("healthy", false, now + Duration::from_secs(1));
-        assert!(!retries.admit("failed", now + CADENCE, &active));
-        assert!(retries.admit("healthy", now + CADENCE, &active));
-        assert!(retries.admit("failed", now + Duration::from_secs(30), &active));
-        retries.complete("failed", true, now + Duration::from_secs(30));
-        assert_eq!(retries.0["failed"].failures, 2);
-        assert_eq!(retries.0["failed"].due, now + Duration::from_secs(90));
+        for healthy_first in [false, true] {
+            let mut retries = HistoryRetries::default();
+            let active = BTreeSet::new();
+            assert!(retries.admit("failed", now, &active));
+            assert!(retries.admit("healthy", now, &active));
+            let completions = if healthy_first {
+                [("healthy", false), ("failed", true)]
+            } else {
+                [("failed", true), ("healthy", false)]
+            };
+            for (id, failed) in completions {
+                retries.complete(id, failed, now);
+            }
+            assert!(!retries.admit("failed", now + CADENCE, &active));
+            assert!(retries.admit("healthy", now + CADENCE, &active));
+            assert!(retries.admit("failed", now + Duration::from_secs(30), &active));
+            retries.complete("failed", true, now + Duration::from_secs(30));
+            assert_eq!(retries.0["failed"].failures, 2);
+            assert_eq!(retries.0["failed"].due, now + Duration::from_secs(90));
+        }
     }
 
     #[test]

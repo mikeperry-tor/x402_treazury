@@ -2,6 +2,64 @@
 use super::*;
 use rusqlite::{Params, StatementStatus, types::Value};
 
+#[test]
+fn indexed_lookups_preserve_retirement_null_claims_and_refresh_exclusions() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(SCHEMA).unwrap();
+    db.execute("INSERT INTO pools(id,name) VALUES ('pool','pool')", [])
+        .unwrap();
+    for (sequence, role) in [(1, "ACTIVE"), (2, "RETAINED"), (3, "READY")] {
+        db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES (?1,'pool',?2,?1,X'00','1',?3)", params![format!("wallet-{sequence}"), sequence, role]).unwrap();
+    }
+    // A wallet lies beyond the captured pass boundary; retire another wallet
+    // between pages. Neither may leak into the remaining captured page.
+    let first = inspect(&db, history::WALLET_PAGE_SQL, params!["pool", -1, 2, 1]).0;
+    assert_eq!(first[0][0], Value::Integer(1));
+    db.execute("UPDATE wallets SET role='RETIRED' WHERE sequence=2", [])
+        .unwrap();
+    assert!(
+        inspect(&db, history::WALLET_PAGE_SQL, params!["pool", 1, 2, 64])
+            .0
+            .is_empty()
+    );
+    assert_eq!(
+        inspect(&db, history::WALLET_PAGE_SQL, params!["pool", 1, 3, 64]).0[0][0],
+        Value::Integer(3)
+    );
+
+    db.execute("INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind) VALUES ('initial','wallet-1','QUEUED','1','pool','initial')", []).unwrap();
+    assert_eq!(
+        inspect(
+            &db,
+            bootstrap::STARTUP_CLAIM_SQL,
+            params!["pool", "initial", Option::<i64>::None]
+        )
+        .0,
+        vec![vec![Value::Text("initial".into())]]
+    );
+    assert!(
+        inspect(
+            &db,
+            bootstrap::STARTUP_CLAIM_SQL,
+            params!["pool", "initial", 0]
+        )
+        .0
+        .is_empty()
+    );
+    for id in ["legacy", "refresh"] {
+        db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,'initial','\"QUOTED\"')", [id]).unwrap();
+    }
+    db.execute(
+        "INSERT INTO funding_quote_refreshes(operation_id) VALUES ('refresh')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        inspect(&db, funding::RECOVERY_COUNT_SQL, ["initial"]).0,
+        vec![vec![Value::Integer(1)]]
+    );
+}
+
 fn inspect(db: &Connection, sql: &str, params: impl Params) -> (Vec<Vec<Value>>, i32) {
     let mut stmt = db.prepare(sql).unwrap();
     let columns = stmt.column_count();
