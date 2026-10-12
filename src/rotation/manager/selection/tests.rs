@@ -971,3 +971,110 @@ async fn healthy_selection_does_not_wait_for_late_wallet_local_failure() {
     drop(selected);
     f.close().await;
 }
+
+#[tokio::test]
+async fn malformed_readiness_is_wallet_local_in_cold_and_cached_selection() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    for cached in [false, true] {
+        for sufficient in [false, true] {
+            for support in ["{}", "tuple", "null"] {
+                let f = fixture(0).await;
+                if sufficient {
+                    f.balance(&f.small, 10);
+                }
+                if cached {
+                    for wallet in [&f.bound.wallet, &f.small, &f.large] {
+                        f.manager
+                            .acquire_candidate_wallet(wallet.clone())
+                            .await
+                            .unwrap();
+                    }
+                }
+                if support == "null" {
+                    f.db()
+                        .execute(
+                            "UPDATE funding_jobs SET readiness_support=NULL WHERE wallet_id=?1",
+                            [&f.large],
+                        )
+                        .unwrap();
+                } else if support == "tuple" {
+                    f.db()
+                        .execute(
+                            "UPDATE funding_jobs SET readiness_capacity='999' WHERE wallet_id=?1",
+                            [&f.large],
+                        )
+                        .unwrap();
+                } else {
+                    f.db()
+                        .execute(
+                            "UPDATE funding_jobs SET readiness_support=?1 WHERE wallet_id=?2",
+                            rusqlite::params![support, f.large],
+                        )
+                        .unwrap();
+                }
+                if cached && sufficient {
+                    let hinted = f.manager.candidate_for(Some(U256::from(5))).await.unwrap();
+                    assert_eq!(hinted.wallet, f.small);
+                }
+                let result = f.manager.acquire_candidate(&f.bound, U256::from(5)).await;
+                match result {
+                    Ok(CandidatePassResult::Selected(selected)) if sufficient => {
+                        assert_eq!(selected.candidate.wallet, f.small);
+                        drop(selected);
+                    }
+                    Err(error) if !sufficient => assert_eq!(
+                        error.downcast_ref::<EvidenceFailure>(),
+                        Some(&EvidenceFailure::MalformedSupport)
+                    ),
+                    _ => {
+                        panic!("malformed sibling vetoed healthy selection or lost its diagnostic")
+                    }
+                }
+                assert_eq!(
+                    f.db()
+                        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+                assert_eq!(
+                    f.db()
+                        .query_row(
+                            "SELECT COUNT(*) FROM reserve_claims WHERE wallet_id IS NOT NULL",
+                            [],
+                            |r| r.get::<_, i64>(0)
+                        )
+                        .unwrap(),
+                    2
+                );
+                assert_eq!(
+                    f.db()
+                        .query_row("SELECT role FROM wallets WHERE id=?1", [&f.large], |r| {
+                            r.get::<_, String>(0)
+                        })
+                        .unwrap(),
+                    "READY"
+                );
+                f.close().await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn selection_does_not_swallow_database_failures() {
+    let f = fixture(0).await;
+    f.db()
+        .execute("ALTER TABLE funding_jobs RENAME TO unavailable_jobs", [])
+        .unwrap();
+    let error = f
+        .manager
+        .acquire_candidate(&f.bound, U256::from(5))
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is::<rusqlite::Error>());
+    assert!(!error.is::<crate::rotation::base::evidence::EvidenceFailure>());
+    assert!(f.calls.lock().unwrap().is_empty());
+    f.close().await;
+}

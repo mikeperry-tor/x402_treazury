@@ -125,7 +125,26 @@ impl ManagedPool {
                             s.cached_payment_view(&pool, &id)?,
                         ))
                     })
-                    .await?;
+                    .await;
+                let state = match state {
+                    Ok(state) => state,
+                    Err(error)
+                        if error
+                            .downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                            == Some(
+                                &super::super::base::evidence::EvidenceFailure::MalformedSupport,
+                            ) =>
+                    {
+                        incomplete |= completion_is_incomplete(
+                            Err(error),
+                            &mut completed,
+                            &mut wallet_failure,
+                        )?;
+                        (CandidateEvidenceState::Ineligible, None)
+                    }
+                    // Store-wide failures are not failed unsigned acquisitions.
+                    Err(error) => return Err(error),
+                };
                 if let Some(view) = state.1 {
                     completed.push(view);
                 }

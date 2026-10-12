@@ -110,8 +110,20 @@ impl Store {
             if !within {
                 continue;
             }
-            let Some(ownership) = payment_ownership(&self.db, pool, wallet)? else {
-                continue;
+            let ownership = match payment_ownership(&self.db, pool, wallet) {
+                Ok(Some(ownership)) => ownership,
+                Ok(None) => continue,
+                // The captured inventory pass retains this wallet's diagnostic.
+                // A bad historical binding cannot veto an independent cached payer.
+                Err(error)
+                    if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                        == Some(
+                            &super::super::base::evidence::EvidenceFailure::MalformedSupport,
+                        ) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
             };
             if cost > ownership.payment_limit {
                 continue;

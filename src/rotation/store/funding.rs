@@ -760,7 +760,13 @@ pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<
         Option<String>,
         String,
     );
-    let saved:Option<Saved>=db.query_row("SELECT f.readiness_support,f.readiness_requirement,f.readiness_capacity,f.readiness_hash,f.readiness_height,f.readiness_latest_hash,f.readiness_endpoint,f.readiness_checkpoint_hash,f.readiness_disputed,f.readiness_operation,j.operation_id,w.address,j.accepted_output,j.accepted_recipient,f.target FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id WHERE f.wallet_id=?1 AND f.readiness_requirement IS NOT NULL",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?,r.get(11)?,r.get(12)?,r.get(13)?,r.get(14)?))).optional()?;
+    let saved:Option<Saved>=db.query_row("SELECT f.readiness_support,f.readiness_requirement,f.readiness_capacity,f.readiness_hash,f.readiness_height,f.readiness_latest_hash,f.readiness_endpoint,f.readiness_checkpoint_hash,f.readiness_disputed,f.readiness_operation,j.operation_id,w.address,j.accepted_output,j.accepted_recipient,f.target FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id WHERE f.wallet_id=?1 AND f.readiness_requirement IS NOT NULL",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?,r.get(11)?,r.get(12)?,r.get(13)?,r.get(14)?))).optional().map_err(|error| {
+        if matches!(error, rusqlite::Error::InvalidColumnType(..) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..)) {
+            anyhow::Error::new(error).context(crate::rotation::base::evidence::EvidenceFailure::MalformedSupport)
+        } else {
+            error.into()
+        }
+    })?;
     let Some((
         support,
         requirement,
@@ -781,45 +787,48 @@ pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<
     else {
         return Ok(false);
     };
-    let support: super::evidence::BalanceSupport = serde_json::from_str(&support)?;
-    support.observation.validate()?;
-    ensure!(
-        support.observation.wallet == wallet
-            && support
-                .observation
-                .address
-                .parse::<alloy_primitives::Address>()?
-                == address.parse::<alloy_primitives::Address>()?,
-        "readiness support wallet mismatch"
-    );
-    ensure!(
-        support.observation.available() == amount(&capacity)?
-            && amount(&capacity)? >= amount(&requirement)?
-            && support.observation.confirmed.anchor.hash == hash
-            && i64::try_from(support.observation.confirmed.anchor.height)? == height
-            && support.observation.latest.anchor.hash == latest
-            && support.observation.endpoint == endpoint
-            && support.checkpoint.as_ref().map(|a| a.hash.as_str()) == checkpoint.as_deref(),
-        "readiness support tuple mismatch"
-    );
-    if let Some(correlation) = correlation {
+    (|| -> Result<bool> {
+        let support: super::evidence::BalanceSupport = serde_json::from_str(&support)?;
+        support.observation.validate()?;
         ensure!(
-            correlation == operation
-                && accepted.as_deref() == Some(requirement.as_str())
-                && recipient
-                    .as_deref()
-                    .context("readiness accepted recipient missing")?
+            support.observation.wallet == wallet
+                && support
+                    .observation
+                    .address
                     .parse::<alloy_primitives::Address>()?
                     == address.parse::<alloy_primitives::Address>()?,
-            "readiness operation correlation mismatch"
+            "readiness support wallet mismatch"
         );
-    } else {
         ensure!(
-            requirement == original && accepted.is_none(),
-            "external readiness requirement mismatch"
+            support.observation.available() == amount(&capacity)?
+                && amount(&capacity)? >= amount(&requirement)?
+                && support.observation.confirmed.anchor.hash == hash
+                && i64::try_from(support.observation.confirmed.anchor.height)? == height
+                && support.observation.latest.anchor.hash == latest
+                && support.observation.endpoint == endpoint
+                && support.checkpoint.as_ref().map(|a| a.hash.as_str()) == checkpoint.as_deref(),
+            "readiness support tuple mismatch"
         );
-    }
-    Ok(true)
+        if let Some(correlation) = correlation {
+            ensure!(
+                correlation == operation
+                    && accepted.as_deref() == Some(requirement.as_str())
+                    && recipient
+                        .as_deref()
+                        .context("readiness accepted recipient missing")?
+                        .parse::<alloy_primitives::Address>()?
+                        == address.parse::<alloy_primitives::Address>()?,
+                "readiness operation correlation mismatch"
+            );
+        } else {
+            ensure!(
+                requirement == original && accepted.is_none(),
+                "external readiness requirement mismatch"
+            );
+        }
+        Ok(true)
+    })()
+    .context(crate::rotation::base::evidence::EvidenceFailure::MalformedSupport)
 }
 
 /// Destination disposition is separate from source-accounting completion. A
