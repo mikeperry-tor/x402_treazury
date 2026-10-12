@@ -17,7 +17,7 @@ You can also optionally grant your agent a set of tools to discover and add x402
 
 ![Wallet funding and payment flow, with Low Balance Wallets stacked beside the Active USDC Wallet](docs/wallet-flow.svg)
 
-> **NOTE:**
+> **NOTE: Payments are not invisible**
 >
 > `x402_treazury` reduces wallet and network linkability; it does not make payments
 > invisible. The Zcash to USDC funding path uses **public NEAR swaps and public Base
@@ -91,7 +91,7 @@ See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
 The cargo download dependencies and Zcash proving parameters are downloaded
 outside of Tor routing by default.
 
-> **NOTE:**
+> **NOTE: Incremental Builds**
 >
 > `scripts/zcash.sh build` defaults to an optimized release build with incremental
 > compiler caches disabled, including for the protoc helper. The executable is
@@ -139,7 +139,7 @@ target/release/x402_treazury wallet backup \
 
 Keep the backup secure: it contains spending material.
 
-> **NOTE:**
+> **NOTE: Single Instance Only**
 >
 > Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchronized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
 
@@ -161,7 +161,7 @@ Allow more if the bridge minimum exceeds $2 or exchange rates and fees change su
 
 To reduce initial expense, **remove one of the `[wallets.NAME]` definitions**, then remove or rebind any servers/sources referencing them.
 
-> **NOTE:**
+> **NOTE: All wallets are auto-funded**
 >
 > Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
 > not eliminate that pool's funding setup. Keeping one pool requires one $2 reserve; sharing it across multiple MCP servers preserves
@@ -267,38 +267,38 @@ transaction-safety drain to finish. Wallet administration commands that need
 exclusive ownership must run while serving is stopped. Local example copies,
 `state/` and `secrets/` are gitignored.
 
-> **NOTE:**
+> **NOTE: Advanced Wallet Commands**
 >
 > For funding failures, refunds, backup restoration and RPC configuration, use the
 > [wallet reference](docs/wallet-cli.md) and [rotation guide](docs/wallet-rotation.md).
 > For bounded paid test runs, use the [live integration runbook](tests/live/INTEGRATION.md).
 
-## Large wallets for expensive APIs
+## Using Expensive APIs
 
-The privacy quickstart uses small $2 USDC wallets and no large reserve wallet.
-If any of your APIs cost more than **$0.50 per call (25% of $2)**, consider
-adding a large reserve to that wallet group. Aim for a **2-4x multiple your
-largest expected API payment**, preferring 4x when prices vary. For example, a
-$2 maximum expected payment suggests a **$8 large reserve**.
+The max API payments of the privacy example are set relatively low, which
+excludes some APIs in the set. Increse `max_api_payment_usdc` on the main wallet
+group definitions to allow larger API payments.
 
-To enable a large USDC wallet reserve, configure the target as
-`funding_amount_usdc` under `[wallets.NAME.reserves.large]`, keeping the small
-reserve for cheaper calls.  The large target must be at least the small target.
-Set `max_api_payment_usdc` separately to authorize the intended payments; adding
-a large reserve does not raise that cap. The extra reserve requires additional
-treasury funds. See the [configuration reference](docs/configuration.md) for
-reserve settings, initial funding requirements and how changes apply on reopen.
+If any of your APIs cost more than **$0.50 per call**, consider
+adding a large reserve wallet to that wallet group. We provide a separate large wallet option for expensive APIs (rather than simply increasing the small wallet `funding_amount_usdc`), because this uses fewer API calls per rotation of both wallets, which reduces usage tracking and linkability.
 
-Ensuring that wallets only serve payments up to 25% of their initial allocation
-size reduces the risk of fragmentation: balances left across several wallets
-cannot be combined for one payment. Retained balances can still serve smaller
-calls, but selection may also keep cheap calls on a sufficient large wallet.
-See the [fragmentation examples and bounds](docs/configuration.md#reserve-sizing-and-fragmentation) for the detailed math and assumptions.
+To enable a large reserve wallet for a wallet group, add a reserve block for that group name under a new stanza `[wallets.NAME.reserves.large]`, and configure the target amount as `funding_amount_usdc`.
 
-We provide a separate large wallet option for expensive APIs (rather than simply
-increasing the small wallet size), because this allows quicker rotation of
-wallets, which reduces linkability, Larger wallets can therefore mean more calls
-sharing a payment address; reserve sizing does not guarantee privacy.
+Aim for a **4x multiple your largest expected API payment**. For example, a $2.50 maximum API payment suggests a **$10 large reserve**:
+
+```toml
+# Add a large wallet to the company group in examples/deployments/privacy.toml
+[wallets.company.reserves.large]
+funding_amount_usdc = "10.00"
+```
+
+> **NOTE: Why 4X Sizing?**
+>
+> Ensuring that wallets only serve payments up to 25% of their initial allocation
+> size reduces the risk of fragmentation: balances left across several wallets
+> cannot be combined for one payment. Retained balances can still serve smaller
+> calls, but selection may also keep cheap calls on a sufficient large wallet.
+> See the [fragmentation examples and bounds](docs/configuration.md#reserve-sizing-and-fragmentation) for the detailed math and assumptions.
 
 ## Choose what shares a wallet
 
