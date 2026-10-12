@@ -370,7 +370,11 @@ async fn privacy_example_enables_source_wallet_discovery_offline() {
     assert_eq!(shown["discovery_relay"]["warm"], true);
     assert!(shown["discovery_relay"]["wallet"].is_null());
     assert_eq!(shown["discovery_wallets"]["exa"], "company");
-    assert_eq!(shown["discovery_wallets"]["social"], "social");
+    assert_eq!(shown["discovery_wallets"]["social"], "company");
+    assert_eq!(
+        shown["wallet_bindings"]["social"]["social"]["wallet"],
+        "company"
+    );
     assert_eq!(shown["discovery_wallets"]["webinfo"], "web");
     assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
     assert_eq!(

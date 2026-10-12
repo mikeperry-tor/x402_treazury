@@ -5,8 +5,9 @@
 # Partial allocations cannot pay until full readiness; accepted insufficient work stays owned.
 # Startup accepts any funded eligible payer; explicit bootstrap waits its captured slot jobs.
 # Partial credited allocations retain their claims until full readiness; accepted work stays owned.
-# Three private research contexts share one Zcash treasury, but use separate
-# rotating EVM wallet pools and Tor payer identities. Copy this file to privacy.local.toml before editing.
+# Three research contexts share one Zcash treasury and two rotating wallet pools.
+# Social and company share a payer wallet and Tor identity; web stays separate.
+# Copy this file to privacy.local.toml before editing.
 # Run each agent against the MCP listener for its research context.
 # Separate wallets/circuits do not hide identifying terms in API request content.
 version = 1
@@ -49,7 +50,7 @@ confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 
 # Each pool starts with one small reserve and no separate active wallet.
-# Three groups with $2 small reserves request $6 before fees and accepted bridge minimum increases.
+# Two groups with $2 small reserves request $4 before fees and accepted bridge minimum increases.
 # Allow additional treasury funds for those costs and replacements after the first payment.
 # Actual deposits may rise with swap minimums. All declared pools initialize, even
 # unused ones: remove unused wallet definitions and update bindings to save funding.
@@ -65,26 +66,18 @@ max_conversion_overhead_percent = 5
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
-[wallets.social]
-mode = "zcash_rotation"
-max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
-max_api_payment_usdc = "0.05"
-max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
-max_conversion_overhead_percent = 5
-
-# Company research has its own small reserve and Tor payer identities.
+# Social and company research share this pool, reserve and Tor payer identities.
 # $0.10 permits single-company enrichment; larger PDL batches may exceed the cap.
-
-[wallets.social.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
-
 [wallets.company]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
 max_api_payment_usdc = "0.10"
 max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
+
+[wallets.company.reserves.small]
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's
@@ -98,10 +91,6 @@ max_conversion_overhead_percent = 5
 # demonstrating that even the same provider/tool can use different payers.
 # Using different wallets keeps the social queries to SocialFetch unlinked and
 # isolated from the webinfo queries.
-
-[wallets.company.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
 [sources.social]
 extends = "../../providers/socialfetch.toml"
@@ -123,10 +112,10 @@ extends = "../../providers/exa.toml"
 instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. This source is shared by the web and company listeners, each with its own payment wallet. Treazury handles x402 without an Exa API key. Prefer small result/page counts and highlights; charges vary with options and the live challenge is authoritative. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
-# above its $0.05 cap; paid matches require a deliberate cap increase.
+# above the shared $0.10 cap; paid matches require a deliberate cap increase.
 [sources.pdl_people]
 extends = "../../providers/pdl.toml"
-instructions_text = "People Data Labs person enrichment and structured person search support the social research context. Use known identifiers for enrichment and small result batches for search; preserve confidence and provenance. Vendor-listed matched results cost $0.28 each, above this example's $0.05 social payment cap. Paid matches require an operator to raise that cap; agents cannot change it. Do not interpret a rejected payment or failed lookup as evidence that a person does not exist."
+instructions_text = "People Data Labs person enrichment and structured person search support the social research context. Use known identifiers for enrichment and small result batches for search; preserve confidence and provenance. Vendor-listed matched results cost $0.28 each, above this example's shared $0.10 social/company payment cap. Paid matches require an operator to raise that cap; agents cannot change it. Do not interpret a rejected payment or failed lookup as evidence that a person does not exist."
 include_tools = ["pdl_person_*"]
 
 # Structured company discovery complements Deepline enrichment.
@@ -151,7 +140,7 @@ include_tools = [
   "stableenrich_minerva_validate_emails",
   "stableenrich_serper_people_image_search",
 ]
-instructions_text = "Social research through StableEnrich: search Reddit and retrieve post comments, resolve people with Minerva, enrich known profiles, check email database records and search for public headshots. Use small batches and preserve identity confidence, provenance and timestamps. An email database match is not proof of current deliverability; disambiguate names with known profile/company information before combining results or attributing images. Request content can identify people despite separate payment wallets. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Vendor prices are estimates; the live challenge and $0.05 social cap govern payment. Do not repeat a paid submission to retrieve pending results."
+instructions_text = "Social research through StableEnrich: search Reddit and retrieve post comments, resolve people with Minerva, enrich known profiles, check email database records and search for public headshots. Use small batches and preserve identity confidence, provenance and timestamps. An email database match is not proof of current deliverability; disambiguate names with known profile/company information before combining results or attributing images. Request content can identify people despite separate payment wallets. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Vendor prices are estimates; the live challenge and $0.10 shared social/company cap govern payment. Do not repeat a paid submission to retrieve pending results."
 
 # Company estimates are $0.0126-$0.08 per call, within the $0.10 cap.
 # FullEnrich company search ($0.15) is omitted. Keep person/contact enrichment
@@ -226,7 +215,7 @@ extends = "../../providers/genuinegood.toml"
 include_tools = ["genuinegood_search_post", "genuinegood_detail_post"]
 instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed; Treazury handles x402 payment."
 
-# Independent MCP endpoints let an agent choose the appropriate privacy context.
+# MCP endpoints expose separate toolsets; social and company share payment identity.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
 [servers.web]
 # discover_on_demand = true # advertise search/call wrappers; fetch schemas as needed
@@ -240,12 +229,12 @@ sources = ["exa", "webinfo", "googletrends"]
 discover_on_demand = true
 listen = "127.0.0.1:6338"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
-wallet = "social"
+wallet = "company"
 sources = ["social", "pdl_people", "social_stableenrich"]
 
 # Note: Exa is the same source used by web, but this listener pays from the
-# "company" wallet, and connections to Exa travel down a separate Tor circuit,
-# isolated by the wallet address.
+# "company" wallet shared with social. Its Exa connections use a separate Tor
+# identity from web, isolated by the wallet address.
 # Do not set sources.exa.wallet: that would override the listener's wallet choice.
 [servers.company]
 listen = "127.0.0.1:6339"

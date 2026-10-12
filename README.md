@@ -56,7 +56,8 @@ shows help. See the [command reference](docs/configuration.md).
 ## Quickstart: Zcash and Tor
 
 The [privacy example conf file](examples/deployments/privacy.toml)
-provides three MCP endpoints, each with its own rotating wallet pool:
+provides three MCP endpoints backed by two rotating wallet pools. Social and
+company share a wallet and Tor payer identity; web uses a separate wallet:
 
 | Research context | Selected APIs | MCP endpoint |
 | --- | --- | --- |
@@ -152,21 +153,18 @@ target/release/x402_treazury wallet addresses \
 ```
 
 Send ZEC to the treasury's **shielded receive address**. The privacy example conf defines
-**three wallet groups**, each starting with one small reserve:
-**3 × $2 = $6 USDC** before fees and accepted bridge minimum increases.
-Allow additional treasury funds for those costs and subsequent replacements.
+**two wallet groups**, each starting with one small reserve:
+**2 x $2 = $4 USDC** before fees and accepted bridge minimum increases.
+Allow additional treasury funds for those costs and subsequent replacements. Sending $5USD worth of ZEC to your treasury should be plenty to get started and test functionality. $10USD will allow you to use the servers through at least 2 wallet rotations each (which is quite a lot of API calls).
 
-Allow more if the bridge minimum exceeds $2 or exchange rates and fees change.
-This preload funds initial wallets, not unlimited calls or replacements.
+Allow more if the bridge minimum exceeds $2 or exchange rates and fees change substantially.
 
-To reduce that expense, **remove unused `[wallets.NAME]` definitions**, then remove
-or rebind any servers/sources referencing them.
+To reduce initial expense, **remove one of the `[wallets.NAME]` definitions**, then remove or rebind any servers/sources referencing them.
 
 > **NOTE:**
 >
 > Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
-> not eliminate that pool's funding setup. Keeping one pool requires one $2 reserve
-> (about $2 before fees); sharing it across multiple MCP servers preserves
+> not eliminate that pool's funding setup. Keeping one pool requires one $2 reserve; sharing it across multiple MCP servers preserves
 > separate toolsets but shares their payment identity and Tor circuit usage.
 
 After sending ZEC, sync the treasury and check its confirmed spendable balance:
@@ -232,7 +230,7 @@ The example requests **2 USDC** for small-reserve wallets and
 permits accepted bridge minimums up to **3 USDC**. Ordinary enabled funding uses
 actual spendable Zcash treasury funds after confirmations, reservations and fees;
 there is no daily or cumulative allocation setting. Individual payments remain
-capped at **0.05 USDC for web/social** and **0.10 USDC for company**.
+capped at **0.05 USDC for web** and **0.10 USDC for social/company**.
 Conversion overhead is limited to **5%**, with separate per-transfer and network
 fee safeguards. Reservations and accepted transaction bytes survive restarts.
 

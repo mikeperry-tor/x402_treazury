@@ -334,7 +334,14 @@ async fn privacy_example_exposes_reserves_and_per_operation_fee_defaults_offline
         .unwrap();
     assert!(shown["funding"].get("daily_funding_limit_usdc").is_none());
     assert!(shown["funding"].get("total_funding_limit_usdc").is_none());
-    for name in ["web", "social", "company"] {
+    assert_eq!(shown["wallets"].as_object().unwrap().len(), 2);
+    assert_eq!(
+        shown["wallet_summary"]["initial_inventory_target_atomic"],
+        "4000000"
+    );
+    assert_eq!(shown["wallets"]["web"]["max_api_payment_usdc"], "0.05");
+    assert_eq!(shown["wallets"]["company"]["max_api_payment_usdc"], "0.10");
+    for name in ["web", "company"] {
         assert_eq!(
             shown["wallets"][name]["reserves"]["small"]["funding_amount_usdc"],
             "2.00"
