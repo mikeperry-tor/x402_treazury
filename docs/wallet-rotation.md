@@ -331,7 +331,10 @@ remains a liability. Reorg contradictions cannot silently reset accounting.
 Balance-only acquisition reads one fresh latest/confirmed header pair, pins both
 balance calls to those hashes, and rechecks their canonical anchors. A view that
 also scans historical authorizations acquires a new header pair after that scan;
-finishing the scan never renews the earlier observation's timestamp.
+finishing the scan never renews the earlier observation's timestamp. Identical
+canonical header checks are shared across captured wallet dependencies within one
+verification phase on one endpoint. Initial reads never replace post-state checks,
+and reuse neither renews evidence nor skips comparison against each expected hash.
 
 Historical liability release and fresh spending capacity have separate anchors.
 A confirmed USED proof requires a new balance observation at or beyond its debit

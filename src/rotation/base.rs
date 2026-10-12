@@ -228,11 +228,30 @@ impl BaseRpc {
         use sha2::{Digest, Sha256};
         alloy_primitives::hex::encode(Sha256::digest(self.url.as_str().as_bytes()))
     }
+    /// Share canonical header observations only within one verification phase on
+    /// this endpoint. Initial headers read before state acquisition are excluded.
+    async fn recheck_anchor(
+        &self,
+        height: u64,
+        rechecked: &mut BTreeMap<u64, Anchor>,
+        progress: &ViewProgress,
+        stage: &'static str,
+    ) -> Result<Anchor> {
+        if let Some(anchor) = rechecked.get(&height) {
+            return Ok(anchor.clone());
+        }
+        let (anchor, _) = progress
+            .step(stage, self.block(&format!("0x{height:x}")))
+            .await?;
+        rechecked.insert(height, anchor.clone());
+        Ok(anchor)
+    }
     async fn verify_capture(
         &self,
         capture: &EvidenceCapture,
         endpoint: &str,
         progress: &ViewProgress,
+        rechecked: &mut BTreeMap<u64, Anchor>,
     ) -> Result<()> {
         let mut anchors: BTreeMap<(u64, String), (bool, bool)> = BTreeMap::new();
         if let Some(checkpoint) = &capture.checkpoint {
@@ -260,8 +279,8 @@ impl BaseRpc {
                 .or_insert((false, false));
         }
         for ((height, hash), (latest_only, financial_checkpoint)) in anchors {
-            let (canonical, _) = progress
-                .step("wallet_checkpoint", self.block(&format!("0x{height:x}")))
+            let canonical = self
+                .recheck_anchor(height, rechecked, progress, "wallet_checkpoint")
                 .await?;
             if canonical.height != height || canonical.hash != hash {
                 return Err(EvidenceConflict {
@@ -339,11 +358,16 @@ impl BaseRpc {
         // Only the compact checkpoint and immutable proof anchor are required.
         // A replaced ordinary balance cannot destroy useful completed history.
         capture.previous = None;
-        endpoint
+        let mut rechecked = endpoint
             .verify_recheck(&capture, certificate.endpoint())
             .await?;
-        let (canonical, _) = endpoint
-            .block(&format!("0x{:x}", certificate.anchor().height))
+        let canonical = endpoint
+            .recheck_anchor(
+                certificate.anchor().height,
+                &mut rechecked,
+                &ViewProgress::new(),
+                "history_anchor_recheck",
+            )
             .await?;
         ensure!(
             canonical == *certificate.anchor(),
@@ -372,7 +396,11 @@ impl BaseRpc {
             .context("original evidence endpoint unavailable")
     }
 
-    async fn verify_recheck(&self, capture: &EvidenceCapture, endpoint: &str) -> Result<()> {
+    async fn verify_recheck(
+        &self,
+        capture: &EvidenceCapture,
+        endpoint: &str,
+    ) -> Result<BTreeMap<u64, Anchor>> {
         ensure!(
             quantity(&self.rpc("eth_chainId", json!([])).await?)
                 .map_err(|_| RpcFailure::malformed("eth_chainId"))?
@@ -381,8 +409,10 @@ impl BaseRpc {
                 endpoint: endpoint.into()
             }
         );
-        self.verify_capture(capture, endpoint, &ViewProgress::new())
-            .await
+        let mut rechecked = BTreeMap::new();
+        self.verify_capture(capture, endpoint, &ViewProgress::new(), &mut rechecked)
+            .await?;
+        Ok(rechecked)
     }
 
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
@@ -627,11 +657,14 @@ impl BaseRpc {
         // Authorization resolution is historical canonical evidence. Its sweep
         // cannot age the independently acquired admission balance view.
         let resolution_anchor = confirmed.clone();
+        let mut rechecked = BTreeMap::new();
         if query.wallets.is_empty() {
-            let (canonical, _) = progress
-                .step(
+            let canonical = self
+                .recheck_anchor(
+                    resolution_anchor.height,
+                    &mut rechecked,
+                    progress,
                     "history_anchor_recheck",
-                    self.block(&format!("0x{:x}", resolution_anchor.height)),
                 )
                 .await?;
             if canonical != resolution_anchor {
@@ -654,7 +687,7 @@ impl BaseRpc {
             for capture in query.captures.values() {
                 let mut historical = capture.clone();
                 historical.previous = None;
-                self.verify_capture(&historical, &endpoint, progress)
+                self.verify_capture(&historical, &endpoint, progress, &mut rechecked)
                     .await?;
             }
             return Ok(ChainView {
@@ -739,16 +772,9 @@ impl BaseRpc {
             .buffer_unordered(8)
             .try_collect()
             .await?;
-        let mut rechecked = std::collections::BTreeSet::new();
         for anchor in [&resolution_anchor, &confirmed, &latest] {
-            if !rechecked.insert((anchor.height, anchor.hash.clone())) {
-                continue;
-            }
-            let (end, _) = progress
-                .step(
-                    "anchor_recheck",
-                    self.block(&format!("0x{:x}", anchor.height)),
-                )
+            let end = self
+                .recheck_anchor(anchor.height, &mut rechecked, progress, "anchor_recheck")
                 .await?;
             if end.height != anchor.height || end.hash != anchor.hash {
                 // A contradiction of captured accepted evidence has its scoped
@@ -763,12 +789,15 @@ impl BaseRpc {
                         .previous
                         .as_ref()
                         .is_some_and(|observation| &observation.latest.anchor == anchor);
-                    if financial_checkpoint || previous_confirmed || previous_latest {
+                    let durable = capture.durable_balance_anchors.contains(anchor);
+                    if financial_checkpoint || previous_confirmed || previous_latest || durable {
                         return Err(EvidenceConflict {
                             wallet: capture.wallet.clone(),
                             endpoint: endpoint.clone(),
                             anchor: anchor.clone(),
-                            latest_only: !financial_checkpoint && !previous_confirmed,
+                            latest_only: !financial_checkpoint
+                                && !previous_confirmed
+                                && previous_latest,
                             financial_checkpoint,
                         }
                         .into());
@@ -780,7 +809,8 @@ impl BaseRpc {
         // The financial checkpoint and captured same-wallet facts must still be
         // canonical on the very endpoint that supplied these exact reads.
         for capture in query.captures.values() {
-            self.verify_capture(capture, &endpoint, progress).await?;
+            self.verify_capture(capture, &endpoint, progress, &mut rechecked)
+                .await?;
         }
         let balance_certificates = observations
             .iter()

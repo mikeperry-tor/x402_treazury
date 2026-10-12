@@ -78,6 +78,130 @@ fn query(history: bool) -> ChainQuery {
     }
 }
 
+fn capture(wallet: &str, checkpoint: Option<Anchor>) -> EvidenceCapture {
+    EvidenceCapture {
+        namespace: uuid::Uuid::new_v4(),
+        wallet: wallet.into(),
+        generation: 0,
+        endpoint_generations: BTreeMap::new(),
+        checkpoint,
+        previous: None,
+        previous_confirmed_covered: false,
+        durable_balance_anchors: vec![],
+    }
+}
+
+fn anchor(height: u64) -> Anchor {
+    Anchor {
+        height,
+        hash: format!("0x{height:064x}"),
+    }
+}
+
+fn header_reads(requests: &Requests, height: u64) -> usize {
+    requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| {
+            request["method"] == "eth_getBlockByNumber"
+                && request["params"][0] == format!("0x{height:x}")
+        })
+        .count()
+}
+
+#[tokio::test]
+async fn captured_and_acquired_anchors_share_post_balance_checks_across_wallets() {
+    let (rpc, requests, server, stamp) = fixture(false).await;
+    let mut query = query(false);
+    query
+        .wallets
+        .push(("second".into(), format!("0x{:040x}", 2)));
+    for wallet in ["wallet", "second"] {
+        let mut captured = capture(wallet, Some(anchor(88)));
+        captured.durable_balance_anchors = vec![anchor(88), anchor(100)];
+        query.captures.insert(wallet.into(), captured);
+    }
+    let view = rpc.view(query).await.unwrap();
+    assert_eq!(view.balance_certificates.len(), 2);
+    assert_eq!(view.admission_valid_until, stamp - 60 + 120);
+    assert_eq!(
+        header_reads(&requests, 88),
+        2,
+        "initial header and one post-state recheck"
+    );
+    assert_eq!(header_reads(&requests, 100), 1);
+    assert_eq!(requests.lock().unwrap().len(), 9);
+    server.abort();
+}
+
+#[tokio::test]
+async fn shared_header_checks_preserve_captured_conflict_scope() {
+    // Both the financial checkpoint and immutable readiness-only support must
+    // retain their typed attribution when an acquired anchor changes.
+    for financial in [false, true] {
+        let (rpc, _, server, _) = fixture(true).await;
+        let mut query = query(false);
+        let mut captured = capture("wallet", financial.then(|| anchor(88)));
+        captured.durable_balance_anchors.push(anchor(88));
+        query.captures.insert("wallet".into(), captured);
+        let error = rpc.view(query).await.err().unwrap();
+        let conflict = error.downcast_ref::<EvidenceConflict>().unwrap();
+        assert_eq!(conflict.wallet, "wallet");
+        assert_eq!(conflict.anchor, anchor(88));
+        assert_eq!(conflict.financial_checkpoint, financial);
+        assert!(!conflict.latest_only);
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn shared_height_still_compares_each_captured_hash() {
+    let (rpc, requests, server, _) = fixture(false).await;
+    let mut query = query(false);
+    let conflicting = Anchor {
+        height: 88,
+        hash: anchor(999).hash,
+    };
+    query.captures.insert(
+        "wallet".into(),
+        capture("wallet", Some(conflicting.clone())),
+    );
+    let error = rpc.view(query).await.err().unwrap();
+    let conflict = error.downcast_ref::<EvidenceConflict>().unwrap();
+    assert_eq!(conflict.anchor, conflicting);
+    assert!(conflict.financial_checkpoint);
+    assert_eq!(header_reads(&requests, 88), 2);
+    server.abort();
+}
+
+#[tokio::test]
+async fn historical_resolution_and_compatibility_share_identical_anchors() {
+    let (rpc, requests, server, _) = fixture(false).await;
+    let mut query = query(true);
+    query.wallets.clear();
+    let captured = capture("wallet", Some(anchor(88)));
+    query.captures.insert("wallet".into(), captured.clone());
+    let view = rpc.view(query).await.unwrap();
+    assert_eq!(header_reads(&requests, 88), 2);
+    let original = view.resolution_certificates["attempt"].clone();
+    requests.lock().unwrap().clear();
+    let verified = rpc
+        .recheck_resolution(original.clone(), captured)
+        .await
+        .unwrap();
+    assert_eq!(header_reads(&requests, 88), 1);
+    assert_eq!(verified.anchor(), original.anchor());
+    assert_eq!(verified.block_time(), original.block_time());
+    assert_eq!(verified.outcome(), original.outcome());
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        2,
+        "chain ID and exact header only"
+    );
+    server.abort();
+}
+
 #[tokio::test]
 async fn balance_only_reads_one_header_pair_and_rechecks_both_anchors() {
     let (rpc, requests, server, stamp) = fixture(false).await;
