@@ -230,7 +230,7 @@ impl ManagedPool {
                 s.scoped_chain_query(&pool, vec![id], vec![])
             })
             .await?;
-        let view = self.acquire_view(query, true, None).await?;
+        let view = self.acquire_view(query, true).await?;
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let pool = self.pool.clone();
         self.store

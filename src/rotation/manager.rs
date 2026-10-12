@@ -142,7 +142,6 @@ impl ManagedPool {
         &self,
         query: super::base::ChainQuery,
         payment: bool,
-        guard: Option<Arc<tokio::sync::OwnedMutexGuard<()>>>,
     ) -> Result<super::base::ChainView> {
         let result = if payment {
             self.base.payment_view(query).await
@@ -154,10 +153,7 @@ impl ManagedPool {
         match result {
             Ok(view) => Ok(view),
             Err(error) => {
-                let guard = match guard {
-                    Some(guard) => guard,
-                    None => Arc::new(self.gate.clone().lock_owned().await),
-                };
+                let guard = Arc::new(self.gate.clone().lock_owned().await);
                 self.store
                     .call_with_guard(guard, move |store| {
                         store.record_base_failure(&error)?;
@@ -210,7 +206,7 @@ impl ManagedPool {
             })
             .await?;
         drop(guard);
-        let view = self.acquire_view(query, true, None).await?;
+        let view = self.acquire_view(query, true).await?;
         Ok((view, Arc::new(self.gate.clone().lock_owned().await)))
     }
     pub async fn pay(
@@ -431,7 +427,7 @@ impl ManagedPool {
                             })
                             .await?;
                         drop(guard);
-                        view = self.acquire_view(query, true, None).await?;
+                        view = self.acquire_view(query, true).await?;
                         guard = Arc::new(self.gate.clone().lock_owned().await);
                         continue;
                     }
@@ -503,7 +499,7 @@ impl ManagedPool {
                                 })
                                 .await?;
                             drop(guard);
-                            view = self.acquire_view(query, true, None).await?;
+                            view = self.acquire_view(query, true).await?;
                             guard = Arc::new(self.gate.clone().lock_owned().await);
                         }
                     }

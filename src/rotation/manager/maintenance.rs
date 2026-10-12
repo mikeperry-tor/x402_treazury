@@ -300,7 +300,7 @@ impl ManagedPool {
                 })
                 .await?;
             drop(guard);
-            let mut view = self.acquire_view(query, false, None).await?;
+            let mut view = self.acquire_view(query, false).await?;
             let guard = Arc::new(self.gate.clone().lock_owned().await);
             let pool = self.pool.clone();
             let completed = view.clone();
@@ -403,7 +403,7 @@ impl ManagedPool {
                         )
                     })
                     .await?;
-                let view = self.acquire_view(query, false, None).await?;
+                let view = self.acquire_view(query, false).await?;
                 ensure!(
                     anchor.as_ref().is_none_or(|saved| saved == &view.anchor),
                     "qualification_full_inventory_anchor_changed"
