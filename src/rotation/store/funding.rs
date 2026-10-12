@@ -1,5 +1,7 @@
 //! Funding workflow journal. The source operation ID is allocated before any
 //! calculation and remains immutable across crashes and ambiguous submissions.
+pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)";
+
 use super::*;
 // Missing bytes are not proof that an interrupted preparer did no work.
 pub(crate) fn safely_unprepared(job: &FundingJob) -> bool {
@@ -874,11 +876,7 @@ fn completed_error(error: Option<&str>) -> Option<&str> {
 impl Store {
     /// Recovery history survives restarts and operation replacement.
     pub fn funding_recovery_count(&self, job: &str) -> Result<u64> {
-        let count: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)",
-            [job],
-            |r| r.get(0),
-        )?;
+        let count: i64 = self.db.query_row(RECOVERY_COUNT_SQL, [job], |r| r.get(0))?;
         Ok(u64::try_from(count)?)
     }
 

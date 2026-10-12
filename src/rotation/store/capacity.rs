@@ -1248,7 +1248,7 @@ mod tests {
     }
 
     #[test]
-    fn reopening_schema16_adds_role_index_without_changing_inventory() {
+    fn reopening_schema16_adds_lookup_indexes_without_changing_inventory() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -1263,13 +1263,27 @@ mod tests {
         let before = serde_json::to_value(store.status().unwrap()).unwrap();
         store
             .db
-            .execute_batch("DROP INDEX wallet_role_sequence")
+            .execute_batch("DROP INDEX wallet_role_sequence; DROP INDEX wallet_live_sequence; DROP INDEX funding_claim_lookup; DROP INDEX funding_recovery_job")
             .unwrap();
         drop(store);
         for _ in 0..2 {
             let reopened = Store::open(&state, &key, &id).unwrap();
-            let exists: bool = reopened.db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='wallet_role_sequence')",[],|r|r.get(0)).unwrap();
-            assert!(exists);
+            for index in [
+                "wallet_role_sequence",
+                "wallet_live_sequence",
+                "funding_claim_lookup",
+                "funding_recovery_job",
+            ] {
+                let exists: bool = reopened
+                    .db
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                        [index],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert!(exists, "missing {index}");
+            }
             assert_eq!(
                 serde_json::to_value(reopened.status().unwrap()).unwrap(),
                 before

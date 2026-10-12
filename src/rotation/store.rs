@@ -3,6 +3,8 @@ mod backup;
 mod capacity;
 mod preflight;
 #[cfg(test)]
+mod query_tests;
+#[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(feature = "zcash")]
 mod treasury_reads;
@@ -1361,7 +1363,10 @@ fn admission_schema(db: &Connection) -> Result<()> {
     // Additive lookup optimization for existing schema16 stores; financial
     // records and the state format are unchanged.
     db.execute_batch(
-        "CREATE INDEX IF NOT EXISTS wallet_role_sequence ON wallets(pool_id,role,sequence);",
+        "CREATE INDEX IF NOT EXISTS wallet_role_sequence ON wallets(pool_id,role,sequence);
+         CREATE INDEX IF NOT EXISTS wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
+         CREATE INDEX IF NOT EXISTS funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
+         CREATE INDEX IF NOT EXISTS funding_recovery_job ON funding_recovery(job_id,operation_id);",
     )?;
     Ok(())
 }

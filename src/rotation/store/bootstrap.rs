@@ -1,5 +1,7 @@
 //! Bounded startup reads over configured groups and their destination paths.
 //! No partial Status, full wallet inventory, refund history, or new readiness ledger.
+pub(super) const STARTUP_CLAIM_SQL: &str = "SELECT f.id FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.pool_id=?1 AND f.allocation_kind=?2 AND f.claim_generation IS ?3";
+
 use super::funding::{FundingFacts, FundingJob};
 use super::*;
 
@@ -252,9 +254,14 @@ impl Store {
         ensure!(claims.len() <= 3, "startup claim inventory too large");
         let mut result = Vec::new();
         for claim in claims {
-            let saved:Option<String> = self.db.query_row(
-                "SELECT f.id FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.pool_id=?1 AND f.allocation_kind=?2 AND f.claim_generation IS ?3",
-                params![pool,claim.kind,claim.generation], |r| r.get(0)).optional()?;
+            let saved: Option<String> = self
+                .db
+                .query_row(
+                    STARTUP_CLAIM_SQL,
+                    params![pool, claim.kind, claim.generation],
+                    |r| r.get(0),
+                )
+                .optional()?;
             if let Some(id) = saved {
                 result.push(self.startup_path(&id)?);
             }

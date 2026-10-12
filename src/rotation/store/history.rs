@@ -1,5 +1,7 @@
 //! Runtime owners capture an upper boundary, then acquire bounded keyset pages.
 //! No cursor is durable and no inventory size limits financial authority.
+pub(super) const WALLET_PAGE_SQL: &str = "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND role!='RETIRED' AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4";
+
 use super::*;
 use crate::rotation::base::PendingAuthorization;
 
@@ -64,9 +66,7 @@ impl Store {
         through: i64,
         limit: usize,
     ) -> Result<Vec<(i64, String, String)>> {
-        let mut statement = self.db.prepare(
-            "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND role!='RETIRED' AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4",
-        )?;
+        let mut statement = self.db.prepare(WALLET_PAGE_SQL)?;
         Ok(statement
             .query_map(params![pool, after, through, page_limit(limit)?], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))

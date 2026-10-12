@@ -76,3 +76,8 @@ CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  OR (NEW.allocation_kind='initial') != (NEW.claim_generation IS NULL)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
 PRAGMA user_version=16;
+
+-- Scoped operational lookups must not scan retired or unrelated financial history.
+CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
+CREATE INDEX funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
+CREATE INDEX funding_recovery_job ON funding_recovery(job_id,operation_id);
