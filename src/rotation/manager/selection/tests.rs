@@ -24,6 +24,8 @@ struct Fixture {
     large: String,
     retained: Vec<String>,
     balances: Arc<StdMutex<BTreeMap<String, u64>>>,
+    calls: Arc<StdMutex<BTreeMap<String, usize>>>,
+    head: Arc<AtomicUsize>,
     blocked: Arc<StdMutex<BTreeSet<String>>>,
     started: Arc<StdMutex<BTreeSet<String>>>,
     unavailable: Arc<AtomicBool>,
@@ -134,21 +136,23 @@ async fn fixture(retained_count: usize) -> Fixture {
     let balances = Arc::new(StdMutex::new(BTreeMap::<String, u64>::new()));
     let blocked = Arc::new(StdMutex::new(BTreeSet::<String>::new()));
     let started = Arc::new(StdMutex::new(BTreeSet::<String>::new()));
+    let calls = Arc::new(StdMutex::new(BTreeMap::<String, usize>::new()));
+    let head = Arc::new(AtomicUsize::new(200));
     let release = Arc::new(tokio::sync::Notify::new());
     let unavailable = Arc::new(AtomicBool::new(false));
     let initializing = Arc::new(AtomicBool::new(true));
     let timestamp = now().unwrap();
     let app=Router::new().route("/",post({
-        let (balances,blocked,started,release,unavailable,initializing)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone());
+        let (balances,blocked,started,release,unavailable,initializing,calls,head)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone(),calls.clone(),head.clone());
         move |Json(v):Json<Value>| {
-            let (balances,blocked,started,release,unavailable,initializing)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone());
+            let (balances,blocked,started,release,unavailable,initializing,calls,head)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone(),calls.clone(),head.clone());
             async move {
                 if unavailable.load(Ordering::SeqCst) { return Json(json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32602,"message":"fixture unavailable"}})); }
                 let result=match v["method"].as_str().unwrap() {
                     "eth_chainId"=>json!("0x2105"),
                     "eth_getBlockByNumber"=>{
                         let tag=v["params"][0].as_str().unwrap();
-                        let height=if tag=="latest"{if initializing.load(Ordering::SeqCst){100}else{200}}else{u64::from_str_radix(&tag[2..],16).unwrap()};
+                        let height=if tag=="latest"{if initializing.load(Ordering::SeqCst){100}else{head.load(Ordering::SeqCst) as u64}}else{u64::from_str_radix(&tag[2..],16).unwrap()};
                         json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     },
                     "eth_call"=>{
@@ -156,6 +160,7 @@ async fn fixture(retained_count: usize) -> Fixture {
                         assert!(data.starts_with("0x70a08231"),"selection must not start historical scans or writes");
                         let address=format!("0x{}",&data[data.len()-40..]).to_lowercase();
                         started.lock().unwrap().insert(address.clone());
+                        *calls.lock().unwrap().entry(address.clone()).or_default() += 1;
                         while blocked.lock().unwrap().contains(&address) { release.notified().await; }
                         // Hold fast reads until the blocked lanes have actually
                         // started, making independence an observed assertion.
@@ -198,6 +203,7 @@ async fn fixture(retained_count: usize) -> Fixture {
     .unwrap();
     initializing.store(false, Ordering::SeqCst);
     started.lock().unwrap().clear();
+    calls.lock().unwrap().clear();
     let (store, worker) = StoreHandle::spawn(store);
     let manager =
         ManagedPool::new(store, pool, base, SpendPolicy::dollars("100").unwrap()).unwrap();
@@ -209,6 +215,8 @@ async fn fixture(retained_count: usize) -> Fixture {
         large: wallets[2].clone(),
         retained,
         balances,
+        calls,
+        head,
         blocked,
         started,
         unavailable,
@@ -636,4 +644,187 @@ async fn completed_sufficient_candidate_survives_cache_churn() {
         selected,
         "sufficient completed observation was lost; complete_negative={negative}"
     );
+}
+
+#[tokio::test]
+async fn cached_candidate_survives_eviction_between_evaluation_and_batched_selection() {
+    let mut f = fixture(260).await;
+    f.balance(&f.large, 10);
+    f.block(&f.bound.wallet);
+    let owner = f.manager.clone();
+    let target = f.large.clone();
+    let others = f.retained.clone();
+    let evaluated = Arc::new(AtomicUsize::new(0));
+    f.manager.test_admission_hook = Some(Arc::new(move |stage| {
+        let (owner, target, others, evaluated) = (
+            owner.clone(),
+            target.clone(),
+            others.clone(),
+            evaluated.clone(),
+        );
+        async move {
+            if matches!(stage, AdmissionTestStage::CandidateEvaluated) {
+                match evaluated.fetch_add(1, Ordering::SeqCst) {
+                    // Publish the next priority wallet after the initial scan.
+                    0 => {
+                        owner.acquire_candidate_wallet(target).await.unwrap();
+                    }
+                    // Its cached proof has now been evaluated and must stay owned.
+                    1 => {
+                        for wallet in others {
+                            owner.acquire_candidate_wallet(wallet).await.unwrap();
+                        }
+                        let pool = owner.pool.clone();
+                        assert!(matches!(
+                            owner
+                                .store
+                                .call(move |s| s.candidate_evidence_state(&pool, &target))
+                                .await
+                                .unwrap(),
+                            CandidateEvidenceState::Missing
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        .boxed()
+    }));
+    let CandidatePassResult::Selected(selected) = select(&f).await else {
+        panic!("cached completed candidate was lost to churn")
+    };
+    assert_eq!(selected.candidate.wallet, f.large);
+    assert_eq!(
+        f.calls.lock().unwrap()[&f.address(&f.large)],
+        2,
+        "one exact confirmed/latest acquisition, without rereading after eviction"
+    );
+    drop(selected);
+    f.close().await;
+}
+
+async fn select_owned(f: &Fixture, view: ChainView, cost: u64) -> Option<SelectedCandidate> {
+    f.manager
+        .select_completed_candidate(&f.bound.wallet, U256::from(cost), i64::MAX, &mut vec![view])
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn evicted_owned_proof_keeps_expiry_and_rechecks_liabilities_and_invalidation() {
+    let f = fixture(260).await;
+    f.balance(&f.bound.wallet, 10);
+    let (_, view) = f
+        .manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    let view = view.unwrap();
+    for wallet in &f.retained {
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+    }
+    let (pool, wallet) = (f.manager.pool.clone(), f.bound.wallet.clone());
+    assert!(matches!(
+        f.manager
+            .store
+            .call(move |s| s.candidate_evidence_state(&pool, &wallet))
+            .await
+            .unwrap(),
+        CandidateEvidenceState::Missing
+    ));
+    let calls = f.calls.lock().unwrap().clone();
+    let selected = select_owned(&f, view.clone(), 5).await.unwrap();
+    assert_eq!(
+        selected.view.admission_valid_until,
+        view.admission_valid_until
+    );
+    assert_eq!(selected.candidate.wallet, f.bound.wallet);
+    assert!(f.manager.gate.try_lock().is_err());
+    drop(selected);
+    let mut expired = view.clone();
+    expired
+        .balance_certificates
+        .get_mut(&f.bound.wallet)
+        .unwrap()
+        .restrict_validity(0);
+    assert!(select_owned(&f, expired, 5).await.is_none());
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='7' WHERE id=?1",
+            [&f.bound.wallet],
+        )
+        .unwrap();
+    assert!(select_owned(&f, view.clone(), 5).await.is_none());
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='0' WHERE id=?1",
+            [&f.bound.wallet],
+        )
+        .unwrap();
+    let endpoint = view.observations[&f.bound.wallet].endpoint.clone();
+    f.manager
+        .store
+        .call(move |s| s.invalidate_endpoint_evidence(&endpoint))
+        .await
+        .unwrap();
+    assert!(select_owned(&f, view, 5).await.is_none());
+    assert_eq!(
+        *f.calls.lock().unwrap(),
+        calls,
+        "local revalidation must not acquire again"
+    );
+    assert_eq!(
+        f.db()
+            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn chain_order_wins_over_cache_publication_order() {
+    let f = fixture(260).await;
+    f.head.store(300, Ordering::SeqCst);
+    f.balance(&f.bound.wallet, 10);
+    let (_, view) = f
+        .manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    for wallet in &f.retained {
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+    }
+    // A slower independent acquisition from an older head completes after churn.
+    f.head.store(200, Ordering::SeqCst);
+    f.balance(&f.bound.wallet, 3);
+    f.manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    let view = view.unwrap();
+    let selected = select_owned(&f, view.clone(), 5).await;
+    assert!(
+        selected.is_some(),
+        "older retained-cache entry must not suppress the newer completed proof"
+    );
+    drop(selected);
+    // The inverse matters financially: a newer insufficient cache observation
+    // must supersede our formerly sufficient proof, regardless of ownership.
+    f.head.store(400, Ordering::SeqCst);
+    f.manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    let calls = f.calls.lock().unwrap().clone();
+    assert!(select_owned(&f, view, 5).await.is_none());
+    assert_eq!(*f.calls.lock().unwrap(), calls);
+    f.close().await;
 }

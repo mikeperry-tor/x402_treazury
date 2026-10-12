@@ -56,7 +56,7 @@ impl Store {
     }
 
     /// Completed caller-owned proofs survive retention-cache churn. Current
-    /// cached observations supersede them; all proofs still require fresh
+    /// observations are compared by chain version; all proofs still require fresh
     /// ownership, lineage, expiry and liability checks under the group gate.
     pub(crate) fn payment_candidate_with_evidence(
         &self,
@@ -68,16 +68,39 @@ impl Store {
     ) -> Result<Option<(PaymentCandidateHandle, super::super::base::ChainView)>> {
         let now = super::super::base::now()?;
         let mut best: Option<(Rank, PaymentCandidateHandle, super::super::base::ChainView)> = None;
-        let certificates = self
+        let mut certificates: std::collections::BTreeMap<_, _> = self
             .evidence_cache
             .iter()
             .map(|(wallet, (_, cert))| (wallet, cert))
-            .chain(
-                completed
-                    .iter()
-                    .flat_map(|view| &view.balance_certificates)
-                    .filter(|(wallet, _)| !self.evidence_cache.contains_key(*wallet)),
-            );
+            .collect();
+        for (wallet, certificate) in completed.iter().flat_map(|view| &view.balance_certificates) {
+            // Eviction can let an older in-flight read populate the cache after
+            // our newer completion. Ignore invalid owned proofs before comparing
+            // versions, and never let publication order replace chain order.
+            if let Some(saved) = certificates.get(wallet) {
+                match evidence::check_balance(&self.db, self.evidence_namespace, certificate) {
+                    Ok(support) if now <= support.observation.valid_until => {}
+                    Ok(_) => continue,
+                    Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                }
+                match evidence::check_balance(&self.db, self.evidence_namespace, saved) {
+                    Ok(support) if now <= support.observation.valid_until => {
+                        if certificate.observation().compare(saved.observation())?
+                            != std::cmp::Ordering::Greater
+                        {
+                            continue;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            certificates.insert(wallet, certificate);
+        }
         for (wallet, certificate) in certificates {
             let within: bool = self.db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",

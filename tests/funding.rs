@@ -22,6 +22,7 @@ struct Fake {
     reconcile_error: Option<&'static str>,
     recovery: Option<x402_treazury::treasury::recovery::RecoveryOutcome>,
     recovery_calls: usize,
+    recovery_observed: bool,
     reconcile_calls: usize,
     chain_credit: bool,
     external_credit: bool,
@@ -85,10 +86,10 @@ impl FundingBackend for Fake {
         &mut self,
         _: &FundingJob,
     ) -> Result<Option<x402_treazury::treasury::recovery::RecoveryObservation>> {
-        use x402_treazury::treasury::recovery::{RecoveryObservation, RecoveryOutcome};
+        use x402_treazury::treasury::recovery::RecoveryObservation;
         self.recovery_calls += 1;
         Ok(self.recovery.clone().map(|outcome| RecoveryObservation {
-            source_observed: matches!(outcome, RecoveryOutcome::Waiting(_)),
+            source_observed: self.recovery_observed,
             outcome,
         }))
     }
@@ -248,6 +249,7 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             reconcile_error: None,
             recovery: None,
             recovery_calls: 0,
+            recovery_observed: false,
             reconcile_calls: 0,
             chain_credit: false,
             external_credit: false,
@@ -357,6 +359,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             reconcile_error: None,
             recovery: None,
             recovery_calls: 0,
+            recovery_observed: false,
             reconcile_calls: 0,
             chain_credit: true,
             external_credit: false,
@@ -438,6 +441,7 @@ async fn fixture() -> (
             reconcile_error: None,
             recovery: None,
             recovery_calls: 0,
+            recovery_observed: false,
             reconcile_calls: 0,
             chain_credit: false,
             external_credit: false,
@@ -1437,8 +1441,16 @@ async fn assert_timed_out_source_observations(
     }
     let before = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(before.funding_jobs[0].phase, FundingPhase::DepositPending);
+    let reconciles_before = worker.backend.lock().await.reconcile_calls;
+    worker.tick(now + 350).await.unwrap();
+    assert_eq!(
+        worker.backend.lock().await.reconcile_calls,
+        reconciles_before + 1
+    );
+    assert_eq!(worker.backend.lock().await.recovery_calls, 0);
     worker.backend.lock().await.timeout = 1;
     worker.backend.lock().await.recovery = recovery;
+    worker.backend.lock().await.recovery_observed = ordinary_reconciliations == 0;
     let reconciles_before = worker.backend.lock().await.reconcile_calls;
     worker.tick(now + 1000).await.unwrap();
     let after = worker.store.call(|s| s.status()).await.unwrap();
@@ -1457,4 +1469,23 @@ async fn assert_timed_out_source_observations(
     assert!(after.outgoing_pending);
     drop(worker);
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn operator_disposition_after_source_observation_does_not_reconcile_again() {
+    use x402_treazury::treasury::recovery::RecoveryOutcome;
+    assert_timed_out_source_observations(
+        Some(RecoveryOutcome::OperatorRequired(
+            "conflicting_transaction_or_input_evidence",
+        )),
+        0,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn recovery_wait_before_source_observation_preserves_ordinary_reconciliation() {
+    use x402_treazury::treasury::recovery::RecoveryOutcome;
+    assert_timed_out_source_observations(Some(RecoveryOutcome::Waiting("funding_in_progress")), 1)
+        .await;
 }

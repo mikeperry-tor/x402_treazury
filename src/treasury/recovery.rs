@@ -364,11 +364,16 @@ mod tests {
             .await
             .unwrap();
         let stop = CancellationToken::new();
+        let observation = owner
+            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop)
+            .await
+            .unwrap();
+        assert!(
+            !observation.source_observed,
+            "early disposition must not claim a source observation"
+        );
         assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
-                .await
-                .unwrap(),
+            observation.outcome,
             RecoveryOutcome::OperatorRequired("preparation_outcome_unknown")
         );
         let id = job.id.clone();

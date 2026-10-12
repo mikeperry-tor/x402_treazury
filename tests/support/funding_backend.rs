@@ -313,6 +313,72 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         panic!("wrong command")
     };
     assert_eq!(id, job.operation_id);
+    // Count actual commands crossing the production backend/treasury boundary.
+    // The fixture rejects ordinary reconciliation; recovery reports an owned
+    // observation. A duplicate command either violates the match or times out.
+    let (id, operation) = (job.id.clone(), job.operation_id.clone());
+    store
+        .call(move |s| {
+            s.request_broadcast(&operation, now()?, 1, false)?;
+            s.reconcile_funding_phase(&id, &operation)
+        })
+        .await
+        .unwrap();
+    let coordinator = FundingWorker::new(store.clone(), backend, 60);
+    for timed_out in [false, true] {
+        let id = job.id.clone();
+        let current = store
+            .call(move |s| {
+                if timed_out {
+                    s.mark_funding_timeout(&id)?;
+                }
+                s.funding_job(&id)?.context("fixture job missing")
+            })
+            .await
+            .unwrap();
+        let clock = TickClock {
+            epoch: now().unwrap(),
+            started: std::time::Instant::now(),
+        };
+        let (result, observed) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(
+                coordinator.source_step(&current, &clock),
+                commands.test_observe()
+            )
+        })
+        .await
+        .unwrap();
+        match observed {
+            ObservedCommand::Reconcile(id) if !timed_out => {
+                assert_eq!(id, job.operation_id);
+                assert!(result.is_err());
+            }
+            ObservedCommand::RecoverFunding(id, _, false) if timed_out => {
+                assert_eq!(id, job.id);
+                assert!(result.unwrap().is_none());
+            }
+            _ => panic!("wrong source command or duplicate ordinary observation"),
+        }
+        assert!(commands.test_is_empty());
+        let operation = job.operation_id.clone();
+        assert_eq!(
+            store
+                .call(move |s| Ok(s.operation(&operation)?.attempts))
+                .await
+                .unwrap(),
+            1
+        );
+    }
+    let FundingWorker {
+        backend: owned_backend,
+        store: owned_store,
+        ..
+    } = coordinator;
+    drop(owned_store);
+    backend = std::sync::Arc::try_unwrap(owned_backend)
+        .ok()
+        .unwrap()
+        .into_inner();
     let id = job.operation_id.clone();
     store
         .call(move |s| s.confirm_spend(&id, 110000, 1))
