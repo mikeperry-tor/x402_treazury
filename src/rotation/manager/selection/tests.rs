@@ -309,7 +309,7 @@ async fn gated_selection_rechecks_current_liabilities_and_all_completed_candidat
                 .acquire_candidate_wallet(wallet.clone())
                 .await
                 .unwrap(),
-            CandidateEvidenceState::Usable
+            (CandidateEvidenceState::Usable, _)
         ));
     }
     let held = f.manager.gate.clone().lock_owned().await;
@@ -346,7 +346,7 @@ async fn cache_balances(f: &Fixture, skip: Option<&str>) {
                 .acquire_candidate_wallet(wallet.clone())
                 .await
                 .unwrap(),
-            CandidateEvidenceState::Usable
+            (CandidateEvidenceState::Usable, _)
         ));
     }
     f.started.lock().unwrap().clear();
@@ -412,7 +412,7 @@ async fn batched_scan_sees_independent_publication_before_reaching_that_wallet()
             .acquire_candidate_wallet(target.clone())
             .await
             .unwrap(),
-        CandidateEvidenceState::Usable
+        (CandidateEvidenceState::Usable, _)
     ));
     resume.notify_one();
     let CandidatePassResult::Selected(selected) =
@@ -489,7 +489,7 @@ async fn independent_publication_is_selected_before_waiting_for_blocked_reads() 
         .await
         .unwrap()
         .unwrap(),
-        CandidateEvidenceState::Usable
+        (CandidateEvidenceState::Usable, _)
     ));
     resume.notify_one();
     let CandidatePassResult::Selected(selected) =
@@ -562,7 +562,7 @@ async fn independent_publication_wakes_all_blocked_passes_without_new_acquisitio
             .acquire_candidate_wallet(target.clone())
             .await
             .unwrap(),
-        CandidateEvidenceState::Usable
+        (CandidateEvidenceState::Usable, _)
     ));
     for task in [first, second] {
         let wallet = tokio::time::timeout(std::time::Duration::from_secs(5), task)
@@ -580,4 +580,60 @@ async fn independent_publication_wakes_all_blocked_passes_without_new_acquisitio
         0
     );
     f.close().await;
+}
+
+#[tokio::test]
+async fn completed_sufficient_candidate_survives_cache_churn() {
+    let mut f = fixture(260).await;
+    f.balance(&f.bound.wallet, 10);
+    let owner = f.manager.clone();
+    let bound = f.bound.wallet.clone();
+    let others: Vec<_> = [&f.small, &f.large]
+        .into_iter()
+        .chain(&f.retained)
+        .cloned()
+        .collect();
+    let scans = Arc::new(AtomicUsize::new(0));
+    f.manager.test_admission_hook = Some(Arc::new(move |stage| {
+        let (owner, bound, others, scans) =
+            (owner.clone(), bound.clone(), others.clone(), scans.clone());
+        async move {
+            if matches!(stage, AdmissionTestStage::CandidateScan)
+                && scans.fetch_add(1, Ordering::SeqCst) == 1
+            {
+                assert!(matches!(
+                    owner.acquire_candidate_wallet(bound.clone()).await.unwrap(),
+                    (CandidateEvidenceState::Usable, _)
+                ));
+                for wallet in others {
+                    owner.acquire_candidate_wallet(wallet).await.unwrap();
+                }
+                let pool = owner.pool.clone();
+                assert!(matches!(
+                    owner
+                        .store
+                        .call(move |s| s.candidate_evidence_state(&pool, &bound))
+                        .await
+                        .unwrap(),
+                    CandidateEvidenceState::Missing
+                ));
+            }
+        }
+        .boxed()
+    }));
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        f.manager.acquire_candidate(&f.bound, U256::from(5)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let selected = matches!(result, CandidatePassResult::Selected(_));
+    let negative = matches!(result, CandidatePassResult::CompleteNegative);
+    drop(result);
+    f.close().await;
+    assert!(
+        selected,
+        "sufficient completed observation was lost; complete_negative={negative}"
+    );
 }

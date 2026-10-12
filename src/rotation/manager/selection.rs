@@ -55,8 +55,12 @@ impl ManagedPool {
         let mut cursor = -1;
         let mut exhausted = false;
         let mut incomplete = false;
-        let mut reads = tokio::task::JoinSet::<Result<CandidateEvidenceState>>::new();
+        let mut reads =
+            tokio::task::JoinSet::<Result<(CandidateEvidenceState, Option<ChainView>)>>::new();
 
+        // Retain only the current traversal batch plus the four read lanes.
+        // Selection consumes this batch even when it has no sufficient proof.
+        let mut completed = Vec::new();
         loop {
             // Register before inspecting evidence to avoid a publication between
             // the last gated scan and the wait being lost. Wake all group waiters.
@@ -64,13 +68,15 @@ impl ManagedPool {
             tokio::pin!(changed);
             changed.as_mut().enable();
             while let Some(result) = reads.try_join_next() {
-                incomplete |=
-                    completion_is_incomplete(result.context("candidate acquisition task failed")?)?;
+                incomplete |= completion_is_incomplete(
+                    result.context("candidate acquisition task failed")?,
+                    &mut completed,
+                )?;
             }
             // This is the actual gated selection, not a provisional winner.
             // Recompute all completed cached candidates, liabilities, and roles.
             if let Some(selected) = self
-                .select_completed_candidate(&bound.wallet, cost, through)
+                .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
                 .await?
             {
                 // `reads` is dropped now, without waiting for unrelated EOF.
@@ -111,8 +117,17 @@ impl ManagedPool {
                 let (pool, id) = (self.pool.clone(), wallet.clone());
                 let state = self
                     .store
-                    .call_with_guard(guard, move |s| s.candidate_evidence_state(&pool, &id))
+                    .call_with_guard(guard, move |s| {
+                        Ok((
+                            s.candidate_evidence_state(&pool, &id)?,
+                            s.cached_payment_view(&pool, &id)?,
+                        ))
+                    })
                     .await?;
+                if let Some(view) = state.1 {
+                    completed.push(view);
+                }
+                let state = state.0;
                 if state == CandidateEvidenceState::Missing {
                     let owner = self.clone();
                     let context = crate::qualification::capture_case();
@@ -125,11 +140,12 @@ impl ManagedPool {
                     .await;
                 // Poll independently ready acquisitions while walking cached or
                 // ineligible rows, so a long inventory cannot hide a completion.
-                let mut completed = false;
+                let mut read_completed = false;
                 while let Some(result) = reads.try_join_next() {
-                    completed = true;
+                    read_completed = true;
                     incomplete |= completion_is_incomplete(
                         result.context("candidate acquisition task failed")?,
+                        &mut completed,
                     )?;
                 }
                 evaluated_since_selection += 1;
@@ -137,9 +153,9 @@ impl ManagedPool {
                 // the full cache scan at the existing inventory page size: this
                 // also notices independent evidence/liability changes without
                 // rescanning the same cache for every unchanged inventory row.
-                if completed || evaluated_since_selection == PAGE_SIZE {
+                if read_completed || evaluated_since_selection == PAGE_SIZE {
                     if let Some(selected) = self
-                        .select_completed_candidate(&bound.wallet, cost, through)
+                        .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
                         .await?
                     {
                         return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -152,7 +168,7 @@ impl ManagedPool {
             if evaluated_since_selection > 0
                 && !reads.is_empty()
                 && let Some(selected) = self
-                    .select_completed_candidate(&bound.wallet, cost, through)
+                    .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
                     .await?
             {
                 return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -165,15 +181,17 @@ impl ManagedPool {
                 _ = &mut changed, if !reads.is_empty() => continue,
             };
             if let Some(result) = completion {
-                incomplete |=
-                    completion_is_incomplete(result.context("candidate acquisition task failed")?)?;
+                incomplete |= completion_is_incomplete(
+                    result.context("candidate acquisition task failed")?,
+                    &mut completed,
+                )?;
                 continue;
             }
             if exhausted && priority.is_empty() && page.is_empty() {
                 // A final gated recheck may see independently completed evidence;
                 // this does not reopen the captured pass or acquire another row.
                 if let Some(selected) = self
-                    .select_completed_candidate(&bound.wallet, cost, through)
+                    .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
                     .await?
                 {
                     return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -192,26 +210,19 @@ impl ManagedPool {
         bound: &str,
         cost: U256,
         through: i64,
+        completed: &mut Vec<ChainView>,
     ) -> Result<Option<SelectedCandidate>> {
         #[cfg(test)]
         self.admission_test_stage(AdmissionTestStage::CandidateScan)
             .await;
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let (pool, bound) = (self.pool.clone(), bound.to_owned());
+        debug_assert!(completed.len() <= PAGE_SIZE + READS);
+        let completed = std::mem::take(completed);
         let selected = self
             .store
             .call_with_guard(guard.clone(), move |s| {
-                let Some(candidate) =
-                    s.cached_payment_candidate_at_boundary(&pool, cost, Some(&bound), through)?
-                else {
-                    return Ok(None);
-                };
-                // A clock tick may expire the candidate between these local checks.
-                // That loses this provisional result, never the original traversal.
-                let Some(view) = s.cached_payment_view(&pool, &candidate.wallet)? else {
-                    return Ok(None);
-                };
-                Ok(Some((candidate, view)))
+                s.payment_candidate_with_evidence(&pool, cost, Some(&bound), through, &completed)
             })
             .await?;
         Ok(selected.map(|(candidate, view)| SelectedCandidate {
@@ -221,7 +232,10 @@ impl ManagedPool {
         }))
     }
 
-    async fn acquire_candidate_wallet(&self, wallet: String) -> Result<CandidateEvidenceState> {
+    async fn acquire_candidate_wallet(
+        &self,
+        wallet: String,
+    ) -> Result<(CandidateEvidenceState, Option<ChainView>)> {
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let (pool, id) = (self.pool.clone(), wallet.clone());
         let query = self
@@ -235,7 +249,8 @@ impl ManagedPool {
         let pool = self.pool.clone();
         self.store
             .call_with_guard(guard, move |s| {
-                s.publish_candidate_evidence(&pool, &wallet, view)
+                let state = s.publish_candidate_evidence(&pool, &wallet, view)?;
+                Ok((state, s.cached_payment_view(&pool, &wallet)?))
             })
             .await
     }
@@ -243,11 +258,18 @@ impl ManagedPool {
 
 // Integrity rejection is not a new acquisition allowance or permission to shop
 // around a rejected proof. Acquisition failures leave a negative pass incomplete.
-fn completion_is_incomplete(result: Result<CandidateEvidenceState>) -> Result<bool> {
+fn completion_is_incomplete(
+    result: Result<(CandidateEvidenceState, Option<ChainView>)>,
+    completed: &mut Vec<ChainView>,
+) -> Result<bool> {
     use crate::rotation::base::{EndpointMismatch, EvidenceConflict, evidence::EvidenceFailure};
     match result {
-        Ok(CandidateEvidenceState::Usable | CandidateEvidenceState::Ineligible) => Ok(false),
-        Ok(CandidateEvidenceState::Missing) => Ok(true),
+        Ok((state, view)) => {
+            if let Some(view) = view {
+                completed.push(view);
+            }
+            Ok(state == CandidateEvidenceState::Missing)
+        }
         Err(error) => {
             if error.is::<EvidenceConflict>()
                 || error.is::<EndpointMismatch>()

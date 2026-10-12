@@ -50,9 +50,35 @@ impl Store {
         bound: Option<&str>,
         through: i64,
     ) -> Result<Option<PaymentCandidateHandle>> {
+        Ok(self
+            .payment_candidate_with_evidence(pool, cost, bound, through, &[])?
+            .map(|(candidate, _)| candidate))
+    }
+
+    /// Completed caller-owned proofs survive retention-cache churn. Current
+    /// cached observations supersede them; all proofs still require fresh
+    /// ownership, lineage, expiry and liability checks under the group gate.
+    pub(crate) fn payment_candidate_with_evidence(
+        &self,
+        pool: &str,
+        cost: U256,
+        bound: Option<&str>,
+        through: i64,
+        completed: &[super::super::base::ChainView],
+    ) -> Result<Option<(PaymentCandidateHandle, super::super::base::ChainView)>> {
         let now = super::super::base::now()?;
-        let mut best: Option<(Rank, PaymentCandidateHandle)> = None;
-        for (wallet, (_, certificate)) in &self.evidence_cache {
+        let mut best: Option<(Rank, PaymentCandidateHandle, super::super::base::ChainView)> = None;
+        let certificates = self
+            .evidence_cache
+            .iter()
+            .map(|(wallet, (_, cert))| (wallet, cert))
+            .chain(
+                completed
+                    .iter()
+                    .flat_map(|view| &view.balance_certificates)
+                    .filter(|(wallet, _)| !self.evidence_cache.contains_key(*wallet)),
+            );
+        for (wallet, certificate) in certificates {
             let within: bool = self.db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
                 params![wallet, pool, through],
@@ -92,18 +118,19 @@ impl Store {
                     })?;
             let candidate = PaymentCandidateHandle {
                 wallet: wallet.clone(),
-                address: support.observation.address,
+                address: support.observation.address.clone(),
                 generation,
             };
+            let view = payment_view(wallet, certificate, support.observation);
             if bound == Some(wallet.as_str()) {
-                return Ok(Some(candidate));
+                return Ok(Some((candidate, view)));
             }
             let rank = Rank::new(capacity, &ownership.role, ownership.slot.as_deref(), wallet);
-            if best.as_ref().is_none_or(|(current, _)| rank < *current) {
-                best = Some((rank, candidate));
+            if best.as_ref().is_none_or(|(current, _, _)| rank < *current) {
+                best = Some((rank, candidate, view));
             }
         }
-        Ok(best.map(|(_, candidate)| candidate))
+        Ok(best.map(|(_, candidate, view)| (candidate, view)))
     }
 }
 
@@ -170,16 +197,7 @@ impl Store {
         if super::super::base::now()? > observation.valid_until {
             return Ok(None);
         }
-        Ok(Some(super::super::base::ChainView {
-            admission_valid_until: observation.valid_until,
-            anchor: observation.confirmed.anchor.clone(),
-            balances: [(wallet.to_owned(), observation.available())].into(),
-            observations: [(wallet.to_owned(), observation)].into(),
-            balance_certificates: [(wallet.to_owned(), certificate.clone())].into(),
-            resolution_certificates: Default::default(),
-            released: vec![],
-            resolutions: Default::default(),
-        }))
+        Ok(Some(payment_view(wallet, certificate, observation)))
     }
 
     /// Runtime evidence publication alone cannot consume a reserve or retire a wallet.
@@ -292,5 +310,23 @@ mod notification_tests {
         store.notify_capacity_changed("one");
         next.await;
         assert!(!std::sync::Arc::ptr_eq(&changes, &other));
+    }
+}
+
+// Construct from the exact validated observation without renewing its authority.
+fn payment_view(
+    wallet: &str,
+    certificate: &super::super::base::BalanceCertificate,
+    observation: super::super::base::evidence::BalanceObservation,
+) -> super::super::base::ChainView {
+    super::super::base::ChainView {
+        admission_valid_until: observation.valid_until,
+        anchor: observation.confirmed.anchor.clone(),
+        balances: [(wallet.to_owned(), observation.available())].into(),
+        observations: [(wallet.to_owned(), observation)].into(),
+        balance_certificates: [(wallet.to_owned(), certificate.clone())].into(),
+        resolution_certificates: Default::default(),
+        released: vec![],
+        resolutions: Default::default(),
     }
 }
