@@ -389,6 +389,14 @@ impl PaidClient {
     pub async fn drain(&self) {
         self.work.drain().await;
     }
+    /// Retain an encompassing payment workflow through its outcome publication.
+    /// Nested payment execution reuses this owner and its foreground permit.
+    pub(crate) async fn run_owned<T: Send + 'static>(
+        &self,
+        work: impl std::future::Future<Output = T> + Send + 'static,
+    ) -> Result<T> {
+        ownership::run(&self.work, work).await
+    }
     pub(crate) async fn execute_response_scoped(
         &self,
         route: RoutedRequest,
@@ -397,7 +405,7 @@ impl PaidClient {
     ) -> Result<crate::output::HttpOutput> {
         let client = self.clone();
         let progress = progress.clone();
-        ownership::run(&self.work, async move {
+        self.run_owned(async move {
             client
                 .execute_response_owned(route, &progress, operation)
                 .await

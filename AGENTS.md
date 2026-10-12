@@ -399,13 +399,14 @@ and [the runtime architecture](docs/architecture.md).
   selection; config show exposes discovery_wallets. Keep the discovery-wallet-v1
   selection domain stable. Shared sources do not multiply paid discovery across
   listeners; different wallet scopes cannot coalesce relay requests or relay cache data.
-  A monotonic submission marker confines proven pre-submission failures/cancellation
-  to bounded target attempts/backoff. Possibly submitted failures/cancellation
+  A monotonic submission marker confines proven pre-submission failures
+  to bounded target attempts/backoff. Possibly submitted failures
   disable the shared relay across all wallets; absence of receipts proves nothing.
   Attributed target failures are cached without disabling other targets. Target discovery stays
   unsigned GET-only; only relay payment uses PaidClient. Reuse existing wallet caps
   and byte/time limits. Serialize calls, coalesce successful targets, and disable
-  the relay for the run on possibly submitted failure/cancellation before any retry can spend.
+  the relay for the run on possibly submitted failure before any retry can spend. Waiter cancellation retains
+  serialized ownership through terminal outcome publication.
   Outer max_response_bytes must fit the JSON envelope/escaping as well as decoded
   target limits; neither size failure authorizes a paid retry.
   Successful 2xx pricing probes leave prices unknown without invoking the relay.

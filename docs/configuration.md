@@ -1046,10 +1046,11 @@ response reporting an origin HTTP error, connection failure, unusable catalog or
 pricing response ends fallback for that target. Its failure is retained so aliases
 cannot retry it, while other targets can still use Curl. No upstream error text is logged.
 A monotonic submission marker distinguishes proven pre-submission failures from
-possibly paid work. Pre-submission failure or cancellation leaves unrelated targets
+possibly paid work. A cancelled waiter leaves accepted work running through outcome publication.
+Proven pre-submission failure leaves unrelated targets
 usable; subsequent requests for that scoped target have at most three attempts
-with a one-second backoff. Once signed submission may have begun, failure,
-cancellation or an invalid/unattributable envelope disables relay spending across
+with a one-second backoff. Once signed submission may have begun, failure
+or an invalid/unattributable envelope disables relay spending across
 all wallets for the run. No uncertain signed request is replayed. A new explicit command or
 process restart starts a new run and can spend again. Required catalog failure
 still aborts startup; pricing failures remain unknown estimates. Existing successful results and

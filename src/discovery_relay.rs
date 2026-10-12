@@ -104,7 +104,6 @@ pub(crate) async fn build(
 #[derive(Default)]
 struct State {
     stopped: bool,
-    submission: Option<crate::payment::SubmissionProgress>,
     attempts: BTreeMap<(String, String), (u8, Instant)>,
     responses: BTreeMap<(String, String), Arc<Response>>,
     failures: BTreeMap<(String, String), TargetFailure>,
@@ -206,6 +205,7 @@ impl std::fmt::Display for RelayFailure {
 }
 impl std::error::Error for RelayFailure {}
 
+#[derive(Clone)]
 pub struct Relay {
     client: PaidClient,
     endpoint: String,
@@ -313,6 +313,19 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
+        let relay = self.clone();
+        let url = url.to_owned();
+        self.client
+            .run_owned(async move { relay.fetch_owned(&url, expected, limit, setting).await })
+            .await?
+    }
+    async fn fetch_owned(
+        &self,
+        url: &str,
+        expected: u16,
+        limit: usize,
+        setting: &'static str,
+    ) -> Result<Arc<Response>> {
         let target = reqwest::Url::parse(url)?;
         ensure!(
             target.scheme() == "https"
@@ -338,13 +351,6 @@ impl Relay {
             }
             return Ok(response.clone());
         }
-        if state.stopped && state.submission.as_ref().is_some_and(|p| !p.possible()) {
-            state.stopped = false;
-            tracing::warn!(
-                scope = "pre_submission",
-                "Discovery relay previous request ended before paid intent; unrelated targets remain enabled"
-            );
-        }
         if let Some((attempts, last)) = state.attempts.get(&key) {
             ensure!(
                 *attempts < 3,
@@ -359,11 +365,11 @@ impl Relay {
             !state.stopped,
             "discovery relay disabled after error or cancellation; no paid retry"
         );
-        // Set BEFORE the first await: cancellation/uncertain settlement cannot restart spending.
-        // Serializing paid fetches also prevents queued pricing probes draining a failing wallet.
+        // The accepted owner retains this lock through payment, decoding and
+        // publication. Cancelling its waiter cannot admit another paid fetch.
+        // Leave the breaker closed if the owner fails before publishing an outcome.
         state.stopped = true;
         let progress = crate::payment::SubmissionProgress::default();
-        state.submission = Some(progress.clone());
         let attempt = state
             .attempts
             .entry(key.clone())
@@ -847,57 +853,30 @@ pub(crate) mod tests {
         }
     }
     #[tokio::test]
-    async fn pre_submission_failure_and_cancellation_leave_other_targets_available() {
-        for cancel in [false, true] {
-            let (mut relay, _, task) = fixture(envelope(TARGET), false, false).await;
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let endpoint = format!("http://{}/", listener.local_addr().unwrap());
-            Arc::get_mut(&mut relay).unwrap().endpoint = endpoint;
-            let arrived = Arc::new(tokio::sync::Notify::new());
-            let pending_server = if cancel {
-                let arrived = arrived.clone();
-                Some(tokio::spawn(async move {
-                    let app = Router::new().fallback(move || {
-                        let arrived = arrived.clone();
-                        async move {
-                            arrived.notify_one();
-                            std::future::pending::<String>().await
-                        }
-                    });
-                    axum::serve(listener, app).await.unwrap();
-                }))
-            } else {
-                drop(listener);
-                None
-            };
-            let r = relay.clone();
-            let fetch =
-                tokio::spawn(async move { r.fetch(TARGET, 200, 4096, "max_spec_bytes").await });
-            if cancel {
-                tokio::time::timeout(std::time::Duration::from_secs(5), arrived.notified())
-                    .await
-                    .unwrap();
-                fetch.abort();
-                assert!(matches!(fetch.await, Err(e) if e.is_cancelled()));
-            } else {
-                assert!(fetch.await.unwrap().is_err());
-            }
-            let other_url = "https://other.example/spec";
-            let (mut other, f, other_task) = fixture(envelope(other_url), false, false).await;
-            Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
-            assert!(
-                other
-                    .fetch(other_url, 200, 4096, "max_spec_bytes")
-                    .await
-                    .is_ok()
-            );
-            assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-            task.abort();
-            other_task.abort();
-            if let Some(task) = pending_server {
-                task.abort();
-            }
-        }
+    async fn pre_submission_failure_leaves_other_targets_available() {
+        let (mut relay, _, task) = fixture(envelope(TARGET), false, false).await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Arc::get_mut(&mut relay).unwrap().endpoint =
+            format!("http://{}/", listener.local_addr().unwrap());
+        drop(listener);
+        assert!(
+            relay
+                .fetch(TARGET, 200, 4096, "max_spec_bytes")
+                .await
+                .is_err()
+        );
+        let other_url = "https://other.example/spec";
+        let (mut other, f, other_task) = fixture(envelope(other_url), false, false).await;
+        Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
+        assert!(
+            other
+                .fetch(other_url, 200, 4096, "max_spec_bytes")
+                .await
+                .is_ok()
+        );
+        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+        task.abort();
+        other_task.abort();
     }
 
     #[test]
@@ -1072,32 +1051,8 @@ pub(crate) mod tests {
             }
         }
     }
-    #[tokio::test]
-    async fn cancellation_after_signed_submission_disables_relay() {
-        let (relay, f, task) = fixture(envelope(TARGET), false, true).await;
-        let second = second_wallet(&relay);
-        let r = relay.clone();
-        let fetch = tokio::spawn(async move { r.fetch(TARGET, 200, 4096, "max_spec_bytes").await });
-        tokio::time::timeout(std::time::Duration::from_secs(10), f.arrived.notified())
-            .await
-            .unwrap();
-        fetch.abort();
-        let _ = fetch.await;
-        assert!(
-            second
-                .fetch(TARGET, 200, 4096, "max_spec_bytes")
-                .await
-                .is_err()
-        );
-        assert!(
-            relay
-                .fetch(TARGET, 200, 4096, "max_spec_bytes")
-                .await
-                .is_err()
-        );
-        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-        task.abort();
-    }
+    mod ownership_tests;
+
     #[test]
     fn rejects_redirects_truncation_wrong_target_and_oversize() {
         let log = tempfile::NamedTempFile::new().unwrap();

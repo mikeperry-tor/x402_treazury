@@ -52,7 +52,8 @@ bypasses qualification. See [discovery disk caching](configuration.md#automatic-
 It resolves one assigned wallet per source (or an explicit override), uses the
 ordinary paid client, serializes requests across wallets and disables
 further relay spending across all wallets after a possibly submitted payment fails
-or is cancelled. Proven pre-submission failures retain bounded retry/backoff and
+or returns an invalid envelope. Waiter cancellation retains serialized ownership
+through terminal outcome publication. Proven pre-submission failures retain bounded retry/backoff and
 do not disable unrelated targets. Local bootstrap metadata avoids
 a catalog dependency cycle. `deployment/bootstrap.rs` supervises initial funding
 and confirmation before ordinary managed serving loads catalogs, and also powers
