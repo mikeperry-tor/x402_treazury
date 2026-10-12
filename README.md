@@ -152,20 +152,22 @@ target/release/x402_treazury wallet addresses \
   --config examples/deployments/privacy.local.toml
 ```
 
-Send ZEC to the treasury's **shielded receive address**. The privacy example conf defines
-**two wallet groups**, each starting with one small reserve:
-**2 x $2 = $4 USDC** before fees and accepted bridge minimum increases.
-Allow additional treasury funds for those costs and subsequent replacements. Sending $5USD worth of ZEC to your treasury should be plenty to get started and test functionality. $10USD will allow you to use the servers through at least 2 wallet rotations each (which is quite a lot of API calls).
+Send $5 worth of ZEC to the treasury's **shielded receive address**.
 
-Allow more if the bridge minimum exceeds $2 or exchange rates and fees change substantially.
+The privacy example conf defines two wallet groups, each starting with one small reserve: **2 x $2 = $4 USDC before fees**.
 
-To reduce initial expense, **remove one of the `[wallets.NAME]` definitions**, then remove or rebind any servers/sources referencing them.
+Individual API payments are capped at **0.05 USDC for web** and **0.10 USDC
+for social/company**, so even a $5 initial funding should get you at least 40
+web search+page fetch calls, but more likely closer to 100. The social+company
+calls tend to be a bit more expensive, but you will still have at least 20 of
+those.
+
+You can send additional ZEC to your treasury address at any time.
 
 > **NOTE: All wallets are auto-funded**
 >
 > Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
-> not eliminate that pool's funding setup. Keeping one pool requires one $2 reserve; sharing it across multiple MCP servers preserves
-> separate toolsets but shares their payment identity and Tor circuit usage.
+> not eliminate that pool's funding setup. To reduce initial testing expense, **remove one of the `[wallets.NAME]` definitions**, then remove or rebind any servers/sources referencing them.
 
 After sending ZEC, sync the treasury and check its confirmed spendable balance:
 
@@ -175,32 +177,25 @@ target/release/x402_treazury wallet sync \
 target/release/x402_treazury wallet status --config examples/deployments/privacy.local.toml
 ```
 
-Once `wallet status` shows sufficient confirmed spendable ZEC, fund the configured reserves:
+Once `wallet status` shows sufficient confirmed spendable ZEC, fund the
+configured reserve wallets with USDC via bootstap:
 
 ```sh
 target/release/x402_treazury wallet bootstrap \
   --config examples/deployments/privacy.local.toml
 ```
 
-Bootstrap uses actual spendable treasury funds under per-operation safeguards and waits for confirmed USDC credit to its captured reserve claims.
-Repeating it observes current configured inventory and resumes unfinished funding work,
-including eligible automatic recovery. Prepared deposits that missed their quote
-window wait for verified transaction expiry before funding retries. For a single
-recovery pass with serving stopped, use `wallet recover --config FILE`; it reports
-what recovered, what is waiting, and what needs operator attention without sending
-funds. Recovery attempts remain bounded across restarts.
-The wallets are now set up for paid discovery and API calls.
+Bootstrap uses ZEC treasury funds and waits for confirmed USDC credit to each wallet.
+
+Once bootstrap completes successfully, the wallets are ready for paid API calls.
+
+Repeating the bootstrap command displays current configured inventory and
+resumes any unfinished funding work, including automatic recovery for any
+failed USDC swap transactions.
 
 ### 4. Optionally warm the catalogs
 
-The privacy example automatically tries a [paid discovery relay](docs/configuration.md#paid-discovery-relay) when API catalog or pricing
-requests are blocked or time out over Tor. This relay service is also contacted
-over Tor. Its requests are paid by the wallet that is attached to the provider
-that it is contacting, and these requests use Tor circuit isolation derived from that same
-target wallet to connect to this relay service. If multiple wallets are assigned to a provider through multiple MCP servers (such as with the Exa provider in the privacy example conf),
-one wallet is always chosen deterministically for any relayed API catalog requests.
-
-To speed up discovery during MCP server launch, you can warm the catalog and
+To speed up the MCP server launch, you can pre-warm the API catalog and
 pricing cache before serving, with or without Tor.
 
 The optional `--direct` flag bypasses Tor for these requests:
@@ -210,12 +205,18 @@ target/release/x402_treazury catalog warm \
   --config examples/deployments/privacy.local.toml --direct --discover-pricing
 ```
 
-Omit `--direct` to warm through Tor, with paid relay fallback upon API catalog
-or pricing fetch failure. Direct warming reveals your IP address to providers;
-treasury traffic and paid API calls still use Tor. Only responses with suitable
-caching headers can be reused while fresh, and the command reports what was
-cached. See the [cache
-reference](docs/configuration.md#automatic-discovery-disk-cache) for details.
+**Direct warming reveals your IP address to providers; treasury traffic and
+paid API calls still use Tor**. Omit `--direct` to warm through Tor.
+
+> **NOTE: Tor block and ratelimit fallback relay
+>
+> The privacy example conf automatically uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
+> when API catalog or pricing requests are blocked, rate limited, or time out over Tor.
+> This relay service is also contacted over Tor. Its requests are paid by the wallet that is attached to the provider that it
+> is contacting, and these requests use Tor circuit isolation derived from that
+> same target wallet to connect to this relay service. If multiple wallets are assigned to a provider through
+> multiple MCP servers (such as with the Exa provider in the privacy example conf),
+> one wallet is always chosen deterministically for any relayed API catalog requests.
 
 ### 5. Start serving
 
@@ -226,46 +227,24 @@ target/release/x402_treazury config show \
   --config examples/deployments/privacy.local.toml
 ```
 
-The example requests **2 USDC** for small-reserve wallets and
-permits accepted bridge minimums up to **3 USDC**. Ordinary enabled funding uses
-actual spendable Zcash treasury funds after confirmations, reservations and fees;
-there is no daily or cumulative allocation setting. Individual payments remain
-capped at **0.05 USDC for web** and **0.10 USDC for social/company**.
-Conversion overhead is limited to **5%**, with separate per-transfer and network
-fee safeguards. Reservations and accepted transaction bytes survive restarts.
-
-Changes apply on reopen. A partially funded allocation stays unavailable for
-payments until its readiness requirement is satisfied, including while funding is
-paused. Explicit bootstrap waits for its captured reserve jobs;
-ordinary serving requires one funded eligible payer. See [configuration and startup
-outcomes](docs/configuration.md) for claim ownership and accepted-operation limits.
-
-The default retirement tolerance is zero. `auto_fund=false` pauses new funding,
-not independently eligible retirement. Read [funding and retirement configuration](docs/configuration.md)
-before updating a local deployment. Old target/budget fields are rejected; wallet
-state conversion is separate from configuration. The inspected legacy source lacks
-immutable readiness proof and cannot be converted under the strict contract.
-Ordinary startup rejects legacy schemas before loading keys or mutating state.
-The [known-state preflight notes](docs/operator-notes/privacy-local-schema12.md)
-describe the separate utility, rejection evidence and backup requirements.
-
-Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
+Set `TREAZURY_MCP_TOKEN` with secret bearer token, then launch:
 
 ```sh
 target/release/x402_treazury serve --config examples/deployments/privacy.local.toml
 ```
 
-Serving handles discovery and subsequent wallet replacement funding automatically.
-If you skipped explicit bootstrap, ordinary enabled serving waits for one funded
-eligible payer before discovery while the same owner continues reserve funding.
+Serving handles API catalog download and price discovery and wallet replacement funding automatically.
+
+If you skipped funding bootstrap, `serve` performs the ZEC to USDC swaps,
+waits for a funded USDC wallet, and then performs API catalog download and pricing discovery.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
 
-`wallet status` reports persisted progress. Stop with Ctrl-C and allow the announced
-transaction-safety drain to finish. Wallet administration commands that need
-exclusive ownership must run while serving is stopped. Local example copies,
-`state/` and `secrets/` are gitignored.
+`wallet status` reports persisted progress.
+
+Stop with **only one** Ctrl-C **once** and allow the announced
+transaction-safety drain to finish.
 
 > **NOTE: Advanced Wallet Commands**
 >
@@ -442,7 +421,8 @@ An enabled endpoint advertises these five tools to the agent:
 By default, registered API tools also appear in the endpoint's tool list (but this list will not be refreshed until a new conversation).
 
 Set `discover_on_demand = true` to advertise only the five management tools and
-let clients retrieve API schemas as needed, rather than fill the tool list with all added APIs. Tool arguments and the discovery
+let clients retrieve API schemas as needed, rather than fill the tool list
+with all added APIs. Tool arguments and the API discovery
 workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).
 
 With `registry_file`, accepted specifications are saved and restored on restart;
@@ -463,34 +443,9 @@ Removal revokes API access without deleting wallet balances or financial journal
 See the [configuration and authority reference](docs/agent-sources.md#configuration-and-authority)
 for import restrictions, limits and endpoint permissions.
 
-## MCP and startup behavior
+## Bare Bones Single-Wallet MCP Stdio Server
 
-- **Streamable HTTP and stdio.** Managed multi-server deployments use loopback
-  HTTP listeners with authentication enabled by default. Standalone provider
-  serving also supports stdio.
-- **Multiple servers in one process.** Each listener selects sources, tools and
-  wallet bindings; provider definitions are reusable across deployments.
-- **Tor-oriented startup scheduling.** Catalogs use a rolling two-load default;
-  pricing discovery uses a separate 16-request cap. Both are configurable. Compatible
-  catalog aliases share downloads, and pricing results remain
-  cached for the process. These defaults are working choices, not a universal optimum.
-- **Automatic HTTP disk caching.** Deployments with existing treasury state reuse
-  catalogs and pricing estimates when providers supply suitable caching headers.
-  `catalog warm --config FILE --direct --discover-pricing` explicitly warms
-  discovery data directly for a Tor deployment. Omitting `--source` selects all
-  declared sources; add `--source ID` to narrow the selection. Selected sources
-  with `http_cache_enabled = false` reject the warm run rather than being skipped.
-  An optional [paid discovery relay](docs/configuration.md#paid-discovery-relay)
-  uses source-assigned wallets when origin discovery fails, with an optional override.
-  See [cache behavior and opt-out](docs/configuration.md#automatic-discovery-disk-cache).
-- **Plain agent results.** The server handles x402 challenge/sign/retry. Bounded text
-  and supported inline images become MCP results, with explicit errors for limits.
-
-Startup currently waits for all selected catalogs and pricing discovery. Independent
-provider startup is deferred. See [configuration](docs/configuration.md) for filters,
-limits, startup timing, provider protocol exceptions and pricing behavior.
-
-For a simpler static-key stdio setup, provide `EVM_PRIVATE_KEY` through the environment
+For a simple static-key stdio setup, provide `EVM_PRIVATE_KEY` through the environment
 or a private `.env` file:
 
 ```sh
@@ -500,26 +455,7 @@ target/release/x402_treazury serve --provider providers/socialfetch.toml \
 
 This uses Tor but does not rotate or fund the static wallet. MCP clients should spawn
 the binary with absolute config paths or a repository working directory. Logs go to
-stderr; stdout carries MCP or requested CLI output. Build without the embedded Zcash
-wallet with `scripts/zcash.sh build --no-default-features`.
-
-Logging defaults to `warn,x402_treazury=info`: application milestones at `info`,
-with dependency warnings and errors. Catalog and pricing completions, HTTP listener
-startup and funding phase changes are milestones. Download/parse timings, HTTP
-protocol details, individual cover episodes and accepted treasury tip lag are
-`debug` diagnostics. Override the filter
-through the process environment (including for wallet commands):
-
-```sh
-RUST_LOG='warn,x402_treazury=info,x402_treazury::treasury=debug' \
-  target/release/x402_treazury serve --config /path/to/deployment.toml
-```
-
-`RUST_LOG` replaces the default filter and must be set before starting the process;
-it is not read from `--env-file`. Invalid filters fail with a CLI error. Treasury
-sync warnings report fixed failure categories; funding progress reports committed
-phase changes with local job/pool IDs. Logs do not establish payment readiness;
-use `wallet status --config /path/to/deployment.toml` for saved funding and sync state.
+stderr; stdout carries MCP or requested CLI output.
 
 ## Experimental HTTP/2 cover traffic
 
@@ -538,15 +474,6 @@ sources do not automatically authorize cover traffic. See the
 
 ## Documentation and status
 
-Managed payments currently support **Base USDC v2 exact EIP-3009**. Static wallets
-also support v1 exact and v2 upto; upto requires a separately provisioned Permit2
-allowance. Uploads, general artifact storage and automatic polling workflows remain
-outside the current tool execution model.
-
-[Testing and qualification](docs/testing.md#qualification-status) distinguishes
-implemented behavior, exercised live boundaries and outstanding acceptance. Full
-automated lifecycle/restart and combined funded cover qualification remain deferred.
-
 | Guide | What it covers |
 | --- | --- |
 | [Configuration](docs/configuration.md) | Sources, listeners, filters, pricing and transport options |
@@ -556,7 +483,7 @@ automated lifecycle/restart and combined funded cover qualification remain defer
 | [Development](docs/development.md) | Tests, coverage and complexity tools |
 | [Documentation index](docs/README.md) | Architecture, demos, plans and further references |
 
-Run `scripts/check.sh` for the full offline check suite. Live tests are separately
+Run `scripts/check.sh` for the full offline test suite. Live tests are separately
 funded and opt-in; ordinary tests use temporary state and unfunded fixture keys.
 
 ## License
