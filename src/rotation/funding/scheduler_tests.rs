@@ -88,6 +88,176 @@ fn quote(job: &FundingJob) -> Quote {
         deposit: Some("fixture-deposit".into()),
     }
 }
+
+#[test]
+fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
+    let job = FundingJob {
+        id: "job".into(),
+        pool_id: "pool".into(),
+        pool_name: "pool".into(),
+        wallet_id: "wallet".into(),
+        recipient: "recipient".into(),
+        target: "1".into(),
+        phase: FundingPhase::Swapping,
+        operation_id: "operation".into(),
+        attempts: 1,
+        started_at: None,
+        error_streak: 0,
+        timed_out: false,
+        next_poll: 0,
+        last_error: None,
+    };
+    for kind in [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote] {
+        let mut state = State::default();
+        let mut active = BTreeSet::new();
+        let mut jobs = Vec::new();
+        for n in 0..RECORDS {
+            let mut job = job.clone();
+            job.operation_id = format!("operation-{n:03}");
+            let key = Key {
+                operation: job.operation_id.clone(),
+                kind,
+            };
+            assert_eq!(state.admit(&key, &job, 100, &active), Some(true));
+            if n == 0 {
+                active.insert(key);
+            } else {
+                state.complete(&job, kind, 100, 10, Some("fixture outage".into()));
+            }
+            jobs.push(job);
+        }
+        let next = Key {
+            operation: "next-operation".into(),
+            kind,
+        };
+        assert_eq!(state.admit(&next, &job, 100, &active), None);
+        let due = state
+            .records
+            .values()
+            .map(|record| record.due)
+            .max()
+            .unwrap();
+        let protected = Key {
+            operation: jobs[0].operation_id.clone(),
+            kind,
+        };
+        let retry = Key {
+            operation: jobs[1].operation_id.clone(),
+            kind,
+        };
+        assert_eq!(state.admit(&retry, &jobs[1], due - 1, &active), Some(false));
+        assert_eq!(state.admit(&next, &job, due - 1, &active), None);
+        assert_eq!(state.admit(&next, &job, due, &active), Some(true));
+        assert!(
+            state.records.contains_key(&protected),
+            "active ownership cannot be evicted"
+        );
+        assert_eq!(state.records.len(), RECORDS);
+        // Completion still finds the active record after eviction pressure.
+        state.complete(&jobs[0], kind, due, 10, None);
+        active.remove(&protected);
+        assert_eq!(state.admit(&protected, &jobs[0], due, &active), Some(false));
+        // A new operation on the same job has independent retry metadata.
+        let mut replacement = jobs[0].clone();
+        replacement.operation_id = "replacement".into();
+        let replacement_key = Key {
+            operation: replacement.operation_id.clone(),
+            kind,
+        };
+        assert_eq!(
+            state.admit(&replacement_key, &replacement, due, &active),
+            Some(true)
+        );
+        assert!(
+            state.records.contains_key(&protected),
+            "replacement cannot reset old backoff"
+        );
+    }
+}
+
+#[tokio::test]
+async fn late_quote_completion_cannot_mutate_a_replacement_operation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_and_allocate(
+        &mut state,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let old = state.funding_jobs().unwrap().remove(0);
+    state
+        .close_unprepared_funding_for_operation(&old.id, &old.operation_id)
+        .unwrap();
+    state
+        .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+        .unwrap();
+    let replacement = state.funding_job(&old.id).unwrap().unwrap();
+    assert_ne!(old.operation_id, replacement.operation_id);
+    let (store, actor) = StoreHandle::spawn(state);
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+            },
+            gate: Arc::new(Semaphore::new(0)),
+            started,
+        },
+        1,
+    );
+    let lease = Arc::new(store.funding_owner().lock_owned().await);
+    assert!(
+        worker
+            .publish_observation(
+                &lease,
+                Completion {
+                    result: Ok(Observation::Quote(quote(&old))),
+                    job: old.clone(),
+                    kind: Kind::Quote,
+                },
+                1000
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    store
+        .call(move |s| {
+            let current = s.funding_job(&old.id)?.unwrap();
+            assert_eq!(current.operation_id, replacement.operation_id);
+            assert_eq!(current.phase, FundingPhase::Allocated);
+            assert_eq!(current.next_poll, 0);
+            let facts = s.funding_facts(&current.id, &current.operation_id)?;
+            assert!(!facts.accepted_quote);
+            assert_eq!(facts.source_attempts, 0);
+            assert_eq!(s.funding_recovery_count(&current.id)?, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(lease.state.lock().unwrap().records.is_empty());
+    drop(lease);
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+}
 fn submitted(store: &mut Store, job: &FundingJob) {
     store
         .save_funding_quote(&job.id, &serde_json::to_vec(&quote(job)).unwrap())
@@ -139,7 +309,7 @@ async fn wait_until(mut predicate: impl FnMut() -> bool) {
 }
 
 #[tokio::test]
-async fn later_page_status_survives_blocked_credit_and_source_and_cancelled_waiter() {
+async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(
         &dir.path().join("state"),
@@ -148,7 +318,7 @@ async fn later_page_status_survives_blocked_credit_and_source_and_cancelled_wait
         b"fixture",
     )
     .unwrap();
-    for i in 0..34 {
+    for i in 0..(RECORDS / 2 + 2) {
         crate::rotation::store::test_support::declare_and_allocate(
             &mut store,
             &format!("pool{i}"),
@@ -160,7 +330,7 @@ async fn later_page_status_survives_blocked_credit_and_source_and_cancelled_wait
     }
     let mut jobs = store.funding_jobs().unwrap();
     jobs.sort_by(|a, b| a.id.cmp(&b.id));
-    assert!(jobs.len() > super::super::store::scheduling::PAGE_SIZE);
+    assert!(jobs.len() > RECORDS);
     let target = jobs.last().unwrap().clone();
     submitted(&mut store, &target);
     let store_id = store.id().to_owned();
@@ -222,7 +392,7 @@ async fn later_page_status_survives_blocked_credit_and_source_and_cancelled_wait
     waiter.abort();
     let _ = waiter.await;
     let error = worker.tick(1001).await.unwrap_err();
-    assert!(error.is::<scheduler::AlreadyOwned>());
+    assert!(error.is::<AlreadyOwned>());
     assert_eq!(credit_calls.load(Ordering::SeqCst), 4);
     source_gate.add_permits(jobs.len());
     credits.add_permits(jobs.len());
@@ -280,14 +450,14 @@ async fn later_page_status_survives_blocked_credit_and_source_and_cancelled_wait
         Source {
             store: store.clone(),
             reads: Reads {
-                credits: Arc::new(Semaphore::new(100)),
+                credits: Arc::new(Semaphore::new(jobs.len())),
                 credit_calls: calls.clone(),
                 statuses,
                 status_gates: Default::default(),
                 failed_job: Default::default(),
                 processing: false,
             },
-            gate: Arc::new(Semaphore::new(100)),
+            gate: Arc::new(Semaphore::new(jobs.len())),
             started,
         },
         1,

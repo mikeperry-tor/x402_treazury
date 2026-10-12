@@ -955,6 +955,3 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
 #[cfg(test)]
 #[path = "../../tests/support/funding_backend.rs"]
 mod tests;
-
-#[cfg(test)]
-mod scheduler_tests;
