@@ -434,10 +434,10 @@ not automatically follow vendor updates. You can inspect registrations while
 serving; stop the server before refreshing a specification or removing a source:
 
 ```sh
-target/release/x402_treazury sources inspect --config examples/deployments/agent-sources.local.toml
-target/release/x402_treazury sources refresh --config examples/deployments/agent-sources.local.toml \
+target/release/x402_treazury sources inspect --config path/to/deployment_config.toml
+target/release/x402_treazury sources refresh --config path/to/deployment_config.toml \
   --server research --source-id SOURCE_ID
-target/release/x402_treazury sources remove --config examples/deployments/agent-sources.local.toml \
+target/release/x402_treazury sources remove --config path/to/deployment_config.toml \
   --server research --source-id SOURCE_ID
 ```
 
