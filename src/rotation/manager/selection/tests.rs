@@ -29,6 +29,7 @@ struct Fixture {
     blocked: Arc<StdMutex<BTreeSet<String>>>,
     started: Arc<StdMutex<BTreeSet<String>>>,
     unavailable: Arc<AtomicBool>,
+    release: Arc<tokio::sync::Notify>,
     worker: tokio::task::JoinHandle<()>,
     server: tokio::task::JoinHandle<()>,
 }
@@ -227,6 +228,7 @@ async fn fixture(retained_count: usize) -> Fixture {
         blocked,
         started,
         unavailable,
+        release,
         worker,
         server,
     }
@@ -1427,5 +1429,200 @@ async fn retirement_payment_order(payment_first: bool) {
         drop(db);
         seller.abort();
     }
+    f.close().await;
+}
+
+#[tokio::test]
+async fn cold_negative_pass_reads_each_captured_wallet_once_across_pages() {
+    let f = fixture(PAGE_SIZE + 9).await;
+    assert!(matches!(
+        select(&f).await,
+        CandidatePassResult::CompleteNegative
+    ));
+    // One acquisition reads each wallet at both confirmed and latest anchors.
+    let expected: BTreeMap<_, _> = [&f.bound.wallet, &f.small, &f.large]
+        .into_iter()
+        .chain(&f.retained)
+        .map(|wallet| (f.address(wallet), 2))
+        .collect();
+    assert_eq!(*f.calls.lock().unwrap(), expected);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn cancelled_pass_drops_its_reads_but_preserves_independent_publication() {
+    let f = fixture(2).await;
+    let owned = [&f.bound.wallet, &f.small, &f.large, &f.retained[0]];
+    for wallet in owned {
+        f.block(wallet);
+    }
+    let independent = f.retained[1].clone();
+    f.block(&independent);
+    f.balance(&independent, 10);
+    let jobs_before: i64 = f
+        .db()
+        .query_row("SELECT count(*) FROM funding_jobs", [], |r| r.get(0))
+        .unwrap();
+    let roles: Vec<(String, String)> = f
+        .db()
+        .prepare("SELECT id,role FROM wallets ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    let (manager, bound) = (f.manager.clone(), f.bound.clone());
+    let pass = tokio::spawn(async move { manager.acquire_candidate(&bound, U256::from(5)).await });
+    let manager = f.manager.clone();
+    let wallet = independent.clone();
+    let maintenance = tokio::spawn(async move { manager.acquire_candidate_wallet(wallet).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while f.started.lock().unwrap().len() != READS + 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    pass.abort();
+    assert!(matches!(pass.await, Err(error) if error.is_cancelled()));
+    f.blocked.lock().unwrap().clear();
+    f.release.notify_waiters();
+    assert!(matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), maintenance)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        (CandidateEvidenceState::Usable, _)
+    ));
+    for wallet in owned {
+        let (pool, wallet) = (f.manager.pool.clone(), wallet.clone());
+        let state = f
+            .manager
+            .store
+            .call(move |s| s.candidate_evidence(&pool, &wallet))
+            .await
+            .unwrap();
+        assert!(
+            matches!(state, (CandidateEvidenceState::Missing, None)),
+            "canceled read must not publish evidence"
+        );
+    }
+    let CandidatePassResult::Selected(selected) = select(&f).await else {
+        panic!("independent publication remains usable after cancellation")
+    };
+    assert_eq!(selected.candidate.wallet, independent);
+    drop(selected);
+    assert!(f.manager.gate.try_lock().is_ok());
+    assert_eq!(
+        f.db()
+            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    let after: Vec<(String, String)> = f
+        .db()
+        .prepare("SELECT id,role FROM wallets ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(after, roles);
+    assert_eq!(
+        f.db()
+            .query_row("SELECT count(*) FROM funding_jobs", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        jobs_before
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn captured_pass_excludes_newly_allocated_wallet_even_with_published_capacity() {
+    let mut f = fixture(1).await;
+    for wallet in [&f.bound.wallet, &f.small, &f.large, &f.retained[0]] {
+        f.block(wallet);
+    }
+    let (paused, resume, _) = pause_after_evaluation(&mut f, READS);
+    let (manager, bound) = (f.manager.clone(), f.bound.clone());
+    let pass = tokio::spawn(async move { manager.acquire_candidate(&bound, U256::from(5)).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), paused.notified())
+        .await
+        .unwrap();
+    let pool = f.manager.pool.clone();
+    f.db().execute("UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1 WHERE pool_id=?1 AND slot='small'", [&pool]).unwrap();
+    let job = f
+        .manager
+        .store
+        .call(move |s| s.allocate_capacity_kind(&pool, AllocationKind::Small, true))
+        .await
+        .unwrap()
+        .unwrap();
+    let new_wallet: String = f
+        .db()
+        .query_row(
+            "SELECT wallet_id FROM funding_jobs WHERE id=?1",
+            [&job],
+            |r| r.get(0),
+        )
+        .unwrap();
+    f.db()
+        .execute(
+            "UPDATE wallets SET role='RETAINED' WHERE id=?1",
+            [&new_wallet],
+        )
+        .unwrap();
+    f.balance(&new_wallet, 10);
+    let (pool, wallet) = (f.manager.pool.clone(), new_wallet.clone());
+    let query = f
+        .manager
+        .store
+        .call(move |s| s.scoped_chain_query(&pool, vec![wallet], vec![]))
+        .await
+        .unwrap();
+    let view = f.manager.base.view(query).await.unwrap();
+    let wallet = new_wallet.clone();
+    f.manager
+        .store
+        .call(move |s| s.record_verified_credit(&wallet, view))
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.manager
+            .acquire_candidate_wallet(new_wallet.clone())
+            .await
+            .unwrap(),
+        (CandidateEvidenceState::Usable, _)
+    ));
+    let calls_before = f
+        .calls
+        .lock()
+        .unwrap()
+        .get(&f.address(&new_wallet))
+        .copied()
+        .unwrap();
+    f.blocked.lock().unwrap().clear();
+    f.release.notify_waiters();
+    resume.notify_one();
+    assert!(matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), pass)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        CandidatePassResult::CompleteNegative
+    ));
+    assert_eq!(
+        f.calls.lock().unwrap().get(&f.address(&new_wallet)),
+        Some(&calls_before)
+    );
+    let CandidatePassResult::Selected(selected) = select(&f).await else {
+        panic!("the next captured pass must see new capacity")
+    };
+    assert_eq!(selected.candidate.wallet, new_wallet);
+    drop(selected);
     f.close().await;
 }
