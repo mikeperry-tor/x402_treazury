@@ -124,6 +124,8 @@ pub fn bind(tools: Vec<(ToolSpec, PaidClient, String)>) -> Vec<BoundTool> {
                 .entry((
                     tool.help_url.clone().unwrap_or_default(),
                     client.max_help_bytes(),
+                    client.transport(),
+                    crate::network::global().read_timeout(client.timeout()),
                 ))
                 .or_insert_with(|| Arc::new(OnceCell::new()))
                 .clone();
@@ -143,4 +145,122 @@ pub fn find<'a>(snapshot: &'a CatalogSnapshot, server: &str, name: &str) -> Resu
         .get(server)
         .and_then(|v| v.iter().find(|t| t.tool.name == name))
         .context("unknown tool")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        catalog::{Config, build_tools},
+        network::HttpPolicy,
+    };
+    use serde_json::json;
+    use std::time::Duration;
+
+    fn help(url: &str) -> ToolSpec {
+        build_tools(
+            &Config {
+                help_url: Some(url.into()),
+                ..Default::default()
+            },
+            &json!({"paths":{"/unused":{"get":{}}}}),
+            "test",
+        )
+        .unwrap()
+        .into_iter()
+        .find(|t| t.help_url.is_some())
+        .unwrap()
+    }
+
+    #[test]
+    fn help_sharing_requires_equal_effective_read_and_transport_policies() {
+        let tool = help("https://example.com/help");
+        let default = PaidClient::unsigned();
+        let effective = crate::network::global().read_timeout(None);
+        let clients = vec![
+            default.clone(),
+            default.clone().with_timeout(effective),
+            default
+                .clone()
+                .with_timeout(effective + Duration::from_secs(1)),
+            default.clone().with_transport(HttpPolicy {
+                allow_http1: true,
+                allow_tls12: false,
+            }),
+            default.clone().with_transport(HttpPolicy {
+                allow_http1: false,
+                allow_tls12: true,
+            }),
+            default.clone().with_transport(HttpPolicy {
+                allow_http1: true,
+                allow_tls12: true,
+            }),
+            default.with_download_limits(1024, 1),
+        ];
+        let bound = bind(
+            clients
+                .into_iter()
+                .map(|c| (tool.clone(), c, String::new()))
+                .collect(),
+        );
+        for i in 0..bound.len() {
+            for j in 0..bound.len() {
+                assert_eq!(
+                    Arc::ptr_eq(&bound[i].help, &bound[j].help),
+                    i == j || i < 2 && j < 2,
+                    "bindings {i}, {j}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_and_inflight_help_cannot_bypass_a_shorter_read_policy() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = Arc::new(AtomicUsize::new(0));
+        let seen = hits.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/help", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                axum::Router::new().route(
+                    "/help",
+                    axum::routing::get(move || {
+                        let seen = seen.clone();
+                        async move {
+                            seen.fetch_add(1, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            "documentation"
+                        }
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let tool = help(&url);
+        let bound = bind(vec![
+            (
+                tool.clone(),
+                PaidClient::unsigned().with_timeout(Duration::from_secs(2)),
+                String::new(),
+            ),
+            (
+                tool,
+                PaidClient::unsigned().with_timeout(Duration::from_millis(100)),
+                String::new(),
+            ),
+        ]);
+        let args = Default::default();
+        let (long, short) = tokio::join!(bound[0].invoke(&args), bound[1].invoke(&args));
+        assert_eq!(long.unwrap(), "documentation");
+        assert!(short.is_err());
+        assert!(bound[1].help.get().is_none());
+        assert!(bound[1].invoke(&args).await.is_err());
+        assert_eq!(bound[0].invoke(&args).await.unwrap(), "documentation");
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+        server.abort();
+        let _ = server.await;
+    }
 }
