@@ -961,11 +961,55 @@ async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
     let h = Harness::new().await;
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     db.execute_batch("CREATE TRIGGER fail_journal BEFORE INSERT ON payment_attempts WHEN NEW.state='POSSIBLY_SUBMITTED' BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
-    assert!(h.client.execute(h.route()).await.is_err());
+    let before = h.store.call(|s| s.status()).await.unwrap();
+    let error = h.client.execute(h.route()).await.unwrap_err();
+    assert!(format!("{error:#}").contains("injected journal failure"));
     assert!(h.f.signed.lock().unwrap().is_empty());
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "an untyped journal failure rolls back the entire attempt and cannot trigger private replacement"
+    );
+    let after = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&before.pools[0].addresses).unwrap(),
+        serde_json::to_value(&after.pools[0].addresses).unwrap(),
+        "journal failure must not retain exposure or mutate wallet identity"
+    );
+    assert_eq!(
+        h.f.traces
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, kind, _)| kind == "unsigned")
+            .count(),
+        1,
+        "failed call must not fetch another challenge"
+    );
     db.execute_batch("DROP TRIGGER fail_journal;").unwrap();
     h.client.execute(h.route()).await.unwrap();
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    let signed = h.f.signed.lock().unwrap().clone();
+    assert_eq!(signed.len(), 1);
+    let authorization = &signed[0]["payload"]["authorization"];
+    let (payer, nonce, state): (String, String, String) = db
+        .query_row("SELECT payer,nonce,state FROM payment_attempts", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .unwrap();
+    assert_eq!(
+        payer.to_lowercase(),
+        authorization["from"].as_str().unwrap().to_lowercase()
+    );
+    assert_eq!(nonce, authorization["nonce"].as_str().unwrap());
+    assert_eq!(state, "POSSIBLY_SUBMITTED");
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
     h.close().await;
 }
 

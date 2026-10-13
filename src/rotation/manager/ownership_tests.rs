@@ -1,7 +1,24 @@
 //! Reuse the actual local Base and journal-checking seller fixture.
 use super::*;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CancelAt {
+    Acquired,
+    Signed,
+    Journaled,
+}
 #[tokio::test]
 async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch() {
+    cancel_at(CancelAt::Journaled).await;
+}
+#[tokio::test]
+async fn canceled_direct_waiter_before_preparation_retains_admission_owner() {
+    cancel_at(CancelAt::Acquired).await;
+}
+#[tokio::test]
+async fn canceled_direct_waiter_with_private_signature_finishes_exact_authorization() {
+    cancel_at(CancelAt::Signed).await;
+}
+async fn cancel_at(cancel_at: CancelAt) {
     use crate::rotation::store::Store;
     let dir = tempfile::tempdir().unwrap();
     let mut state = Store::create(
@@ -54,15 +71,27 @@ async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch()
     )
     .unwrap();
     let journaled = Arc::new(tokio::sync::Notify::new());
+    let signatures = Arc::new(StdMutex::new(Vec::new()));
     let release = Arc::new(tokio::sync::Notify::new());
     manager.test_admission_hook = Some(Arc::new({
         let journaled = journaled.clone();
         let release = release.clone();
+        let signatures = signatures.clone();
         move |stage| {
             let journaled = journaled.clone();
             let release = release.clone();
+            let signatures = signatures.clone();
             async move {
-                if matches!(stage, AdmissionTestStage::Journaled) {
+                if let AdmissionTestStage::Signed { nonce, .. } = &stage {
+                    signatures.lock().unwrap().push(nonce.clone());
+                }
+                let stop = matches!(
+                    (cancel_at, stage),
+                    (CancelAt::Acquired, AdmissionTestStage::Acquired)
+                        | (CancelAt::Signed, AdmissionTestStage::Signed { .. })
+                        | (CancelAt::Journaled, AdmissionTestStage::Journaled)
+                );
+                if stop {
                     journaled.notify_one();
                     release.notified().await;
                 }
@@ -71,6 +100,7 @@ async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch()
         }
     }));
     let expected = manager.candidate().await.unwrap();
+    let expected_address = expected.address.clone();
     let http = crate::network::NetworkContext::new(Default::default())
         .unwrap()
         .discovery(&base, None)
@@ -93,9 +123,19 @@ async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch()
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(count, 1);
+    assert_eq!(count, i64::from(cancel_at == CancelAt::Journaled));
+    assert_eq!(
+        manager.gate.try_lock().is_err(),
+        cancel_at != CancelAt::Journaled,
+        "acquired/private-signature admission retains the gate; acknowledged dispatch releases it"
+    );
     waiter.abort();
     assert!(waiter.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        manager.gate.try_lock().is_err(),
+        cancel_at != CancelAt::Journaled,
+        "waiter cancellation cannot release the accepted owner's gate"
+    );
     release.notify_one();
     tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -113,6 +153,35 @@ async fn canceled_direct_waiter_does_not_suppress_acknowledged_signed_dispatch()
         )
         .unwrap();
     assert_eq!(count, 1, "seller success cannot release managed liability");
+    let signatures = signatures.lock().unwrap().clone();
+    assert_eq!(
+        signatures.len(),
+        1,
+        "cancellation cannot trigger replacement signing"
+    );
+    assert_eq!(*fixture.sent.lock().unwrap(), signatures);
+    let (payer, nonce, amount): (String, String, String) = db
+        .query_row(
+            "SELECT payer,nonce,amount FROM payment_attempts",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(payer.to_lowercase(), expected_address.to_lowercase());
+    assert_eq!(nonce, signatures[0]);
+    assert_eq!(amount, "1");
+    let exposure: String = db
+        .query_row(
+            "SELECT unresolved_exposure FROM wallets WHERE lower(address)=lower(?1)",
+            [&expected_address],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(exposure, "1");
+    assert!(
+        manager.gate.try_lock().is_ok(),
+        "completed ownership releases the gate"
+    );
     drop(manager);
     drop(store);
     worker.await.unwrap();
