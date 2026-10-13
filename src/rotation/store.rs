@@ -1046,111 +1046,7 @@ fn read_status(db: &Connection) -> Result<Status> {
     ensure!(version == 1, "unsupported state schema");
     let revision = db.query_row("SELECT MAX(revision) FROM snapshots", [], |r| r.get(0))?;
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let mut stmt = db.prepare("SELECT id,name,generation,enabled FROM pools ORDER BY name")?;
-    let rows = stmt.query_map([], |r| {
-        Ok(PoolStatus {
-            id: r.get(0)?,
-            name: r.get(1)?,
-            generation: r.get(2)?,
-            enabled: r.get(3)?,
-            payment_limit_atomic: None,
-            retirement_tolerance_atomic: None,
-            retirement_accounting: RetirementAccounting::default(),
-            serving_ready: false,
-            inventory_ready: false,
-            reserve_claims: Vec::new(),
-            retained_wallets: 0,
-            retired_wallets: 0,
-            funding_degraded: false,
-            addresses: Vec::new(),
-        })
-    })?;
-    let mut pools = Vec::new();
-    for row in rows {
-        let mut pool = row?;
-        let mut stmt = db.prepare("SELECT id,address,role,target,balance,block_height,block_hash FROM wallets WHERE pool_id=?1 ORDER BY sequence")?;
-        pool.addresses = stmt
-            .query_map([&pool.id], |r| {
-                Ok(AddressStatus {
-                    id: r.get(0)?,
-                    address: r.get(1)?,
-                    role: r.get(2)?,
-                    target: r.get(3)?,
-                    confirmed_balance: r.get(4)?,
-                    confirmed_height: r.get(5)?,
-                    confirmed_hash: r.get(6)?,
-                    signed_exposure_atomic: None,
-                    financial_repair: None,
-                    destination_recorded: false,
-                    destination_disputed: None,
-                    retirement: None,
-                    runtime_balance_evidence: None,
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        if version == 16 {
-            (pool.payment_limit_atomic, pool.retirement_tolerance_atomic) = db.query_row(
-                "SELECT payment_limit,retirement_tolerance FROM pools WHERE id=?1",
-                [&pool.id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            for wallet in &mut pool.addresses {
-                wallet.signed_exposure_atomic =
-                    Some(evidence::exposure(db, &wallet.id)?.to_string());
-                wallet.financial_repair = db.query_row(
-                    "SELECT evidence_repair FROM wallets WHERE id=?1",
-                    [&wallet.id],
-                    |r| r.get(0),
-                )?;
-                wallet.destination_recorded = funding::readiness_recorded_valid(db, &wallet.id)?;
-                wallet.destination_disputed = db.query_row(
-                    "SELECT readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
-                    [&wallet.id],
-                    |r| r.get(0),
-                )?;
-                wallet.retirement = db.query_row("SELECT confirmed_amount,latest_amount,accepted_maximum,observed_bound,confirmed_height,confirmed_hash,latest_height,latest_hash,disputed,recorded_at FROM wallet_retirements WHERE wallet_id=?1",[&wallet.id],|r|Ok(RetirementStatus {
-                    confirmed_amount:r.get(0)?,latest_amount:r.get(1)?,accepted_maximum:r.get(2)?,observed_bound:r.get(3)?,confirmed_height:r.get(4)?,confirmed_hash:r.get(5)?,latest_height:r.get(6)?,latest_hash:r.get(7)?,disputed:r.get(8)?,recorded_at:r.get(9)?,
-                })).optional()?;
-                pool.retained_wallets += usize::from(wallet.role == "RETAINED");
-                pool.retired_wallets += usize::from(wallet.role == "RETIRED");
-                pool.serving_ready |=
-                    capacity::payment_ownership(db, &pool.id, &wallet.id)?.is_some();
-            }
-            let mut claims = db.prepare("SELECT slot,enabled,generation,wallet_id,target,maximum_output FROM reserve_claims WHERE pool_id=?1 ORDER BY CASE slot WHEN 'small' THEN 0 ELSE 1 END")?;
-            pool.reserve_claims = claims
-                .query_map([&pool.id], |r| {
-                    Ok(ReserveClaimStatus {
-                        slot: r.get(0)?,
-                        enabled: r.get(1)?,
-                        generation: r.get(2)?,
-                        wallet_id: r.get(3)?,
-                        target_atomic: r.get(4)?,
-                        maximum_output_atomic: r.get(5)?,
-                        destination_ready: false,
-                    })
-                })?
-                .collect::<rusqlite::Result<_>>()?;
-            for claim in &mut pool.reserve_claims {
-                if let Some(wallet) = &claim.wallet_id {
-                    claim.destination_ready = capacity::payment_ownership(db, &pool.id, wallet)?
-                        .is_some_and(|ownership| {
-                            ownership.role == "READY"
-                                && ownership.slot.as_deref() == Some(&claim.slot)
-                                && ownership.claim_generation == Some(claim.generation)
-                        });
-                }
-            }
-            pool.inventory_ready = pool.enabled
-                && pool.reserve_claims.iter().any(|c| c.enabled)
-                && pool
-                    .reserve_claims
-                    .iter()
-                    .filter(|c| c.enabled)
-                    .all(|c| c.destination_ready);
-        }
-        pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses, version)?;
-        pools.push(pool);
-    }
+    let mut pools = reporting::read_pools(db, version)?;
     let sync: Option<SyncObservation> = if version >= 2 {
         db.query_row(
             "SELECT observation FROM treasury_sync WHERE singleton=1",
@@ -1171,39 +1067,7 @@ fn read_status(db: &Connection) -> Result<Status> {
     let sync_fresh = sync.as_ref().is_some_and(|observation| {
         crate::rotation::base::now().is_ok_and(|now| observation.fresh(now, revision))
     });
-    let treasury_operations = if version >= 3 {
-        let mut stmt =
-            db.prepare("SELECT id,facts,submission,attempts FROM treasury_operations ORDER BY id")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        })?;
-        rows.map(|row| -> Result<OperationStatus> {
-            let (operation_id, facts, mut submission, attempts) = row?;
-            if version >= 8
-                && db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
-                    [&operation_id],
-                    |r| r.get::<_, bool>(0),
-                )?
-            {
-                submission = "EXPIRED".into();
-            }
-            Ok(OperationStatus {
-                operation_id,
-                facts: serde_json::from_str(&facts)?,
-                submission,
-                attempts,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?
-    } else {
-        vec![]
-    };
+    let treasury_operations = reporting::read_operations(db, version)?;
     let funding_jobs = if version >= 4 {
         funding::read_jobs(db)?
     } else {
