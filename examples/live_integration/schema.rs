@@ -143,6 +143,18 @@ fn check(schema: &Value, value: &Value, depth: usize, remaining: &mut usize) -> 
         ensure!(allowed, "schema forbids value");
         return Ok(());
     }
+    check_common(schema, value)?;
+    match value {
+        Value::Object(map) => check_object(schema, map, depth, remaining)?,
+        Value::Array(items) => check_array(schema, items, depth, remaining)?,
+        Value::String(text) => check_string(schema, text)?,
+        Value::Number(_) => check_number(schema, value)?,
+        _ => {}
+    }
+    check_alternatives(schema, value, depth, remaining)
+}
+
+fn check_common(schema: &Value, value: &Value) -> Result<()> {
     let object = schema
         .as_object()
         .context("schema must be object or boolean")?;
@@ -210,69 +222,92 @@ fn check(schema: &Value, value: &Value, depth: usize, remaining: &mut usize) -> 
     if let Some(v) = object.get("const") {
         ensure!(v == value, "argument differs from const");
     }
-    if let Some(map) = value.as_object() {
-        for r in object
-            .get("required")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
+    Ok(())
+}
+
+fn check_object(
+    schema: &Value,
+    map: &serde_json::Map<String, Value>,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<()> {
+    for r in schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        ensure!(
+            map.contains_key(r.as_str().context("invalid required name")?),
+            "missing required argument"
+        );
+    }
+    for (name, v) in map {
+        if let Some(s) = schema.get("properties").and_then(|p| p.get(name)) {
+            check(s, v, depth + 1, remaining)?;
+        } else if let Some(s) = schema.get("additionalProperties") {
+            check(s, v, depth + 1, remaining)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_array(schema: &Value, items: &[Value], depth: usize, remaining: &mut usize) -> Result<()> {
+    bounds(items.len(), schema, "minItems", "maxItems")?;
+    if let Some(s) = schema.get("items") {
+        for v in items {
+            check(s, v, depth + 1, remaining)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_string(schema: &Value, text: &str) -> Result<()> {
+    if let Some(format) = schema.get("format") {
+        formats::check(format.as_str().context("invalid schema format")?, text)?;
+    }
+    bounds(text.chars().count(), schema, "minLength", "maxLength")?;
+    if let Some(p) = schema.get("pattern") {
+        ensure!(
+            regex::Regex::new(p.as_str().context("invalid pattern")?)?.is_match(text),
+            "argument pattern mismatch"
+        );
+    }
+    Ok(())
+}
+
+fn check_number(schema: &Value, value: &Value) -> Result<()> {
+    let n = exact_number(value)?;
+    for (key, exclusive, lower) in [
+        ("minimum", false, true),
+        ("maximum", false, false),
+        ("exclusiveMinimum", true, true),
+        ("exclusiveMaximum", true, false),
+    ] {
+        if let Some(limit) = schema.get(key) {
+            let limit = exact_number(limit)?;
             ensure!(
-                map.contains_key(r.as_str().context("invalid required name")?),
-                "missing required argument"
+                if lower {
+                    if exclusive { n > limit } else { n >= limit }
+                } else if exclusive {
+                    n < limit
+                } else {
+                    n <= limit
+                },
+                "numeric bound violated"
             );
         }
-        for (name, v) in map {
-            if let Some(s) = schema.get("properties").and_then(|p| p.get(name)) {
-                check(s, v, depth + 1, remaining)?;
-            } else if let Some(s) = schema.get("additionalProperties") {
-                check(s, v, depth + 1, remaining)?;
-            }
-        }
     }
-    if let Some(items) = value.as_array() {
-        bounds(items.len(), schema, "minItems", "maxItems")?;
-        if let Some(s) = schema.get("items") {
-            for v in items {
-                check(s, v, depth + 1, remaining)?;
-            }
-        }
-    }
-    if let Some(text) = value.as_str() {
-        if let Some(format) = schema.get("format") {
-            formats::check(format.as_str().context("invalid schema format")?, text)?;
-        }
-        bounds(text.chars().count(), schema, "minLength", "maxLength")?;
-        if let Some(p) = schema.get("pattern") {
-            ensure!(
-                regex::Regex::new(p.as_str().context("invalid pattern")?)?.is_match(text),
-                "argument pattern mismatch"
-            );
-        }
-    }
-    if value.is_number() {
-        let n = exact_number(value)?;
-        for (key, exclusive, lower) in [
-            ("minimum", false, true),
-            ("maximum", false, false),
-            ("exclusiveMinimum", true, true),
-            ("exclusiveMaximum", true, false),
-        ] {
-            if let Some(limit) = schema.get(key) {
-                let limit = exact_number(limit)?;
-                ensure!(
-                    if lower {
-                        if exclusive { n > limit } else { n >= limit }
-                    } else if exclusive {
-                        n < limit
-                    } else {
-                        n <= limit
-                    },
-                    "numeric bound violated"
-                );
-            }
-        }
-    }
+    Ok(())
+}
+
+fn check_alternatives(
+    schema: &Value,
+    value: &Value,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<()> {
+    // Every branch shares the caller's work budget, including mismatches.
     for key in ["allOf", "anyOf", "oneOf"] {
         if let Some(branches) = schema.get(key) {
             let branches = branches.as_array().context("invalid schema alternatives")?;

@@ -19,7 +19,9 @@ and path/query/body routing. Provider files in `providers/` carry selections,
 help URLs, pricing settings and explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
 fixture utility is `examples/snapshot_spec.rs`. Tests pin generated contracts
-against `tests/fixtures/`. Header parameters do not grant agents control over
+against `tests/fixtures/`. Operation validation and stable sorting precede path,
+method and tag selection; only selected operations contribute to name collisions.
+Tool-name filters apply after collision resolution. Header parameters do not grant agents control over
 payment headers. Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 

@@ -971,40 +971,10 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
     let mut counts = BTreeMap::<String, usize>::new();
     let had_operations = !ops.is_empty();
     for op in ops {
-        let path = op["path"].as_str().unwrap();
-        let operation = format!(
-            "{} {path}",
-            op["method"].as_str().unwrap().to_ascii_uppercase()
-        );
-        if !cfg.include_operations.is_empty() && !cfg.include_operations.contains(&operation) {
-            continue;
+        if let Some(base) = selected_operation_base(cfg, &op, prefix) {
+            *counts.entry(base.clone()).or_default() += 1;
+            selected.push((op, base));
         }
-        if anchor(path, &cfg.exclude).is_some() {
-            continue;
-        }
-        let anchored = anchor(path, &cfg.include);
-        if !cfg.include.is_empty() && anchored.is_none() {
-            continue;
-        }
-        let tags: BTreeSet<_> = op["tags"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect();
-        if cfg.exclude_tags.iter().any(|t| tags.contains(t.as_str())) {
-            continue;
-        }
-        if !cfg.tags.is_empty() && !cfg.tags.iter().any(|t| tags.contains(t.as_str())) {
-            continue;
-        }
-        let suffix = slug(path.strip_prefix(anchored.unwrap_or("")).unwrap_or(path));
-        let base = format!(
-            "{prefix}_{}",
-            if suffix.is_empty() { "root" } else { &suffix }
-        );
-        *counts.entry(base.clone()).or_default() += 1;
-        selected.push((op, base));
     }
     if selected.is_empty() {
         let error = anyhow::anyhow!("no operations matched");
@@ -1014,6 +984,50 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
             error
         });
     }
+    Ok(name_selected_operations(selected, &counts))
+}
+
+// Filters precede collision counting and retain the most specific include anchor.
+fn selected_operation_base(cfg: &Config, op: &Value, prefix: &str) -> Option<String> {
+    let path = op["path"].as_str().unwrap();
+    let operation = format!(
+        "{} {path}",
+        op["method"].as_str().unwrap().to_ascii_uppercase()
+    );
+    if !cfg.include_operations.is_empty() && !cfg.include_operations.contains(&operation) {
+        return None;
+    }
+    if anchor(path, &cfg.exclude).is_some() {
+        return None;
+    }
+    let anchored = anchor(path, &cfg.include);
+    if !cfg.include.is_empty() && anchored.is_none() {
+        return None;
+    }
+    let tags: BTreeSet<_> = op["tags"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if cfg.exclude_tags.iter().any(|t| tags.contains(t.as_str())) {
+        return None;
+    }
+    if !cfg.tags.is_empty() && !cfg.tags.iter().any(|t| tags.contains(t.as_str())) {
+        return None;
+    }
+    let suffix = slug(path.strip_prefix(anchored.unwrap_or("")).unwrap_or(path));
+    let base = format!(
+        "{prefix}_{}",
+        if suffix.is_empty() { "root" } else { &suffix }
+    );
+    Some(base)
+}
+
+fn name_selected_operations(
+    selected: Vec<(Value, String)>,
+    counts: &BTreeMap<String, usize>,
+) -> Vec<(Value, String)> {
     let mut seen = BTreeMap::<String, usize>::new();
     let mut named = Vec::new();
     for (op, base) in selected {
@@ -1032,7 +1046,7 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
         };
         named.push((op, name));
     }
-    Ok(named)
+    named
 }
 
 struct OperationInput {

@@ -164,6 +164,7 @@ remaining lifecycle and cover gates.
 | Contract | Maintained tests |
 | --- | --- |
 | Every provider is selected or explicitly excluded | `tests/provider_catalogs.rs::live_provider_scope_accounts_for_every_bundled_definition` |
+| Qualification schema rejection order, recursion and shared alternative work limits | `examples/live_integration/schema.rs` tests through public `validate` |
 | Exact reviewed requests, caps, schemas and wallet arrangements | `examples/live_integration/presets.rs` and independent request fixtures |
 | Authenticated MCP signs exactly once | `tests/server.rs::authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result`, `tests/payments.rs` |
 | Crash/failure cannot replay or refund a charged attempt | Runner registry tests and `tests/integration_preparation.rs` real-process tests |
