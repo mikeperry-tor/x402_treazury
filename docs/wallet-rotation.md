@@ -262,6 +262,13 @@ and once before returning a negative result. Batch rechecks include independentl
 published evidence and changed liabilities; each selection revalidates current
 capacity under the group gate.
 
+Each pass captures its inventory boundary before traversal; new wallets become
+eligible for a later pass. Priority identities are deduplicated against keyset
+pages. Cancelling the caller drops that pass's unsigned acquisitions while
+independent maintenance retains ownership and can publish evidence. Cancellation
+does not retract requests already received by an endpoint or undo accepted store
+jobs. The pass itself neither allocates funding nor changes wallet roles.
+
 Runtime hints expire 300 seconds after the unsigned response was received and
 retain at most 512 fixed-size entries per process. Their trusted key includes
 source/revision, method/OpenAPI template, wallet group and transport scope; request

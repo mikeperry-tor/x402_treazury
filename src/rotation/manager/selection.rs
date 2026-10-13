@@ -25,6 +25,99 @@ pub(super) enum CandidatePassResult {
     Incomplete,
 }
 
+/// Fixed priority identities plus one monotonic page bound traversal memory.
+struct CandidateTraversal {
+    through: i64,
+    priority_ids: Vec<String>,
+    priority: VecDeque<String>,
+    page: VecDeque<(i64, String, String)>,
+    cursor: i64,
+    exhausted: bool,
+}
+impl CandidateTraversal {
+    fn new(through: i64, priority: Vec<String>) -> Self {
+        Self {
+            through,
+            priority_ids: priority.clone(),
+            priority: priority.into(),
+            page: VecDeque::new(),
+            cursor: -1,
+            exhausted: false,
+        }
+    }
+    async fn next(&mut self, owner: &ManagedPool) -> Result<Option<String>> {
+        if let Some(wallet) = self.priority.pop_front() {
+            return Ok(Some(wallet));
+        }
+        loop {
+            if let Some((sequence, wallet, _)) = self.page.pop_front() {
+                self.cursor = sequence;
+                if !self.priority_ids.contains(&wallet) {
+                    return Ok(Some(wallet));
+                }
+                continue;
+            }
+            if self.exhausted {
+                return Ok(None);
+            }
+            let pool = owner.pool.clone();
+            let (cursor, through) = (self.cursor, self.through);
+            let rows = owner
+                .store
+                .call(move |s| s.wallet_page(&pool, cursor, through, PAGE_SIZE))
+                .await?;
+            if rows.is_empty() {
+                self.exhausted = true;
+                return Ok(None);
+            }
+            self.page = rows.into();
+        }
+    }
+    fn is_exhausted(&self) -> bool {
+        self.exhausted && self.priority.is_empty() && self.page.is_empty()
+    }
+}
+
+/// Retain only this traversal batch plus the read lanes. Gated selection
+/// consumes completed proofs; local failures remain available at exhaustion.
+#[derive(Default)]
+struct CandidateCompletions {
+    completed: Vec<ChainView>,
+    incomplete: bool,
+    wallet_failure: Option<anyhow::Error>,
+}
+impl CandidateCompletions {
+    fn record(
+        &mut self,
+        result: Result<(CandidateEvidenceState, Option<ChainView>)>,
+    ) -> Result<()> {
+        self.incomplete |=
+            completion_is_incomplete(result, &mut self.completed, &mut self.wallet_failure)?;
+        Ok(())
+    }
+    fn drain_ready(
+        &mut self,
+        reads: &mut tokio::task::JoinSet<Result<(CandidateEvidenceState, Option<ChainView>)>>,
+    ) -> Result<bool> {
+        let mut read_completed = false;
+        while let Some(result) = reads.try_join_next() {
+            read_completed = true;
+            self.record(result.context("candidate acquisition task failed")?)?;
+        }
+        Ok(read_completed)
+    }
+    fn finish(self) -> Result<CandidatePassResult> {
+        if let Some(error) = self.wallet_failure {
+            return Err(error);
+        }
+        Ok(if self.incomplete {
+            CandidatePassResult::Incomplete
+        } else {
+            CandidatePassResult::CompleteNegative
+        })
+    }
+}
+
 impl ManagedPool {
     /// Caller already owns the foreground admission permit. This function does
     /// not allocate, mutate roles, reserve funds, or sign. Dropping its futures
@@ -47,38 +140,27 @@ impl ManagedPool {
                 ))
             })
             .await?;
-        // Fixed small priority list is also the traversal dedup set. Keyset
-        // monotonicity deduplicates every other candidate without history growth.
-        let priority_ids = priority.clone();
-        let mut priority: VecDeque<_> = priority.into();
-        let mut page = VecDeque::new();
-        let mut cursor = -1;
-        let mut exhausted = false;
-        let mut incomplete = false;
-        let mut wallet_failure = None;
+        let mut traversal = CandidateTraversal::new(through, priority);
+        let mut completions = CandidateCompletions::default();
         let mut reads =
             tokio::task::JoinSet::<Result<(CandidateEvidenceState, Option<ChainView>)>>::new();
 
-        // Retain only the current traversal batch plus the four read lanes.
-        // Selection consumes this batch even when it has no sufficient proof.
-        let mut completed = Vec::new();
         loop {
             // Register before inspecting evidence to avoid a publication between
             // the last gated scan and the wait being lost. Wake all group waiters.
             let changed = changes.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            while let Some(result) = reads.try_join_next() {
-                incomplete |= completion_is_incomplete(
-                    result.context("candidate acquisition task failed")?,
-                    &mut completed,
-                    &mut wallet_failure,
-                )?;
-            }
+            completions.drain_ready(&mut reads)?;
             // This is the actual gated selection, not a provisional winner.
             // Recompute all completed cached candidates, liabilities, and roles.
             if let Some(selected) = self
-                .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
+                .select_completed_candidate(
+                    &bound.wallet,
+                    cost,
+                    through,
+                    &mut completions.completed,
+                )
                 .await?
             {
                 // `reads` is dropped now, without waiting for unrelated EOF.
@@ -86,92 +168,17 @@ impl ManagedPool {
             }
             let mut evaluated_since_selection = 0;
             while reads.len() < READS {
-                let next = if let Some(wallet) = priority.pop_front() {
-                    Some(wallet)
-                } else {
-                    loop {
-                        if let Some((sequence, wallet, _)) = page.pop_front() {
-                            cursor = sequence;
-                            if !priority_ids.contains(&wallet) {
-                                break Some(wallet);
-                            }
-                            continue;
-                        }
-                        if exhausted {
-                            break None;
-                        }
-                        let pool = self.pool.clone();
-                        let rows = self
-                            .store
-                            .call(move |s| s.wallet_page(&pool, cursor, through, PAGE_SIZE))
-                            .await?;
-                        if rows.is_empty() {
-                            exhausted = true;
-                            break None;
-                        }
-                        page = rows.into();
-                    }
+                let Some(wallet) = traversal.next(self).await? else {
+                    break;
                 };
-                let Some(wallet) = next else { break };
-                // A cached insufficient balance still completes an evaluation;
-                // never reread it merely to seek a more favorable answer.
-                let guard = Arc::new(self.gate.clone().lock_owned().await);
-                let (pool, id) = (self.pool.clone(), wallet.clone());
-                let state = self
-                    .store
-                    .call_with_guard(guard, move |s| s.candidate_evidence(&pool, &id))
-                    .await;
-                let state = match state {
-                    Ok(state) => state,
-                    Err(error)
-                        if error
-                            .downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                            == Some(
-                                &super::super::base::evidence::EvidenceFailure::MalformedSupport,
-                            ) =>
-                    {
-                        incomplete |= completion_is_incomplete(
-                            Err(error),
-                            &mut completed,
-                            &mut wallet_failure,
-                        )?;
-                        (CandidateEvidenceState::Ineligible, None)
-                    }
-                    // Store-wide failures are not failed unsigned acquisitions.
-                    Err(error) => return Err(error),
-                };
-                if let Some(view) = state.1 {
-                    completed.push(view);
-                }
-                let state = state.0;
-                if state == CandidateEvidenceState::Missing {
-                    let owner = self.clone();
-                    let context = crate::qualification::capture_case();
-                    reads.spawn(crate::qualification::inherit_case(context, async move {
-                        let result = owner.acquire_candidate_wallet(wallet.clone()).await;
-                        #[cfg(test)]
-                        owner
-                            .admission_test_stage(AdmissionTestStage::CandidateReadCompleted {
-                                wallet,
-                            })
-                            .await;
-                        result
-                    }));
-                }
+                self.evaluate_candidate(wallet, &mut completions, &mut reads)
+                    .await?;
                 #[cfg(test)]
                 self.admission_test_stage(AdmissionTestStage::CandidateEvaluated)
                     .await;
                 // Poll independently ready acquisitions while walking cached or
                 // ineligible rows, so a long inventory cannot hide a completion.
-                let mut read_completed = false;
-                while let Some(result) = reads.try_join_next() {
-                    read_completed = true;
-                    incomplete |= completion_is_incomplete(
-                        result.context("candidate acquisition task failed")?,
-                        &mut completed,
-                        &mut wallet_failure,
-                    )?;
-                }
+                let read_completed = completions.drain_ready(&mut reads)?;
                 evaluated_since_selection += 1;
                 // Recheck immediately after our reads complete. Otherwise batch
                 // the full cache scan at the existing inventory page size: this
@@ -179,7 +186,12 @@ impl ManagedPool {
                 // rescanning the same cache for every unchanged inventory row.
                 if read_completed || evaluated_since_selection == PAGE_SIZE {
                     if let Some(selected) = self
-                        .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
+                        .select_completed_candidate(
+                            &bound.wallet,
+                            cost,
+                            through,
+                            &mut completions.completed,
+                        )
                         .await?
                     {
                         return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -192,7 +204,12 @@ impl ManagedPool {
             if evaluated_since_selection > 0
                 && !reads.is_empty()
                 && let Some(selected) = self
-                    .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
+                    .select_completed_candidate(
+                        &bound.wallet,
+                        cost,
+                        through,
+                        &mut completions.completed,
+                    )
                     .await?
             {
                 return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -205,32 +222,71 @@ impl ManagedPool {
                 _ = &mut changed, if !reads.is_empty() => continue,
             };
             if let Some(result) = completion {
-                incomplete |= completion_is_incomplete(
-                    result.context("candidate acquisition task failed")?,
-                    &mut completed,
-                    &mut wallet_failure,
-                )?;
+                completions.record(result.context("candidate acquisition task failed")?)?;
                 continue;
             }
-            if exhausted && priority.is_empty() && page.is_empty() {
+            if traversal.is_exhausted() {
                 // A final gated recheck may see independently completed evidence;
                 // this does not reopen the captured pass or acquire another row.
                 if let Some(selected) = self
-                    .select_completed_candidate(&bound.wallet, cost, through, &mut completed)
+                    .select_completed_candidate(
+                        &bound.wallet,
+                        cost,
+                        through,
+                        &mut completions.completed,
+                    )
                     .await?
                 {
                     return Ok(CandidatePassResult::Selected(Box::new(selected)));
                 }
-                if let Some(error) = wallet_failure {
-                    return Err(error);
-                }
-                return Ok(if incomplete {
-                    CandidatePassResult::Incomplete
-                } else {
-                    CandidatePassResult::CompleteNegative
-                });
+                return completions.finish();
             }
         }
+    }
+
+    async fn evaluate_candidate(
+        &self,
+        wallet: String,
+        completions: &mut CandidateCompletions,
+        reads: &mut tokio::task::JoinSet<Result<(CandidateEvidenceState, Option<ChainView>)>>,
+    ) -> Result<()> {
+        // A cached insufficient balance still completes an evaluation;
+        // never reread it merely to seek a more favorable answer.
+        let guard = Arc::new(self.gate.clone().lock_owned().await);
+        let (pool, id) = (self.pool.clone(), wallet.clone());
+        let state = self
+            .store
+            .call_with_guard(guard, move |s| s.candidate_evidence(&pool, &id))
+            .await;
+        let state = match state {
+            Ok(state) => state,
+            Err(error)
+                if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                    == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) =>
+            {
+                completions.record(Err(error))?;
+                (CandidateEvidenceState::Ineligible, None)
+            }
+            // Store-wide failures are not failed unsigned acquisitions.
+            Err(error) => return Err(error),
+        };
+        if let Some(view) = state.1 {
+            completions.completed.push(view);
+        }
+        let state = state.0;
+        if state == CandidateEvidenceState::Missing {
+            let owner = self.clone();
+            let context = crate::qualification::capture_case();
+            reads.spawn(crate::qualification::inherit_case(context, async move {
+                let result = owner.acquire_candidate_wallet(wallet.clone()).await;
+                #[cfg(test)]
+                owner
+                    .admission_test_stage(AdmissionTestStage::CandidateReadCompleted { wallet })
+                    .await;
+                result
+            }));
+        }
+        Ok(())
     }
 
     async fn select_completed_candidate(
