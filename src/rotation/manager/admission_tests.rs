@@ -344,6 +344,10 @@ async fn race(race: Race) {
 #[path = "ownership_tests.rs"]
 mod ownership_tests;
 
+#[cfg(unix)]
+#[path = "crash_tests.rs"]
+mod crash_tests;
+
 #[tokio::test]
 async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused() {
     use crate::{

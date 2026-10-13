@@ -113,6 +113,12 @@ bindings, cancellation and reopen. Shared balance-read fixtures verify coalescin
 and retained acquisition ownership after a waiter leaves. These tests preserve
 serialized treasury prerequisites and accepted financial work.
 
+Managed payment crash fixtures use SIGKILL on an owned signing subprocess at
+private-signature, journal-acknowledgement and provider-receipt boundaries. They
+reopen the real SQLite state, retain committed nonce/exposure records without
+replay, and verify independent peer-pool service. These use unfunded temporary
+wallets and loopback providers; they do not establish live settlement outcomes.
+
 The narrow conversion utility has synthetic fixtures for strict source-shape and
 proof validation, rejection before mutation, repeated/reopened inspection,
 exclusive ownership, and committed WAL inspection without changing source sidecars.
