@@ -167,3 +167,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "reporting_tests.rs"]
+mod status_tests;
