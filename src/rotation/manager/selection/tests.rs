@@ -1790,3 +1790,68 @@ async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity
     assert_eq!(read_only_candidate(&f, 5, None, vec![]).await, None);
     f.close().await;
 }
+
+#[tokio::test]
+async fn contradictory_same_anchor_completed_proof_propagates_without_fallback_or_mutation() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    let f = fixture(0).await;
+    f.balance(&f.bound.wallet, 10);
+    f.balance(&f.small, 8);
+    for wallet in [&f.bound.wallet, &f.small] {
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+    }
+    let (pool, wallet) = (f.manager.pool.clone(), f.bound.wallet.clone());
+    let query = f
+        .manager
+        .store
+        .call(move |store| store.scoped_chain_query(&pool, vec![wallet], vec![]))
+        .await
+        .unwrap();
+    // The endpoint now reports a different amount at the identical block hashes.
+    // Acquire through the real verifier without publishing into the owner cache;
+    // selection itself must compare this completed proof to the cached proof.
+    f.balance(&f.bound.wallet, 9);
+    let contradictory = f.manager.base.view(query).await.unwrap();
+    let db = f.db();
+    let version: i64 = db
+        .pragma_query_value(None, "data_version", |r| r.get(0))
+        .unwrap();
+    let calls = f.calls.lock().unwrap().clone();
+    let pool = f.manager.pool.clone();
+    let error = f
+        .manager
+        .store
+        .call(move |store| {
+            store
+                .payment_candidate_with_evidence(
+                    &pool,
+                    U256::from(5),
+                    None,
+                    i64::MAX,
+                    &[contradictory],
+                )
+                .map(|_| ())
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::AmountContradiction)
+    );
+    assert_eq!(
+        db.pragma_query_value(None, "data_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        version
+    );
+    assert_eq!(*f.calls.lock().unwrap(), calls);
+    // The rejected comparison neither invalidates usable cache entries nor
+    // silently falls back to the independent sufficient small payer above.
+    assert_eq!(
+        read_only_candidate(&f, 5, Some(f.bound.wallet.clone()), vec![]).await,
+        Some(f.bound.wallet.clone())
+    );
+    f.close().await;
+}

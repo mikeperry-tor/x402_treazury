@@ -501,6 +501,29 @@ mod tests {
     }
 
     #[test]
+    fn public_validation_enforces_schema_and_argument_node_boundaries() {
+        // Absent properties consume schema preflight work without consuming
+        // argument-matching work, so the two independent limits stay observable.
+        let properties: serde_json::Map<String, Value> = (0..99_999)
+            .map(|index| (format!("field_{index}"), Value::Bool(true)))
+            .collect();
+        let mut schema = json!({"properties":properties});
+        validate(&schema, &json!({})).unwrap();
+        schema["properties"]["one_more"] = Value::Bool(true);
+        assert_eq!(
+            validate(&schema, &json!({})).unwrap_err().to_string(),
+            "schema exceeds 64-level or 100000-node qualification limit"
+        );
+        let mut arguments = Value::Array(vec![Value::Null; 99_999]);
+        validate(&Value::Bool(true), &arguments).unwrap();
+        arguments.as_array_mut().unwrap().push(Value::Null);
+        assert_eq!(
+            validate(&Value::Bool(true), &arguments).unwrap_err().to_string(),
+            "arguments exceed 64-level or 100000-node qualification limit"
+        );
+    }
+
+    #[test]
     fn nested_arguments_and_unknown_assertions_fail_closed() {
         let s = json!({"type":"object","required":["n"],"properties":{"n":{"type":"integer","minimum":2}},"additionalProperties":false});
         assert!(validate(&s, &json!({"n":2})).is_ok());
