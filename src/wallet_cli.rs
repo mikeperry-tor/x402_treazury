@@ -89,74 +89,15 @@ enum Action {
 }
 
 fn resolve_args(args: WalletArgs) -> Result<Command> {
-    use anyhow::{Context, ensure};
+    use anyhow::Context;
     if matches!(args.command, Action::Pool { .. }) {
         anyhow::bail!(
             "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
         );
     }
-    let settings = if let Some(path) = &args.config {
-        let config: crate::deployment::MetaConfig =
-            toml::from_str(&std::fs::read_to_string(path)?)?;
-        ensure!(config.version == 1, "unsupported deployment version");
-        crate::network::install(config.network)?;
-        let mut treasury = config.treasury.context("missing [treasury]")?;
-        treasury.validate()?;
-        treasury.resolve(path);
-        Some(treasury)
-    } else {
-        if let Some(path) = &args.network_config {
-            crate::network::install(crate::network::NetworkPolicy::load(path)?)?;
-        }
-        None
-    };
-    let configured_path = || {
-        args.config
-            .clone()
-            .context("this wallet command requires --config FILE")
-    };
-    match args.command {
-        Action::Bootstrap => {
-            return Ok(Command::Bootstrap {
-                meta_config: configured_path()?,
-            });
-        }
-        Action::Sync {
-            qualification_parent_stdin,
-        } => {
-            return Ok(Command::Sync {
-                meta_config: configured_path()?,
-                qualification_parent_stdin,
-            });
-        }
-        Action::Reconcile {
-            operation_id,
-            rebroadcast,
-        } => {
-            return Ok(Command::Reconcile {
-                meta_config: configured_path()?,
-                operation_id,
-                rebroadcast,
-            });
-        }
-        Action::Recover => {
-            return Ok(Command::Recover {
-                meta_config: configured_path()?,
-            });
-        }
-        Action::RecoverExpired { operation_id } => {
-            return Ok(Command::RecoverExpired {
-                meta_config: configured_path()?,
-                operation_id,
-            });
-        }
-        Action::ShieldRefunds { job_id } => {
-            return Ok(Command::ShieldRefunds {
-                meta_config: configured_path()?,
-                job_id,
-            });
-        }
-        _ => {}
+    let settings = load_wallet_settings(args.config.as_ref(), args.network_config.as_ref())?;
+    if let Some(command) = configured_command(&args.command, args.config.as_ref())? {
+        return Ok(command);
     }
     let state_dir = settings
         .as_ref()
@@ -179,26 +120,12 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
         mnemonic_file,
     } = args.command
     {
-        ensure!(
-            settings.is_none() || indexer_url_env.is_none(),
-            "configure the indexer in the deployment file"
-        );
-        ensure!(
-            expected.is_none(),
-            "init creates a new treasury identity; omit the expected treasury ID"
-        );
-        let indexer_url =
-            if birthday.is_some() {
-                None
-            } else if let Some(t) = &settings {
-                Some(t.indexer_endpoint(|name| std::env::var(name).ok())?)
-            } else if let Some(name) = indexer_url_env {
-                Some(std::env::var(&name).with_context(|| {
-                    format!("missing birthday indexer environment variable {name}")
-                })?)
-            } else {
-                None
-            };
+        let indexer_url = resolve_init_endpoint(
+            settings.as_ref(),
+            expected.as_deref(),
+            birthday,
+            indexer_url_env.as_deref(),
+        )?;
         return Ok(Command::Init {
             state_dir,
             key_file,
@@ -207,18 +134,7 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
             mnemonic_file,
         });
     }
-    let treasury_id = if let Some(expected) = expected {
-        let actual = crate::rotation::store::status(&state_dir)?.treasury_id;
-        ensure!(
-            expected == actual,
-            "treasury ID does not match state (state identity mismatch); use the treasury_id from `wallet status` (it is a UUID, not an account number)"
-        );
-        expected
-    } else if matches!(args.command, Action::Status | Action::Addresses) {
-        String::new()
-    } else {
-        crate::rotation::store::status(&state_dir)?.treasury_id
-    };
+    let treasury_id = resolve_administrative_identity(&args.command, &state_dir, expected)?;
     Ok(match args.command {
         Action::Pool { .. } => unreachable!("removed command rejected before state access"),
         Action::Status => Command::Status { state_dir },
@@ -246,6 +162,133 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
         },
         _ => unreachable!(),
     })
+}
+
+fn load_wallet_settings(
+    config_path: Option<&PathBuf>,
+    network_path: Option<&PathBuf>,
+) -> Result<Option<crate::rotation::config::TreasuryConfig>> {
+    use anyhow::{Context, ensure};
+    let settings = if let Some(path) = config_path {
+        let config: crate::deployment::MetaConfig =
+            toml::from_str(&std::fs::read_to_string(path)?)?;
+        ensure!(config.version == 1, "unsupported deployment version");
+        crate::network::install(config.network)?;
+        let mut treasury = config.treasury.context("missing [treasury]")?;
+        treasury.validate()?;
+        treasury.resolve(path);
+        Some(treasury)
+    } else {
+        if let Some(path) = network_path {
+            crate::network::install(crate::network::NetworkPolicy::load(path)?)?;
+        }
+        None
+    };
+    Ok(settings)
+}
+
+fn configured_command(action: &Action, config: Option<&PathBuf>) -> Result<Option<Command>> {
+    use anyhow::Context;
+    let configured_path = || {
+        config
+            .cloned()
+            .context("this wallet command requires --config FILE")
+    };
+    match action {
+        Action::Bootstrap => {
+            return Ok(Some(Command::Bootstrap {
+                meta_config: configured_path()?,
+            }));
+        }
+        Action::Sync {
+            qualification_parent_stdin,
+        } => {
+            return Ok(Some(Command::Sync {
+                meta_config: configured_path()?,
+                qualification_parent_stdin: *qualification_parent_stdin,
+            }));
+        }
+        Action::Reconcile {
+            operation_id,
+            rebroadcast,
+        } => {
+            return Ok(Some(Command::Reconcile {
+                meta_config: configured_path()?,
+                operation_id: operation_id.clone(),
+                rebroadcast: *rebroadcast,
+            }));
+        }
+        Action::Recover => {
+            return Ok(Some(Command::Recover {
+                meta_config: configured_path()?,
+            }));
+        }
+        Action::RecoverExpired { operation_id } => {
+            return Ok(Some(Command::RecoverExpired {
+                meta_config: configured_path()?,
+                operation_id: operation_id.clone(),
+            }));
+        }
+        Action::ShieldRefunds { job_id } => {
+            return Ok(Some(Command::ShieldRefunds {
+                meta_config: configured_path()?,
+                job_id: job_id.clone(),
+            }));
+        }
+        _ => {}
+    }
+    Ok(None)
+}
+
+fn resolve_init_endpoint(
+    settings: Option<&crate::rotation::config::TreasuryConfig>,
+    expected: Option<&str>,
+    birthday: Option<u32>,
+    indexer_url_env: Option<&str>,
+) -> Result<Option<String>> {
+    use anyhow::{Context, ensure};
+    ensure!(
+        settings.is_none() || indexer_url_env.is_none(),
+        "configure the indexer in the deployment file"
+    );
+    ensure!(
+        expected.is_none(),
+        "init creates a new treasury identity; omit the expected treasury ID"
+    );
+    let indexer_url = if birthday.is_some() {
+        None
+    } else if let Some(t) = settings {
+        Some(t.indexer_endpoint(|name| std::env::var(name).ok())?)
+    } else if let Some(name) = indexer_url_env {
+        Some(
+            std::env::var(name)
+                .with_context(|| format!("missing birthday indexer environment variable {name}"))?,
+        )
+    } else {
+        None
+    };
+    Ok(indexer_url)
+}
+
+fn resolve_administrative_identity(
+    action: &Action,
+    state_dir: &std::path::Path,
+    expected: Option<String>,
+) -> Result<String> {
+    use anyhow::ensure;
+    let treasury_id = if let Some(expected) = expected {
+        let actual = crate::rotation::store::status(state_dir)?.treasury_id;
+        ensure!(
+            expected == actual,
+            "treasury ID does not match state (state identity mismatch); use the treasury_id from `wallet status` (it is a UUID, not an account number)"
+        );
+        expected
+    } else if matches!(action, Action::Status | Action::Addresses) {
+        String::new()
+    } else {
+        crate::rotation::store::status(state_dir)?.treasury_id
+    };
+    Ok(treasury_id)
 }
 
 // Keep wallet commands recognizable in reduced builds so they can report feature requirements.
