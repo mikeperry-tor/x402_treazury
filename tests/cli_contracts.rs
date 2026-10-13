@@ -666,3 +666,162 @@ async fn removed_wallet_pool_fails_before_opening_state_with_migration_guidance(
     assert!(error.contains("wallet pool was removed"), "{error}");
     assert!(error.contains("wallet bootstrap --config FILE"), "{error}");
 }
+
+#[tokio::test]
+async fn standalone_modes_preserve_inspection_and_unsigned_probe_order() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let calls = count.clone();
+    let app = axum::Router::new().fallback(move |request: axum::extract::Request| {
+        assert_eq!(request.method(), "GET");
+        assert!(request.headers().get("payment-signature").is_none());
+        assert!(request.headers().get("x-payment").is_none());
+        calls.fetch_add(1, Ordering::SeqCst);
+        async { "unsigned" }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("spec.json"),
+        r#"{"paths":{"/read":{"get":{"tags":["read"]}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='spec.json'\nprefix='api'\n",
+    )
+    .unwrap();
+    let tags = run(
+        dir.path(),
+        &["catalog", "tags", "--provider", "provider.toml"],
+        &[],
+    )
+    .await;
+    assert_eq!(good(tags), json!({"read":1}));
+    let error = bad(run(
+        dir.path(),
+        &["catalog", "tools", "--provider", "provider.toml"],
+        &[],
+    )
+    .await);
+    assert!(error.contains("base_url is required"), "{error}");
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        format!("spec='spec.json'\nprefix='api'\nbase_url='{base}'\n"),
+    )
+    .unwrap();
+    let tools = good(
+        run(
+            dir.path(),
+            &["catalog", "tools", "--provider", "provider.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(tools.as_array().unwrap().len(), 1);
+    assert_eq!(tools[0]["name"], "api_read");
+    assert_eq!(
+        tools[0]["input_schema"],
+        json!({"type":"object","properties":{}})
+    );
+    let checked = run(
+        dir.path(),
+        &["config", "check", "--provider", "provider.toml"],
+        &[],
+    )
+    .await;
+    assert!(checked.status.success());
+    assert_eq!(checked.stdout, b"1 tools validated\n");
+    let routed = good(
+        run(
+            dir.path(),
+            &[
+                "catalog",
+                "route",
+                "--provider",
+                "provider.toml",
+                "api_read",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(
+        routed,
+        json!({"method":"GET","url":format!("{base}/read"),"query":{},"body":null})
+    );
+    let unknown = bad(run(
+        dir.path(),
+        &[
+            "catalog",
+            "route",
+            "--provider",
+            "provider.toml",
+            "missing",
+            "--args",
+            "invalid",
+        ],
+        &[],
+    )
+    .await);
+    assert!(unknown.contains("unknown tool"), "{unknown}");
+    let invalid = bad(run(
+        dir.path(),
+        &[
+            "serve",
+            "--provider",
+            "provider.toml",
+            "--max-api-payment-usdc",
+            "invalid",
+        ],
+        &[],
+    )
+    .await);
+    assert!(
+        invalid.contains("price must be a nonnegative decimal"),
+        "{invalid}"
+    );
+    let missing = bad(run(dir.path(), &["serve", "--provider", "provider.toml"], &[]).await);
+    assert!(missing.contains("EVM_PRIVATE_KEY required"), "{missing}");
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    good(
+        run(
+            dir.path(),
+            &[
+                "catalog",
+                "tools",
+                "--provider",
+                "provider.toml",
+                "--discover-pricing",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let key = "0000000000000000000000000000000000000000000000000000000000000001";
+    let auth = bad(run(
+        dir.path(),
+        &[
+            "serve",
+            "--provider",
+            "provider.toml",
+            "--transport",
+            "http",
+        ],
+        &[("EVM_PRIVATE_KEY", key)],
+    )
+    .await);
+    assert!(auth.contains("HTTP transport requires"), "{auth}");
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        2,
+        "serving discovery precedes HTTP auth but follows valid payer setup"
+    );
+    server.abort();
+}

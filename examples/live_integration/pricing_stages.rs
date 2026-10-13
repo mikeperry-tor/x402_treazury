@@ -256,6 +256,7 @@ pub fn inventory(snapshot:&Value,events:&Value,session:&str)->Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("pricing_inventory_tests.rs");
     fn fixture() -> (Manifest, Value, Value) {
         let mut m = crate::tests::manifest();
         m.pricing_checks.insert("api".into(), Expectation::Empty);
