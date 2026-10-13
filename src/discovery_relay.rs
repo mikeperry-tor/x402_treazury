@@ -793,8 +793,19 @@ pub(crate) mod tests {
         };
         let first = resolve(&config, &policy);
         assert_eq!(first["exa"], "company");
-        assert_eq!(first["social"], "social");
+        // The authored example deliberately shares social/company identities,
+        // while the web listener uses a separate payer and Tor scope.
+        assert_eq!(first["social"], "company");
         assert_eq!(first["webinfo"], "web");
+        let assignment = crate::rotation::assignment::resolve(&config).unwrap();
+        for (source, wallet) in &first {
+            assert!(assignment.wallets.contains_key(wallet));
+            assert!(assignment.bindings.values().any(|bindings| {
+                bindings
+                    .get(source)
+                    .is_some_and(|binding| &binding.wallet == wallet)
+            }));
+        }
         let web = config.servers.remove("web").unwrap();
         config
             .servers
@@ -818,8 +829,10 @@ pub(crate) mod tests {
                 .values()
                 .all(|w| w == "web")
         );
-        config.sources.get_mut("exa").unwrap().wallet = Some("social".into());
-        assert_eq!(resolve(&config, &policy)["exa"], "social");
+        config.sources.get_mut("exa").unwrap().wallet = Some("missing".into());
+        assert!(crate::rotation::assignment::resolve(&config).is_err());
+        config.sources.get_mut("exa").unwrap().wallet = Some("web".into());
+        assert_eq!(resolve(&config, &policy)["exa"], "web");
         // Automatic assignments select existing generated profiles, not new pools.
         for server in config.servers.values_mut() {
             server.wallet = None;
