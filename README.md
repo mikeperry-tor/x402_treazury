@@ -428,15 +428,28 @@ let clients retrieve API schemas as needed, rather than fill the tool list
 with all added APIs. Tool arguments and the API discovery
 workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).
 
-With `registry_file`, accepted specifications are saved and restored on restart;
-without it, additions last only until the process exits. Saved specifications do
-not automatically follow vendor updates. You can inspect registrations while
-serving; stop the server before refreshing a specification or removing a source:
+With `registry_file` set, accepted specifications are saved and restored on restart;
+without it, additions last only until the process exits.
+
+To view all saved API sources currently saved in `registry_file`:
 
 ```sh
 target/release/x402_treazury sources inspect --config path/to/deployment_config.toml
+```
+
+Saved API specifications do
+not automatically follow vendor updates; they must be updated manually.
+
+First, stop the server, then:
+
+```sh
 target/release/x402_treazury sources refresh --config path/to/deployment_config.toml \
   --server research --source-id SOURCE_ID
+```
+
+To remove a source:
+
+```sh
 target/release/x402_treazury sources remove --config path/to/deployment_config.toml \
   --server research --source-id SOURCE_ID
 ```
