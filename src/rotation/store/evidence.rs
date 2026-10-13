@@ -1110,6 +1110,127 @@ fn balance_support_queries() -> &'static [String; 6] {
 }
 
 impl Store {
+    /// A conflicting durable nonce proof invalidates its original wallet anchor.
+    fn check_resolution_or_invalidate(
+        &mut self,
+        attempt: &str,
+        certificate: &crate::rotation::base::ResolutionCertificate,
+    ) -> Result<()> {
+        check_resolution(&self.db, self.evidence_namespace, certificate)?;
+        let existing:Option<(String,i64,String,u64)> = self.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
+        if let Some((outcome, height, hash, block_time)) = existing {
+            let expected =
+                if *certificate.outcome() == crate::rotation::base::AuthorizationOutcome::Used {
+                    "USED"
+                } else {
+                    "EXPIRED_UNUSED"
+                };
+            if outcome != expected
+                || height != i64::try_from(certificate.anchor().height)?
+                || hash != certificate.anchor().hash
+                || block_time != certificate.block_time()
+            {
+                self.invalidate_wallet_evidence(
+                    &certificate.authorization().wallet,
+                    &Anchor {
+                        height: height.try_into()?,
+                        hash,
+                    },
+                    true,
+                    false,
+                )?;
+                anyhow::bail!(EvidenceFailure::ResolutionConflict);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_journal_support_or_invalidate(
+        &mut self,
+        wallet: &str,
+        observation: &BalanceObservation,
+    ) -> Result<()> {
+        // Journal support survives cache eviction. Indexed hash lookups return
+        // only a conflicting record; ordinary acquisition never enumerates history.
+        for point in [&observation.confirmed, &observation.latest] {
+            let encoded = serde_json::to_value(point.amount)?;
+            let amount_text = encoded.as_str().context("invalid encoded balance amount")?;
+            // SQLite flattens the funding/retirement projections so each
+            // lookup retains its dedicated hash index and malformed-JSON guard.
+            for sql in balance_support_queries() {
+                let conflicting: Option<(String, bool)> = self
+                    .db
+                    .prepare_cached(sql)?
+                    .query_row(
+                        params![
+                            wallet,
+                            point.anchor.hash,
+                            amount_text,
+                            i64::try_from(point.anchor.height)?
+                        ],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                if let Some((support, malformed)) = conflicting {
+                    let exact = serde_json::from_str::<BalanceSupport>(&support)
+                        .ok()
+                        .filter(|support| support.observation.validate().is_ok());
+                    self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
+                    if malformed || exact.is_none() {
+                        anyhow::bail!(EvidenceFailure::MalformedSupport);
+                    }
+                    anyhow::bail!(EvidenceFailure::AmountContradiction);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Cached contradictions invalidate only the anchor supporting the failure.
+    fn compare_cached_balance_or_invalidate(
+        &mut self,
+        wallet: &str,
+        observation: &BalanceObservation,
+        saved: &BalanceObservation,
+    ) -> Result<std::cmp::Ordering> {
+        match observation.compare(saved) {
+            Ok(order) => Ok(order),
+            Err(failure) => {
+                if matches!(
+                    failure,
+                    EvidenceFailure::AmountContradiction
+                        | EvidenceFailure::ConfirmedReplacement
+                        | EvidenceFailure::LatestReplacement
+                ) {
+                    let anchor = if failure == EvidenceFailure::AmountContradiction {
+                        [&observation.confirmed, &observation.latest]
+                            .into_iter()
+                            .find(|point| {
+                                [&saved.confirmed, &saved.latest].into_iter().any(|old| {
+                                    point.anchor.hash == old.anchor.hash
+                                        && (point.amount != old.amount
+                                            || point.anchor.height != old.anchor.height)
+                                })
+                            })
+                            .map(|point| &point.anchor)
+                            .context("missing conflicting balance anchor")?
+                    } else if failure == EvidenceFailure::LatestReplacement {
+                        &saved.latest.anchor
+                    } else {
+                        &saved.confirmed.anchor
+                    };
+                    self.invalidate_wallet_evidence(
+                        wallet,
+                        anchor,
+                        false,
+                        failure == EvidenceFailure::AmountContradiction,
+                    )?;
+                }
+                Err(failure.into())
+            }
+        }
+    }
+
     /// Complete observations are retained only as a bounded optimization. Exact
     /// financial support is separately committed with each durable disposition.
     pub(crate) fn prepare_evidence_view(
@@ -1117,33 +1238,7 @@ impl Store {
         mut view: crate::rotation::base::ChainView,
     ) -> Result<crate::rotation::base::ChainView> {
         for (attempt, certificate) in &view.resolution_certificates {
-            check_resolution(&self.db, self.evidence_namespace, certificate)?;
-            let existing:Option<(String,i64,String,u64)> = self.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
-            if let Some((outcome, height, hash, block_time)) = existing {
-                let expected = if *certificate.outcome()
-                    == crate::rotation::base::AuthorizationOutcome::Used
-                {
-                    "USED"
-                } else {
-                    "EXPIRED_UNUSED"
-                };
-                if outcome != expected
-                    || height != i64::try_from(certificate.anchor().height)?
-                    || hash != certificate.anchor().hash
-                    || block_time != certificate.block_time()
-                {
-                    self.invalidate_wallet_evidence(
-                        &certificate.authorization().wallet,
-                        &Anchor {
-                            height: height.try_into()?,
-                            hash,
-                        },
-                        true,
-                        false,
-                    )?;
-                    anyhow::bail!(EvidenceFailure::ResolutionConflict);
-                }
-            }
+            self.check_resolution_or_invalidate(attempt, certificate)?;
         }
         for (wallet, incoming) in &mut view.balance_certificates {
             let observation = view
@@ -1155,82 +1250,14 @@ impl Store {
                 "balance_certificate_binding_mismatch"
             );
             check_balance_integrity(&self.db, self.evidence_namespace, incoming)?;
-            // Journal support survives cache eviction. Indexed hash lookups return
-            // only a conflicting record; ordinary acquisition never enumerates history.
-            for point in [&observation.confirmed, &observation.latest] {
-                let encoded = serde_json::to_value(point.amount)?;
-                let amount_text = encoded.as_str().context("invalid encoded balance amount")?;
-                // SQLite flattens the funding/retirement projections so each
-                // lookup retains its dedicated hash index and malformed-JSON guard.
-                for sql in balance_support_queries() {
-                    let conflicting: Option<(String, bool)> = self
-                        .db
-                        .prepare_cached(sql)?
-                        .query_row(
-                            params![
-                                wallet,
-                                point.anchor.hash,
-                                amount_text,
-                                i64::try_from(point.anchor.height)?
-                            ],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .optional()?;
-                    if let Some((support, malformed)) = conflicting {
-                        let exact = serde_json::from_str::<BalanceSupport>(&support)
-                            .ok()
-                            .filter(|support| support.observation.validate().is_ok());
-                        self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
-                        if malformed || exact.is_none() {
-                            anyhow::bail!(EvidenceFailure::MalformedSupport);
-                        }
-                        anyhow::bail!(EvidenceFailure::AmountContradiction);
-                    }
-                }
-            }
+            self.check_journal_support_or_invalidate(wallet, observation)?;
 
             if let Some((_, saved)) = self.evidence_cache.get(wallet).cloned() {
-                let order = match observation.compare(saved.observation()) {
-                    Ok(order) => order,
-                    Err(failure) => {
-                        if matches!(
-                            failure,
-                            EvidenceFailure::AmountContradiction
-                                | EvidenceFailure::ConfirmedReplacement
-                                | EvidenceFailure::LatestReplacement
-                        ) {
-                            let anchor = if failure == EvidenceFailure::AmountContradiction {
-                                [&observation.confirmed, &observation.latest]
-                                    .into_iter()
-                                    .find(|point| {
-                                        [
-                                            &saved.observation().confirmed,
-                                            &saved.observation().latest,
-                                        ]
-                                        .into_iter()
-                                        .any(|old| {
-                                            point.anchor.hash == old.anchor.hash
-                                                && (point.amount != old.amount
-                                                    || point.anchor.height != old.anchor.height)
-                                        })
-                                    })
-                                    .map(|point| &point.anchor)
-                                    .context("missing conflicting balance anchor")?
-                            } else if failure == EvidenceFailure::LatestReplacement {
-                                &saved.observation().latest.anchor
-                            } else {
-                                &saved.observation().confirmed.anchor
-                            };
-                            self.invalidate_wallet_evidence(
-                                wallet,
-                                anchor,
-                                false,
-                                failure == EvidenceFailure::AmountContradiction,
-                            )?;
-                        }
-                        return Err(failure.into());
-                    }
-                };
+                let order = self.compare_cached_balance_or_invalidate(
+                    wallet,
+                    observation,
+                    saved.observation(),
+                )?;
                 if order == std::cmp::Ordering::Equal {
                     incoming.restrict_validity(saved.observation().valid_until);
                     view.observations
