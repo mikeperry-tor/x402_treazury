@@ -849,4 +849,151 @@ mod tests {
         assert!(guard.validate_state(&clean).is_err());
         assert!(guard.validate_state(&state).is_err());
     }
+
+    fn permit_rows(db: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        [
+            "SELECT * FROM funding_permits ORDER BY intent",
+            "SELECT * FROM funding_source_attempts ORDER BY operation",
+        ]
+        .into_iter()
+        .map(|sql| {
+            let mut statement = db.prepare(sql).unwrap();
+            let columns = statement.column_count();
+            statement
+                .query_map([], |row| {
+                    (0..columns).map(|column| row.get(column)).collect()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        })
+        .collect()
+    }
+
+    #[test]
+    fn malformed_identity_and_baseline_bindings_preserve_existing_permits() {
+        for change in 0..10 {
+            let (_dir, guard, db, state) = fixture();
+            guard.reserve_allocations("treasury", "pool", &[5]).unwrap();
+            guard.validate_state(&state).unwrap();
+            let before = permit_rows(&db);
+            assert_eq!(before[0].len(), 1);
+            let mut current = state.clone();
+            match change {
+                0 | 1 => {
+                    let key = if change == 0 { "pools" } else { "funding_jobs" };
+                    let duplicate = current["treasury_status"][key][0].clone();
+                    current["treasury_status"][key]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(duplicate);
+                }
+                2 | 3 => {
+                    let mut old = state.clone();
+                    let key = if change == 2 { "pools" } else { "funding_jobs" };
+                    let duplicate = old["treasury_status"][key][0].clone();
+                    old["treasury_status"][key]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(duplicate);
+                    baseline(&db, &old);
+                }
+                4 => {
+                    current["treasury_status"]["pools"][0]["addresses"]
+                        .as_array_mut()
+                        .unwrap()
+                        .remove(0);
+                }
+                5 => {
+                    current["treasury_status"]["funding_jobs"]
+                        .as_array_mut()
+                        .unwrap()
+                        .remove(0);
+                }
+                n => {
+                    let field = ["wallet_id", "recipient", "pool_id", "pool_name"][n - 6];
+                    current["treasury_status"]["funding_jobs"][0][field] = json!("changed");
+                }
+            }
+            assert!(
+                guard.validate_state(&current).is_err(),
+                "invalid identity/binding change {change} accepted"
+            );
+            assert_eq!(
+                permit_rows(&db),
+                before,
+                "rejection must preserve original authority and charges"
+            );
+        }
+    }
+
+    fn missing_profiles_fixture(
+        malformed_second: bool,
+    ) -> (tempfile::TempDir, RegistryPermits, Connection, Value) {
+        let (dir, mut guard, db, mut state) = fixture();
+        state["treasury_status"]["pools"] = json!([]);
+        state["treasury_status"]["funding_jobs"] = json!([]);
+        baseline(&db, &state);
+        db.execute(r#"UPDATE runs SET manifest=json_set(manifest,'$.start.mode','treasury_only','$.start.pools',json('["pool","second"]'))"#, []).unwrap();
+        let raw: String = db
+            .query_row("SELECT payload FROM pins", [], |r| r.get(0))
+            .unwrap();
+        let mut pins: Value = serde_json::from_str(&raw).unwrap();
+        pins["resolved_config"]["resolved_wallets"]["second"] =
+            pins["resolved_config"]["resolved_wallets"]["pool"].clone();
+        if malformed_second {
+            pins["resolved_config"]["resolved_wallets"]["second"]["reserves"]["small"] =
+                Value::Null;
+        }
+        let raw = pins.to_string();
+        guard.binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        db.execute(
+            "UPDATE pins SET payload=?1,digest=?2",
+            params![raw, guard.binding.pin_digest],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE events SET detail=?1 WHERE kind='application_session'",
+            [serde_json::to_string(&guard.binding).unwrap()],
+        )
+        .unwrap();
+        (dir, guard, db, state)
+    }
+
+    #[test]
+    fn malformed_later_profile_never_reserves_earlier_valid_pool() {
+        let (_dir, guard, db, state) = missing_profiles_fixture(true);
+        let before = permit_rows(&db);
+        let error = guard.validate_state(&state).unwrap_err();
+        assert!(format!("{error:#}").contains("pinned small reserve missing"));
+        assert_eq!(permit_rows(&db), before);
+    }
+
+    #[test]
+    fn second_permit_insert_failure_rolls_back_first_and_can_retry_without_charge() {
+        let (_dir, guard, db, state) = missing_profiles_fixture(false);
+        let before = permit_rows(&db);
+        // The injected failure can fire only after the first insert is visible
+        // inside this transaction. No production fault switch is introduced.
+        db.execute_batch("CREATE TRIGGER fail_second_permit BEFORE INSERT ON funding_permits WHEN NEW.pool='second' AND (SELECT count(*) FROM funding_permits)=1 BEGIN SELECT RAISE(ABORT,'fixture second permit insertion'); END;").unwrap();
+        let error = guard.validate_state(&state).unwrap_err();
+        assert!(format!("{error:#}").contains("fixture second permit insertion"));
+        assert_eq!(
+            permit_rows(&db),
+            before,
+            "earlier tentative reservation must roll back"
+        );
+        db.execute_batch("DROP TRIGGER fail_second_permit;")
+            .unwrap();
+        guard.validate_state(&state).unwrap();
+        let committed = permit_rows(&db);
+        assert_eq!(committed[0].len(), 2);
+        assert!(committed[1].is_empty());
+        guard.validate_state(&state).unwrap();
+        assert_eq!(
+            permit_rows(&db),
+            committed,
+            "successful restart reuses exact permits without a second charge"
+        );
+    }
 }
