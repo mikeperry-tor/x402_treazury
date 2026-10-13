@@ -260,7 +260,10 @@ The pass checks the completed cache initially, after acquisition completions, af
 each page-sized batch of evaluated wallets, before waiting on outstanding reads,
 and once before returning a negative result. Batch rechecks include independently
 published evidence and changed liabilities; each selection revalidates current
-capacity under the group gate.
+capacity under the group gate. Candidate selection compares cached and caller-owned
+certificates by chain observation, using one captured time. It performs no writes
+or evidence acquisition; contradictory observations and database errors propagate
+instead of becoming a successful fallback.
 
 Each pass captures its inventory boundary before traversal; new wallets become
 eligible for a later pass. Priority identities are deduplicated against keyset

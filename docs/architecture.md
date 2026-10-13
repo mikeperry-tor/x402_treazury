@@ -94,7 +94,8 @@ list-changed notification channel. Dynamic deployments expose listener-scoped
 search/call fallback tools for clients that cache their initial inventory.
 
 `src/payment.rs` owns the unsigned challenge and single signed attempt. Static
-profiles support Base USDC v1/v2 exact and v2 upto signing. Managed profiles use
+profiles support Base USDC v1/v2 exact and v2 upto signing. Each call pins its
+static signer before unsigned I/O, so replacement affects subsequent calls. Managed profiles use
 v2 exact EIP-3009 admission and durable reservations. A paid timeout/body failure
 can still have spent money; neither tool dispatch nor output conversion replays it.
 
@@ -110,7 +111,8 @@ and returns `ManagedResponse`, carrying the response, extension warning flag and
 cover lease. Raw-body callers retain that lease through output consumption and
 mark it complete after success. `pay` preserves its tuple return for callers
 without cover; `drain_direct_payments` waits for accepted signing and dispatch.
-`PaidClient` continues to retain cover through its complete output conversion.
+`PaidClient` retains cover until successful HTTP output collection; attachment
+rendering happens later and cannot retry payment.
 
 `src/output.rs` preserves response bytes and MIME, handles ordinary text/JSON,
 small supported inline images and configured base64/data-URI mappings. A bounded
