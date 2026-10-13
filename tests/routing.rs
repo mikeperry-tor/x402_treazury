@@ -21,6 +21,71 @@ fn path_tools() -> Vec<x402_treazury::catalog::ToolSpec> {
     .unwrap()
 }
 
+#[test]
+fn assembled_template_cannot_form_normalized_dot_segments() {
+    for path in [
+        "/users/.{suffix}/settings",
+        "/users/%2e{suffix}/settings",
+        "/users/..{suffix}/settings",
+        "/users/%2e%2e{suffix}/settings",
+    ] {
+        let tools = build_tools(&Config::default(), &json!({"operations":[{"method":"PUT","path":path,"params":[{"name":"suffix","in":"path"}]}]}), "route").unwrap();
+        assert!(
+            tools[0]
+                .route(
+                    "https://example.com",
+                    json!({"suffix":""}).as_object().unwrap()
+                )
+                .is_err()
+        );
+        assert!(
+            tools[0]
+                .route(
+                    "https://example.com",
+                    json!({"suffix":"txt"}).as_object().unwrap()
+                )
+                .is_ok()
+        );
+    }
+}
+
+#[tokio::test]
+async fn inherited_parameters_route_and_prevent_incomplete_pricing_probes() {
+    let root = json!({"openapi":"3.1.0","components":{"parameters":{
+        "id":{"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+        "query":{"name":"q","in":"query","required":true,"schema":{"type":"string"}}
+    }},"paths":{
+        "/users/{id}":{"parameters":[{"$ref":"#/components/parameters/id"},{"$ref":"#/components/parameters/query"}],
+            "get":{"parameters":[{"name":"q","in":"query","required":false,"schema":{"type":"integer"}}]},"delete":{}},
+        "/search":{"parameters":[{"$ref":"#/components/parameters/query"}],"get":{}}
+    }});
+    let cfg = Config::default();
+    let tools = build_tools(&cfg, &root, "route").unwrap();
+    let get = tools
+        .iter()
+        .find(|t| t.path == "/users/{id}" && t.method == "GET")
+        .unwrap();
+    assert_eq!(get.input_schema["required"], json!(["id"]));
+    assert_eq!(get.input_schema["properties"]["q"]["type"], "integer");
+    let route = get
+        .route(
+            "https://example.com",
+            json!({"id":"alice","q":7}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.url, "https://example.com/users/alice");
+    assert_eq!(route.query["q"], 7);
+    let delete = tools.iter().find(|t| t.method == "DELETE").unwrap();
+    assert_eq!(delete.input_schema["required"], json!(["id", "q"]));
+    let discovery = x402_treazury::pricing::PricingCache::default()
+        .discover_observed(&cfg, &root, &tools, "http://127.0.0.1:1")
+        .await
+        .unwrap();
+    assert_eq!(discovery.evidence.skipped_arguments, 1);
+    assert_eq!(discovery.evidence.eligible, 0);
+    assert!(discovery.prices.is_empty());
+}
+
 #[tokio::test]
 async fn nullable_body_fields_preserve_presence_and_wire_names() {
     let root = json!({"openapi":"3.1.0","paths":{"/profile":{"patch":{

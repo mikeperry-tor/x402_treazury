@@ -46,7 +46,8 @@ fn openapi_conversion_preserves_complete_parameter_metadata_and_operation_scope(
         vec![
             json!({"path":"/a","method":"get","summary":"Summary","description":"Vendor prose.\nStill whole.","tags":null,
             "pricing":{"amount":"2"},"credit_pricing":{"credits":3},"body":null,
-            "params":[
+                "params":[
+                    {"name":"path_level","in":"query","required":false,"description":null,"schema":{}},
                 {"name":"count","in":"query","required":true,"description":"Schema prose","schema":{"type":"integer","minimum":0,"exclusiveMinimum":0,"description":"Schema prose"}},
                 {"name":"empty","in":"query","required":false,"description":"","schema":{"description":"Not used","type":"string"}},
                 {"name":"fallback","in":null,"required":false,"description":"Fallback","schema":{"description":"Fallback"}},

@@ -285,6 +285,20 @@ impl ToolSpec {
             "missing path parameter for {}",
             self.name
         );
+        // A template literal and an empty argument can also form a dot
+        // segment. Inspect the assembled path, with one URL decoding pass.
+        ensure!(
+            !path
+                .split(['?', '#'])
+                .next()
+                .unwrap_or("")
+                .split('/')
+                .any(|segment| {
+                    let decoded = percent_encoding::percent_decode_str(segment).collect::<Vec<_>>();
+                    decoded == b"." || decoded == b".."
+                }),
+            "dot path segment rejected"
+        );
         // httpx appends relative paths to base_url, including a gateway prefix.
         let url = if path.starts_with("https://") || path.starts_with("http://") {
             path
@@ -779,12 +793,25 @@ fn openapi_operation(
     pricing_key: Option<&str>,
     credit_key: Option<&str>,
 ) -> Value {
-    let params: Vec<_> = op["parameters"]
+    // Operation parameters override inherited parameters by (location, name),
+    // not by name alone. Resolve references before comparing their identities.
+    let mut params: Vec<Value> = Vec::new();
+    for parameter in root["paths"][path]["parameters"]
         .as_array()
         .into_iter()
         .flatten()
+        .chain(op["parameters"].as_array().into_iter().flatten())
         .filter_map(|p| openapi_parameter(root, p))
-        .collect();
+    {
+        if let Some(previous) = params
+            .iter_mut()
+            .find(|p| p["name"] == parameter["name"] && p["in"] == parameter["in"])
+        {
+            *previous = parameter;
+        } else {
+            params.push(parameter);
+        }
+    }
     let body = op.get("requestBody").filter(|v| !v.is_null()).map(|rb| {
         let rb = resolve(root, rb, &mut BTreeSet::new());
         json!({"required": rb["required"].as_bool().unwrap_or(false),
