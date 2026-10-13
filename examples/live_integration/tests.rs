@@ -440,3 +440,5 @@ fn rotation_rounds_require_distinct_ordered_paid_calls_and_exact_wallet_scope() 
     unknown["phases"][0]["scenario"]["rounds"][0]["repeat_forever"] = json!(true);
     assert!(serde_json::from_value::<Manifest>(unknown).is_err());
 }
+
+include!("planner_tests.rs");
