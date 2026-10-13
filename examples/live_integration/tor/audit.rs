@@ -352,4 +352,6 @@ mod tests {
         assert!(fields("KEY=\"unfinished").is_err());
         assert!(fields(&"x".repeat(1024 * 1024 + 1)).is_err());
     }
+    include!("audit_tests.rs");
+
 }
