@@ -303,3 +303,133 @@ async fn conflicting_resolution_rejects_each_changed_field_before_balance_public
         );
     }
 }
+
+fn publication_rows(store: &Store) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+    [
+        "wallets",
+        "payment_attempts",
+        "payment_resolutions",
+        "funding_jobs",
+        "funding_progress",
+        "pools",
+        "reserve_claims",
+    ]
+    .into_iter()
+    .map(|table| {
+        let mut query = store
+            .db
+            .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+            .unwrap();
+        let columns = query.column_count();
+        query
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|i| row.get(i))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    })
+    .collect()
+}
+
+#[tokio::test]
+async fn publication_rolls_back_resolution_and_first_balance_after_late_failure() {
+    let mut fixture = Fixture::new().await;
+    fixture.chain.lock().unwrap().1 = 1_000_000;
+    let authorization = fixture.authorization();
+    let query = fixture
+        .store
+        .scoped_chain_query(&fixture.pool, fixture.wallets.clone(), vec![authorization])
+        .unwrap();
+    let view = fixture.rpc.view(query).await.unwrap();
+    let before = publication_rows(&fixture.store);
+    let sibling = &fixture.wallets[1];
+    fixture.store.db.execute_batch(&format!(
+        "CREATE TEMP TRIGGER reject_late_publication BEFORE UPDATE OF balance ON wallets
+         WHEN NEW.id='{sibling}' AND EXISTS(SELECT 1 FROM payment_resolutions WHERE attempt_id='proof')
+         AND EXISTS(SELECT 1 FROM wallets WHERE id='{}' AND balance='1000000')
+         AND EXISTS(SELECT 1 FROM funding_jobs WHERE readiness_hash IS NOT NULL)
+         BEGIN SELECT RAISE(ABORT,'fixture_late_publication'); END;", fixture.wallets[0])).unwrap();
+    let error = fixture
+        .store
+        .reconcile_pool(&fixture.pool, view.clone())
+        .unwrap_err();
+    assert_eq!(error.to_string(), "fixture_late_publication");
+    assert_eq!(publication_rows(&fixture.store), before);
+    assert_eq!(
+        exposure(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+        U256::from(7)
+    );
+    assert_eq!(
+        checkpoint(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+        None
+    );
+    fixture
+        .store
+        .db
+        .execute_batch("DROP TRIGGER reject_late_publication")
+        .unwrap();
+    fixture
+        .store
+        .reconcile_pool(&fixture.pool, view.clone())
+        .unwrap();
+    assert_eq!(
+        exposure(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+        U256::ZERO
+    );
+    assert_eq!(
+        checkpoint(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+        Some(
+            view.resolutions["proof"]
+                .anchor
+                .clone()
+                .unwrap_or(view.anchor.clone())
+        )
+    );
+    let after = publication_rows(&fixture.store);
+    fixture.store.reconcile_pool(&fixture.pool, view).unwrap();
+    assert_eq!(publication_rows(&fixture.store), after);
+}
+
+#[tokio::test]
+async fn scoped_publication_leaves_sibling_untouched_and_complete_requires_it() {
+    let mut fixture = Fixture::new().await;
+    let query = fixture
+        .store
+        .scoped_chain_query(&fixture.pool, vec![fixture.wallets[0].clone()], vec![])
+        .unwrap();
+    let view = fixture.rpc.view(query).await.unwrap();
+    let before = publication_rows(&fixture.store);
+    assert_eq!(
+        fixture
+            .store
+            .reconcile_pool(&fixture.pool, view.clone())
+            .unwrap_err()
+            .to_string(),
+        "incomplete Base view"
+    );
+    assert_eq!(publication_rows(&fixture.store), before);
+    fixture
+        .store
+        .publish_scoped_evidence(&fixture.pool, view)
+        .unwrap();
+    let after = publication_rows(&fixture.store);
+    assert_ne!(after[0][0], before[0][0]);
+    assert_eq!(after[0][1], before[0][1]);
+    assert_eq!(after[1], before[1]);
+    assert_eq!(after[2], before[2]);
+    let next = fixture.rpc.view(fixture.query()).await.unwrap();
+    fixture.store.reconcile_pool(&fixture.pool, next).unwrap();
+    let balance: String = fixture
+        .store
+        .db
+        .query_row(
+            "SELECT balance FROM wallets WHERE id=?1",
+            [&fixture.wallets[1]],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(balance, "100");
+}
