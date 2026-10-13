@@ -451,6 +451,7 @@ pub fn refill_service(
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("lifecycle_capacity_tests.rs");
     fn wallet(id: &str, n: u64, role: &str) -> Value {
         json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"2000000"})
     }
@@ -470,14 +471,7 @@ mod tests {
     }
     #[test]
     fn capacity_consumption_uses_exact_slot_and_destination_not_source_completion() {
-        let (mut before, mut after) = promoted();
-        before["schema_version"] = json!(2);
-        after["schema_version"] = json!(2);
-        after["pools"][0]["generation"] = json!(0);
-        after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
-        before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
-        before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":4,"wallet_id":"ready","destination_ready":true}]);
-        after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":5,"wallet_id":"new","destination_ready":false}]);
+        let (before, mut after) = capacity_fixture();
         let mut vacant = after.clone();
         vacant["pools"][0]["addresses"]
             .as_array_mut()
