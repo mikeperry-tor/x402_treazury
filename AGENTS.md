@@ -325,8 +325,10 @@ and [the runtime architecture](docs/architecture.md).
   I/O; dispatch once to /services or /best and use a directory slug for details.
   Keep their schemas aligned with the pinned directory contract, except that built-in search
   hides `network` and always sends `BSE`; agent-supplied network arguments fail before I/O.
-  Tool descriptions guide agents through provider documentation to a verified public
-  OpenAPI JSON URL, then registration, tool search and invocation. Importing sources
+  Tool descriptions route specification discovery through source_url_info and pass
+  returned or published URLs directly to source_add for server-side fetching and
+  validation. Never instruct agents to fetch/read/verify large OpenAPI documents
+  or full API directory JSON themselves; tools_search retrieves relevant schemas. Importing sources
   never grants a directory transport bypass.
 - `source_url_info` takes exactly one directory slug or public HTTPS base URL. Slugs
   use ordinary directory payment policy; provider document probes are always unsigned.

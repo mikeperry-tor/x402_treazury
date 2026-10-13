@@ -84,8 +84,9 @@ does not fetch its catalog or probe its prices. Both tools use the endpoint's
 source-management wallet (including its explicit listener override), normal response
 handling and payment admission, and the configured direct/Tor network policy. The
 bundled directory can charge after its shared-IP quota. Results are leads, not
-payment/delivery guarantees, and may lack an OpenAPI URL. Verify the vendor's published
-specification rather than inferring schemas from endpoint descriptions.
+payment/delivery guarantees, and may lack an OpenAPI URL. Specification discovery
+and validation belong to `source_url_info` and `source_add`, not the agent's web
+or raw-request tools.
 
 Browse dispatches to `GET /services`, with `page` and `per_page`. Best dispatches
 to `GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, or
@@ -99,17 +100,21 @@ The local `mode` selector is never sent upstream; unsupported or mixed-mode argu
 fail before network I/O. Each call selects exactly one directory operation and preserves
 its response, including ranking information. Details dispatches to
 `GET /services/{slug}`; use `{"slug":"<slug from search>"}` to inspect a candidate
-before obtaining its published specification and adding it. Use `source_url_info`
-with its slug or known API base to check common locations. Follow provider documentation or
-website links to the OpenAPI JSON document; the provider's `llms.txt` may link to those
-docs. Use available web tools to verify candidate URLs such as `/openapi.json` or
-`/.well-known/openapi.json` actually return an OpenAPI 3 JSON document for the intended
-API. Never invent URLs or derive request schemas from prose. If no published spec can
-be found, registration is unavailable; use `raw_get` or `raw_post` only when the
-provider documents the endpoint, method and request arguments. Never guess paid
-request arguments. Pass the verified URL to
-`source_add`, then use `tools_search` with its returned `source_id` and invoke the
-chosen `tool_ref` through `tool_call`.
+before locating its published specification and adding it. `source_details` returns
+listing metadata, not the provider's OpenAPI document. Use `source_url_info` with
+its slug or known API base to check common locations, then pass a returned
+`verified_openapi` URL directly to `source_add`. The server downloads and validates
+the specification; the agent must not fetch, read or verify large OpenAPI documents
+or full API directory JSON using web/raw tools.
+
+If common locations yield nothing, concise provider documentation or `llms.txt`
+may supply a published specification link. Pass that URL directly to `source_add`
+for server-side validation without opening the specification. Never invent URLs
+or derive request schemas from prose. If no published spec can be found, use
+`raw_get` or `raw_post` only with a documented endpoint, method and arguments.
+After registration, use `tools_search` with the returned `source_id` and a targeted
+query to retrieve only relevant tool schemas, then invoke the chosen `tool_ref`
+through `tool_call`.
 
 Use `x402_treazury_source_url_info` to locate documents without manual URL guessing:
 
