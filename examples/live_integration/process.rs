@@ -93,6 +93,14 @@ impl Evidence {
             .all(|o| !o.limit_exceeded && !o.read_error && !o.pipe_incomplete)
     }
 }
+
+// Metadata only: captured child output may contain credentials or wallet data.
+fn output_diagnostic(output: &Output, collector_finished: bool) -> String {
+    format!(
+        "captured_bytes={} limit_exceeded={} read_error={} pipe_incomplete={} collector_finished={collector_finished}",
+        output.bytes.len(), output.limit_exceeded, output.read_error, output.pipe_incomplete
+    )
+}
 pub struct Process {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -142,6 +150,12 @@ impl ProcessSlot {
             .context("application shutdown not started")?
             .await;
         self.draining.take();
+        if let Err(error) = &result {
+            eprintln!(
+                "child cleanup owner failed: cancelled={} panicked={}; accepted work must remain uncertain",
+                error.is_cancelled(), error.is_panic()
+            );
+        }
         result.context("application cleanup task failed")?
     }
 }
@@ -253,15 +267,28 @@ impl Process {
             "invalid child cleanup deadline"
         );
         // EOF is the production child's normal drain request. Never signal an arbitrary stored PID.
-        self.stdin.take();
-        let deadline = Instant::now() + cleanup;
+        let eof_requested = self.stdin.take().is_some();
+        let started = Instant::now();
+        let deadline = started + cleanup;
         let mut forced = false;
         let status = match tokio::time::timeout_at(deadline, self.child.wait()).await {
             Ok(status) => status?,
             Err(_) => {
+                // Probe only this owned handle. A deadline still records forced
+                // abandonment even if exit races this diagnostic observation.
+                let (child_state, observed_exit_code, os_error) = match self.child.try_wait() {
+                    Ok(Some(status)) => ("exited", status.code(), None),
+                    Ok(None) => ("running", None, None),
+                    Err(error) => ("wait_error", None, error.raw_os_error()),
+                };
                 eprintln!(
-                    "child cleanup deadline exceeded; terminating owned child; accepted work must remain uncertain"
+                    "child cleanup deadline exceeded; terminating owned child; accepted work must remain uncertain; pid={} elapsed_ms={} cleanup_ms={} eof_requested={eof_requested} child_state={child_state} observed_exit_code={observed_exit_code:?} os_error={os_error:?}",
+                    self.pid, started.elapsed().as_millis(), cleanup.as_millis()
                 );
+                for (label, (output, task)) in ["stdout", "stderr"].into_iter().zip(&self.output) {
+                    eprintln!("child cleanup snapshot: pid={} stream={label} {}", self.pid,
+                        output_diagnostic(&output.lock().expect("capture lock"), task.is_finished()));
+                }
                 forced = true;
                 self.child.start_kill()?;
                 tokio::time::timeout(Duration::from_secs(5), self.child.wait())
@@ -269,16 +296,18 @@ impl Process {
                     .context("owned child could not be reaped within 5 seconds")??
             }
         };
-        for (output, task) in &mut self.output {
+        for (label, (output, task)) in ["stdout", "stderr"].into_iter().zip(&mut self.output) {
             match tokio::time::timeout_at(deadline, &mut *task).await {
                 Ok(Ok(())) => {}
-                Ok(Err(_)) => {
-                    eprintln!("child output collector failed; evidence is incomplete");
+                Ok(Err(error)) => {
+                    eprintln!("child output collector failed; evidence is incomplete; pid={} stream={label} cancelled={} panicked={}", self.pid, error.is_cancelled(), error.is_panic());
                     output.lock().expect("capture lock").read_error = true;
                 }
                 Err(_) => {
                     eprintln!(
-                        "child output pipe remained open at cleanup deadline; evidence is incomplete"
+                        "child output pipe remained open at cleanup deadline; evidence is incomplete; pid={} stream={label} elapsed_ms={} cleanup_ms={} child_success={} exit_code={:?} forced_kill={forced} {}",
+                        self.pid, started.elapsed().as_millis(), cleanup.as_millis(), status.success(), status.code(),
+                        output_diagnostic(&output.lock().expect("capture lock"), task.is_finished())
                     );
                     output.lock().expect("capture lock").pipe_incomplete = true;
                     task.abort();
@@ -348,6 +377,17 @@ fn capture<R: AsyncRead + Unpin + Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cleanup_diagnostics_include_metadata_without_child_prose() {
+        let output = Output {
+            bytes: b"private-child-output".to_vec(),
+            limit_exceeded: true,
+            read_error: true,
+            pipe_incomplete: false,
+        };
+        assert_eq!(output_diagnostic(&output, false),
+            "captured_bytes=20 limit_exceeded=true read_error=true pipe_incomplete=false collector_finished=false");
+    }
     async fn shell(script: &str, limit: usize, timeout: Duration) -> Evidence {
         let dir = tempfile::tempdir().unwrap();
         let child = Process::launch(
