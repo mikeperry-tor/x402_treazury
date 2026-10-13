@@ -78,6 +78,11 @@ See [authorization details](INTEGRATION_REFERENCE.md#registry-authorization-and-
 for existing liabilities and positive-funding scenarios. No plan or report grants
 permission to spend.
 
+Funding validation checks the saved baseline, wallet/job bindings, outstanding
+liabilities and start readiness in one registry transaction. It validates every
+missing-pool claim before reserving the batch; any failure rolls back new permits.
+Retained jobs keep their original run ownership and charges.
+
 ## 3. Prepare complete catalogs
 
 ```sh

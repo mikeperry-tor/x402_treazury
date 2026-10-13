@@ -30,7 +30,42 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
     let existing_funds_only = manifest["start"]["mode"] == "funded_pools"
         && run_limits.jobs == 0
         && run_limits.source_zatoshis == 0;
-    let (raw, hash): (String, String) = tx.query_row(
+    let baseline = verified_baseline(&tx, status)?;
+    let raw: String = tx.query_row(
+        "SELECT payload FROM pins WHERE run=?1 ORDER BY revision DESC LIMIT 1",
+        [&guard.binding.run],
+        |r| r.get(0),
+    )?;
+    let pins = qualification::bounded(raw)?;
+    let profiles = pins["resolved_config"]["resolved_wallets"]
+        .as_object()
+        .context("pinned wallet profiles missing")?;
+    let pools = index(array(status, "pools")?, "id")?;
+    let old_wallets = validate_pool_continuity(&pools, &baseline)?;
+    let jobs = index(array(status, "funding_jobs")?, "id")?;
+    validate_job_continuity(&jobs, &baseline)?;
+    validate_allocations(&tx, &pools, profiles, &old_wallets, &jobs)?;
+    validate_incomplete_jobs(&tx, guard, &manifest, &jobs, status, existing_funds_only)?;
+    validate_pending_sources(&tx, &guard.binding.run, current)?;
+    validate_source(&tx, &baseline, current)?;
+    validate_payments(&tx, &guard.binding.run, &baseline, current)?;
+    validate_start_readiness(
+        &tx,
+        &guard.binding.run,
+        &manifest,
+        &pools,
+        existing_funds_only,
+    )?;
+    let bootstrap = bootstrap_claims(profiles, &pools)?;
+    if !bootstrap.is_empty() {
+        guard.reserve_batch(&mut tx, name(status, "treasury_id")?, &manifest, &bootstrap)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn verified_baseline(db: &Connection, status: &Value) -> Result<Value> {
+    let (raw, hash): (String, String) = db.query_row(
         "SELECT baseline,baseline_hash FROM identity WHERE singleton=1",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
@@ -51,16 +86,12 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
         baseline["treasury_status"]["treasury_id"] == status["treasury_id"],
         "qualification baseline treasury mismatch"
     );
-    let raw: String = tx.query_row(
-        "SELECT payload FROM pins WHERE run=?1 ORDER BY revision DESC LIMIT 1",
-        [&guard.binding.run],
-        |r| r.get(0),
-    )?;
-    let pins = qualification::bounded(raw)?;
-    let profiles = pins["resolved_config"]["resolved_wallets"]
-        .as_object()
-        .context("pinned wallet profiles missing")?;
-    let pools = index(array(status, "pools")?, "id")?;
+    Ok(baseline)
+}
+fn validate_pool_continuity<'a>(
+    pools: &BTreeMap<&str, &Value>,
+    baseline: &'a Value,
+) -> Result<BTreeMap<&'a str, &'a Value>> {
     let old_pools = index(array(&baseline["treasury_status"], "pools")?, "id")?;
     let mut old_wallets = BTreeMap::new();
     for (id, old) in &old_pools {
@@ -80,7 +111,9 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             old_wallets.insert(id, wallet);
         }
     }
-    let jobs = index(array(status, "funding_jobs")?, "id")?;
+    Ok(old_wallets)
+}
+fn validate_job_continuity(jobs: &BTreeMap<&str, &Value>, baseline: &Value) -> Result<()> {
     let old_jobs = index(array(&baseline["treasury_status"], "funding_jobs")?, "id")?;
     for (id, old) in &old_jobs {
         let job = jobs.get(id).context("baseline funding job disappeared")?;
@@ -91,6 +124,15 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+fn validate_allocations(
+    db: &Connection,
+    pools: &BTreeMap<&str, &Value>,
+    profiles: &serde_json::Map<String, Value>,
+    old_wallets: &BTreeMap<&str, &Value>,
+    jobs: &BTreeMap<&str, &Value>,
+) -> Result<()> {
     for pool in pools.values() {
         let pool_name = name(pool, "name")?;
         ensure!(
@@ -111,7 +153,7 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
                 job["recipient"] == wallet["address"] && job["pool_id"] == pool["id"],
                 "wallet/job binding differs"
             );
-            let known: bool = tx.query_row(
+            let known: bool = db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM funding_permits WHERE job=?1 AND pool=?2)",
                 params![name(job, "id")?, pool_name],
                 |r| r.get(0),
@@ -122,14 +164,24 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+fn validate_incomplete_jobs(
+    db: &Connection,
+    guard: &RegistryPermits,
+    manifest: &Value,
+    jobs: &BTreeMap<&str, &Value>,
+    status: &Value,
+    existing_funds_only: bool,
+) -> Result<()> {
     // A fresh run cannot adopt another run's funding authority. A known, wholly
     // unprepared refill can remain paused in a zero-funding run, or outside the
     // selected pool scope. Its permit stays owned and charged to the old run.
-    for (id, job) in &jobs {
+    for (id, job) in jobs {
         if job["phase"] == "COMPLETE" {
             continue;
         }
-        let owned: bool = tx.query_row(
+        let owned: bool = db.query_row(
             "SELECT EXISTS(SELECT 1 FROM funding_permits WHERE run=?1 AND job=?2)",
             params![guard.binding.run, id],
             |r| r.get(0),
@@ -139,22 +191,32 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             .any(|pool| pool == &job["pool_name"]);
         let retained = !owned
             && (existing_funds_only || outside_scope)
-            && retained_unprepared_job(&tx, job, status)?;
+            && retained_unprepared_job(db, job, status)?;
         ensure!(
             owned || retained,
             "incomplete funding job requires its original run or explicit reconciliation before a fresh run"
         );
     }
+    Ok(())
+}
+fn validate_pending_sources(db: &Connection, run: &str, current: &Value) -> Result<()> {
     for operation in array(current, "pending_source_operations")? {
-        let owned: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE p.run=?1 AND s.operation=?2 AND s.released=0)", params![guard.binding.run,operation.as_str().context("invalid pending operation")?], |r| r.get(0))?;
+        let owned: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE p.run=?1 AND s.operation=?2 AND s.released=0)", params![run,operation.as_str().context("invalid pending operation")?], |r| r.get(0))?;
         ensure!(
             owned,
             "pending source operation requires its original run before fresh qualification"
         );
     }
-    validate_source(&tx, &baseline, current)?;
-    validate_payments(&tx, &guard.binding.run, &baseline, current)?;
-    let resumed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM funding_permits WHERE run=?1) OR EXISTS(SELECT 1 FROM events WHERE run=?1 AND kind='application_claim')", [&guard.binding.run], |r| r.get(0))?;
+    Ok(())
+}
+fn validate_start_readiness(
+    db: &Connection,
+    run: &str,
+    manifest: &Value,
+    pools: &BTreeMap<&str, &Value>,
+    existing_funds_only: bool,
+) -> Result<()> {
+    let resumed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM funding_permits WHERE run=?1) OR EXISTS(SELECT 1 FROM events WHERE run=?1 AND kind='application_claim')", [run], |r| r.get(0))?;
     for selected in array(&manifest["start"], "pools")? {
         let pool = pools.values().find(|p| p["name"] == *selected);
         if manifest["start"]["mode"] == "treasury_only" {
@@ -181,6 +243,12 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+fn bootstrap_claims<'a>(
+    profiles: &'a serde_json::Map<String, Value>,
+    pools: &BTreeMap<&str, &Value>,
+) -> Result<Vec<(&'a str, i64)>> {
     let mut bootstrap = Vec::new();
     for (pool_name, profile) in profiles {
         if profile["mode"] == "zcash_rotation"
@@ -198,12 +266,9 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
             }
         }
     }
-    if !bootstrap.is_empty() {
-        guard.reserve_batch(&mut tx, name(status, "treasury_id")?, &manifest, &bootstrap)?;
-    }
-    tx.commit()?;
-    Ok(())
+    Ok(bootstrap)
 }
+
 fn retained_unprepared_job(db: &Connection, job: &Value, status: &Value) -> Result<bool> {
     if !matches!(job["phase"].as_str(), Some("ALLOCATED" | "QUOTED")) {
         return Ok(false);
