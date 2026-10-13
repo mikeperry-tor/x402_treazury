@@ -38,6 +38,7 @@ type Entry = Arc<OnceCell<CachedProbe>>;
 type ProbeKey = (
     String,
     crate::network::HttpPolicy,
+    Duration,
     Option<std::path::PathBuf>,
     Option<Vec<u8>>,
     bool,
@@ -90,6 +91,8 @@ impl PricingCache {
             .entry((
                 url.clone(),
                 cfg.transport(),
+                crate::network::global()
+                    .read_timeout(cfg.read_timeout_seconds.map(Duration::from_secs_f64)),
                 cfg.http_cache_directory.clone(),
                 cfg.http_cache_direct_warm_target
                     .as_ref()

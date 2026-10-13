@@ -532,3 +532,70 @@ fn advertised_prices_preserve_provenance_even_when_amounts_appear_in_prose() {
     assert!(desc("/unknown").contains("Cost: unknown."));
     assert!(!desc("/unknown").contains("X402_MAX_PRICE_USD"));
 }
+
+#[tokio::test]
+async fn one_shot_pricing_keeps_timeout_failures_scoped_to_read_policy() {
+    let _guard = TEST_LOCK.lock().await;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/pay", any(move |req: Request| {
+            let seen = seen.clone();
+            async move {
+                assert_eq!(req.method(), "GET");
+                assert!(!req.headers().contains_key("payment-signature"));
+                seen.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(
+                    json!({"accepts":[{"scheme":"exact","amount":"14000","asset":"USDC","network":"eip155:8453"}]}).to_string()))])
+            }
+        }))).await.unwrap();
+    });
+    let short = Config {
+        read_timeout_seconds: Some(0.1),
+        ..Default::default()
+    };
+    let long = Config {
+        read_timeout_seconds: Some(2.0),
+        ..short.clone()
+    };
+    let root = json!({"paths":{"/pay":{"get":{}}}});
+    let tools = build_tools(&short, &root, "test").unwrap();
+    // Test both initializer orders. A cached timeout must not poison a longer
+    // allowance, and a cached success must not bypass the shorter policy.
+    for short_first in [true, false] {
+        let cache = PricingCache::default();
+        for cfg in if short_first {
+            [&short, &long]
+        } else {
+            [&long, &short]
+        } {
+            let result = cache
+                .discover_observed(cfg, &root, &tools, &base)
+                .await
+                .unwrap();
+            assert_eq!(
+                result.prices.is_empty(),
+                cfg.read_timeout_seconds == Some(0.1)
+            );
+            assert_eq!(result.evidence.cache[&CachePath::Initialized], 1);
+        }
+        for cfg in [&short, &long] {
+            let result = cache
+                .discover_observed(cfg, &root, &tools, &base)
+                .await
+                .unwrap();
+            assert_eq!(
+                result.prices.is_empty(),
+                cfg.read_timeout_seconds == Some(0.1)
+            );
+            assert_eq!(result.evidence.cache[&CachePath::Hit], 1);
+        }
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 4);
+    server.abort();
+    let _ = server.await;
+}
