@@ -224,3 +224,197 @@ async fn structured_credit_prices_skip_probes_and_support_digests() {
         assert_eq!(discovered.evidence.eligible, 0);
     }
 }
+
+fn expect_estimate(metadata: Value, estimate: &str) {
+    assert_eq!(
+        tools(metadata).remove(0).description,
+        format!(
+            "Original description. Pricing: \"Original credit conditions.\" [spec]. Estimated cost: {estimate} [conf]."
+        )
+    );
+}
+
+#[test]
+fn complete_tariff_descriptions_preserve_modes_and_ordered_suffixes() {
+    expect_estimate(tariff(), "0.014 USDC/request");
+    let mut bounded = tariff();
+    bounded["maxCredits"] = json!(4);
+    bounded["normalizationFailureCredits"] = json!(2);
+    bounded["settlement"] = json!("actual_credits");
+    bounded["surcharges"] = json!([
+        {"credits":3,"queryParam":"media","when":"boolean_true","label":"three-credit cap","badge":"optional"},
+        {"credits":1,"queryParam":"details","when":"present","label":"one-credit cap"}
+    ]);
+    expect_estimate(
+        bounded,
+        "0.014 USDC base; maximum 0.056 USDC/request; up to 0.042 USDC extra when media is true (three-credit cap); up to 0.014 USDC extra when details is supplied (one-credit cap); normalization-failure charge 0.028 USDC",
+    );
+    let mut metered = tariff();
+    metered["baseCredits"] = json!(2);
+    metered["maxCredits"] = json!(8);
+    metered["normalizationFailureCredits"] = json!(1);
+    metered["metered"] = json!({"chargedUnits":"returned_records","creditsPerUnit":2,"defaultUnits":3,"maxUnits":3,"queryParam":"limit","unit":"record"});
+    expect_estimate(
+        metered,
+        "0.028 USDC base + 0.028 USDC per returned record (limit defaults to 3, maximum 3 records); maximum 0.112 USDC/request; normalization-failure charge 0.014 USDC",
+    );
+    let mut batch = tariff();
+    batch["baseCredits"] = json!(3);
+    batch["maxCredits"] = json!(150);
+    batch["batch"] = json!({"unit":"url","maxUnits":50});
+    expect_estimate(
+        batch,
+        "up to 0.042 USDC/URL; maximum 50 URLs and 2.1 USDC/request",
+    );
+}
+
+#[test]
+fn unsupported_tariff_rules_and_arithmetic_overflow_keep_complete_unknown_description() {
+    let metered = json!({"chargedUnits":"returned_records","creditsPerUnit":1,"defaultUnits":1,"maxUnits":1,"queryParam":"limit","unit":"record"});
+    let batch = json!({"unit":"url","maxUnits":1});
+    let surcharge = json!({"credits":1,"queryParam":"extra","when":"present","label":"cap"});
+    let mut invalid = vec![Value::Null, json!([]), json!({})];
+    for (key, value) in [
+        ("version", json!(2)),
+        ("version", json!("1")),
+        ("unknown", json!(0)),
+        ("baseCredits", json!(-1)),
+        ("baseCredits", json!(2)),
+        ("maxCredits", json!(1.5)),
+        ("normalizationFailureCredits", json!(2)),
+        ("settlement", json!("estimated_credits")),
+        ("surcharges", Value::Null),
+    ] {
+        let mut p = tariff();
+        p[key] = value;
+        invalid.push(p);
+    }
+    for field in [
+        "version",
+        "baseCredits",
+        "maxCredits",
+        "normalizationFailureCredits",
+        "surcharges",
+    ] {
+        let mut p = tariff();
+        p.as_object_mut().unwrap().remove(field);
+        invalid.push(p);
+    }
+    let mut both = tariff();
+    both["metered"] = metered.clone();
+    both["batch"] = batch.clone();
+    invalid.push(both);
+    for (key, value) in [
+        ("chargedUnits", json!("requested_records")),
+        ("unit", json!("url")),
+        ("defaultUnits", json!(2)),
+        ("maxUnits", json!(2)),
+        ("creditsPerUnit", json!(-1)),
+        ("unknown", json!(true)),
+    ] {
+        let mut p = tariff();
+        p["baseCredits"] = json!(0);
+        p["metered"] = metered.clone();
+        p["metered"][key] = value;
+        invalid.push(p);
+    }
+    for (base, units, per_unit) in [(0, u64::MAX, 2), (1, u64::MAX, 1)] {
+        let mut p = tariff();
+        p["baseCredits"] = json!(base);
+        p["maxCredits"] = json!(u64::MAX);
+        p["metered"] = metered.clone();
+        p["metered"]["maxUnits"] = json!(units);
+        p["metered"]["creditsPerUnit"] = json!(per_unit);
+        invalid.push(p);
+    }
+    for (key, value) in [
+        ("unit", json!("record")),
+        ("maxUnits", json!(0)),
+        ("maxUnits", json!(2)),
+        ("unknown", json!(true)),
+    ] {
+        let mut p = tariff();
+        p["batch"] = batch.clone();
+        p["batch"][key] = value;
+        invalid.push(p);
+    }
+    let mut overflow = tariff();
+    overflow["baseCredits"] = json!(u64::MAX);
+    overflow["maxCredits"] = json!(u64::MAX);
+    overflow["batch"] = json!({"unit":"url","maxUnits":2});
+    invalid.push(overflow);
+    for (key, value) in [
+        ("when", json!("false")),
+        ("credits", json!(2)),
+        ("credits", json!(-1)),
+        ("unknown", json!(true)),
+        ("badge", json!(false)),
+    ] {
+        let mut p = tariff();
+        p["surcharges"] = json!([surcharge.clone()]);
+        p["surcharges"][0][key] = value;
+        invalid.push(p);
+    }
+    for (mode, value, field) in [
+        ("metered", metered, "queryParam"),
+        ("batch", batch, "unit"),
+        ("surcharges", surcharge, "label"),
+    ] {
+        let mut value = value;
+        value.as_object_mut().unwrap().remove(field);
+        let mut p = tariff();
+        p[mode] = if mode == "surcharges" {
+            json!([value])
+        } else {
+            value
+        };
+        invalid.push(p);
+    }
+    for metadata in invalid {
+        assert_eq!(
+            tools(metadata.clone()).remove(0).description,
+            "Original description. Pricing: \"Original credit conditions.\" [spec]. Per-call USDC estimate unavailable [conf].",
+            "{metadata}"
+        );
+    }
+}
+
+#[test]
+fn zero_and_maximum_units_preserve_existing_permissive_tariffs() {
+    let mut zero = tariff();
+    zero["baseCredits"] = json!(0);
+    zero["maxCredits"] = json!(0);
+    expect_estimate(zero.clone(), "0 USDC/request");
+    zero["metered"] = json!({"chargedUnits":"returned_records","creditsPerUnit":0,"defaultUnits":0,"maxUnits":0,"queryParam":"","unit":"record"});
+    expect_estimate(
+        zero.clone(),
+        "0 USDC base + 0 USDC per returned record ( defaults to 0, maximum 0 records); maximum 0 USDC/request",
+    );
+    zero["metered"]["maxUnits"] = json!(u64::MAX);
+    zero["metered"]["defaultUnits"] = json!(u64::MAX);
+    expect_estimate(
+        zero.clone(),
+        "0 USDC base + 0 USDC per returned record ( defaults to 18446744073709551615, maximum 18446744073709551615 records); maximum 0 USDC/request",
+    );
+    zero["metered"] = Value::Null;
+    zero["batch"] = json!({"unit":"url","maxUnits":u64::MAX});
+    expect_estimate(
+        zero,
+        "up to 0 USDC/URL; maximum 18446744073709551615 URLs and 0 USDC/request",
+    );
+    let mut maximum = tariff();
+    maximum["baseCredits"] = json!(u64::MAX);
+    maximum["maxCredits"] = json!(u64::MAX);
+    expect_estimate(maximum, "258254417031933722.61 USDC/request");
+    let mut unusual = tariff();
+    unusual["surcharges"] = json!([
+        {"credits":1,"queryParam":"","when":"present","label":""},
+        {"credits":1,"queryParam":"","when":"present","label":"","badge":null}
+    ]);
+    unusual["normalizationFailureCredits"] = json!(1);
+    // Individual surcharges are capped, but their sum plus base is not validated.
+    expect_estimate(
+        unusual,
+        "0.014 USDC base; maximum 0.014 USDC/request; up to 0.014 USDC extra when  is supplied (); up to 0.014 USDC extra when  is supplied (); normalization-failure charge 0.014 USDC",
+    );
+}
