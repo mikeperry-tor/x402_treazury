@@ -680,6 +680,7 @@ impl Deployment {
     ) -> Result<(
         crate::treasury::SyncSettings,
         crate::rotation::base::BaseRpc,
+        crate::rotation::near::NearClient,
     )> {
         use crate::rotation::base::{BaseRpc, secure_endpoint};
         let t = self.config.treasury.as_ref().unwrap();
@@ -691,9 +692,19 @@ impl Deployment {
             t.max_sync_age_seconds,
         )?;
         secure_endpoint(&t.submission_endpoint(|name| env.get(name).cloned())?)?;
-        if let Some(key) = &f.near_api_key_env {
-            required_secret(env, key)?;
-        }
+        let key = f
+            .near_api_key_env
+            .as_deref()
+            .map(|name| required_secret(env, name))
+            .transpose()?;
+        let session = f
+            .near_user_session_env
+            .as_deref()
+            .map(|name| required_secret(env, name))
+            .transpose()?;
+        // Construct once before opening state: both presence and header syntax are preflight.
+        let near =
+            crate::rotation::near::NearClient::with_session(key.as_deref(), session.as_deref())?;
         let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
         if self.config.network.mode == crate::network::Mode::Direct {
             tracing::warn!(
@@ -704,7 +715,7 @@ impl Deployment {
         }
         let base =
             BaseRpc::with_fallbacks(&urls, f.base_confirmations, f.base_max_block_age_seconds)?;
-        Ok((sync_settings, base))
+        Ok((sync_settings, base, near))
     }
 
     async fn initialize_wallets(
@@ -716,7 +727,6 @@ impl Deployment {
     ) -> Result<InitializedWallets> {
         #[cfg(not(feature = "zcash"))]
         let _ = restriction;
-        let secret = |key: &str| required_secret(env, key);
         self.validate_static_identities(only_wallets).await?;
         let mut wallets = self.static_wallets(env, only_wallets, relay_wallets)?;
         #[cfg(feature = "zcash")]
@@ -735,7 +745,7 @@ impl Deployment {
                 use crate::rotation::manager::ManagedPool;
                 let t = self.config.treasury.as_ref().unwrap();
                 let f = self.config.funding.as_ref().unwrap();
-                let (sync_settings, base) = self.managed_connection_preflight(env)?;
+                let (sync_settings, base, near) = self.managed_connection_preflight(env)?;
                 let mut owner = crate::treasury::Treasury::open(
                     t.state_dir.clone(),
                     t.key_file.clone(),
@@ -793,15 +803,10 @@ impl Deployment {
                 tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
                     "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to actual spendable treasury funds, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
                 let (handle, commands) = crate::treasury::actor::channel();
-                let key = f.near_api_key_env.as_deref().map(secret).transpose()?;
-                let session = f.near_user_session_env.as_deref().map(secret).transpose()?;
                 let backend = crate::rotation::funding::Backend {
                     treasury: handle,
                     store: store.clone(),
-                    near: crate::rotation::near::NearClient::with_session(
-                        key.as_deref(),
-                        session.as_deref(),
-                    )?,
+                    near,
                     base,
                     wallets: self.wallet_resolution.wallets.clone(),
                     funding: f.clone(),
@@ -1545,6 +1550,78 @@ impl RunningDeployment {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[cfg(feature = "zcash")]
+    #[tokio::test]
+    async fn near_credentials_fail_before_treasury_state_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"paths":{"/test":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let path = dir.path().join("servers.toml");
+        std::fs::write(
+            &path,
+            r#"
+version=1
+[treasury]
+state_dir="state"
+[funding]
+auto_fund=false
+near_api_key_env="KEY"
+near_user_session_env="SESSION"
+[wallets.shared]
+mode="zcash_rotation"
+max_api_payment_usdc="1"
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
+[wallets.shared.reserves.small]
+funding_amount_usdc="5"
+[sources.test]
+spec="spec.json"
+base_url="https://example.com"
+probe_pricing=false
+[servers.one]
+listen="127.0.0.1:0"
+wallet="shared"
+sources=["test"]
+bearer_token_env="TOKEN"
+"#,
+        )
+        .unwrap();
+        for (key, session, expected) in [
+            (Some("key"), None, "SESSION"),
+            (None, Some("session"), "KEY"),
+            (Some("key"), Some(""), "SESSION"),
+            (Some("bad\nkey"), Some("session"), "invalid NEAR API key"),
+            (
+                Some("key"),
+                Some("bad\rsession"),
+                "invalid NEAR user session",
+            ),
+        ] {
+            let mut env = BTreeMap::from([("TOKEN".into(), "fixture".into())]);
+            for (name, value) in [("KEY", key), ("SESSION", session)] {
+                if let Some(value) = value {
+                    env.insert(name.into(), value.into());
+                }
+            }
+            let deployment = Deployment::load(&path).await.unwrap();
+            let error = match deployment.bind(&env).await {
+                Ok(_) => panic!("invalid credentials accepted"),
+                Err(error) => format!("{error:#}"),
+            };
+            assert!(error.contains(expected), "{error}");
+            assert!(!dir.path().join("state").exists());
+        }
+        let deployment = Deployment::load(&path).await.unwrap();
+        let env = BTreeMap::from([
+            ("KEY".into(), "key".into()),
+            ("SESSION".into(), "session".into()),
+        ]);
+        deployment.managed_connection_preflight(&env).unwrap();
+        assert!(!dir.path().join("state").exists());
+    }
     #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn funding_failure_keeps_listeners_and_base_reconciliation_available() {
