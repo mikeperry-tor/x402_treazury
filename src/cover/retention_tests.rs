@@ -201,3 +201,140 @@ async fn recency_preserves_retained_negative_and_fallback_state() {
     assert!(matches!(recreated.capability, Capability::Unknown));
     assert!(!recreated.using_fallback);
 }
+
+#[tokio::test]
+async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes_charged() {
+    use futures_util::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for preempt in [false, true] {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let app = axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(headers["range"], "bytes=0-1023");
+                assert!(!headers.contains_key("payment-signature"));
+                let first = futures_util::stream::once(async {
+                    Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"observed fragment"))
+                });
+                let body =
+                    axum::body::Body::from_stream(first.chain(futures_util::stream::pending()));
+                (
+                    axum::http::StatusCode::PARTIAL_CONTENT,
+                    [
+                        ("content-range", "bytes 0-1023/4096"),
+                        ("content-length", "1024"),
+                    ],
+                    body,
+                )
+            }
+        });
+        let (addr, server) =
+            crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+        let socks = crate::test_socks::Socks::start(
+            std::collections::BTreeMap::from([("api.example.com".into(), addr)]),
+            crate::test_socks::Fault::None,
+        )
+        .await;
+        let http = NetworkContext::new(NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(socks.address),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA)
+        .discovery("https://api.example.com", None)
+        .unwrap();
+        let engine = Engine::new(Limits {
+            max_active_streams: 1,
+            max_cover_body_bytes_per_window: 1024,
+            ..Default::default()
+        });
+        let mut config = crate::cover::tests::example_config();
+        config.padding = None;
+        config.qualification_range_bytes = 1024;
+        config.start_delay = toml::from_str("distribution='uniform'\nmin_ms=0\nmax_ms=0").unwrap();
+        let config = Arc::new(config);
+        let owner = owner("partial");
+        let mut call = engine
+            .begin(owner.clone(), config.clone(), scope(), http.clone())
+            .unwrap();
+        call.response_headers();
+        let observed = b"observed fragment".len() as u64;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let received = engine
+                    .last_range_counter
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|n| n.load(Ordering::Relaxed));
+                if received == Some(observed) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("client must observe partial body before cancellation");
+        assert_eq!(engine.metrics().in_flight_ranges, 1);
+        let next = if preempt {
+            let next = engine
+                .begin(owner.clone(), config.clone(), scope(), http.clone())
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(3), next.prioritize())
+                .await
+                .expect("API priority must not wait for remote EOF");
+            Some(next)
+        } else {
+            None
+        };
+        tokio::time::timeout(Duration::from_secs(3), engine.stop_ranges())
+            .await
+            .expect("shutdown must drain owned range tasks without remote EOF");
+        assert!(engine.tasks.is_empty());
+        {
+            let episode = call.session.episode.lock().unwrap();
+            assert_eq!(episode.streams, 0);
+            assert_eq!(episode.reserved, 0);
+            assert_eq!(episode.received, observed);
+            assert_eq!(episode.requests, 1);
+        }
+        let metrics = engine.metrics();
+        assert_eq!(metrics.in_flight_ranges, 0);
+        assert_eq!(metrics.range_requests, 1);
+        assert_eq!(metrics.cover_body_bytes, observed);
+        assert_eq!(metrics.qualified_ranges, 0);
+        assert_eq!(metrics.range_outcomes.get("cancelled"), Some(&1));
+        assert!(matches!(
+            engine.registry.lock().unwrap().owners[&owner].capability,
+            Capability::Unavailable("cover_qualification_cancelled")
+        ));
+        // The freed stream and unused reservation are reusable, while bytes
+        // actually received remain charged for the process accounting window.
+        let unused = engine
+            .budget
+            .reserve(Instant::now(), 1024 - observed, 0, true)
+            .unwrap();
+        drop(unused);
+        assert!(matches!(
+            engine
+                .budget
+                .reserve(Instant::now(), 1025 - observed, 0, true),
+            Err(crate::cover::budget::Refusal::BodyLimit)
+        ));
+        assert!(
+            engine
+                .begin(owner, config, scope(), http)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("cover_shutdown")
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        drop(next);
+        drop(call);
+        server.abort();
+    }
+}

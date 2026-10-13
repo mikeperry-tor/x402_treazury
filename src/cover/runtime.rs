@@ -26,6 +26,9 @@ pub struct Engine {
     rng: Mutex<Option<StdRng>>,
     tasks: TaskTracker,
     stop: CancellationToken,
+    // Observe receipt without retaining the range guard or its budget permit.
+    #[cfg(test)]
+    last_range_counter: Mutex<Option<Arc<std::sync::atomic::AtomicU64>>>,
 }
 #[derive(Default)]
 struct RequestGate {
@@ -60,6 +63,8 @@ impl Engine {
             rng: Mutex::new(None),
             tasks: TaskTracker::new(),
             stop: CancellationToken::new(),
+            #[cfg(test)]
+            last_range_counter: Mutex::new(None),
         })
     }
     fn random<T>(&self, f: impl FnOnce(&mut StdRng) -> Result<T>) -> Result<T> {
@@ -365,6 +370,10 @@ impl Engine {
                         .map(|v| (p.header_name.parse().unwrap(), v))
                 });
                 let counter = budget.counter();
+                #[cfg(test)]
+                {
+                    *self.last_range_counter.lock().unwrap() = Some(counter.clone());
+                }
                 let mut guard = RangeGuard {
                     metrics: self.metrics.clone(),
                     outcome: None,
