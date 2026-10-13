@@ -939,3 +939,7 @@ mod shutdown_tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "zcash"))]
+#[path = "wallet_cli/resolution_tests.rs"]
+mod resolution_tests;
