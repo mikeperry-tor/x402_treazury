@@ -281,12 +281,29 @@ async fn wallet_switch_keeps_inflight_signer() {
         async move { client.execute(route(url)).await }
     });
     arrived.notified().await;
+    assert_eq!(gate.count.load(Ordering::SeqCst), 1);
+    assert!(gate.signed.lock().unwrap().is_empty());
     client.replace_payer(payer(KEY2, "1"));
     release.notify_one();
-    pending.await.unwrap().unwrap();
+    assert_eq!(pending.await.unwrap().unwrap(), "paid");
+    assert_eq!(gate.count.load(Ordering::SeqCst), 2);
+    {
+        let signed = gate.signed.lock().unwrap();
+        assert_eq!(signed.len(), 1);
+        assert_eq!(
+            signatures::recover_exact(&signed[0]).to_string(),
+            payer(KEY1, "1").address
+        );
+    }
     release.notify_one();
-    client.execute(route(url)).await.unwrap();
+    assert_eq!(client.execute(route(url)).await.unwrap(), "paid");
+    assert_eq!(gate.count.load(Ordering::SeqCst), 4);
     let signed = gate.signed.lock().unwrap();
+    assert_eq!(signed.len(), 2);
+    assert_eq!(
+        signatures::recover_exact(&signed[1]).to_string(),
+        payer(KEY2, "1").address
+    );
     assert_eq!(
         signed[0]["payload"]["authorization"]["from"]
             .as_str()
