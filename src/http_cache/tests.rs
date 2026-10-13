@@ -152,6 +152,24 @@ async fn handler(State(state): State<Arc<Mutex<Origin>>>, request: Request) -> R
             "{\"value\":12}",
         )
             .into_response(),
+        13 => (
+            axum::http::StatusCode::NOT_MODIFIED,
+            [("etag", "\"two\"")],
+            "",
+        )
+            .into_response(),
+        14 => (
+            axum::http::StatusCode::CREATED,
+            [("cache-control", "max-age=600"), ("etag", "\"created\"")],
+            "{\"value\":14}",
+        )
+            .into_response(),
+        15 => (
+            axum::http::StatusCode::NOT_MODIFIED,
+            [("etag", "\"one\""), ("vary", "*")],
+            "",
+        )
+            .into_response(),
         _ => (
             axum::http::StatusCode::OK,
             [("cache-control", "max-age=600")],
@@ -322,6 +340,18 @@ async fn opt_out_isolation_missing_state_and_corruption() {
     entry.data = b"broken".to_vec();
     slot.write(Some(entry)).await;
     assert_eq!(catalog(&url, &cfg).await.unwrap()["value"], 1);
+    {
+        let state = origin.lock().unwrap();
+        assert_eq!(state.calls.len(), 5);
+        assert!(!state.calls[4].contains_key("if-none-match"));
+        assert!(!state.calls[4].contains_key("if-modified-since"));
+    }
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&slot.read().await.unwrap().data).unwrap()["value"],
+        1
+    );
+    assert_eq!(catalog(&url, &cfg).await.unwrap()["value"], 1);
+    assert_eq!(origin.lock().unwrap().calls.len(), 5);
     cfg.http_cache_directory = Some(dir.path().join("missing/http-cache"));
     catalog(&url, &cfg).await.unwrap();
     assert!(!dir.path().join("missing").exists());
@@ -341,8 +371,22 @@ async fn origin_limit_has_consumer_error_and_sanitized_log() {
     let mut cfg = config(dir.path());
     cfg.max_spec_bytes = 1024;
     let (url, origin, task) = fixture().await;
+    catalog(&url, &cfg).await.unwrap();
+    let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+    let mut entry = slot.read().await.unwrap();
+    entry.metadata.expires = 0;
+    slot.write(Some(entry)).await;
     origin.lock().unwrap().mode = 8;
     let error = catalog(&url, &cfg).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<catalog::LoadStage>(),
+        Some(&catalog::LoadStage::Body)
+    );
+    {
+        let state = origin.lock().unwrap();
+        assert_eq!(state.calls.len(), 2);
+        assert_eq!(state.calls[1]["if-none-match"], "\"one\"");
+    }
     assert!(format!("{error:#}").contains("max_spec_bytes=1024"));
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(logs.contains("download limit exceeded"));
@@ -759,4 +803,89 @@ async fn catalog_ttl_zero_and_changes_are_isolated_from_pricing() {
     catalog(&url, &cfg).await.unwrap();
     assert_eq!(origin.lock().unwrap().calls.len(), 4);
     task.abort();
+}
+
+#[tokio::test]
+async fn unsolicited_and_conflicting_304_fail_once_at_headers() {
+    for cache_enabled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(dir.path());
+        cfg.http_cache_enabled = cache_enabled;
+        let (url, origin, task) = fixture().await;
+        origin.lock().unwrap().mode = 1;
+        let error = catalog(&url, &cfg).await.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<catalog::LoadStage>(),
+            Some(&catalog::LoadStage::Headers)
+        );
+        assert!(format!("{error:#}").contains("unsolicited catalog HTTP 304"));
+        {
+            let state = origin.lock().unwrap();
+            assert_eq!(state.calls.len(), 1);
+            assert!(!state.calls[0].contains_key("if-none-match"));
+            assert!(!state.calls[0].contains_key("if-modified-since"));
+        }
+        if let Some(slot) = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes) {
+            assert!(slot.read().await.is_none());
+        }
+        task.abort();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    let (url, origin, task) = fixture().await;
+    catalog(&url, &cfg).await.unwrap();
+    let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+    let mut entry = slot.read().await.unwrap();
+    entry.metadata.expires = 0;
+    slot.write(Some(entry)).await;
+    origin.lock().unwrap().mode = 13;
+    let error = catalog(&url, &cfg).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<catalog::LoadStage>(),
+        Some(&catalog::LoadStage::Headers)
+    );
+    assert!(format!("{error:#}").contains("did not validate cached representation"));
+    {
+        let state = origin.lock().unwrap();
+        assert_eq!(state.calls.len(), 2);
+        assert_eq!(state.calls[1]["if-none-match"], "\"one\"");
+    }
+    assert!(slot.read().await.is_none());
+    task.abort();
+}
+
+#[tokio::test]
+async fn successful_uncacheable_responses_remove_previous_catalog() {
+    for mode in [14, 15] {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = config(dir.path());
+        let (url, origin, task) = fixture().await;
+        catalog(&url, &cfg).await.unwrap();
+        let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+        let mut entry = slot.read().await.unwrap();
+        entry.metadata.expires = 0;
+        slot.write(Some(entry)).await;
+        origin.lock().unwrap().mode = mode;
+        assert_eq!(
+            catalog(&url, &cfg).await.unwrap()["value"],
+            if mode == 14 { 14 } else { 1 }
+        );
+        {
+            let state = origin.lock().unwrap();
+            assert_eq!(state.calls.len(), 2);
+            assert_eq!(state.calls[1]["if-none-match"], "\"one\"");
+        }
+        assert!(slot.read().await.is_none());
+        // The successfully returned document does not grant persistence. The
+        // next load must return to origin without the removed validator.
+        origin.lock().unwrap().mode = 14;
+        assert_eq!(catalog(&url, &cfg).await.unwrap()["value"], 14);
+        {
+            let state = origin.lock().unwrap();
+            assert_eq!(state.calls.len(), 3);
+            assert!(!state.calls[2].contains_key("if-none-match"));
+        }
+        assert!(slot.read().await.is_none());
+        task.abort();
+    }
 }
