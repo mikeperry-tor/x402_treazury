@@ -441,166 +441,174 @@ pub(crate) async fn load_json_cached(
     limit: usize,
     slot: Option<crate::http_cache::Slot>,
 ) -> Result<Value> {
-    let bytes = if source.starts_with("https://") || source.starts_with("http://") {
-        let cached = if let Some(slot) = &slot {
-            slot.read().await
-        } else {
-            None
-        };
-        let cached = match cached {
-            Some(entry) => match serde_json::from_slice::<Value>(&entry.data) {
-                Ok(document) => Some((entry, document)),
-                Err(_) => {
-                    tracing::warn!("Invalid HTTP cached catalog; fetching origin");
-                    if let Some(slot) = &slot {
-                        slot.write(None).await;
-                    }
-                    None
-                }
-            },
-            None => None,
-        };
-        if cached
-            .as_ref()
-            .is_some_and(|(entry, _)| entry.metadata.fresh())
-        {
-            tracing::info!(
-                cache = "disk_hit",
-                "Catalog loaded from fresh HTTP disk cache"
-            );
-            return Ok(cached.expect("fresh cached document").1);
-        } else {
-            let started = std::time::Instant::now();
-            let request = crate::http_cache::discovery_get(http, source);
-            let conditional = cached
-                .as_ref()
-                .map(|(entry, _)| entry)
-                .filter(|e| e.metadata.has_validator());
-            let cache = if slot.is_none() {
-                "unavailable"
-            } else if conditional.is_some() {
-                "revalidate"
-            } else if cached.is_some() {
-                "expired"
-            } else {
-                "miss"
-            };
-            tracing::info!(
-                cache,
-                conditional = conditional.is_some(),
-                "Catalog fetching origin"
-            );
-            let request = conditional.map_or_else(
-                || crate::http_cache::discovery_get(http, source),
-                |e| e.metadata.conditional(request),
-            );
-            let response = request
-                .send()
-                .await
-                .map_err(reqwest::Error::without_url)
-                .context(LoadStage::Headers)?;
-            tracing::debug!(target: "x402_treazury::startup",
-                headers_ms = started.elapsed().as_millis() as u64,
-                "Catalog response headers received; reading body");
-            crate::network::log_http(&response, "catalog");
-            if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-                let entry = conditional
-                    .context("unsolicited catalog HTTP 304")
-                    .context(LoadStage::Headers)?;
-                if !entry.metadata.matches_validation(response.headers()) {
-                    if let Some(slot) = &slot {
-                        slot.write(None).await;
-                    }
-                    return Err(anyhow::anyhow!(
-                        "catalog HTTP 304 did not validate cached representation"
-                    ))
-                    .context(LoadStage::Headers);
-                }
-                let metadata = crate::http_cache::Metadata::from_catalog_headers(
-                    response.headers(),
-                    std::time::Duration::ZERO,
-                    Some(&entry.metadata),
-                    slot.as_ref().map_or(0, |s| s.catalog_ttl),
-                );
-                tracing::info!(
-                    cache_policy = crate::http_cache::Metadata::policy_label(
-                        response.headers(),
-                        metadata.as_ref()
-                    ),
-                    "Catalog revalidation response cache policy"
-                );
-                if let Some(slot) = &slot {
-                    slot.write(metadata.map(|metadata| crate::http_cache::Entry {
-                        metadata,
-                        data: entry.data.clone(),
-                    }))
-                    .await;
-                }
-                tracing::info!(
-                    cache = "revalidated",
-                    http_status = 304,
-                    "Catalog HTTP disk cache revalidated by origin"
-                );
-                return Ok(cached.expect("validated cached document").1);
-            } else {
-                // Invalidate before status/body/parse errors; never fall back to stale data.
-                if let Some(slot) = &slot {
-                    slot.write(None).await;
-                }
-                let response = response
-                    .error_for_status()
-                    .map_err(reqwest::Error::without_url)
-                    .context(LoadStage::Headers)?;
-                let status = response.status();
-                let headers = response.headers().clone();
-                let body_started = std::time::Instant::now();
-                let bytes =
-                    crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
-                        .await
-                        .context(LoadStage::Body)?;
-                tracing::debug!(target: "x402_treazury::startup",
-                    body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
-                    "Catalog response body complete");
-                // Only complete, valid JSON catalogs reach persistent storage.
-                let document = parse_document(&bytes)?;
-                let metadata = if status == reqwest::StatusCode::OK {
-                    crate::http_cache::Metadata::from_catalog_headers(
-                        &headers,
-                        std::time::Duration::ZERO,
-                        None,
-                        slot.as_ref().map_or(0, |s| s.catalog_ttl),
-                    )
-                } else {
-                    None
-                };
-                tracing::info!(
-                    cache = if slot.is_some() {
-                        "enabled"
-                    } else {
-                        "unavailable"
-                    },
-                    cache_policy =
-                        crate::http_cache::Metadata::policy_label(&headers, metadata.as_ref()),
-                    http_status = status.as_u16(),
-                    "Catalog origin response cache policy"
-                );
-                if let (Some(slot), Some(metadata)) = (&slot, metadata) {
-                    slot.write(Some(crate::http_cache::Entry {
-                        metadata,
-                        data: bytes,
-                    }))
-                    .await;
-                }
-                return Ok(document);
-            }
-        }
-    } else {
+    if !source.starts_with("https://") && !source.starts_with("http://") {
         tracing::info!(cache = "local_file", "Catalog loading local file");
-        tokio::fs::read(source)
+        let bytes = tokio::fs::read(source)
             .await
-            .context(LoadStage::LocalRead)?
+            .context(LoadStage::LocalRead)?;
+        return parse_document(&bytes);
+    }
+
+    let cached = read_cached_catalog(slot.as_ref()).await;
+    if cached
+        .as_ref()
+        .is_some_and(|(entry, _)| entry.metadata.fresh())
+    {
+        tracing::info!(
+            cache = "disk_hit",
+            "Catalog loaded from fresh HTTP disk cache"
+        );
+        return Ok(cached.expect("fresh cached document").1);
+    }
+    let started = std::time::Instant::now();
+    let request = crate::http_cache::discovery_get(http, source);
+    let conditional = cached
+        .as_ref()
+        .map(|(entry, _)| entry)
+        .filter(|e| e.metadata.has_validator());
+    let cache = if slot.is_none() {
+        "unavailable"
+    } else if conditional.is_some() {
+        "revalidate"
+    } else if cached.is_some() {
+        "expired"
+    } else {
+        "miss"
     };
-    parse_document(&bytes)
+    tracing::info!(
+        cache,
+        conditional = conditional.is_some(),
+        "Catalog fetching origin"
+    );
+    let request = conditional.map_or_else(
+        || crate::http_cache::discovery_get(http, source),
+        |e| e.metadata.conditional(request),
+    );
+    let response = request
+        .send()
+        .await
+        .map_err(reqwest::Error::without_url)
+        .context(LoadStage::Headers)?;
+    tracing::debug!(target: "x402_treazury::startup",
+        headers_ms = started.elapsed().as_millis() as u64,
+        "Catalog response headers received; reading body");
+    crate::network::log_http(&response, "catalog");
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        revalidate_cached_catalog(response.headers(), conditional, slot.as_ref()).await?;
+        return Ok(cached.expect("validated cached document").1);
+    }
+    load_catalog_response(response, limit, slot.as_ref()).await
+}
+
+async fn read_cached_catalog(
+    slot: Option<&crate::http_cache::Slot>,
+) -> Option<(crate::http_cache::Entry, Value)> {
+    let slot = slot?;
+    let entry = slot.read().await?;
+    match serde_json::from_slice::<Value>(&entry.data) {
+        Ok(document) => Some((entry, document)),
+        Err(_) => {
+            tracing::warn!("Invalid HTTP cached catalog; fetching origin");
+            slot.write(None).await;
+            None
+        }
+    }
+}
+
+async fn revalidate_cached_catalog(
+    headers: &reqwest::header::HeaderMap,
+    conditional: Option<&crate::http_cache::Entry>,
+    slot: Option<&crate::http_cache::Slot>,
+) -> Result<()> {
+    let entry = conditional
+        .context("unsolicited catalog HTTP 304")
+        .context(LoadStage::Headers)?;
+    if !entry.metadata.matches_validation(headers) {
+        if let Some(slot) = slot {
+            slot.write(None).await;
+        }
+        return Err(anyhow::anyhow!(
+            "catalog HTTP 304 did not validate cached representation"
+        ))
+        .context(LoadStage::Headers);
+    }
+    let metadata = crate::http_cache::Metadata::from_catalog_headers(
+        headers,
+        std::time::Duration::ZERO,
+        Some(&entry.metadata),
+        slot.map_or(0, |s| s.catalog_ttl),
+    );
+    tracing::info!(
+        cache_policy = crate::http_cache::Metadata::policy_label(headers, metadata.as_ref()),
+        "Catalog revalidation response cache policy"
+    );
+    if let Some(slot) = slot {
+        slot.write(metadata.map(|metadata| crate::http_cache::Entry {
+            metadata,
+            data: entry.data.clone(),
+        }))
+        .await;
+    }
+    tracing::info!(
+        cache = "revalidated",
+        http_status = 304,
+        "Catalog HTTP disk cache revalidated by origin"
+    );
+    Ok(())
+}
+
+async fn load_catalog_response(
+    response: reqwest::Response,
+    limit: usize,
+    slot: Option<&crate::http_cache::Slot>,
+) -> Result<Value> {
+    // Invalidate before status/body/parse errors; never fall back to stale data.
+    if let Some(slot) = slot {
+        slot.write(None).await;
+    }
+    let response = response
+        .error_for_status()
+        .map_err(reqwest::Error::without_url)
+        .context(LoadStage::Headers)?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body_started = std::time::Instant::now();
+    let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
+        .await
+        .context(LoadStage::Body)?;
+    tracing::debug!(target: "x402_treazury::startup",
+        body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
+        "Catalog response body complete");
+    // Only complete, valid JSON catalogs reach persistent storage.
+    let document = parse_document(&bytes)?;
+    let metadata = if status == reqwest::StatusCode::OK {
+        crate::http_cache::Metadata::from_catalog_headers(
+            &headers,
+            std::time::Duration::ZERO,
+            None,
+            slot.map_or(0, |s| s.catalog_ttl),
+        )
+    } else {
+        None
+    };
+    tracing::info!(
+        cache = if slot.is_some() {
+            "enabled"
+        } else {
+            "unavailable"
+        },
+        cache_policy = crate::http_cache::Metadata::policy_label(&headers, metadata.as_ref()),
+        http_status = status.as_u16(),
+        "Catalog origin response cache policy"
+    );
+    if let (Some(slot), Some(metadata)) = (slot, metadata) {
+        slot.write(Some(crate::http_cache::Entry {
+            metadata,
+            data: bytes,
+        }))
+        .await;
+    }
+    Ok(document)
 }
 fn parse_document(bytes: &[u8]) -> Result<Value> {
     let started = std::time::Instant::now();
