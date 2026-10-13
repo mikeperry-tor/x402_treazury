@@ -37,8 +37,12 @@ pub async fn plan(m: &Manifest) -> Result<Plan> {
 pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
     m.validate()?;
     if let Some(servers) = config.get("servers").and_then(Value::as_object) {
-        ensure!(servers.values().all(|server| server.get("auth") != Some(&Value::Bool(false))),
-            "live qualification requires authenticated listeners");
+        ensure!(
+            servers
+                .values()
+                .all(|server| server.get("auth") != Some(&Value::Bool(false))),
+            "live qualification requires authenticated listeners"
+        );
     }
     crate::pricing_stages::validate(m, config)?;
     let wallets = config["resolved_wallets"]
@@ -68,6 +72,68 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         "manifest/deployment network modes differ"
     );
     let cases: BTreeMap<_, _> = m.cases.iter().map(|c| (c.id.as_str(), c)).collect();
+    let bindings = case_bindings(m, config, wallets)?;
+    let total = checked_sum(
+        m.cases
+            .iter()
+            .map(|c| usdc(&c.reserve_usdc).expect("validated")),
+    )?;
+    let ceiling = usdc(&m.limits.api_reservation_usdc)?;
+    ensure!(
+        total <= ceiling,
+        "expanded API reservations exceed run ceiling"
+    );
+    let expansion = expand_phases(m, config, &declared, &cases, &bindings)?;
+    let jobs = expansion.new_jobs;
+    crate::reliability::validate(m)?;
+    ensure!(
+        expansion.used_cases == cases.len(),
+        "unused cases: every reviewed case must appear in exactly one phase"
+    );
+    ensure!(
+        jobs <= m.limits.new_funding_jobs,
+        "insufficient funding slots for bootstrap/refills"
+    );
+    ensure!(
+        jobs > 0 || m.limits.new_funding_jobs == 0,
+        "funding allowance without a planned allocation is forbidden"
+    );
+    let only_unsigned = m.cases.iter().all(|c| c.unsigned);
+    ensure!(
+        !only_unsigned
+            || (m.start.mode == StartMode::FundedPools && m.start.pools.is_empty() && jobs == 0),
+        "unsigned suite must not initialize or select managed pools"
+    );
+    Ok(Plan {
+        version: 1,
+        run_id: m.run_id.clone(),
+        offline: true,
+        execution_authorized: false,
+        api_reservation_atomic: total,
+        api_headroom_atomic: ceiling - total,
+        planned_new_funding_jobs: jobs,
+        funding_job_headroom: m.limits.new_funding_jobs - jobs,
+        source_exposure_limit_zatoshis: zec(&m.limits.source_exposure_zec)?,
+        funding_feasibility: "unverified: no live balance, quote, fee or baseline reads",
+        prerequisites: vec![
+            "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
+            "registry authorization and immutable treasury baseline required before execution",
+            "reviewed startup inventory required; treasury-only bootstrap waits for active and configured reserves, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
+            "source fees and floating swap minimum must fit funding permits; offline targets are not quotes",
+            "all declared pools must be preserved; unused pools receive no new allocation authority",
+        ],
+        case_bindings: bindings,
+        expanded_phases: expansion.rows,
+        declared_managed_pools: declared,
+        network_disclosures: json!({"policy":config["network"],"base_rpc_policy":config["base_rpc_policy"],"tor":m.network,"external_requests_performed":0,"provider_origins":"resolve during prepare; no catalog downloads during plan"}),
+        manifest: m.clone(),
+    })
+}
+fn case_bindings(
+    m: &Manifest,
+    config: &Value,
+    wallets: &serde_json::Map<String, Value>,
+) -> Result<BTreeMap<String, Value>> {
     let mut bindings = BTreeMap::new();
     for c in &m.cases {
         let wallet = config["wallet_bindings"][&c.server][&c.source]["wallet"]
@@ -82,7 +148,10 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
                 c.id
             );
             let cap = usdc(
-                profile.get("max_api_payment_usdc").or_else(|| profile.get("max_price_usd")).unwrap_or(&Value::Null)
+                profile
+                    .get("max_api_payment_usdc")
+                    .or_else(|| profile.get("max_price_usd"))
+                    .unwrap_or(&Value::Null)
                     .as_str()
                     .context("wallet cap missing")?,
             )?;
@@ -94,16 +163,22 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         }
         bindings.insert(c.id.clone(), json!({"server":c.server,"source":c.source,"tool":c.tool,"wallet":wallet,"unsigned":c.unsigned,"reservation_atomic":reserve,"catalog_validation":"pending_prepare"}));
     }
-    let total = checked_sum(
-        m.cases
-            .iter()
-            .map(|c| usdc(&c.reserve_usdc).expect("validated")),
-    )?;
-    let ceiling = usdc(&m.limits.api_reservation_usdc)?;
-    ensure!(
-        total <= ceiling,
-        "expanded API reservations exceed run ceiling"
-    );
+    Ok(bindings)
+}
+
+struct PhaseExpansion {
+    rows: Vec<Value>,
+    new_jobs: u32,
+    used_cases: usize,
+}
+
+fn expand_phases(
+    m: &Manifest,
+    config: &Value,
+    declared: &[String],
+    cases: &BTreeMap<&str, &Case>,
+    bindings: &BTreeMap<String, Value>,
+) -> Result<PhaseExpansion> {
     let mut seen = BTreeSet::new();
     let mut used = BTreeSet::new();
     let mut expanded = Vec::new();
@@ -156,132 +231,108 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
                 );
             }
         }
-        match &p.scenario {
-            Scenario::Smoke {} => ensure!(
-                p.cases.len() == 1 && p.pools.len() == 1 && !phase_unsigned,
-                "smoke requires one paid case and pool"
-            ),
-            Scenario::Unsigned {} => ensure!(
-                phase_unsigned && p.pools.is_empty(),
-                "unsigned phase cannot contain paid cases or funding pools"
-            ),
-            Scenario::Concurrency { batches } => validate_batches(m, p, batches)?,
-            Scenario::TorOutage {
-                warm_case,
-                cached_case,
-                uncached_case,
-            } => {
-                ensure!(
-                    m.start.pools.is_empty()
-                        && declared.is_empty()
-                        && config["funding"]["auto_fund"] != true,
-                    "Tor outage requires a separate keyless deployment with no managed wallets or automatic funding"
-                );
-                ensure!(
-                    m.network.tor_mode == TorMode::Owned && phase_unsigned && p.pools.is_empty(),
-                    "Tor outage requires owned Tor and unsigned cases"
-                );
-                ensure!(
-                    m.phases.last().is_some_and(|last| last.id == p.id),
-                    "Tor outage must be the final phase"
-                );
-                ensure!(
-                    cached_case != uncached_case
-                        && p.cases == [cached_case.clone(), uncached_case.clone()],
-                    "Tor outage requires ordered cached/uncached cases exactly once"
-                );
-                let warm = m
-                    .phases
-                    .iter()
-                    .find(|phase| phase.cases.contains(warm_case))
-                    .context("outage warm case missing")?;
-                ensure!(
-                    seen.contains(&warm.id) && p.depends_on.contains(&warm.id),
-                    "outage requires an earlier warm phase as an explicit dependency"
-                );
-            }
-            Scenario::Rotation {
-                refill_slots,
-                rounds,
-            }
-            | Scenario::RefillService {
-                refill_slots,
-                rounds,
-            } => {
-                ensure!(
-                    !phase_unsigned && !p.pools.is_empty() && *refill_slots == 1,
-                    "rotation/refill requires paid cases, pools and exactly one refill slot"
-                );
-                validate_rounds(m, p, rounds, 1, &bindings, config)?;
-            }
-            Scenario::Lifecycle {
-                refill_slots,
-                rounds,
-                ..
-            } => {
-                ensure!(
-                    !phase_unsigned && !p.pools.is_empty() && *refill_slots == 2,
-                    "lifecycle requires paid cases, pools and exactly two refill slots"
-                );
-                validate_rounds(m, p, rounds, 2, &bindings, config)?;
-                ensure!(
-                    rounds[0].pool == rounds[1].pool,
-                    "lifecycle must rotate the same selected pool twice"
-                );
-            }
-            Scenario::Reliability { .. } => {}
-            Scenario::ProviderSweep {} => {}
-        }
+        validate_scenario(m, p, phase_unsigned, declared, config, &seen, bindings)?;
         jobs = jobs
             .checked_add(p.scenario.refill_slots())
             .context("funding slots overflow")?;
         expanded.push(json!({"id":p.id,"scenario":p.scenario,"depends_on":p.depends_on,"window":window,"cases":p.cases,"pools":p.pools,"required":p.required,"call_count":p.cases.len()}));
         seen.insert(p.id.clone());
     }
-    crate::reliability::validate(m)?;
-    ensure!(
-        used.len() == cases.len(),
-        "unused cases: every reviewed case must appear in exactly one phase"
-    );
-    ensure!(
-        jobs <= m.limits.new_funding_jobs,
-        "insufficient funding slots for bootstrap/refills"
-    );
-    ensure!(
-        jobs > 0 || m.limits.new_funding_jobs == 0,
-        "funding allowance without a planned allocation is forbidden"
-    );
-    let only_unsigned = m.cases.iter().all(|c| c.unsigned);
-    ensure!(
-        !only_unsigned
-            || (m.start.mode == StartMode::FundedPools && m.start.pools.is_empty() && jobs == 0),
-        "unsigned suite must not initialize or select managed pools"
-    );
-    Ok(Plan {
-        version: 1,
-        run_id: m.run_id.clone(),
-        offline: true,
-        execution_authorized: false,
-        api_reservation_atomic: total,
-        api_headroom_atomic: ceiling - total,
-        planned_new_funding_jobs: jobs,
-        funding_job_headroom: m.limits.new_funding_jobs - jobs,
-        source_exposure_limit_zatoshis: zec(&m.limits.source_exposure_zec)?,
-        funding_feasibility: "unverified: no live balance, quote, fee or baseline reads",
-        prerequisites: vec![
-            "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
-            "registry authorization and immutable treasury baseline required before execution",
-            "reviewed startup inventory required; treasury-only bootstrap waits for active and configured reserves, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
-            "source fees and floating swap minimum must fit funding permits; offline targets are not quotes",
-            "all declared pools must be preserved; unused pools receive no new allocation authority",
-        ],
-        case_bindings: bindings,
-        expanded_phases: expanded,
-        declared_managed_pools: declared,
-        network_disclosures: json!({"policy":config["network"],"base_rpc_policy":config["base_rpc_policy"],"tor":m.network,"external_requests_performed":0,"provider_origins":"resolve during prepare; no catalog downloads during plan"}),
-        manifest: m.clone(),
+    Ok(PhaseExpansion {
+        rows: expanded,
+        new_jobs: jobs,
+        used_cases: used.len(),
     })
 }
+
+fn validate_scenario(
+    m: &Manifest,
+    p: &Phase,
+    phase_unsigned: bool,
+    declared: &[String],
+    config: &Value,
+    seen: &BTreeSet<String>,
+    bindings: &BTreeMap<String, Value>,
+) -> Result<()> {
+    match &p.scenario {
+        Scenario::Smoke {} => ensure!(
+            p.cases.len() == 1 && p.pools.len() == 1 && !phase_unsigned,
+            "smoke requires one paid case and pool"
+        ),
+        Scenario::Unsigned {} => ensure!(
+            phase_unsigned && p.pools.is_empty(),
+            "unsigned phase cannot contain paid cases or funding pools"
+        ),
+        Scenario::Concurrency { batches } => validate_batches(m, p, batches)?,
+        Scenario::TorOutage {
+            warm_case,
+            cached_case,
+            uncached_case,
+        } => {
+            ensure!(
+                m.start.pools.is_empty()
+                    && declared.is_empty()
+                    && config["funding"]["auto_fund"] != true,
+                "Tor outage requires a separate keyless deployment with no managed wallets or automatic funding"
+            );
+            ensure!(
+                m.network.tor_mode == TorMode::Owned && phase_unsigned && p.pools.is_empty(),
+                "Tor outage requires owned Tor and unsigned cases"
+            );
+            ensure!(
+                m.phases.last().is_some_and(|last| last.id == p.id),
+                "Tor outage must be the final phase"
+            );
+            ensure!(
+                cached_case != uncached_case
+                    && p.cases == [cached_case.clone(), uncached_case.clone()],
+                "Tor outage requires ordered cached/uncached cases exactly once"
+            );
+            let warm = m
+                .phases
+                .iter()
+                .find(|phase| phase.cases.contains(warm_case))
+                .context("outage warm case missing")?;
+            ensure!(
+                seen.contains(&warm.id) && p.depends_on.contains(&warm.id),
+                "outage requires an earlier warm phase as an explicit dependency"
+            );
+        }
+        Scenario::Rotation {
+            refill_slots,
+            rounds,
+        }
+        | Scenario::RefillService {
+            refill_slots,
+            rounds,
+        } => {
+            ensure!(
+                !phase_unsigned && !p.pools.is_empty() && *refill_slots == 1,
+                "rotation/refill requires paid cases, pools and exactly one refill slot"
+            );
+            validate_rounds(m, p, rounds, 1, bindings, config)?;
+        }
+        Scenario::Lifecycle {
+            refill_slots,
+            rounds,
+            ..
+        } => {
+            ensure!(
+                !phase_unsigned && !p.pools.is_empty() && *refill_slots == 2,
+                "lifecycle requires paid cases, pools and exactly two refill slots"
+            );
+            validate_rounds(m, p, rounds, 2, bindings, config)?;
+            ensure!(
+                rounds[0].pool == rounds[1].pool,
+                "lifecycle must rotate the same selected pool twice"
+            );
+        }
+        Scenario::Reliability { .. } => {}
+        Scenario::ProviderSweep {} => {}
+    }
+    Ok(())
+}
+
 fn validate_rounds(
     m: &Manifest,
     phase: &Phase,
@@ -307,7 +358,10 @@ fn validate_rounds(
         let price = usdc(&round.expected_price_usdc)?;
         ensure!(price > 0, "rotation expected price must be positive");
         let cap = usdc(
-            config["resolved_wallets"][&round.pool].get("max_api_payment_usdc").or_else(|| config["resolved_wallets"][&round.pool].get("max_price_usd")).unwrap_or(&Value::Null)
+            config["resolved_wallets"][&round.pool]
+                .get("max_api_payment_usdc")
+                .or_else(|| config["resolved_wallets"][&round.pool].get("max_price_usd"))
+                .unwrap_or(&Value::Null)
                 .as_str()
                 .context("rotation pool cap missing")?,
         )?;
