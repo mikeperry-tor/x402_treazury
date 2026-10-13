@@ -255,9 +255,13 @@ impl ToolSpec {
                 .unwrap_or(if self.has_body { "body" } else { "query" })
             {
                 "path" => {
+                    let value = arg_text(value);
+                    // URL parsing removes dot segments, including percent-encoded
+                    // dots. Reject them before they can escape the selected route.
+                    ensure!(value != "." && value != "..", "dot path parameter rejected");
                     path = path.replace(
                         &format!("{{{key}}}"),
-                        &utf8_percent_encode(&arg_text(value), PATH_SEGMENT).to_string(),
+                        &utf8_percent_encode(&value, PATH_SEGMENT).to_string(),
                     )
                 }
                 "query" => {
