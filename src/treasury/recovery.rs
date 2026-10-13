@@ -58,6 +58,41 @@ fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
     None
 }
 
+fn early_job_disposition(job: &FundingJob) -> Option<RecoveryOutcome> {
+    use RecoveryOutcome::*;
+    if !needs_recovery(job) {
+        if job.last_error.as_deref().is_some_and(|reason| {
+            [
+                "treasury_insufficient_spendable_funds",
+                "funding_cost_limit_exceeded",
+                "funding_amount_limit_exceeded",
+                "qualification_funding_denied",
+                "near_authentication_required",
+            ]
+            .iter()
+            .any(|prefix| reason.starts_with(prefix))
+        }) {
+            return Some(OperatorRequired(
+                "funding_balance_budget_or_configuration_required",
+            ));
+        }
+        return Some(Waiting("funding_in_progress"));
+    }
+    if job.last_error.as_deref().is_some_and(|reason| {
+        reason.starts_with(
+            "funding_recovery_requires_operator; conflicting_transaction_or_input_evidence",
+        )
+    }) {
+        return Some(OperatorRequired(
+            "conflicting_transaction_or_input_evidence",
+        ));
+    }
+    if job.phase == FundingPhase::RefundPending {
+        return Some(OperatorRequired("refund_requires_review"));
+    }
+    None
+}
+
 impl Treasury {
     pub async fn recover_funding_job(
         &mut self,
@@ -131,35 +166,8 @@ impl Treasury {
         {
             return Ok(Recovered);
         }
-        if !needs_recovery(&job) {
-            if job.last_error.as_deref().is_some_and(|reason| {
-                [
-                    "treasury_insufficient_spendable_funds",
-                    "funding_cost_limit_exceeded",
-                    "funding_amount_limit_exceeded",
-                    "qualification_funding_denied",
-                    "near_authentication_required",
-                ]
-                .iter()
-                .any(|prefix| reason.starts_with(prefix))
-            }) {
-                return Ok(OperatorRequired(
-                    "funding_balance_budget_or_configuration_required",
-                ));
-            }
-            return Ok(Waiting("funding_in_progress"));
-        }
-        if job.last_error.as_deref().is_some_and(|reason| {
-            reason.starts_with(
-                "funding_recovery_requires_operator; conflicting_transaction_or_input_evidence",
-            )
-        }) {
-            return Ok(OperatorRequired(
-                "conflicting_transaction_or_input_evidence",
-            ));
-        }
-        if job.phase == FundingPhase::RefundPending {
-            return Ok(OperatorRequired("refund_requires_review"));
+        if let Some(outcome) = early_job_disposition(&job) {
+            return Ok(outcome);
         }
         let id = job.id.clone();
         let count = self
@@ -168,65 +176,22 @@ impl Treasury {
             .await?;
         let exhausted = count >= u64::from(max_attempts);
         let Some(operation) = operation.as_ref() else {
-            if !safely_unprepared(&job) {
-                return Ok(OperatorRequired("preparation_outcome_unknown"));
-            }
-            let id = job.id.clone();
-            let expected_operation = job.operation_id.clone();
-            let (closed_count, completed) = self
-                .store
-                .call(move |s| {
-                    s.close_unprepared_funding_for_operation(&id, &expected_operation)?;
-                    Ok((
-                        s.funding_recovery_count(&id)?,
-                        s.finish_funding_if_proven(&id, &expected_operation)?,
-                    ))
-                })
-                .await?;
-            if completed {
-                return Ok(Recovered);
-            }
-            if !allow_new_attempt {
-                return Ok(OperatorRequired("funding_disabled"));
-            }
-            if closed_count > u64::from(max_attempts) {
-                return Ok(OperatorRequired("recovery_attempt_limit_reached"));
-            }
-            let id = job.id.clone();
-            let expected_operation = job.operation_id.clone();
-            self.store
-                .call(move |s| {
-                    s.reauthorize_closed_funding_for_operation(
-                        &id,
-                        &expected_operation,
-                        max_attempts,
-                    )
-                })
-                .await?;
-            return Ok(Recovered);
+            return self
+                .recover_unprepared_job(&job, max_attempts, allow_new_attempt)
+                .await;
         };
         if operation.submission == "CONFIRMED" && job.phase != FundingPhase::RecoveryRequired {
             return Ok(Waiting("source_confirmed_waiting_for_swap"));
         }
         if operation.submission == "EXPIRED" {
-            if !allow_new_attempt {
-                return Ok(OperatorRequired("funding_disabled"));
-            }
-            if count > u64::from(max_attempts) {
-                return Ok(OperatorRequired("recovery_attempt_limit_reached"));
-            }
-            let id = job.id.clone();
-            let expected_operation = job.operation_id.clone();
-            self.store
-                .call(move |s| {
-                    s.reauthorize_closed_funding_for_operation(
-                        &id,
-                        &expected_operation,
-                        max_attempts,
-                    )
-                })
-                .await?;
-            return Ok(Recovered);
+            return self
+                .reauthorize_recovery(
+                    &job,
+                    max_attempts,
+                    allow_new_attempt,
+                    count > u64::from(max_attempts),
+                )
+                .await;
         }
         if operation.submission == "CONFIRMED" {
             return Ok(OperatorRequired("swap_outcome_requires_review"));
@@ -234,36 +199,11 @@ impl Treasury {
         let terminal = job.phase == FundingPhase::RecoveryRequired;
         let operation_id = operation.operation_id.clone();
         let expiry = u64::from(operation.facts.expiry_height);
-        // Submitted/ambiguous work is observed, never resubmitted. Even expired
-        // operations must pass the independent two-sync input proof below.
-        if operation.attempts > 0 {
-            *source_observed = true;
-            if let Err(error) = self
-                .reconcile_prepared(operation_id.clone(), sender, stop)
-                .await
-            {
-                if error
-                    .chain()
-                    .any(|cause| cause.to_string() == "treasury_confirmation_pending")
-                {
-                    return Ok(Waiting("zcash_confirmations_pending"));
-                }
-                return Err(error);
-            }
-            let id = operation_id.clone();
-            if self
-                .store
-                .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
-                .await?
-            {
-                return Ok(if terminal {
-                    OperatorRequired("source_confirmed_check_swap_outcome")
-                } else {
-                    Waiting("source_confirmed_waiting_for_swap")
-                });
-            }
-        } else {
-            self.sync_once(stop).await?;
+        if let Some(outcome) = self
+            .observe_recovery_source(operation, terminal, sender, stop, source_observed)
+            .await?
+        {
+            return Ok(outcome);
         }
         let sync = self.store.call(|s| s.funding_sync_observation()).await?;
         if expiry == 0 {
@@ -285,10 +225,58 @@ impl Treasury {
         {
             return Ok(Recovered);
         }
+        self.reauthorize_recovery(&job, max_attempts, allow_new_attempt, exhausted)
+            .await
+    }
+
+    async fn recover_unprepared_job(
+        &mut self,
+        job: &FundingJob,
+        max_attempts: u32,
+        allow_new_attempt: bool,
+    ) -> Result<RecoveryOutcome> {
+        use RecoveryOutcome::*;
+        if !safely_unprepared(job) {
+            return Ok(OperatorRequired("preparation_outcome_unknown"));
+        }
+        let id = job.id.clone();
+        let expected_operation = job.operation_id.clone();
+        let (closed_count, completed) = self
+            .store
+            .call(move |s| {
+                s.close_unprepared_funding_for_operation(&id, &expected_operation)?;
+                Ok((
+                    s.funding_recovery_count(&id)?,
+                    s.finish_funding_if_proven(&id, &expected_operation)?,
+                ))
+            })
+            .await?;
+        if completed {
+            return Ok(Recovered);
+        }
+        self.reauthorize_recovery(
+            job,
+            max_attempts,
+            allow_new_attempt,
+            closed_count > u64::from(max_attempts),
+        )
+        .await
+    }
+
+    /// Closure already consumed the durable attempt; each caller supplies its
+    /// existing before/after-closure comparison rather than recomputing it here.
+    async fn reauthorize_recovery(
+        &mut self,
+        job: &FundingJob,
+        max_attempts: u32,
+        allow_new_attempt: bool,
+        attempt_limit_reached: bool,
+    ) -> Result<RecoveryOutcome> {
+        use RecoveryOutcome::*;
         if !allow_new_attempt {
             return Ok(OperatorRequired("funding_disabled"));
         }
-        if exhausted {
+        if attempt_limit_reached {
             return Ok(OperatorRequired("recovery_attempt_limit_reached"));
         }
         let id = job.id.clone();
@@ -299,6 +287,50 @@ impl Treasury {
             })
             .await?;
         Ok(Recovered)
+    }
+
+    async fn observe_recovery_source(
+        &mut self,
+        operation: &crate::rotation::transaction::OperationStatus,
+        terminal: bool,
+        sender: &mut impl TransactionSubmission,
+        stop: &CancellationToken,
+        source_observed: &mut bool,
+    ) -> Result<Option<RecoveryOutcome>> {
+        use RecoveryOutcome::*;
+        let operation_id = operation.operation_id.clone();
+        // Submitted/ambiguous work is observed, never resubmitted. Even expired
+        // operations still require the caller's independent two-sync input proof.
+        if operation.attempts > 0 {
+            *source_observed = true;
+            if let Err(error) = self
+                .reconcile_prepared(operation_id.clone(), sender, stop)
+                .await
+            {
+                if error
+                    .chain()
+                    .any(|cause| cause.to_string() == "treasury_confirmation_pending")
+                {
+                    return Ok(Some(Waiting("zcash_confirmations_pending")));
+                }
+                return Err(error);
+            }
+            let id = operation_id.clone();
+            if self
+                .store
+                .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
+                .await?
+            {
+                return Ok(Some(if terminal {
+                    OperatorRequired("source_confirmed_check_swap_outcome")
+                } else {
+                    Waiting("source_confirmed_waiting_for_swap")
+                }));
+            }
+        } else {
+            self.sync_once(stop).await?;
+        }
+        Ok(None)
     }
 }
 
