@@ -1,6 +1,9 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
 #[cfg(feature = "zcash")]
 mod grpc;
+#[cfg(test)]
+#[path = "network/http_queue_tests.rs"]
+mod http_queue_tests;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

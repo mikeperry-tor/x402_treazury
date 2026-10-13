@@ -16,6 +16,8 @@ zingolib = { path = "../../vendor/zingolib", default-features = false }
 
 # Experimental compatibility patch: see vendor/README.md.
 [patch.crates-io]
+h2 = { path = "../../vendor/h2" }
+hyper = { path = "../../vendor/hyper" }
 # Required by zingolib v6.0.0's own workspace. Cargo does not inherit
 # dependency workspaces' root patches into this workspace.
 lightwallet-protocol = { git = "https://github.com/zingolabs/lightwallet-protocol-rust", rev = "9bdfdc77eb283f2a3d26c27100cc2ac90148cd93" }

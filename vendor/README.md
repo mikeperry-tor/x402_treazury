@@ -39,3 +39,24 @@ To remove the patch, remove both root `[patch.crates-io]` Alloy entries and
 update both lockfiles after upstream resolves the incompatibility. Do not remove
 the combined workspace's unrelated `lightwallet-protocol` patch: it comes from
 zingolib v6.0.0 itself and supplies the required Ironwood protobuf fields.
+
+# HTTP transport patches
+
+`hyper` 1.11.1 and `h2` 0.4.19 are the exact published crates.io archives
+with the narrow patches in `hyper-transport.patch` and `h2-transport.patch`. Pending-open HTTP/2 requests now observe response-waiter
+cancellation and reset their stream before capacity returns, removing queued
+HEADERS as well as preventing body transmission. Previously the cancellation
+callback was not polled until after stream capacity returned. h2 also retained
+HEADERS ahead of an explicit reset; its scheduler now discards cancelled unopened
+streams without emitting an illegal RST_STREAM on an idle stream. This applies to
+explicit and implicit cancellation and reclaims cancelled head entries even with
+zero peer capacity.
+
+`transport-sources.json` records the archive SHA-256, every original file hash,
+and the reviewed patch hash. `python3 vendor/verify.py` also reverses the patches
+and checks every file against its upstream hash. Both application and independent
+compatibility workspace pin the same patch. No protocol downgrade, retry or
+change to financial authority is introduced. Application real TLS/SOCKS tests
+check raw HEADERS absence, GET/POST cancellation and timeout, and reuse of the
+healthy multiplexed connection. Remove the patch only after equivalent upstream
+behavior passes those regressions.

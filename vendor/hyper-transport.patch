@@ -1,0 +1,30 @@
+--- a/src/proto/h2/client.rs
++++ b/src/proto/h2/client.rs
+@@ -677,6 +677,16 @@
+ 
+     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+         loop {
++            // A pending-open stream already owns queued HEADERS in h2. Register
++            // cancellation before waiting for capacity: otherwise dropping the
++            // response future leaves those headers alive until a sibling ends.
++            if let Some(f) = self.fut_ctx.as_mut() {
++                if f.cb.poll_canceled(cx).is_ready() {
++                    let mut f = self.fut_ctx.take().expect("pending request");
++                    f.body_tx.send_reset(h2::Reason::CANCEL);
++                    continue;
++                }
++            }
+             match ready!(self.h2_tx.poll_ready(cx)) {
+                 Ok(()) => (),
+                 Err(err) => {
+@@ -760,7 +770,9 @@
+                         Poll::Pending => {
+                             // Save Context
+                             self.fut_ctx = Some(f);
+-                            return Poll::Pending;
++                            // Poll its callback immediately to register the
++                            // cancellation waker even if capacity never returns.
++                            continue;
+                         }
+                         Poll::Ready(Ok(())) => (),
+                         Poll::Ready(Err(err)) => {

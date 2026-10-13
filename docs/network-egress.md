@@ -146,6 +146,11 @@ retain their full establishment allowance before that readiness window expires;
 the readiness guard ends at dispatch.
 Cancelled/timed-out queued calls also cancel their request bodies, so a pending
 HTTP/2 stream cannot upload stale RPC bytes when capacity returns later.
+The reviewed Hyper/h2 patches additionally observe pending-open cancellation and
+discard unopened streams without transmitting HEADERS or RST_STREAM. This protects
+HTTP payment headers as well as gRPC bodies when peer capacity returns after a
+timeout or cancellation. Already transmitted requests retain unknown outcomes;
+no cancellation or reset releases financial exposure or grants retry authority.
 Message-size limits remain in force. Legacy library `grpc-timeout` metadata is
 removed at this transport boundary; application total-RPC wrappers and sync's
 complete-message timers are removed. No large substitute duration is used.

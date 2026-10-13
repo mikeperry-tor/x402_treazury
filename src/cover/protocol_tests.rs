@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_h2_capture as wire;
 use crate::{
     network::{Mode, NetworkContext, NetworkPolicy},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -14,8 +15,6 @@ use std::{
     },
     time::Duration,
 };
-#[path = "../../tests/support/h2_capture.rs"]
-mod wire;
 #[test]
 fn stream_limits_and_faults_in_isolated_process() {
     if std::env::var_os("TREAZURY_COVER_PROTOCOL_CHILD").is_some() {

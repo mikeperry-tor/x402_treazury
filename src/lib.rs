@@ -15,6 +15,9 @@ pub mod treasury;
 pub mod wallet_cli;
 
 #[cfg(test)]
+#[path = "../tests/support/h2_capture.rs"]
+mod test_h2_capture;
+#[cfg(test)]
 #[path = "../tests/support/socks.rs"]
 mod test_socks;
 #[cfg(test)]

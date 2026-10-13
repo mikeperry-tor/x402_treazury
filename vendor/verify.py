@@ -20,3 +20,7 @@ for name, provenance in json.loads((root / 'provenance.json').read_text()).items
         if hashlib.sha256(data).hexdigest() != digest:
             raise SystemExit(f'{name}/{relative}: differs from recorded upstream bytes')
     print(f'{name} {provenance["version"]}: only the intended SHA-3 requirement changed')
+
+# Transport dependencies have source patches, verified by reverse application.
+from verify_transport import verify
+verify()

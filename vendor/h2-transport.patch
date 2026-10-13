@@ -1,0 +1,69 @@
+--- a/src/proto/streams/prioritize.rs
++++ b/src/proto/streams/prioritize.rs
+@@ -529,7 +529,7 @@
+                 return Ok(BufferStatus::CodecFull);
+             }
+ 
+-            if let Some(mut stream) = self.pop_pending_open(store, counts) {
++            if let Some(mut stream) = self.pop_pending_open(buffer, store, counts) {
+                 self.pending_send.push_front(&mut stream);
+                 self.try_assign_capacity(&mut stream);
+             }
+@@ -906,12 +906,27 @@
+         }
+     }
+ 
+-    fn pop_pending_open<'s>(
+-        &mut self,
++    fn pop_pending_open<'s, B>(
++        &mut self,
++        buffer: &mut Buffer<Frame<B>>,
+         store: &'s mut Store,
+         counts: &mut Counts,
+     ) -> Option<store::Ptr<'s>> {
+         tracing::trace!("schedule_pending_open");
++        // A cancelled stream that has never opened must send neither HEADERS
++        // nor RST_STREAM. Reclaim it even when peer capacity remains zero.
++        while let Some(mut stream) = self.pending_open.pop_if(store, |stream| {
++            stream.state.is_reset() || stream.state.get_scheduled_reset().is_some()
++        }) {
++            let pending_reset = stream.is_pending_reset_expiration();
++            if let Some(reason) = stream.state.get_scheduled_reset() {
++                stream.set_reset(reason, Initiator::Library);
++            }
++            self.clear_queue(buffer, &mut stream);
++            self.reclaim_all_capacity(&mut stream, counts);
++            stream.notify_send();
++            counts.transition_after(stream, pending_reset);
++        }
+         // check for any pending open streams
+         if counts.can_inc_num_send_streams() {
+             if let Some(mut stream) = self.pending_open.pop(store) {
+--- a/src/proto/streams/send.rs
++++ b/src/proto/streams/send.rs
+@@ -268,6 +268,13 @@
+             self.prioritize.clear_queue(buffer, stream);
+         }
+ 
++        // Cancellation of an unopened stream must wake the scheduler even
++        // though schedule_send normally waits for peer stream capacity.
++        if stream.is_pending_open {
++            if let Some(task) = task.take() {
++                task.wake();
++            }
++        }
+         let frame = frame::Reset::new(stream.id, reason);
+ 
+         tracing::trace!("send_reset -- queueing; frame={:?}", frame);
+@@ -289,6 +296,11 @@
+         }
+ 
+         stream.state.set_scheduled_reset(reason);
++        if stream.is_pending_open {
++            if let Some(task) = task.take() {
++                task.wake();
++            }
++        }
+ 
+         self.prioritize.reclaim_reserved_capacity(stream, counts);
+         self.prioritize.schedule_send(stream, task);

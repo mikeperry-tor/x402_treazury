@@ -1,3 +1,7 @@
+// The deployment startup future includes the HTTP/TLS dependency stack. This
+// bounds compiler type traversal only; it does not change runtime work limits.
+#![recursion_limit = "256"]
+
 use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches};
 use rmcp::ServiceExt;
