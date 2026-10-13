@@ -356,4 +356,5 @@ mod tests {
         plain["result"]["isError"] = json!(true);
         assert_eq!(evaluate(&plain, &[]).unwrap()["category"], "mcp_is_error");
     }
+    include!("semantics_evaluation_tests.rs");
 }
