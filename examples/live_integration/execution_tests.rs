@@ -423,10 +423,11 @@ async fn endpoint(
         .await
         .unwrap();
     });
+    let network = x402_treazury::network::NetworkContext::new(Default::default()).unwrap();
     let clients = BTreeMap::from([(
         "main".into(),
         mcp::Client {
-            http: reqwest::Client::new(),
+            http: network.discovery(&endpoint, Duration::from_secs(5)).unwrap(),
             endpoint,
             token: "fixture-token".into(),
         },
