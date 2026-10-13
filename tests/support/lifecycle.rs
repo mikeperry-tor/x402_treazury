@@ -325,6 +325,20 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
         .find(|j| j.phase == FundingPhase::Prepared)
         .unwrap()
         .clone();
+    let operation = replacement.operation_id.clone();
+    let (prepared_bytes, prepared_facts, lifecycle) = h
+        .store
+        .call(move |s| {
+            Ok((
+                s.prepared_bytes(&operation)?,
+                x402_treazury::rotation::transaction::PreparedTransaction::load(s, &operation)?
+                    .facts()
+                    .cloned(),
+                s.qualification_lifecycle()?,
+            ))
+        })
+        .await
+        .unwrap();
     let id = status.treasury_id;
     assert_eq!(sends.lock().unwrap().len(), 4);
     drop(worker);
@@ -332,6 +346,25 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
     drop(h.store);
     h.worker.await.unwrap();
     let s = Store::open(&h.dir.path().join("state"), &h.dir.path().join("key"), &id).unwrap();
+    assert_eq!(
+        &*s.prepared_bytes(&replacement.operation_id).unwrap(),
+        &*prepared_bytes
+    );
+    assert_eq!(
+        x402_treazury::rotation::transaction::PreparedTransaction::load(
+            &s,
+            &replacement.operation_id
+        )
+        .unwrap()
+        .facts()
+        .cloned(),
+        prepared_facts
+    );
+    let reopened_lifecycle = s.qualification_lifecycle().unwrap();
+    for field in ["source_operations", "funding_jobs"] {
+        assert_eq!(reopened_lifecycle[field], lifecycle[field], "{field}");
+    }
+    assert_eq!(sends.lock().unwrap().len(), 4, "reopen never submits");
     (h.store, h.worker) = StoreHandle::spawn(s);
     h.client = make_client(h.store.clone(), h.pool.clone(), &h.base);
     let mut worker = funder(&h, Arc::clone(&sends));

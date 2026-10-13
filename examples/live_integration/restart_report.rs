@@ -216,7 +216,7 @@ mod tests {
         let state = json!({"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":1,
             "addresses":[wallet("a",1,"RETIRED"),wallet("b",2,"ACTIVE"),wallet("c",3,"ALLOCATED")]}],
             "funding_jobs":[{"id":"j","pool_id":"p","wallet_id":"c","recipient":format!("0x{:040x}",3),"target":"100","operation_id":"op","phase":"DEPOSIT_PENDING"}],
-            "source_operations":[{"operation_id":"op","submission":"BROADCAST","attempts":1}]});
+            "source_operations":[{"operation_id":"op","submission":"BROADCAST","attempts":1,"facts":{"txid":"tx","expiry_height":200,"amount_zatoshis":100,"fee_zatoshis":10,"deadline":5000},"prepared_record_sha256":"ab".repeat(32)}]});
         let binding = |session: &str| {
             json!({"version":1,"run":m.run_id,"session":session,"registry":"registry.sqlite",
             "pin_digest":"pins","config_sha256":"config","expires_at":1000})

@@ -220,6 +220,7 @@ async fn paid_fixture() {
             if address.address == active { 0 } else { 10000 },
         );
     }
+    let treasury_id = store.id().to_owned();
     let (store, worker) = crate::rotation::store::StoreHandle::spawn(store);
     let manager = Arc::new(
         crate::rotation::manager::ManagedPool::new(
@@ -237,12 +238,18 @@ async fn paid_fixture() {
             source: "fixture".into(),
         },
     );
-    let result = tokio::time::timeout(Duration::from_secs(3), managed.execute_response(route()))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(result.bytes, b"paid");
-    assert!(result.paid_submission);
+    let (first, second) = tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::join!(
+            managed.execute_response(route()),
+            managed.execute_response(route())
+        )
+    })
+    .await
+    .unwrap();
+    for result in [first.unwrap(), second.unwrap()] {
+        assert_eq!(result.bytes, b"paid");
+        assert!(result.paid_submission);
+    }
     let after = store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.pools[0].addresses.len(), 2);
     assert_eq!(after.pools[0].addresses[0].role, "READY");
@@ -254,9 +261,46 @@ async fn paid_fixture() {
         .unwrap();
     assert_eq!(consumed.generation, 1);
     assert!(consumed.wallet_id.is_none());
+    let before_reopen = store.call(|s| s.qualification_state()).await.unwrap();
+    assert_eq!(
+        before_reopen["payment_attempts"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(
+        before_reopen["payment_attempts"][0]["state"],
+        "POSSIBLY_SUBMITTED"
+    );
+    let attempts = before_reopen["payment_attempts"].as_array().unwrap();
+    assert_ne!(attempts[0]["nonce"], attempts[1]["nonce"]);
+    assert_eq!(attempts[0]["wallet"], attempts[1]["wallet"]);
+    assert_eq!(signed.load(Ordering::SeqCst), 4);
+    let signed_before = signed.load(Ordering::SeqCst);
     drop(managed);
     drop(store);
     worker.await.unwrap();
+    let reopened = crate::rotation::store::Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &treasury_id,
+    )
+    .unwrap();
+    let after_reopen = reopened.qualification_state().unwrap();
+    assert_eq!(
+        after_reopen["payment_attempts"],
+        before_reopen["payment_attempts"]
+    );
+    assert_eq!(after_reopen["lifecycle"], before_reopen["lifecycle"]);
+    assert_eq!(
+        after_reopen["payment_resolutions"],
+        json!([]),
+        "seller success and cover progress do not resolve payment"
+    );
+    assert_eq!(
+        signed.load(Ordering::SeqCst),
+        signed_before,
+        "reopen cannot replay paid cover calls"
+    );
+    drop(reopened);
     let engine = crate::network::global().cover.as_ref().unwrap();
     engine.shutdown().await;
     let before = ranges.load(Ordering::SeqCst);

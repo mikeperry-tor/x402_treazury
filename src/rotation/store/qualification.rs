@@ -31,7 +31,7 @@ impl Store {
     /// Public structural state for case-correlated lifecycle observations. No
     /// seeds, signatures, quote bodies, upstream error prose or wallet bytes.
     pub fn qualification_lifecycle(&self) -> Result<Value> {
-        lifecycle(&self.status()?)
+        lifecycle(&self.db, &self.status()?)
     }
     pub fn qualification_state(&self) -> Result<Value> {
         read(&self.db)
@@ -93,10 +93,10 @@ pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> 
     }
     payment["ownership_evidence_version"] = json!(1);
     crate::qualification::validate_admission_balance(&payment)?;
-    payment["lifecycle"] = lifecycle(&read_status(db)?)?;
+    payment["lifecycle"] = lifecycle(db, &read_status(db)?)?;
     Ok(payment)
 }
-fn lifecycle(status: &Status) -> Result<Value> {
+fn lifecycle(db: &Connection, status: &Status) -> Result<Value> {
     let jobs: Vec<_> = status
         .funding_jobs
         .iter()
@@ -111,12 +111,21 @@ fn lifecycle(status: &Status) -> Result<Value> {
     let operations: Vec<_> = status
         .treasury_operations
         .iter()
-        .map(|o| {
-            json!({
-                "operation_id":o.operation_id,"submission":o.submission,"attempts":o.attempts
-            })
+        .map(|o| -> Result<Value> {
+            use sha2::{Digest, Sha256};
+            // Hash the immutable encrypted record without opening wallet keys or
+            // exporting signed bytes. This proves record continuity, not validity.
+            let raw: Vec<u8> = db.query_row(
+                "SELECT raw FROM outgoing WHERE id=?1",
+                [&o.operation_id],
+                |r| r.get(0),
+            )?;
+            Ok(json!({
+                "operation_id":o.operation_id,"submission":o.submission,"attempts":o.attempts,
+                "facts":o.facts,"prepared_record_sha256":format!("{:x}", Sha256::digest(&raw))
+            }))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     Ok(
         json!({"schema_version":status.schema_version,"state_schema_version":status.state_schema_version,"treasury_id":status.treasury_id,"pools":status.pools,
             "funding_jobs":jobs,"source_operations":operations}),
@@ -185,7 +194,7 @@ fn read(db: &Connection) -> Result<Value> {
         .query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"role":r.get::<_,String>(2)?,"balance":r.get::<_,String>(3)?,"height":r.get::<_,Option<i64>>(4)?,"hash":r.get::<_,Option<String>>(5)?})))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(
-        json!({"wallet_observations":wallets,"lifecycle":lifecycle(&status)?,"treasury_status":status,"payment_attempts":attempts,"payment_resolutions":resolutions,"source_budget_entries":budget,"pending_source_operations":pending,"unprepared_archives":archived}),
+        json!({"wallet_observations":wallets,"lifecycle":lifecycle(db, &status)?,"treasury_status":status,"payment_attempts":attempts,"payment_resolutions":resolutions,"source_budget_entries":budget,"pending_source_operations":pending,"unprepared_archives":archived}),
     )
 }
 
@@ -407,6 +416,50 @@ mod tests {
         assert!(
             store.qualification_payment("new").is_err(),
             "corrupted original support cannot justify the admitted payment"
+        );
+    }
+    #[test]
+    fn lifecycle_retains_prepared_record_identity_without_exporting_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
+        let id = store.id().to_owned();
+        store.reserve("operation", None, 0, 100).unwrap();
+        let facts = TransactionFacts {
+            txid: "fixture-tx".into(),
+            expiry_height: 200,
+            amount_zatoshis: 90,
+            fee_zatoshis: 10,
+            deadline: 5000,
+        };
+        store
+            .prepare_with_facts(
+                "operation",
+                1,
+                b"prepared-wallet",
+                b"private-signed-fixture",
+                Some(facts.clone()),
+            )
+            .unwrap();
+        let before = store.qualification_lifecycle().unwrap();
+        let operation = &before["source_operations"][0];
+        assert_eq!(operation["facts"], serde_json::to_value(facts).unwrap());
+        assert_eq!(
+            operation["prepared_record_sha256"].as_str().unwrap().len(),
+            64
+        );
+        assert!(!before.to_string().contains("private-signed-fixture"));
+        drop(store);
+        let store = Store::open(&state, &key, &id).unwrap();
+        assert_eq!(store.qualification_lifecycle().unwrap(), before);
+        store
+            .db
+            .execute("UPDATE outgoing SET raw=X'00' WHERE id='operation'", [])
+            .unwrap();
+        assert_ne!(
+            store.qualification_lifecycle().unwrap()["source_operations"][0]["prepared_record_sha256"],
+            operation["prepared_record_sha256"]
         );
     }
     #[test]

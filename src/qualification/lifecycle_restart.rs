@@ -237,6 +237,25 @@ fn unchanged(before: &Value, after: &Value, pool: &str, job: &str) -> Result<()>
         attempts(current)? >= attempts(previous)?,
         "restart submission count regressed"
     );
+    for operation in [previous, current].into_iter().flatten() {
+        let _: crate::rotation::transaction::TransactionFacts =
+            serde_json::from_value(operation["facts"].clone())
+                .context("restart transaction facts missing or malformed")?;
+        ensure!(
+            operation["prepared_record_sha256"]
+                .as_str()
+                .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())),
+            "restart prepared record digest missing or malformed"
+        );
+    }
+    if let Some(previous) = previous {
+        let current = current.context("restart lost prepared record")?;
+        ensure!(
+            previous["facts"] == current["facts"]
+                && previous["prepared_record_sha256"] == current["prepared_record_sha256"],
+            "restart changed prepared transaction identity"
+        );
+    }
     if previous.is_some_and(|o| o["submission"] == "CONFIRMED") {
         ensure!(
             current.is_some_and(|o| o["submission"] == "CONFIRMED"),
@@ -287,8 +306,7 @@ mod tests {
     fn submitted() -> Value {
         let mut state = queued();
         state["funding_jobs"][0]["phase"] = json!("DEPOSIT_PENDING");
-        state["source_operations"] =
-            json!([{"operation_id":"op","submission":"BROADCAST","attempts":1}]);
+        state["source_operations"] = json!([{"operation_id":"op","submission":"BROADCAST","attempts":1,"facts":{"txid":"tx","expiry_height":200,"amount_zatoshis":100,"fee_zatoshis":10,"deadline":5000},"prepared_record_sha256":"ab".repeat(32)}]);
         state
     }
     fn ready() -> Value {
@@ -360,6 +378,49 @@ mod tests {
         );
     }
     #[test]
+    fn newly_prepared_and_historical_records_require_identity_evidence() {
+        for field in ["facts", "prepared_record_sha256"] {
+            let mut missing = submitted();
+            missing["source_operations"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                continuity(
+                    &queued(),
+                    &queued(),
+                    &missing,
+                    "p",
+                    "j",
+                    Checkpoint::QueuedRefill
+                )
+                .is_err()
+            );
+            assert!(
+                continuity(
+                    &missing,
+                    &missing,
+                    &missing,
+                    "p",
+                    "j",
+                    Checkpoint::SubmittedDeposit
+                )
+                .is_err()
+            );
+            assert!(
+                continuity(
+                    &submitted(),
+                    &missing,
+                    &submitted(),
+                    "p",
+                    "j",
+                    Checkpoint::SubmittedDeposit
+                )
+                .is_err()
+            );
+        }
+    }
+    #[test]
     fn rejects_rebinding_duplicate_submission_and_state_loss() {
         for (pointer, value) in [
             ("/treasury_id", json!("another")),
@@ -368,6 +429,15 @@ mod tests {
             ("/pools/0/addresses/0/address", json!("changed")),
             ("/funding_jobs/0/operation_id", json!("new_operation")),
             ("/funding_jobs/0/recipient", json!("another")),
+            ("/source_operations/0/facts/txid", json!("replacement")),
+            ("/source_operations/0/facts/deadline", json!(6000)),
+            ("/source_operations/0/facts/fee_zatoshis", json!(0)),
+            ("/source_operations/0/facts", Value::Null),
+            (
+                "/source_operations/0/prepared_record_sha256",
+                json!("cd".repeat(32)),
+            ),
+            ("/source_operations/0/prepared_record_sha256", Value::Null),
             ("/source_operations/0/attempts", json!(2)),
             ("/source_operations/0/attempts", json!(0)),
             ("/source_operations", json!([])),

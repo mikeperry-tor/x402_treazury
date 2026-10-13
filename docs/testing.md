@@ -126,6 +126,16 @@ retained reservations/exposure, exact committed bytes, database integrity and no
 provider dispatch after a failed payment journal acknowledgement. A sync error is
 allowed to leave an entire recoverable commit; it never proves no work occurred.
 
+Offline refill fixtures compare exact prepared bytes and transaction facts before
+and after reopening the store. Restart qualification also binds transaction facts
+and the SHA-256 digest of the immutable encrypted prepared record across observed,
+drained and reopened snapshots. Historical evidence lacking these fields stays
+readable but cannot establish that continuity. The digest proves record identity,
+not transaction validity or settlement. Combined cover/payment fixtures retain
+unique managed authorizations through concurrent calls, held range responses and
+store reopen; seller success and cover progress do not release payment exposure.
+These checks do not qualify a live funded restart or Tor privacy.
+
 The narrow conversion utility has synthetic fixtures for strict source-shape and
 proof validation, rejection before mutation, repeated/reopened inspection,
 exclusive ownership, and committed WAL inspection without changing source sidecars.
