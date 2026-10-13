@@ -239,7 +239,14 @@ async fn accounting(h: &Harness, gross: u64, spent: u64, holdings: u64) {
 }
 #[tokio::test]
 async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
-    let (h, mut worker, mut instant) = inventory().await;
+    expensive_retained_inventory(false).await;
+}
+#[tokio::test]
+async fn retained_learning_during_active_rpc_outage_preserves_hint_ranking() {
+    expensive_retained_inventory(true).await;
+}
+async fn expensive_retained_inventory(active_outage: bool) {
+    let (mut h, mut worker, mut instant) = inventory().await;
     for calls in 1..=12 {
         fill(&h, &mut worker, &mut instant).await;
         paid_and_settled(&h, 6 * USDC_UNIT).await;
@@ -280,6 +287,32 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
             accounting(&h, 102 * USDC_UNIT, 60 * USDC_UNIT, 42 * USDC_UNIT).await;
         }
     }
+    drop(worker);
+    if active_outage {
+        // Lose the process cache, then publish independent retained capacity
+        // while the active wallet's unsigned RPC is unavailable. The learning
+        // call must hand off; it cannot assume the active balance was consumed.
+        h = super::draining::reopen(h).await;
+        let state = h.store.call(|s| s.status()).await.unwrap();
+        let active = state
+            .pools
+            .iter()
+            .find(|p| p.id == h.pool)
+            .unwrap()
+            .addresses
+            .iter()
+            .find(|w| w.role == "ACTIVE")
+            .unwrap()
+            .address
+            .clone();
+        h.f.balance_unavailable.lock().unwrap().insert(active);
+        assert!(
+            make_pool(h.store.clone(), h.pool.clone(), &h.base)
+                .reconcile()
+                .await
+                .is_err()
+        );
+    }
     h.store
         .call(|s| {
             s.pause_new_funding();
@@ -298,7 +331,7 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
             >= 9
     );
     let cheap = binding(&h, "POST", "many-retained-paused");
-    for learning in [true, false] {
+    for (call, learning) in [true, false, false].into_iter().enumerate() {
         *h.f.challenge.lock().unwrap() = challenge("3000000");
         let unsigned_before =
             h.f.traces
@@ -308,6 +341,29 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
                 .filter(|(_, k, _)| k == "unsigned")
                 .count();
         let inventory = h.store.call(|s| s.status()).await.unwrap();
+        for wallet in &inventory
+            .pools
+            .iter()
+            .find(|p| p.id == h.pool)
+            .unwrap()
+            .addresses
+        {
+            if wallet.role == "RETAINED" || (wallet.role == "ACTIVE" && !learning) {
+                let evidence = wallet
+                    .runtime_balance_evidence
+                    .as_ref()
+                    .expect("payment balance evidence");
+                assert!(
+                    evidence.fresh && evidence.compatible,
+                    "{}",
+                    serde_json::to_string(wallet).unwrap()
+                );
+                let actual = h.f.balances.lock().unwrap()[&wallet.address].to_string();
+                assert_eq!(evidence.confirmed.amount_atomic, actual);
+                assert_eq!(evidence.latest.amount_atomic, actual);
+                assert_eq!(wallet.signed_exposure_atomic.as_deref(), Some("0"));
+            }
+        }
         let expected = inventory
             .pools
             .iter()
@@ -316,16 +372,36 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
             .addresses
             .iter()
             .filter(|w| {
-                w.role == "RETAINED" && h.f.balances.lock().unwrap()[&w.address] >= 3_000_000
+                matches!(w.role.as_str(), "ACTIVE" | "RETAINED")
+                    && h.f.balances.lock().unwrap()[&w.address] >= 3_000_000
             })
-            // Equal balances/roles use wallet identity, not allocation order.
-            .min_by_key(|w| &w.id)
-            .unwrap()
-            .address
-            .clone();
+            // Recovery may leave ACTIVE unspent by the learning call. Equal
+            // capacities prefer ACTIVE, then identity within the same role.
+            .min_by_key(|w| {
+                (
+                    h.f.balances.lock().unwrap()[&w.address],
+                    w.role != "ACTIVE",
+                    &w.id,
+                )
+            })
+            .unwrap();
         assert_eq!(cheap.invoke(&serde_json::Map::new()).await.unwrap(), "paid");
         let signed = h.f.signed.lock().unwrap().last().unwrap().clone();
         assert_original_journal_claim(&h, &inventory, &signed);
+        if active_outage && learning {
+            let payer = signed["payload"]["authorization"]["from"]
+                .as_str()
+                .unwrap()
+                .parse::<Address>()
+                .unwrap()
+                .to_string();
+            assert!(
+                group
+                    .addresses
+                    .iter()
+                    .any(|w| w.address == payer && w.role == "RETAINED")
+            );
+        }
         if !learning {
             assert_eq!(
                 signed["payload"]["authorization"]["from"]
@@ -334,8 +410,13 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
                     .parse::<Address>()
                     .unwrap()
                     .to_string(),
-                expected
+                expected.address,
+                "inventory: {}",
+                serde_json::to_string(&inventory).unwrap()
             );
+            if active_outage {
+                assert_eq!(expected.role, if call == 1 { "ACTIVE" } else { "RETAINED" });
+            }
             assert_eq!(
                 h.f.traces
                     .lock()
@@ -347,6 +428,7 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
                 1
             );
         }
+        h.f.balance_unavailable.lock().unwrap().clear();
         settle_last(&h, 3000000).await;
     }
     let after = h.store.call(|s| s.status()).await.unwrap();
@@ -371,7 +453,6 @@ async fn expensive_only_refills_past_eleven_wallets_without_retirement() {
             .id
     );
     drop(cheap);
-    drop(worker);
     h.close().await;
 }
 #[tokio::test]
