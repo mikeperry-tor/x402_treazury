@@ -435,6 +435,78 @@ pub(super) async fn price_source<'a>(
     result
 }
 
+async fn catalog_cache_status(cfg: &catalog::Config) -> &'static str {
+    let mut catalog_cache = if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
+        let slot = crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
+        match if let Some(slot) = slot {
+            slot.read().await
+        } else {
+            None
+        } {
+            Some(entry) if entry.metadata.fresh() => "fresh",
+            Some(_) => "requires_revalidation",
+            None => "not_stored",
+        }
+    } else {
+        "local_file"
+    };
+    if let Some(slot) = crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
+        && slot.read().await.is_some_and(|e| e.metadata.fresh())
+    {
+        catalog_cache = "fresh_via_relay";
+    }
+    catalog_cache
+}
+
+async fn discover_warm_pricing(
+    config: &MetaConfig,
+    id: &str,
+    source: &Source,
+    pricing: &crate::pricing::PricingCache,
+) -> Result<(crate::pricing::Evidence, usize)> {
+    let tools = super::cache_warm::selected_tools(config, id, source)?;
+    let discovery = pricing
+        .discover_observed(&source.config, &source.document, &tools, &source.base_url)
+        .await?;
+    let fresh_entries = fresh_pricing_entries(source, &tools, &discovery.prices).await?;
+    Ok((discovery.evidence, fresh_entries))
+}
+
+async fn fresh_pricing_entries(
+    source: &Source,
+    tools: &[catalog::ToolSpec],
+    prices: &BTreeMap<(String, String), String>,
+) -> Result<usize> {
+    let cfg = &source.config;
+    let mut fresh_pricing_entries = 0;
+    let mut inspected = std::collections::BTreeSet::new();
+    for tool in tools {
+        if prices.contains_key(&(tool.method.clone(), tool.path.clone())) {
+            let url = tool.route(&source.base_url, &serde_json::Map::new())?.url;
+            if !inspected.insert(url.clone()) {
+                continue;
+            }
+            for slot in [
+                crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024),
+                crate::discovery_relay::slot(cfg, &url, "pricing", 64 * 1024),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if slot
+                    .read()
+                    .await
+                    .is_some_and(|entry| entry.metadata.fresh())
+                {
+                    fresh_pricing_entries += 1;
+                    break;
+                }
+            }
+        }
+    }
+    Ok(fresh_pricing_entries)
+}
+
 pub(super) async fn warm(
     config: &MetaConfig,
     path: &Path,
@@ -455,66 +527,13 @@ pub(super) async fn warm(
     let pricing = crate::pricing::PricingCache::default();
     let mut pending = stream::iter(selected.iter().map(|id| async {
         let (_, source) = load_one(id, &config.sources[id], path, false, &downloads).await?;
-        let cfg = &source.config;
-        let mut catalog_cache = if cfg.spec.starts_with("https://")
-            || cfg.spec.starts_with("http://")
-        {
-            let slot = crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
-            match if let Some(slot) = slot {
-                slot.read().await
-            } else {
-                None
-            } {
-                Some(entry) if entry.metadata.fresh() => "fresh",
-                Some(_) => "requires_revalidation",
-                None => "not_stored",
-            }
+        let catalog_cache = catalog_cache_status(&source.config).await;
+        let (evidence, fresh_pricing_entries) = if discover_pricing {
+            let (evidence, fresh_entries) =
+                discover_warm_pricing(config, id, &source, &pricing).await?;
+            (Some(evidence), fresh_entries)
         } else {
-            "local_file"
-        };
-        if let Some(slot) =
-            crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
-            && slot.read().await.is_some_and(|e| e.metadata.fresh())
-        {
-            catalog_cache = "fresh_via_relay";
-        }
-        let mut fresh_pricing_entries = 0;
-        let evidence = if discover_pricing {
-            let tools = super::cache_warm::selected_tools(config, id, &source)?;
-            let discovery = pricing
-                .discover_observed(cfg, &source.document, &tools, &source.base_url)
-                .await?;
-            let mut inspected = std::collections::BTreeSet::new();
-            for tool in &tools {
-                if discovery
-                    .prices
-                    .contains_key(&(tool.method.clone(), tool.path.clone()))
-                {
-                    let url = tool.route(&source.base_url, &serde_json::Map::new())?.url;
-                    if !inspected.insert(url.clone()) {
-                        continue;
-                    }
-                    for slot in [
-                        crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024),
-                        crate::discovery_relay::slot(cfg, &url, "pricing", 64 * 1024),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        if slot
-                            .read()
-                            .await
-                            .is_some_and(|entry| entry.metadata.fresh())
-                        {
-                            fresh_pricing_entries += 1;
-                            break;
-                        }
-                    }
-                }
-            }
-            Some(discovery.evidence)
-        } else {
-            None
+            (None, 0)
         };
         Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
             source: id.clone(),
