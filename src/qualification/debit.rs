@@ -19,11 +19,16 @@ pub async fn reconcile_debit(base: &BaseRpc, store: &StoreHandle, pool: &str) ->
         return Ok(());
     };
     let snapshot = store.call(|s| s.qualification_state()).await?;
-    let expected = receipt_expectation(&candidate.payment, &candidate.receipt, &snapshot)
-        .inspect_err(|_| observation_failed("journal_validation"))?;
+    let binding = guard.binding.clone();
+    let (candidate, expected) = tokio::task::spawn_blocking(move || {
+        let expected = checked_expectation(&binding, &candidate, &snapshot)?;
+        Ok::<_, anyhow::Error>((candidate, expected))
+    })
+    .await??;
     let result = base.verify_transfer(&expected).await;
     let binding = guard.binding.clone();
-    tokio::task::spawn_blocking(move || record(&binding, &candidate, result)).await??;
+    tokio::task::spawn_blocking(move || record(&binding, &candidate, Check::Transfer(result)))
+        .await??;
     Ok(())
 }
 fn observation_failed(stage: &'static str) {
@@ -180,25 +185,47 @@ pub fn receipt_expectation(
             .parse()?,
     })
 }
-fn record(
+// Invalid seller claims remain incomplete, but must take their turn in the same
+// durable fair queue as pending and unavailable chain observations. Persist only
+// a fixed category, never untrusted receipt or error prose.
+fn checked_expectation(
     binding: &Binding,
     candidate: &Candidate,
-    result: Result<Option<TransferProof>>,
-) -> Result<()> {
+    snapshot: &Value,
+) -> Result<TransferExpectation> {
+    match receipt_expectation(&candidate.payment, &candidate.receipt, snapshot) {
+        Ok(expected) => Ok(expected),
+        Err(error) => {
+            observation_failed("journal_validation");
+            record(binding, candidate, Check::Invalid)?;
+            Err(error)
+        }
+    }
+}
+enum Check {
+    Invalid,
+    Transfer(Result<Option<TransferProof>>),
+}
+fn record(binding: &Binding, candidate: &Candidate, result: Check) -> Result<()> {
     let mut db = connection(binding)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let mut event = json!({"case":candidate.payment["case"],"session":candidate.payment["session"],
         "attempt_id":candidate.payment["attempt_id"]});
     let proof = match result {
-        Ok(Some(proof)) => {
+        Check::Invalid => {
+            event["status"] = json!("invalid");
+            event["reason"] = json!("journal_validation");
+            None
+        }
+        Check::Transfer(Ok(Some(proof))) => {
             event["status"] = json!("verified");
             Some(proof)
         }
-        Ok(None) => {
+        Check::Transfer(Ok(None)) => {
             event["status"] = json!("pending");
             None
         }
-        Err(error) => {
+        Check::Transfer(Err(error)) => {
             event["status"] = json!("unavailable");
             event["reason"] = json!(crate::rotation::base::safe_diagnostic(&error));
             None
@@ -313,6 +340,70 @@ mod tests {
         assert!(check(&payment, &selected.receipt, &state).is_err());
     }
     #[test]
+    fn invalid_receipts_advance_durable_fairness_without_verification() {
+        for (field, value) in [
+            ("payer", json!(format!("0x{:040x}", 9))),
+            ("payer", json!("private malformed payer")),
+            ("transaction", json!("private malformed transaction")),
+            ("network", json!("eip155:1")),
+        ] {
+            let (_dir, guard, db) = super::super::tests::fixture();
+            let first = add(&db, "first", &guard.binding.session);
+            let second = add(&db, "second", &guard.binding.session);
+            let mut invalid = candidate(&guard.binding, "pool").unwrap().unwrap().receipt;
+            invalid["receipt"][field] = value;
+            db.execute("UPDATE events SET detail=?1 WHERE kind='application_receipt' AND json_extract(detail,'$.attempt_id')='first'", [invalid.to_string()]).unwrap();
+            let snapshot = json!({"payment_attempts":[first,second]});
+            let selected = candidate(&guard.binding, "pool").unwrap().unwrap();
+            assert!(checked_expectation(&guard.binding, &selected, &snapshot).is_err());
+            let detail: String = db
+                .query_row(
+                    "SELECT detail FROM events WHERE kind='application_debit_check'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&detail).unwrap(),
+                json!({
+                    "case":"first", "attempt_id":"first", "session":guard.binding.session,
+                    "status":"invalid", "reason":"journal_validation"
+                })
+            );
+            // Selection opens a fresh connection, so fairness survives reopening.
+            let selected = candidate(&guard.binding, "pool").unwrap().unwrap();
+            assert_eq!(selected.payment["case"], "second");
+            let expected = checked_expectation(&guard.binding, &selected, &snapshot).unwrap();
+            record(
+                &guard.binding,
+                &selected,
+                Check::Transfer(Ok(Some(TransferProof {
+                    transaction: expected.transaction.to_string(),
+                    block_height: 100,
+                    block_hash: format!("0x{:064x}", 5),
+                    payer: expected.payer.to_string(),
+                    payee: expected.payee.to_string(),
+                    amount_atomic: "7".into(),
+                    nonce: expected.nonce.to_string(),
+                }))),
+            )
+            .unwrap();
+            let verified: String = db.query_row("SELECT json_extract(detail,'$.attempt_id') FROM events WHERE kind='application_debit_verified'", [], |r| r.get(0)).unwrap();
+            assert_eq!(verified, "second");
+            let selected = candidate(&guard.binding, "pool").unwrap().unwrap();
+            assert_eq!(selected.payment["case"], "first");
+            assert!(checked_expectation(&guard.binding, &selected, &snapshot).is_err());
+            let count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM events WHERE kind='application_debit_verified'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+    }
+    #[test]
     fn pending_receipts_do_not_starve_others_and_verified_records_are_idempotent() {
         let (_dir, guard, db) = super::super::tests::fixture();
         // Production `prepared` markers contain raw digests, not JSON. Include
@@ -337,7 +428,7 @@ mod tests {
         let mut wrong = snapshot.clone();
         wrong["payment_attempts"][0]["amount"] = json!("8");
         assert!(receipt_expectation(&selected.payment, &selected.receipt, &wrong).is_err());
-        record(&guard.binding, &selected, Ok(None)).unwrap();
+        record(&guard.binding, &selected, Check::Transfer(Ok(None))).unwrap();
         let selected = candidate(&guard.binding, "pool").unwrap().unwrap();
         assert_eq!(selected.payment["case"], "second");
         let expected =
@@ -351,8 +442,13 @@ mod tests {
             amount_atomic: "7".into(),
             nonce: expected.nonce.to_string(),
         };
-        record(&guard.binding, &selected, Ok(Some(proof.clone()))).unwrap();
-        record(&guard.binding, &selected, Ok(Some(proof))).unwrap();
+        record(
+            &guard.binding,
+            &selected,
+            Check::Transfer(Ok(Some(proof.clone()))),
+        )
+        .unwrap();
+        record(&guard.binding, &selected, Check::Transfer(Ok(Some(proof)))).unwrap();
         let count: i64 = db
             .query_row(
                 "SELECT COUNT(*) FROM events WHERE kind='application_debit_verified'",
