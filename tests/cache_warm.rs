@@ -255,3 +255,270 @@ async fn warming_requires_existing_state_and_cannot_be_selected_for_serving() {
     let standalone = cli(&["catalog", "warm", "--provider", "unused.toml", "--direct"]).await;
     assert!(!standalone.status.success());
 }
+
+#[tokio::test]
+async fn warming_sorts_local_and_shared_remote_sources_and_reuses_only_fresh_prices() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("state")).unwrap();
+    let catalog_calls = Arc::new(AtomicUsize::new(0));
+    let price_calls = Arc::new(AtomicUsize::new(0));
+    let counts = (catalog_calls.clone(), price_calls.clone());
+    async fn handler(
+        State((catalog, pricing)): State<(Arc<AtomicUsize>, Arc<AtomicUsize>)>,
+        req: Request,
+    ) -> impl IntoResponse {
+        assert_eq!(req.method(), "GET");
+        assert!(!req.headers().contains_key("payment-signature"));
+        assert!(!req.headers().contains_key("x-payment"));
+        match req.uri().path() {
+            "/spec" => {
+                catalog.fetch_add(1, Ordering::SeqCst);
+                (
+                    axum::http::StatusCode::OK,
+                    [
+                        ("cache-control", "max-age=600".to_owned()),
+                        ("etag", "\"shared\"".to_owned()),
+                    ],
+                    r#"{"operations":[{"method":"GET","path":"/read"}]}"#,
+                )
+            }
+            "/read" => {
+                pricing.fetch_add(1, Ordering::SeqCst);
+                (
+                    axum::http::StatusCode::PAYMENT_REQUIRED,
+                    [
+                        ("cache-control", "max-age=600".to_owned()),
+                        (
+                            "payment-required",
+                            STANDARD.encode(r#"{"accepts":[{"amount":"1000","asset":"USDC"}]}"#),
+                        ),
+                    ],
+                    "",
+                )
+            }
+            other => panic!("unexpected request {other}"),
+        }
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().fallback(any(handler)).with_state(counts),
+        )
+        .await
+        .unwrap()
+    });
+    std::fs::write(
+        dir.path().join("local.json"),
+        r#"{"operations":[{"method":"GET","path":"/read"}]}"#,
+    )
+    .unwrap();
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(
+        &path,
+        format!(
+            r#"
+version=1
+[startup]
+catalog_concurrency=2
+[treasury]
+state_dir='state'
+max_refund_shielding_fee_zec='0.001'
+[wallets.w]
+mode='static'
+private_key_env='UNUSED_KEY'
+max_api_payment_usdc='0.01'
+[sources.z_remote]
+spec='{origin}/spec'
+base_url='{origin}'
+[sources.a_remote]
+spec='{origin}/spec'
+base_url='{origin}'
+[sources.m_local]
+spec='local.json'
+base_url='{origin}'
+[servers.test]
+listen='127.0.0.1:0'
+bearer_token_env='UNUSED_TOKEN'
+wallet='w'
+sources=['z_remote','m_local','a_remote']
+"#
+        ),
+    )
+    .unwrap();
+    let path = path.to_str().unwrap();
+    let run = |pricing: bool| async move {
+        let mut args = vec!["catalog", "warm", "--config", path, "--direct"];
+        if pricing {
+            args.push("--discover-pricing");
+        }
+        let output = cli(&args).await;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let without_pricing = run(false).await;
+    let rows = without_pricing["sources"].as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| r["source"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["a_remote", "m_local", "z_remote"]
+    );
+    assert_eq!(rows[0]["catalog_cache"], "fresh");
+    assert_eq!(rows[1]["catalog_cache"], "local_file");
+    assert_eq!(rows[2]["catalog_cache"], "fresh");
+    assert!(
+        rows.iter()
+            .all(|r| r["pricing"].is_null() && r["fresh_pricing_entries"] == 0)
+    );
+    assert_eq!(
+        catalog_calls.load(Ordering::SeqCst),
+        1,
+        "shared catalog fetched once"
+    );
+    assert_eq!(price_calls.load(Ordering::SeqCst), 0);
+
+    for expected_calls in [1, 1] {
+        let priced = run(true).await;
+        for row in priced["sources"].as_array().unwrap() {
+            assert_eq!(row["fresh_pricing_entries"], 1);
+            assert_eq!(row["pricing"]["available_prices"], 1);
+            assert_eq!(row["pricing"]["observed"], 1);
+        }
+        assert_eq!(catalog_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            price_calls.load(Ordering::SeqCst),
+            expected_calls,
+            "shared route priced once, then reused from disk"
+        );
+    }
+    let db = rusqlite::Connection::open(dir.path().join("state/http-cache/discovery-v1.sqlite"))
+        .unwrap();
+    // Expire all cached observations: the next explicit warm must refresh both
+    // catalog and pricing, retaining sharing across aliases and the local source.
+    db.execute(
+        "UPDATE entries SET metadata=json_set(metadata,'$.expires',0)",
+        [],
+    )
+    .unwrap();
+    let refreshed = run(true).await;
+    assert!(
+        refreshed["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["fresh_pricing_entries"] == 1)
+    );
+    assert_eq!(catalog_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(price_calls.load(Ordering::SeqCst), 2);
+    assert!(!dir.path().join("state/state.sqlite").exists());
+    assert!(!dir.path().join("state/wallet.key").exists());
+    task.abort();
+}
+
+#[tokio::test]
+async fn warming_rolls_forward_within_source_bound_and_sorts_completion_order() {
+    use tokio::sync::{Semaphore, mpsc};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("state")).unwrap();
+    let gates: Vec<_> = (0..3).map(|_| Arc::new(Semaphore::new(0))).collect();
+    let (send, mut arrivals) = mpsc::channel(3);
+    async fn handler(
+        State((gates, arrivals)): State<(Vec<Arc<Semaphore>>, mpsc::Sender<usize>)>,
+        req: Request,
+    ) -> impl IntoResponse {
+        assert_eq!(req.method(), "GET");
+        assert!(!req.headers().contains_key("payment-signature"));
+        let id: usize = req.uri().path().trim_start_matches('/').parse().unwrap();
+        arrivals.send(id).await.unwrap();
+        gates[id].acquire().await.unwrap().forget();
+        r#"{"operations":[{"method":"GET","path":"/read"}]}"#
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let state = (gates.clone(), send);
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().fallback(any(handler)).with_state(state),
+        )
+        .await
+        .unwrap()
+    });
+    let path = dir.path().join("deployment.toml");
+    let mut config = String::from(
+        "version=1\n[startup]\ncatalog_concurrency=2\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_KEY'\nmax_api_payment_usdc='0.01'\n",
+    );
+    for id in 0..3 {
+        config.push_str(&format!(
+            "[sources.s{id}]\nspec='{origin}/{id}'\nbase_url='{origin}'\n"
+        ));
+    }
+    config.push_str("[servers.test]\nlisten='127.0.0.1:0'\nbearer_token_env='UNUSED_TOKEN'\nwallet='w'\nsources=['s0','s1','s2']\n");
+    std::fs::write(&path, config).unwrap();
+    let warming = tokio::spawn(async move {
+        cli(&[
+            "catalog",
+            "warm",
+            "--config",
+            path.to_str().unwrap(),
+            "--direct",
+        ])
+        .await
+    });
+    let timeout = std::time::Duration::from_secs(10);
+    let first = tokio::time::timeout(timeout, arrivals.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = tokio::time::timeout(timeout, arrivals.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(first, second);
+    assert!(first < 2 && second < 2);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), arrivals.recv())
+            .await
+            .is_err(),
+        "third catalog must wait for a source slot"
+    );
+    // Leave the first source blocked: completing its peer must advance the
+    // rolling window, rather than waiting for the entire first batch.
+    gates[second].add_permits(1);
+    assert_eq!(
+        tokio::time::timeout(timeout, arrivals.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        2
+    );
+    gates[2].add_permits(1);
+    gates[first].add_permits(1);
+    let output = warming.await.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["source"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["s0", "s1", "s2"]
+    );
+    assert!(
+        arrivals.try_recv().is_err(),
+        "exactly one request per catalog"
+    );
+    server.abort();
+}

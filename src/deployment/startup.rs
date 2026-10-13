@@ -531,3 +531,6 @@ pub(super) async fn warm(
     results.sort_by(|a, b| a.source.cmp(&b.source));
     Ok(results)
 }
+
+#[cfg(test)]
+mod warm_tests;
