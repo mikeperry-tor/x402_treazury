@@ -136,6 +136,138 @@ fn empty_observation(state: State) -> Vec<Observation> {
         pricing_evidence: None,
     }]
 }
+// Keep stage reads lazy and ordered: malformed unused sections must not change
+// which source/case first reports an error.
+fn catalog_observations(source: &str, r: &Value) -> Result<Vec<Observation>> {
+    let mut catalog = Vec::new();
+    for phase in rows(r, "catalog_stages")? {
+        for row in rows(phase, "sources")?
+            .iter()
+            .filter(|c| c["source"] == source)
+        {
+            catalog.push(observation(
+                phase["phase"]
+                    .as_str()
+                    .context("catalog phase missing")?
+                    .into(),
+                &row["state"],
+                &row["http_status"],
+            )?);
+        }
+    }
+    if catalog.is_empty() {
+        catalog = empty_observation(State::Unobserved);
+    }
+    Ok(catalog)
+}
+
+fn case_observations(
+    source: &str,
+    m: &Manifest,
+    r: &Value,
+    cases: &BTreeMap<&str, &Value>,
+    semantics: &[Value],
+    proofs: &Value,
+) -> Result<(Vec<Observation>, Vec<CaseOutcome>)> {
+    let mut help = Vec::new();
+    let mut outcomes = Vec::new();
+    for case in m.cases.iter().filter(|c| c.source == source) {
+        let row = cases
+            .get(case.id.as_str())
+            .context("manifest case missing from report")?;
+        let execution = state(&row["execution"]);
+        if let Some(h) = rows(r, "help_stages")?
+            .iter()
+            .find(|h| h["case"] == case.id)
+        {
+            let mut observed =
+                observation(case.id.clone(), &h["status"], &h["result"]["http_status"])?;
+            if execution == State::NotAttempted {
+                observed.state = State::NotAttempted;
+            }
+            help.push(observed);
+        }
+        let sem = semantics
+            .iter()
+            .find(|s| s["case"] == case.id)
+            .context("provider semantic assessment missing")?;
+        let verified_atomic = verified_debit(proofs, &case.id)?;
+        let payment = if verified_atomic.is_some() {
+            State::Completed
+        } else if case.unsigned {
+            State::NotRequested
+        } else if execution == State::NotAttempted {
+            State::NotAttempted
+        } else {
+            State::Incomplete
+        };
+        outcomes.push(CaseOutcome {
+            case: case.id.clone(),
+            execution,
+            mcp: state(&row["semantic"]),
+            semantics: state(&sem["status"]),
+            payment,
+            verified_atomic,
+        });
+    }
+    if help.is_empty() {
+        let unknown = m.cases.iter().any(|c| {
+            c.source == source
+                && c.unsigned
+                && cases
+                    .get(c.id.as_str())
+                    .is_some_and(|r| r["execution"] != "UNATTEMPTED")
+        });
+        help = empty_observation(if unknown {
+            State::Unobserved
+        } else {
+            State::NotAttempted
+        });
+    }
+    Ok((help, outcomes))
+}
+
+fn verified_debit(proofs: &Value, case: &str) -> Result<Option<u64>> {
+    let amount = &proofs["cases"][case];
+    if proofs["status"] == "validated" && !amount.is_null() {
+        Ok(Some(
+            amount
+                .as_str()
+                .map(str::parse)
+                .transpose()?
+                .or_else(|| amount.as_u64())
+                .context("invalid canonical debit amount")?,
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+fn pricing_observations(source: &str, r: &Value) -> Result<Vec<Observation>> {
+    let mut pricing = Vec::new();
+    for row in rows(r, "pricing_stages")?
+        .iter()
+        .filter(|p| p["source"] == source)
+    {
+        let mut observed = observation(
+            row["session"].as_str().unwrap_or("no_session").into(),
+            &row["stage"],
+            &Value::Null,
+        )?;
+        if !row["evidence"].is_null() {
+            let evidence: x402_treazury::pricing::Evidence =
+                serde_json::from_value(row["evidence"].clone())?;
+            evidence.validate()?;
+            observed.pricing_evidence = Some(evidence);
+        }
+        pricing.push(observed);
+    }
+    if pricing.is_empty() {
+        pricing = empty_observation(State::Unobserved);
+    }
+    Ok(pricing)
+}
+
 pub fn build(m: &Manifest, config: &Value, r: &Value) -> Result<Report> {
     // Older config-only archives may lack the source inventory. Keep their known
     // case sources visible and explicitly avoid an exhaustive-inventory claim.
@@ -161,113 +293,9 @@ pub fn build(m: &Manifest, config: &Value, r: &Value) -> Result<Report> {
     let proofs = &r["canonical_api_debits"];
     let mut providers = Vec::new();
     for source in &sources {
-        let mut catalog = Vec::new();
-        for phase in rows(r, "catalog_stages")? {
-            for row in rows(phase, "sources")?
-                .iter()
-                .filter(|c| c["source"] == *source)
-            {
-                catalog.push(observation(
-                    phase["phase"]
-                        .as_str()
-                        .context("catalog phase missing")?
-                        .into(),
-                    &row["state"],
-                    &row["http_status"],
-                )?);
-            }
-        }
-        if catalog.is_empty() {
-            catalog = empty_observation(State::Unobserved);
-        }
-        let mut help = Vec::new();
-        let mut outcomes = Vec::new();
-        for case in m.cases.iter().filter(|c| c.source == *source) {
-            let row = cases
-                .get(case.id.as_str())
-                .context("manifest case missing from report")?;
-            let execution = state(&row["execution"]);
-            if let Some(h) = rows(r, "help_stages")?
-                .iter()
-                .find(|h| h["case"] == case.id)
-            {
-                let mut observed =
-                    observation(case.id.clone(), &h["status"], &h["result"]["http_status"])?;
-                if execution == State::NotAttempted {
-                    observed.state = State::NotAttempted;
-                }
-                help.push(observed);
-            }
-            let sem = semantics
-                .iter()
-                .find(|s| s["case"] == case.id)
-                .context("provider semantic assessment missing")?;
-            let amount = &proofs["cases"][&case.id];
-            let verified_atomic = if proofs["status"] == "validated" && !amount.is_null() {
-                Some(
-                    amount
-                        .as_str()
-                        .map(str::parse)
-                        .transpose()?
-                        .or_else(|| amount.as_u64())
-                        .context("invalid canonical debit amount")?,
-                )
-            } else {
-                None
-            };
-            let payment = if verified_atomic.is_some() {
-                State::Completed
-            } else if case.unsigned {
-                State::NotRequested
-            } else if execution == State::NotAttempted {
-                State::NotAttempted
-            } else {
-                State::Incomplete
-            };
-            outcomes.push(CaseOutcome {
-                case: case.id.clone(),
-                execution,
-                mcp: state(&row["semantic"]),
-                semantics: state(&sem["status"]),
-                payment,
-                verified_atomic,
-            });
-        }
-        if help.is_empty() {
-            let unknown = m.cases.iter().any(|c| {
-                c.source == *source
-                    && c.unsigned
-                    && cases
-                        .get(c.id.as_str())
-                        .is_some_and(|r| r["execution"] != "UNATTEMPTED")
-            });
-            help = empty_observation(if unknown {
-                State::Unobserved
-            } else {
-                State::NotAttempted
-            });
-        }
-        let mut pricing = Vec::new();
-        for row in rows(r, "pricing_stages")?
-            .iter()
-            .filter(|p| p["source"] == *source)
-        {
-            let mut observed = observation(
-                row["session"].as_str().unwrap_or("no_session").into(),
-                &row["stage"],
-                &Value::Null,
-            )?;
-            if !row["evidence"].is_null() {
-                let evidence: x402_treazury::pricing::Evidence =
-                    serde_json::from_value(row["evidence"].clone())?;
-                evidence.validate()?;
-                observed.pricing_evidence = Some(evidence);
-            }
-            pricing.push(observed);
-        }
-        if pricing.is_empty() {
-            pricing = empty_observation(State::Unobserved);
-        }
+        let catalog = catalog_observations(source, r)?;
+        let (help, outcomes) = case_observations(source, m, r, &cases, semantics, proofs)?;
+        let pricing = pricing_observations(source, r)?;
         providers.push(Provider {
             source: source.clone(),
             catalog,
