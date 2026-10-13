@@ -181,6 +181,18 @@ pub fn secure_endpoint(text: &str) -> Result<reqwest::Url> {
     );
     Ok(url)
 }
+struct ViewHeaders {
+    latest: Anchor,
+    timestamp: u64,
+    confirmed: Anchor,
+    confirmed_time: u64,
+}
+struct ResolvedHistory {
+    released: Vec<String>,
+    resolutions: BTreeMap<String, AuthorizationResolution>,
+    resolution_certificates: BTreeMap<String, ResolutionCertificate>,
+}
+
 impl BaseRpc {
     pub fn new(url: &str, confirmations: u64, max_age: u64) -> Result<Self> {
         ensure!(confirmations > 0 && max_age > 0, "invalid Base RPC limits");
@@ -515,6 +527,113 @@ impl BaseRpc {
         unreachable!("primary Base RPC endpoint always exists")
     }
     async fn view_inner(&self, query: ChainQuery, progress: &ViewProgress) -> Result<ChainView> {
+        let headers = self.initial_view_headers(&query, progress).await?;
+        let endpoint = self.endpoint_id();
+        let read_history = !query.pending.is_empty();
+        let ResolvedHistory {
+            released,
+            resolutions,
+            resolution_certificates,
+        } = self
+            .resolve_authorizations(
+                query.pending,
+                &query.captures,
+                &headers,
+                &endpoint,
+                progress,
+            )
+            .await?;
+        // Historical resolution and fresh admission retain distinct anchors.
+        let resolution_anchor = headers.confirmed.clone();
+        let mut rechecked = BTreeMap::new();
+        if query.wallets.is_empty() {
+            self.verify_history_anchor(
+                &resolution_anchor,
+                &query.captures,
+                &endpoint,
+                progress,
+                &mut rechecked,
+            )
+            .await?;
+            for capture in query.captures.values() {
+                let mut historical = capture.clone();
+                historical.previous = None;
+                self.verify_capture(&historical, &endpoint, progress, &mut rechecked)
+                    .await?;
+            }
+            return Ok(ChainView {
+                anchor: resolution_anchor,
+                admission_valid_until: headers.timestamp.saturating_add(self.max_age),
+                balances: BTreeMap::new(),
+                observations: BTreeMap::new(),
+                balance_certificates: BTreeMap::new(),
+                resolution_certificates,
+                released,
+                resolutions,
+            });
+        }
+        // Balance-only queries reuse the original coherent pair; a nonce sweep
+        // obtains fresh admission headers after retaining historical resolution.
+        let headers = if read_history {
+            self.admission_view_headers(&resolution_anchor, progress)
+                .await?
+        } else {
+            headers
+        };
+        let observations = self
+            .balance_observations(&query.wallets, &headers, &endpoint, progress)
+            .await?;
+        self.recheck_view_anchors(
+            [&resolution_anchor, &headers.confirmed, &headers.latest],
+            &query.captures,
+            &endpoint,
+            progress,
+            &mut rechecked,
+        )
+        .await?;
+        // The financial checkpoint and captured same-wallet facts must still be
+        // canonical on the very endpoint that supplied these exact reads.
+        for capture in query.captures.values() {
+            self.verify_capture(capture, &endpoint, progress, &mut rechecked)
+                .await?;
+        }
+        let balance_certificates = observations
+            .iter()
+            .filter_map(|(wallet, observation)| {
+                query.captures.get(wallet).map(|capture| {
+                    (
+                        wallet.clone(),
+                        BalanceCertificate::verified(
+                            capture.clone(),
+                            observation.clone(),
+                            resolution_anchor.clone(),
+                        ),
+                    )
+                })
+            })
+            .collect();
+        // Preserve completed evidence even if balance acquisition outlasted its
+        // admission window. The store checks that window before new authority;
+        // retrying this entire sweep here could hold the pool gate forever.
+        Ok(ChainView {
+            admission_valid_until: headers.timestamp.saturating_add(self.max_age),
+            anchor: headers.confirmed,
+            balances: observations
+                .iter()
+                .map(|(id, observation)| (id.clone(), observation.available()))
+                .collect(),
+            observations,
+            balance_certificates,
+            resolution_certificates,
+            released,
+            resolutions,
+        })
+    }
+    async fn initial_view_headers(
+        &self,
+        query: &ChainQuery,
+        progress: &ViewProgress,
+    ) -> Result<ViewHeaders> {
         ensure!(
             quantity(
                 &progress
@@ -566,14 +685,27 @@ impl BaseRpc {
                 && query.anchor.as_ref().is_none_or(|a| height >= a.height),
             "invalid confirmed block"
         );
-        let endpoint = self.endpoint_id();
+        Ok(ViewHeaders {
+            latest,
+            timestamp,
+            confirmed,
+            confirmed_time,
+        })
+    }
+    async fn resolve_authorizations(
+        &self,
+        pending: Vec<PendingAuthorization>,
+        captures: &BTreeMap<String, EvidenceCapture>,
+        headers: &ViewHeaders,
+        endpoint: &str,
+        progress: &ViewProgress,
+    ) -> Result<ResolvedHistory> {
         let mut released = Vec::new();
         let mut resolutions = BTreeMap::new();
         let mut resolution_certificates = BTreeMap::new();
         let selector = &keccak256("authorizationState(address,bytes32)")[..4];
         let selector = alloy_primitives::hex::encode(selector);
-        let read_history = !query.pending.is_empty();
-        for auth in query.pending {
+        for auth in pending {
             let payer: Address = auth.payer.parse()?;
             let nonce: B256 = auth.nonce.parse()?;
             let data = format!(
@@ -583,123 +715,127 @@ impl BaseRpc {
             );
             let scoped = self.for_address(&auth.payer)?;
             let used = progress
-                .step("authorization_nonce", scoped.call(data, &confirmed))
+                .step("authorization_nonce", scoped.call(data, &headers.confirmed))
                 .await
                 .context(VerificationStage("authorization nonce"))?;
             ensure!(used <= U256::from(1), RpcFailure::malformed("eth_call"));
-            if used == U256::from(1) || confirmed_time > auth.valid_before {
+            if used == U256::from(1) || headers.confirmed_time > auth.valid_before {
                 resolutions.insert(
                     auth.id.clone(),
                     AuthorizationResolution {
-                        anchor: Some(confirmed.clone()),
+                        anchor: Some(headers.confirmed.clone()),
                         outcome: if used == U256::from(1) {
                             AuthorizationOutcome::Used
                         } else {
                             AuthorizationOutcome::ExpiredUnused
                         },
-                        block_time: confirmed_time,
+                        block_time: headers.confirmed_time,
                     },
                 );
-                if let Some(capture) = query.captures.get(&auth.wallet) {
+                if let Some(capture) = captures.get(&auth.wallet) {
                     let resolution = &resolutions[&auth.id];
                     resolution_certificates.insert(
                         auth.id.clone(),
                         ResolutionCertificate::verified(
                             capture.clone(),
-                            endpoint.clone(),
+                            endpoint.to_owned(),
                             auth.clone(),
-                            confirmed.clone(),
+                            headers.confirmed.clone(),
                             resolution.outcome.clone(),
-                            confirmed_time,
+                            headers.confirmed_time,
                         ),
                     );
                 }
                 released.push(auth.id);
             }
         }
-        // Authorization resolution is historical canonical evidence. Its sweep
-        // cannot age the independently acquired admission balance view.
-        let resolution_anchor = confirmed.clone();
-        let mut rechecked = BTreeMap::new();
-        if query.wallets.is_empty() {
-            let canonical = self
-                .recheck_anchor(
-                    resolution_anchor.height,
-                    &mut rechecked,
-                    progress,
-                    "history_anchor_recheck",
-                )
-                .await?;
-            if canonical != resolution_anchor {
-                if let Some(capture) = query.captures.values().find(|capture| {
-                    capture.checkpoint.as_ref() == Some(&resolution_anchor)
-                        || capture.durable_balance_anchors.contains(&resolution_anchor)
-                }) {
-                    let financial_checkpoint =
-                        capture.checkpoint.as_ref() == Some(&resolution_anchor);
-                    return Err(EvidenceConflict {
-                        wallet: capture.wallet.clone(),
-                        endpoint: endpoint.clone(),
-                        anchor: resolution_anchor,
-                        latest_only: false,
-                        financial_checkpoint,
-                    }
-                    .into());
+        Ok(ResolvedHistory {
+            released,
+            resolutions,
+            resolution_certificates,
+        })
+    }
+    async fn verify_history_anchor(
+        &self,
+        resolution_anchor: &Anchor,
+        captures: &BTreeMap<String, EvidenceCapture>,
+        endpoint: &str,
+        progress: &ViewProgress,
+        rechecked: &mut BTreeMap<u64, Anchor>,
+    ) -> Result<()> {
+        let canonical = self
+            .recheck_anchor(
+                resolution_anchor.height,
+                rechecked,
+                progress,
+                "history_anchor_recheck",
+            )
+            .await?;
+        if canonical != *resolution_anchor {
+            if let Some(capture) = captures.values().find(|capture| {
+                capture.checkpoint.as_ref() == Some(resolution_anchor)
+                    || capture.durable_balance_anchors.contains(resolution_anchor)
+            }) {
+                let financial_checkpoint = capture.checkpoint.as_ref() == Some(resolution_anchor);
+                return Err(EvidenceConflict {
+                    wallet: capture.wallet.clone(),
+                    endpoint: endpoint.to_owned(),
+                    anchor: resolution_anchor.clone(),
+                    latest_only: false,
+                    financial_checkpoint,
                 }
-                anyhow::bail!("Base view changed during reconciliation");
+                .into());
             }
-            for capture in query.captures.values() {
-                let mut historical = capture.clone();
-                historical.previous = None;
-                self.verify_capture(&historical, &endpoint, progress, &mut rechecked)
-                    .await?;
-            }
-            return Ok(ChainView {
-                anchor: resolution_anchor,
-                admission_valid_until: timestamp.saturating_add(self.max_age),
-                balances: BTreeMap::new(),
-                observations: BTreeMap::new(),
-                balance_certificates: BTreeMap::new(),
-                resolution_certificates,
-                released,
-                resolutions,
-            });
+            anyhow::bail!("Base view changed during reconciliation");
         }
-        // Only a historical nonce sweep needs a new admission observation.
-        // Balance-only acquisition already has a coherent fresh pair of headers;
-        // retain their timestamps and the canonical rechecks below.
-        let (latest, timestamp, confirmed) = if read_history {
-            let (latest, timestamp) = progress
-                .step("admission_latest_block", self.block("latest"))
-                .await?;
-            validate_timestamp(timestamp, now()?, self.max_age)?;
-            let height = latest
-                .height
-                .checked_sub(self.confirmations)
-                .context("insufficient Base confirmations")?;
-            let (confirmed, confirmed_time) = progress
-                .step(
-                    "admission_confirmed_block",
-                    self.block(&format!("0x{height:x}")),
-                )
-                .await?;
-            ensure!(
-                confirmed.height == height
-                    && confirmed_time <= timestamp
-                    && confirmed.height >= resolution_anchor.height,
-                "invalid admission block"
-            );
-            (latest, timestamp, confirmed)
-        } else {
-            (latest, timestamp, confirmed)
-        };
+        Ok(())
+    }
+    async fn admission_view_headers(
+        &self,
+        resolution_anchor: &Anchor,
+        progress: &ViewProgress,
+    ) -> Result<ViewHeaders> {
+        let (latest, timestamp) = progress
+            .step("admission_latest_block", self.block("latest"))
+            .await?;
+        validate_timestamp(timestamp, now()?, self.max_age)?;
+        let height = latest
+            .height
+            .checked_sub(self.confirmations)
+            .context("insufficient Base confirmations")?;
+        let (confirmed, confirmed_time) = progress
+            .step(
+                "admission_confirmed_block",
+                self.block(&format!("0x{height:x}")),
+            )
+            .await?;
+        ensure!(
+            confirmed.height == height
+                && confirmed_time <= timestamp
+                && confirmed.height >= resolution_anchor.height,
+            "invalid admission block"
+        );
+        Ok(ViewHeaders {
+            latest,
+            timestamp,
+            confirmed,
+            confirmed_time,
+        })
+    }
+    async fn balance_observations(
+        &self,
+        wallets: &[(String, String)],
+        headers: &ViewHeaders,
+        endpoint: &str,
+        progress: &ViewProgress,
+    ) -> Result<BTreeMap<String, evidence::BalanceObservation>> {
         use futures_util::{StreamExt, TryStreamExt};
         let observations: BTreeMap<_, _> =
-            futures_util::stream::iter(query.wallets.clone().into_iter().map(|(id, address)| {
-                let confirmed = confirmed.clone();
-                let latest = latest.clone();
+            futures_util::stream::iter(wallets.iter().cloned().map(|(id, address)| {
+                let confirmed = headers.confirmed.clone();
+                let latest = headers.latest.clone();
                 let rpc = self.clone();
-                let endpoint = endpoint.clone();
+                let endpoint = endpoint.to_owned();
                 async move {
                     let address: Address = address.parse()?;
                     let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
@@ -727,7 +863,7 @@ impl BaseRpc {
                             anchor: latest,
                             amount: current,
                         },
-                        valid_until: timestamp.saturating_add(rpc.max_age),
+                        valid_until: headers.timestamp.saturating_add(rpc.max_age),
                     };
                     observation.validate()?;
                     Ok::<_, anyhow::Error>((id, observation))
@@ -736,14 +872,24 @@ impl BaseRpc {
             .buffer_unordered(8)
             .try_collect()
             .await?;
-        for anchor in [&resolution_anchor, &confirmed, &latest] {
+        Ok(observations)
+    }
+    async fn recheck_view_anchors(
+        &self,
+        anchors: [&Anchor; 3],
+        captures: &BTreeMap<String, EvidenceCapture>,
+        endpoint: &str,
+        progress: &ViewProgress,
+        rechecked: &mut BTreeMap<u64, Anchor>,
+    ) -> Result<()> {
+        for anchor in anchors {
             let end = self
-                .recheck_anchor(anchor.height, &mut rechecked, progress, "anchor_recheck")
+                .recheck_anchor(anchor.height, rechecked, progress, "anchor_recheck")
                 .await?;
             if end.height != anchor.height || end.hash != anchor.hash {
                 // A contradiction of captured accepted evidence has its scoped
                 // integrity treatment even when that anchor was also a new read.
-                for capture in query.captures.values() {
+                for capture in captures.values() {
                     let financial_checkpoint = capture.checkpoint.as_ref() == Some(anchor);
                     let previous_confirmed = capture
                         .previous
@@ -757,7 +903,7 @@ impl BaseRpc {
                     if financial_checkpoint || previous_confirmed || previous_latest || durable {
                         return Err(EvidenceConflict {
                             wallet: capture.wallet.clone(),
-                            endpoint: endpoint.clone(),
+                            endpoint: endpoint.to_owned(),
                             anchor: anchor.clone(),
                             latest_only: !financial_checkpoint
                                 && !previous_confirmed
@@ -770,43 +916,7 @@ impl BaseRpc {
                 anyhow::bail!("Base view changed during reconciliation");
             }
         }
-        // The financial checkpoint and captured same-wallet facts must still be
-        // canonical on the very endpoint that supplied these exact reads.
-        for capture in query.captures.values() {
-            self.verify_capture(capture, &endpoint, progress, &mut rechecked)
-                .await?;
-        }
-        let balance_certificates = observations
-            .iter()
-            .filter_map(|(wallet, observation)| {
-                query.captures.get(wallet).map(|capture| {
-                    (
-                        wallet.clone(),
-                        BalanceCertificate::verified(
-                            capture.clone(),
-                            observation.clone(),
-                            resolution_anchor.clone(),
-                        ),
-                    )
-                })
-            })
-            .collect();
-        // Preserve completed evidence even if balance acquisition outlasted its
-        // admission window. The store checks that window before new authority;
-        // retrying this entire sweep here could hold the pool gate forever.
-        Ok(ChainView {
-            admission_valid_until: timestamp.saturating_add(self.max_age),
-            anchor: confirmed,
-            balances: observations
-                .iter()
-                .map(|(id, observation)| (id.clone(), observation.available()))
-                .collect(),
-            observations,
-            balance_certificates,
-            resolution_certificates,
-            released,
-            resolutions,
-        })
+        Ok(())
     }
 }
 fn quantity(v: &Value) -> Result<u64> {
