@@ -7,20 +7,39 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `now` is injected so cross-window and clock-change behavior requires no sleeps.
 /// Prior reservations are observed, never turned back into unattempted cases.
 pub fn inspect(manifest: &Manifest, report: &Value, now: u64) -> Result<Value> {
-    let rows = report["cases"].as_array().context("resume cases missing")?;
-    let mut cases = BTreeMap::new();
-    for row in rows {
-        let id = row["case"].as_str().context("resume case ID missing")?;
-        ensure!(cases.insert(id, row).is_none(), "duplicate resume case");
-    }
+    let cases = index_cases(&report["cases"])?;
     let declared: BTreeSet<_> = manifest.cases.iter().map(|c| c.id.as_str()).collect();
     ensure!(
         cases.keys().copied().collect::<BTreeSet<_>>() == declared,
         "resume case inventory differs from manifest"
     );
-    let events = report["runtime_events"]
-        .as_array()
-        .context("resume runtime events missing")?;
+    let end = original_deadline(&report["runtime_events"], now, manifest.limits.run_seconds)?;
+    let scheduled: Vec<_> = manifest
+        .phases
+        .iter()
+        .flat_map(|p| p.cases.iter().map(String::as_str))
+        .collect();
+    ensure!(
+        scheduled.len() == declared.len()
+            && scheduled.iter().copied().collect::<BTreeSet<_>>() == declared,
+        "resume phase case inventory differs from manifest"
+    );
+    let observed = prior_observations(manifest, report, &cases, &declared)?;
+    eligibility_report(manifest, &cases, now, end, observed)
+}
+
+fn index_cases(rows: &Value) -> Result<BTreeMap<&str, &Value>> {
+    let rows = rows.as_array().context("resume cases missing")?;
+    let mut cases = BTreeMap::new();
+    for row in rows {
+        let id = row["case"].as_str().context("resume case ID missing")?;
+        ensure!(cases.insert(id, row).is_none(), "duplicate resume case");
+    }
+    Ok(cases)
+}
+
+fn original_deadline(events: &Value, now: u64, run_seconds: u64) -> Result<Option<u64>> {
+    let events = events.as_array().context("resume runtime events missing")?;
     let mut first = None;
     for event in events {
         let at = event["at"]
@@ -37,21 +56,19 @@ pub fn inspect(manifest: &Manifest, report: &Value, now: u64) -> Result<Value> {
     let end = first
         .map(|start| {
             start
-                .checked_add(manifest.limits.run_seconds)
+                .checked_add(run_seconds)
                 .context("resume deadline overflow")
         })
         .transpose()?;
-    let expired = end.is_some_and(|end| now >= end);
-    let scheduled: Vec<_> = manifest
-        .phases
-        .iter()
-        .flat_map(|p| p.cases.iter().map(String::as_str))
-        .collect();
-    ensure!(
-        scheduled.len() == declared.len()
-            && scheduled.iter().copied().collect::<BTreeSet<_>>() == declared,
-        "resume phase case inventory differs from manifest"
-    );
+    Ok(end)
+}
+
+fn prior_observations(
+    manifest: &Manifest,
+    report: &Value,
+    cases: &BTreeMap<&str, &Value>,
+    declared: &BTreeSet<&str>,
+) -> Result<usize> {
     // Validate financial state even when there is no eligible window. Missing proof
     // is not permission to use the balance again or to ignore an old liability.
     let proofs = &report["canonical_api_debits"];
@@ -111,6 +128,17 @@ pub fn inspect(manifest: &Manifest, report: &Value, now: u64) -> Result<Value> {
             "prior application identity/completion evidence is invalid or incomplete"
         );
     }
+    Ok(observed)
+}
+
+fn eligibility_report(
+    manifest: &Manifest,
+    cases: &BTreeMap<&str, &Value>,
+    now: u64,
+    end: Option<u64>,
+    observed: usize,
+) -> Result<Value> {
+    let expired = end.is_some_and(|end| now >= end);
     let mut eligible = Vec::new();
     let mut waiting = Vec::new();
     let mut closed = Vec::new();
@@ -226,14 +254,19 @@ mod tests {
     }
     #[test]
     fn canonical_transport_uncertain_state_remains_observation_only_after_resolution() {
-        let (m,mut r)=input();
-        r["cases"][0]["execution"]=json!("TRANSPORT_UNCERTAIN");
-        r["cases"][0]["settlement"]=json!("NOT_SIGNED");
-        let result=inspect(&m,&r,90000).unwrap();
-        assert_eq!(result["observe_only_count"],1);
-        assert_eq!(result["eligible"],json!([]));
-        r["cases"][0]["settlement"]=json!("UNOBSERVED");
-        assert!(inspect(&m,&r,90000).unwrap_err().to_string().contains("unresolved"));
+        let (m, mut r) = input();
+        r["cases"][0]["execution"] = json!("TRANSPORT_UNCERTAIN");
+        r["cases"][0]["settlement"] = json!("NOT_SIGNED");
+        let result = inspect(&m, &r, 90000).unwrap();
+        assert_eq!(result["observe_only_count"], 1);
+        assert_eq!(result["eligible"], json!([]));
+        r["cases"][0]["settlement"] = json!("UNOBSERVED");
+        assert!(
+            inspect(&m, &r, 90000)
+                .unwrap_err()
+                .to_string()
+                .contains("unresolved")
+        );
     }
     #[test]
     fn completed_open_phase_does_not_make_future_cases_eligible() {
