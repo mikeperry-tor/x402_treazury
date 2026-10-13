@@ -175,6 +175,35 @@ UTC-day boundaries are exercised alongside composed registry and summary tests.
 The report interprets saved dispatch evidence; it does not establish provider health
 or attribute failures to Tor.
 
+Qualification planner fixtures compare complete serialized plans for all scenario
+variants and both start modes, retaining invalid combinations as rejections. They
+cover ordered dependency/case validation, wallet bindings, cap fallback, reservation
+and allocation boundaries, reachable arithmetic overflow, and exact first errors.
+Preset, selection, registry and real preparation consumers complement these tests.
+The offline wrapper is checked without catalog credentials or wallet state. Planning
+still grants no execution authority; synthetic plans do not establish live funding
+feasibility. Infeasible billion-pool overflow fixtures are not manufactured: the
+unchanged checked guards and manifest bounds receive independent review.
+
+Wallet argument-resolution tests run the real resolver in isolated subprocesses
+so process-global network policy and environment do not leak between cases. They
+inspect every command's fields without executing it, including configuration and
+network installation order, path defaults, identity assertions and birthday endpoint
+selection. Missing/malformed state and configuration have explicit expectations.
+Real executable fixtures separately cover Clap conflicts, aliases, catalog-free
+administration and preservation of existing state. Resolution-only tests do not
+claim to exercise funded command execution.
+
+Resumption fixtures compare complete eligibility output and ordered failures for
+case inventories, every event timestamp, original deadlines, prior financial states
+and phase windows. Missing start observations remain distinct from expired runs;
+expired windows cannot bypass unresolved prior work. Tests preserve manifest/phase
+ordering, partial lifecycle refusal and the registry's ownership of canonical proof
+and skipped-suffix validation. Registry and real-process cancellation/reopen and
+window tests cover the caller boundary. Eligibility remains offline information,
+never renewed authority or permission to replay attempted work; these checks do not
+exhaustively enumerate concurrency schedules.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
