@@ -240,6 +240,7 @@ pub fn qualification(r: &Value) -> Result<(bool, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("reliability_report_tests.rs");
     fn fixture() -> (Manifest, Value) {
         let mut m = crate::tests::manifest();
         m.limits.run_seconds = 172800;
