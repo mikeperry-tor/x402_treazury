@@ -22,6 +22,66 @@ fn path_tools() -> Vec<x402_treazury::catalog::ToolSpec> {
 }
 
 #[tokio::test]
+async fn nullable_body_fields_preserve_presence_and_wire_names() {
+    let root = json!({"openapi":"3.1.0","paths":{"/profile":{"patch":{
+        "parameters":[{"name":"nickname","in":"query","schema":{"type":"string"}}],
+        "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+            "properties":{"nickname":{"type":["string","null"]},"nested":{"type":"object"}},
+            "required":["nickname"]
+        }}}}
+    }}}});
+    let tools = build_tools(&Config::default(), &root, "route").unwrap();
+    let tool = &tools[0];
+    assert_eq!(tool.input_schema["required"], json!(["nickname_body"]));
+    assert_eq!(
+        tool.input_schema["properties"]["nickname_body"]["type"],
+        json!(["string", "null"])
+    );
+    let args = json!({"nickname":null,"nickname_body":null,"nested":{"value":null,"items":[null]},"extra":null});
+    let routed = tool
+        .route("https://example.com", args.as_object().unwrap())
+        .unwrap();
+    assert!(routed.query.is_empty());
+    let expected = json!({"nickname":null,"nested":{"value":null,"items":[null]},"extra":null});
+    assert_eq!(routed.body, Some(expected.clone()));
+    assert_eq!(
+        tool.route("https://example.com", &Default::default())
+            .unwrap()
+            .body,
+        Some(json!({}))
+    );
+    assert!(
+        path_tools()[0]
+            .route(
+                "https://example.com",
+                json!({"id":null}).as_object().unwrap()
+            )
+            .is_err()
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().fallback(
+                |axum::Json(value): axum::Json<serde_json::Value>| async move { axum::Json(value) },
+            ),
+        )
+        .await
+        .unwrap()
+    });
+    let result = PaidClient::unsigned()
+        .execute(tool.route(&base, args.as_object().unwrap()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
+        expected
+    );
+    task.abort();
+}
+
+#[tokio::test]
 async fn dot_arguments_are_rejected_before_provider_io() {
     let requests = Arc::new(AtomicUsize::new(0));
     let seen = requests.clone();

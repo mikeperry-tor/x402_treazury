@@ -247,7 +247,7 @@ impl ToolSpec {
         let mut path = self.path.clone();
         let mut query = BTreeMap::new();
         let mut body = Map::new();
-        for (key, value) in args.iter().filter(|(_, v)| !v.is_null()) {
+        for (key, value) in args {
             match self
                 .param_routes
                 .get(key)
@@ -255,6 +255,9 @@ impl ToolSpec {
                 .unwrap_or(if self.has_body { "body" } else { "query" })
             {
                 "path" => {
+                    if value.is_null() {
+                        continue;
+                    }
                     let value = arg_text(value);
                     // URL parsing removes dot segments, including percent-encoded
                     // dots. Reject them before they can escape the selected route.
@@ -265,7 +268,9 @@ impl ToolSpec {
                     )
                 }
                 "query" => {
-                    query.insert(key.clone(), value.clone());
+                    if !value.is_null() {
+                        query.insert(key.clone(), value.clone());
+                    }
                 }
                 _ => {
                     body.insert(
