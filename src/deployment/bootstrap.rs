@@ -850,3 +850,7 @@ mod paused_tests;
 #[cfg(test)]
 #[path = "bootstrap_actor_tests.rs"]
 mod actor_tests;
+
+#[cfg(test)]
+#[path = "bootstrap_readiness_tests.rs"]
+mod readiness_tests;

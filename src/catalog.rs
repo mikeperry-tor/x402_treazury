@@ -1263,3 +1263,7 @@ fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "catalog/conversion_tests.rs"]
+mod conversion_tests;
