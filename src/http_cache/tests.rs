@@ -889,3 +889,244 @@ async fn successful_uncacheable_responses_remove_previous_catalog() {
         task.abort();
     }
 }
+
+#[test]
+fn metadata_duplicate_headers_merge_lists_but_reject_conflicting_singletons() {
+    let mut h = headers(&[
+        ("cache-control", "private, max-age=600"),
+        ("vary", "Cookie"),
+    ]);
+    h.append("cache-control", "MAX-AGE = \"30\"".parse().unwrap());
+    h.append("vary", "Accept-Encoding".parse().unwrap());
+    h.append("etag", "\"same\"".parse().unwrap());
+    h.append("etag", "\"same\"".parse().unwrap());
+    let m = Metadata::from_headers(&h, Duration::ZERO, None).unwrap();
+    assert_eq!(m.expires - m.stored, 29);
+    assert_eq!(m.headers["vary"], "Cookie, Accept-Encoding");
+    assert_eq!(m.headers["etag"], "\"same\"");
+    for (name, first, second) in [
+        ("etag", "\"one\"", "\"two\""),
+        ("age", "1", "2"),
+        (
+            "date",
+            "Sun, 06 Nov 1994 08:49:37 GMT",
+            "Sun, 06 Nov 1994 08:49:38 GMT",
+        ),
+        ("expires", "0", "1"),
+        ("last-modified", "one", "two"),
+    ] {
+        let mut h = headers(&[("cache-control", "max-age=600"), (name, first)]);
+        h.append(
+            name.parse::<reqwest::header::HeaderName>().unwrap(),
+            second.parse().unwrap(),
+        );
+        assert!(
+            Metadata::from_headers(&h, Duration::ZERO, None).is_none(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn metadata_freshness_accounts_for_delay_age_and_explicit_precedence() {
+    let h = headers(&[
+        ("cache-control", "max-age=100"),
+        ("age", "20"),
+        ("expires", "0"),
+    ]);
+    let m = Metadata::from_headers(&h, Duration::from_secs(7), None).unwrap();
+    assert_eq!(
+        m.expires - m.stored,
+        72,
+        "max-age overrides Expires; age and response delay both count"
+    );
+    // A fixed future Date avoids wall-clock boundary races while proving that
+    // Expires is relative to the response Date, not the receipt clock.
+    let response_date = httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(4_000_000_000));
+    let expires = httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(4_000_000_120));
+    let dated = Metadata::from_headers(
+        &headers(&[("date", &response_date), ("expires", &expires)]),
+        Duration::from_secs(9),
+        None,
+    )
+    .unwrap();
+    assert_eq!(dated.expires - dated.stored, 110);
+    let historical = Metadata::from_headers(
+        &headers(&[
+            ("date", "Sun, 06 Nov 1994 08:49:37 GMT"),
+            ("expires", "Sun, 06 Nov 1994 08:50:37 GMT"),
+        ]),
+        Duration::ZERO,
+        None,
+    )
+    .unwrap();
+    assert_eq!(historical.expires, historical.stored);
+    let exhausted = Metadata::from_headers(&h, Duration::from_secs(100), None).unwrap();
+    assert_eq!(exhausted.expires, exhausted.stored);
+    for (name, value) in [
+        ("date", "invalid"),
+        ("age", "-1"),
+        ("age", "18446744073709551616"),
+    ] {
+        let h = headers(&[("cache-control", "max-age=100"), (name, value)]);
+        assert!(Metadata::from_headers(&h, Duration::ZERO, None).is_none());
+    }
+    let h = headers(&[("expires", "invalid")]);
+    let m = Metadata::from_headers(&h, Duration::ZERO, None).unwrap();
+    assert_eq!(m.expires, m.stored, "invalid Expires grants no freshness");
+    let h = headers(&[
+        ("cache-control", "max-age=18446744073709551616"),
+        ("age", "18446744073709551615"),
+    ]);
+    let m = Metadata::from_headers(&h, Duration::MAX, None).unwrap();
+    assert_eq!(
+        m.expires, m.stored,
+        "overflow must saturate without renewing freshness"
+    );
+}
+
+#[test]
+fn metadata_validation_replaces_age_observation_and_preserves_omitted_policy() {
+    let old = Metadata::from_headers(
+        &headers(&[
+            ("cache-control", "max-age=600"),
+            ("date", "Sun, 06 Nov 1994 08:49:37 GMT"),
+            ("age", "9999"),
+            ("etag", "\"old\""),
+            ("vary", "Cookie"),
+        ]),
+        Duration::ZERO,
+        None,
+    )
+    .unwrap();
+    assert!(!old.fresh());
+    let refreshed = Metadata::from_headers(
+        &headers(&[("etag", "\"new\"")]),
+        Duration::from_secs(4),
+        Some(&old),
+    )
+    .unwrap();
+    assert!(!refreshed.headers.contains_key("age"));
+    assert_ne!(refreshed.headers["date"], old.headers["date"]);
+    assert_eq!(refreshed.headers["etag"], "\"new\"");
+    assert_eq!(refreshed.headers["vary"], "Cookie");
+    assert_eq!(refreshed.headers["cache-control"], "max-age=600");
+    assert!(refreshed.fresh());
+    assert!(refreshed.expires - refreshed.stored <= 595);
+    let explicit_date = Metadata::from_headers(
+        &headers(&[("date", "Sun, 06 Nov 1994 08:50:37 GMT")]),
+        Duration::ZERO,
+        Some(&old),
+    )
+    .unwrap();
+    assert_eq!(
+        explicit_date.headers["date"],
+        "Sun, 06 Nov 1994 08:50:37 GMT"
+    );
+    assert_eq!(
+        explicit_date.expires, explicit_date.stored,
+        "an explicit validation Date overrides the synthesized receipt Date"
+    );
+    let replaced = Metadata::from_headers(
+        &headers(&[("cache-control", "no-cache"), ("age", "10")]),
+        Duration::ZERO,
+        Some(&old),
+    )
+    .unwrap();
+    assert_eq!(replaced.expires, 0);
+    assert_eq!(replaced.headers["age"], "10");
+    assert!(
+        Metadata::from_headers(
+            &headers(&[("cache-control", "no-store")]),
+            Duration::ZERO,
+            Some(&old)
+        )
+        .is_none()
+    );
+    assert_eq!(
+        old.headers["age"], "9999",
+        "validation does not mutate the old observation"
+    );
+}
+
+#[test]
+fn metadata_rejects_unsafe_variants_and_enforces_selected_header_bound() {
+    for vary in [
+        "*",
+        "Accept, *",
+        "If-None-Match",
+        "if-modified-since",
+        "bad name",
+    ] {
+        assert!(
+            Metadata::from_headers(
+                &headers(&[("cache-control", "max-age=60"), ("vary", vary)]),
+                Duration::ZERO,
+                None
+            )
+            .is_none(),
+            "{vary}"
+        );
+    }
+    let mut h = headers(&[
+        ("cache-control", "max-age=60"),
+        ("vary", " , Cookie, , User-Agent,"),
+    ]);
+    h.insert(
+        "etag",
+        reqwest::header::HeaderValue::from_bytes(&[0xff]).unwrap(),
+    );
+    assert!(Metadata::from_headers(&h, Duration::ZERO, None).is_none());
+    h.remove("etag");
+    assert!(Metadata::from_headers(&h, Duration::ZERO, None).is_some());
+    let exact = "x".repeat(METADATA_LIMIT);
+    let m = Metadata::from_headers(&headers(&[("etag", &exact)]), Duration::ZERO, None).unwrap();
+    assert!(!m.fresh());
+    let oversized = "x".repeat(METADATA_LIMIT + 1);
+    assert!(
+        Metadata::from_headers(&headers(&[("etag", &oversized)]), Duration::ZERO, None).is_none()
+    );
+    let h = headers(&[("cache-control", "max-age=60"), ("set-cookie", &oversized)]);
+    let m = Metadata::from_headers(&h, Duration::ZERO, None).unwrap();
+    assert!(
+        !m.headers.contains_key("set-cookie"),
+        "discarded headers neither persist nor consume metadata capacity"
+    );
+}
+
+#[test]
+fn metadata_directive_quoting_does_not_hide_real_policy() {
+    for directive in [
+        "max-age",
+        "max-age=",
+        "max-age=\"\"",
+        "max-age=-1",
+        "max-age=+1",
+        "max-age=1.5",
+        "max-age=\"60",
+        "extension=\"unfinished\\",
+    ] {
+        assert!(
+            Metadata::from_headers(
+                &headers(&[("cache-control", directive)]),
+                Duration::ZERO,
+                None
+            )
+            .is_none(),
+            "{directive}"
+        );
+    }
+    let h = headers(&[(
+        "cache-control",
+        r#"private, s-maxage=0, extension="escaped\",no-store", max-age=60"#,
+    )]);
+    let m = Metadata::from_headers(&h, Duration::ZERO, None).unwrap();
+    assert_eq!(m.expires - m.stored, 59);
+    let h = headers(&[("cache-control", "max-age=60, NO-CACHE=\"etag\"")]);
+    assert_eq!(
+        Metadata::from_headers(&h, Duration::ZERO, None)
+            .unwrap()
+            .expires,
+        0
+    );
+}
