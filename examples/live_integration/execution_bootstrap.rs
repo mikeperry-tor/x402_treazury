@@ -104,6 +104,10 @@ pub(super) async fn wait_evidence(
     deadline: Instant,
     stop: &CancellationToken,
 ) -> Result<()> {
+    #[cfg(test)]
+    if super::orchestration_tests::active() {
+        return super::orchestration_tests::readiness(phase, child, deadline);
+    }
     let mut progress = Instant::now() - Duration::from_secs(15);
     let mut terminal_reported = std::collections::BTreeSet::new();
     loop {

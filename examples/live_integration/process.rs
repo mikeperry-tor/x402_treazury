@@ -146,6 +146,10 @@ impl ProcessSlot {
     }
 }
 impl Process {
+    #[cfg(test)]
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
     pub fn launch_confined(
         binary: &Path,
         args: &[String],

@@ -978,3 +978,7 @@ mod environment_tests {
         assert!(!environment.contains_key("BASE_RPC_URL"));
     }
 }
+
+#[cfg(test)]
+#[path = "execution_tests.rs"]
+mod orchestration_tests;

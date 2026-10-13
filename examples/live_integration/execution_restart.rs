@@ -18,6 +18,10 @@ pub(super) async fn perform(
     application: &mut session::Application<'_>,
     wait: Wait<'_>,
 ) -> Result<()> {
+    #[cfg(test)]
+    if super::orchestration_tests::active() {
+        return super::orchestration_tests::restart(registry, m, application, wait).await;
+    }
     let Scenario::Lifecycle { restart, .. } = phase.scenario else {
         anyhow::bail!("restart requires lifecycle scenario")
     };

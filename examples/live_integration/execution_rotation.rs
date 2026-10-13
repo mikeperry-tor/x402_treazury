@@ -104,6 +104,21 @@ impl Controller {
                         == round_index as u64),
             "rotation already started; retain observations rather than create another baseline"
         );
+        #[cfg(test)]
+        if super::orchestration_tests::active() {
+            super::orchestration_tests::start_round(round_index, deadline, child, stop)?;
+            return Ok(Some(Self {
+                phase: phase.clone(),
+                round,
+                round_index,
+                before: json!({}),
+                pool: "fixture".into(),
+                generation: round_index as u64,
+                job: None,
+                consumed: false,
+                state: PathBuf::new(),
+            }));
+        }
         let prior = if round_index > 0 {
             let phase_report = report["rotation"]
                 .as_array()
@@ -250,6 +265,12 @@ impl Controller {
             registry.execution_state(&m.run_id, case)? == "COMPLETED",
             "uncertain depletion/service call stops further rotation dispatch; observe only"
         );
+        #[cfg(test)]
+        if super::orchestration_tests::active() {
+            super::orchestration_tests::after_case(self.round_index, case, deadline)?;
+            self.consumed = true;
+            return Ok(());
+        }
         let after = snapshot(&self.state).await?;
         let generation = pool(&after, &self.pool)?["generation"]
             .as_u64()
@@ -318,6 +339,10 @@ impl Controller {
             self.consumed,
             "rotation did not occur within reviewed depletion calls"
         );
+        #[cfg(test)]
+        if super::orchestration_tests::active() {
+            return super::orchestration_tests::finish_round(self.round_index, child, deadline);
+        }
         let mut progress = Instant::now() - Duration::from_secs(15);
         loop {
             let state = snapshot(&self.state).await?;
