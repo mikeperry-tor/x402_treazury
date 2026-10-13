@@ -7,6 +7,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+// A single owned process consumes EOF and acknowledges its drain. An external
+// `cat` adds a shell/descendant lifetime that the application fixture does not
+// need and that the supervisor intentionally does not manage by process group.
+const EOF_CHILD: &str = "while IFS= read -r line; do :; done\nprintf 'fixture-drained\\n'\n";
+const DRAINED: &[u8] = b"fixture-drained\n";
+
+fn assert_drained(application: &session::Application<'_>, closed: &Value) {
+    assert_eq!(closed["complete"], true, "{closed}");
+    assert_eq!(
+        files::read(&application.current.directory.join("serve.stdout")).unwrap(),
+        DRAINED,
+        "successful cleanup must include the child's EOF acknowledgement"
+    );
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Failure {
     None,
@@ -134,7 +149,7 @@ pub(super) async fn restart(
     let closed = application
         .close(registry, m, &config, "fixture_checkpoint")
         .await?;
-    assert_eq!(closed["complete"], true);
+    assert_drained(application, &closed);
     assert_eq!(registry.execution_state(&m.run_id, "s0")?, "COMPLETED");
     let failure = observe(|s| Ok(s.failure))?;
     if failure == Failure::CancelRestart {
@@ -202,7 +217,7 @@ impl Fixture {
         let treasury = store.id().to_owned();
         drop(store);
         let binary = dir.path().join("child");
-        std::fs::write(&binary, "#!/bin/sh\n/bin/cat >/dev/null\n").unwrap();
+        std::fs::write(&binary, format!("#!/bin/sh\n{EOF_CHILD}")).unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
         let mut m = crate::tests::manifest();
         m.binary = binary;
@@ -436,6 +451,32 @@ async fn endpoint(
 }
 
 #[tokio::test]
+async fn fixture_child_acknowledges_eof_even_before_first_runtime_yield() {
+    let dir = tempfile::tempdir().unwrap();
+    for yield_before_close in [false, true] {
+        for _ in 0..16 {
+            let child = Process::launch(
+                Path::new("/bin/sh"),
+                &["-c".into(), EOF_CHILD.into()],
+                &BTreeMap::new(),
+                dir.path(),
+                1024,
+            )
+            .unwrap();
+            let mut slot = crate::process::ProcessSlot::new(child);
+            if yield_before_close {
+                tokio::task::yield_now().await;
+            }
+            slot.begin_shutdown("fixture_eof", Duration::from_secs(5))
+                .unwrap();
+            let evidence = slot.finish_shutdown().await.unwrap();
+            assert!(evidence.success && !evidence.forced_kill && evidence.valid_output());
+            assert_eq!(evidence.stdout.bytes, DRAINED);
+        }
+    }
+}
+
+#[tokio::test]
 async fn lifecycle_rounds_use_real_reservations_completion_and_child_restart() {
     run_fixture(Failure::None).await;
 }
@@ -576,7 +617,7 @@ async fn run_fixture(failure: Failure) {
                 .close(&f.registry, &f.manifest, &config, "fixture_done")
                 .await
                 .unwrap();
-            assert_eq!(closed["complete"], true);
+            assert_drained(&application, &closed);
             assert!(
                 application
                     .summaries()
