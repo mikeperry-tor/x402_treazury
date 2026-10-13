@@ -66,76 +66,27 @@ impl CreditPricing {
         {
             return None;
         }
-        let cost = |credits: u64| format!("{} USDC", amount(credits as u128 * rate as u128));
-        let mut line = if let Some(m) = p.metered {
-            if m.charged_units != "returned_records"
-                || m.unit != "record"
-                || m.default_units > m.max_units
-                || p.base_credits
-                    .checked_add(m.credits_per_unit.checked_mul(m.max_units)?)?
-                    != p.max_credits
-            {
-                return None;
-            }
-            format!(
-                "{} base + {} per returned record ({} defaults to {}, maximum {} records); maximum {}/request",
-                cost(p.base_credits),
-                cost(m.credits_per_unit),
-                m.query_param,
-                m.default_units,
-                m.max_units,
-                cost(p.max_credits)
-            )
-        } else if let Some(b) = p.batch {
-            if b.unit != "url"
-                || b.max_units == 0
-                || p.base_credits.checked_mul(b.max_units)? != p.max_credits
-            {
-                return None;
-            }
-            format!(
-                "up to {}/URL; maximum {} URLs and {}/request",
-                cost(p.base_credits),
-                b.max_units,
-                cost(p.max_credits)
-            )
+        let mut line = if let Some(m) = &p.metered {
+            m.estimate(p.base_credits, p.max_credits, rate)?
+        } else if let Some(b) = &p.batch {
+            b.estimate(p.base_credits, p.max_credits, rate)?
         } else if p.base_credits == p.max_credits && p.surcharges.is_empty() {
-            format!("{}/request", cost(p.base_credits))
+            format!("{}/request", cost(p.base_credits, rate))
         } else {
             format!(
                 "{} base; maximum {}/request",
-                cost(p.base_credits),
-                cost(p.max_credits)
+                cost(p.base_credits, rate),
+                cost(p.max_credits, rate)
             )
         };
-        for surcharge in p.surcharges {
-            let condition = match surcharge.when.as_str() {
-                "boolean_true" => "is true",
-                "present" => "is supplied",
-                _ => return None,
-            };
-            if surcharge.credits > p.max_credits {
-                return None;
-            }
-            // The structured credit value can be a cap (e.g. 24 assets × 2 credits),
-            // so never interpret it as a per-item or necessarily fixed charge.
-            line.push_str(&format!(
-                "; up to {} extra when {} {} ({})",
-                cost(surcharge.credits),
-                surcharge.query_param,
-                condition,
-                surcharge.label
-            ));
-        }
-        if p.normalization_failure_credits > 0 {
-            line.push_str(&format!(
-                "; normalization-failure charge {}",
-                cost(p.normalization_failure_credits)
-            ));
-        }
+        p.append_charges(&mut line, rate)?;
         Some(line)
     }
 }
+fn cost(credits: u64, rate: u64) -> String {
+    format!("{} USDC", amount(credits as u128 * rate as u128))
+}
+
 fn amount(units: u128) -> String {
     let text = format!("{}.{:06}", units / 1_000_000, units % 1_000_000);
     text.trim_end_matches('0').trim_end_matches('.').to_owned()
@@ -177,4 +128,72 @@ struct Surcharge {
     when: String,
     #[serde(rename = "badge")]
     _badge: Option<String>,
+}
+
+impl Metered {
+    fn estimate(&self, base_credits: u64, max_credits: u64, rate: u64) -> Option<String> {
+        if self.charged_units != "returned_records"
+            || self.unit != "record"
+            || self.default_units > self.max_units
+            || base_credits.checked_add(self.credits_per_unit.checked_mul(self.max_units)?)?
+                != max_credits
+        {
+            return None;
+        }
+        Some(format!(
+            "{} base + {} per returned record ({} defaults to {}, maximum {} records); maximum {}/request",
+            cost(base_credits, rate),
+            cost(self.credits_per_unit, rate),
+            self.query_param,
+            self.default_units,
+            self.max_units,
+            cost(max_credits, rate)
+        ))
+    }
+}
+impl Batch {
+    fn estimate(&self, base_credits: u64, max_credits: u64, rate: u64) -> Option<String> {
+        if self.unit != "url"
+            || self.max_units == 0
+            || base_credits.checked_mul(self.max_units)? != max_credits
+        {
+            return None;
+        }
+        Some(format!(
+            "up to {}/URL; maximum {} URLs and {}/request",
+            cost(base_credits, rate),
+            self.max_units,
+            cost(max_credits, rate)
+        ))
+    }
+}
+impl Tariff {
+    fn append_charges(&self, line: &mut String, rate: u64) -> Option<()> {
+        for surcharge in &self.surcharges {
+            let condition = match surcharge.when.as_str() {
+                "boolean_true" => "is true",
+                "present" => "is supplied",
+                _ => return None,
+            };
+            if surcharge.credits > self.max_credits {
+                return None;
+            }
+            // The structured credit value can be a cap (e.g. 24 assets × 2 credits),
+            // so never interpret it as a per-item or necessarily fixed charge.
+            line.push_str(&format!(
+                "; up to {} extra when {} {} ({})",
+                cost(surcharge.credits, rate),
+                surcharge.query_param,
+                condition,
+                surcharge.label
+            ));
+        }
+        if self.normalization_failure_credits > 0 {
+            line.push_str(&format!(
+                "; normalization-failure charge {}",
+                cost(self.normalization_failure_credits, rate)
+            ));
+        }
+        Some(())
+    }
 }

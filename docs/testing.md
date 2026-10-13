@@ -151,6 +151,13 @@ repeated evidence reads; selected-run sections retain their dependency order and
 fatal versus incomplete error handling. These synthetic reports do not establish
 live settlement or qualification.
 
+Credit-pricing fixtures compare complete descriptions for fixed, bounded, metered
+and batch tariffs, ordered surcharge and normalization suffixes, and unknown
+metadata fallback. They retain zero and maximum values, checked-arithmetic overflow
+rejection and unusual accepted metadata. Caller tests cover original billing text,
+overrides, warnings and absence of pricing probes. Tariff conversion remains a
+display estimate and never grants payment authority.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
