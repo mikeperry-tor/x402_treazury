@@ -37,8 +37,11 @@ against `tests/fixtures/`. Operation validation and stable sorting precede path,
 method and tag selection; only selected operations contribute to name collisions.
 Tool-name filters apply after collision resolution. Digest metadata copying and
 OpenAPI operation conversion remain separate; conversion retains operation-level
-parameters and the existing reference-resolution rules. Header parameters do not grant agents control over
-payment headers. Schema conversion is not a general-purpose OpenAPI implementation;
+parameters and the existing reference-resolution rules. Input construction collects
+parameters before merging body properties; renamed body arguments retain their
+original wire keys, and presence-only alternatives follow those renamed arguments.
+Final sanitization applies to the assembled schema. Header parameters do not grant
+agents control over payment headers. Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves

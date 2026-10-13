@@ -55,6 +55,19 @@ funding correlations, readiness support and first-error order, including existin
 schema permissiveness. These structural validators certify recorded evidence;
 passing their synthetic fixtures does not qualify live settlement.
 
+Catalog input matrices compare complete schemas, routes, body-name mappings and
+body presence. They preserve duplicate-parameter behavior, collision error order,
+required alternatives and recursive sanitization; public routing fixtures check
+that exposed arguments reach the original wire fields.
+
+Provider-semantics matrices pin full outcomes, assertion indices and error order,
+including ambiguous JSON, nested error flags and scan exhaustion. Registry
+dependency tests verify that classification affects admission without rewriting
+payment evidence. Synthetic Tor audit sequences pin credential inheritance,
+permissions, normalized destinations, circuit ownership, success counting and
+required-target completeness. Complete sanitized outputs and rejection order are
+checked; these fixtures establish evidence interpretation, not live isolation.
+
 The [coverage map](../tests/COVERAGE.md) identifies regression boundaries and
 optional qualification methods.
 
