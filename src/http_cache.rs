@@ -78,6 +78,84 @@ pub(crate) fn discovery_get(http: &reqwest::Client, url: &str) -> reqwest::Reque
         .header("accept-encoding", "identity")
 }
 
+/// Private-cache storage directives, independent of receipt-time freshness.
+struct CacheControl {
+    max_age: Option<u64>,
+    validate: bool,
+}
+impl CacheControl {
+    fn parse(value: &str) -> Option<Self> {
+        let mut max_age = None;
+        let mut validate = false;
+        for directive in cache_directives(value)? {
+            let (name, value) = directive
+                .trim()
+                .split_once('=')
+                .map_or((directive.trim(), None), |(n, v)| {
+                    (n.trim(), Some(v.trim()))
+                });
+            match name.to_ascii_lowercase().as_str() {
+                "no-store" => return None,
+                "no-cache" => validate = true,
+                "max-age" => {
+                    let value = value?;
+                    let value = if let Some(value) = value.strip_prefix('"') {
+                        value.strip_suffix('"')?
+                    } else {
+                        value
+                    };
+                    if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
+                        return None;
+                    }
+                    let seconds = value.parse::<u64>().unwrap_or(u64::MAX);
+                    max_age = Some(max_age.map_or(seconds, |old: u64| old.min(seconds)));
+                }
+                // This is a private cache; private and s-maxage do not forbid
+                // storage. Unknown extensions do not override known directives.
+                _ => (),
+            }
+        }
+        Some(Self { max_age, validate })
+    }
+    fn expires(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+        delay: Duration,
+        stored: u64,
+    ) -> Option<u64> {
+        let response_date = headers.get("date").map(|v| date(v)).transpose_option()?;
+        let age = headers
+            .get("age")
+            .map(|v| v.parse::<u64>().ok())
+            .transpose_option()?
+            .unwrap_or(0);
+        let explicit = self.max_age.or_else(|| {
+            headers.get("expires").map(|v| {
+                date(v)
+                    .unwrap_or(0)
+                    .saturating_sub(response_date.unwrap_or(stored))
+            })
+        });
+        let lifetime = explicit;
+        let apparent = stored.saturating_sub(response_date.unwrap_or(stored));
+        let corrected = age
+            .saturating_add(delay.as_secs().saturating_add(1))
+            .max(apparent);
+        let expires = if self.validate {
+            0
+        } else {
+            stored.saturating_add(lifetime.unwrap_or(0).saturating_sub(corrected))
+        };
+        if lifetime.is_none()
+            && !headers.contains_key("etag")
+            && !headers.contains_key("last-modified")
+        {
+            return None;
+        }
+        Some(expires)
+    }
+}
+
 impl Metadata {
     pub fn from_headers(headers: &HeaderMap, delay: Duration, old: Option<&Self>) -> Option<Self> {
         Self::parse(headers, delay, old)
@@ -135,6 +213,28 @@ impl Metadata {
         }
     }
     fn parse(headers: &HeaderMap, delay: Duration, old: Option<&Self>) -> Option<Self> {
+        let selected = Self::select_headers(headers, old)?;
+        Self::validate_vary(&selected)?;
+        let control = CacheControl::parse(
+            selected
+                .get("cache-control")
+                .map(String::as_str)
+                .unwrap_or(""),
+        )?;
+        let stored = now();
+        let expires = control.expires(&selected, delay, stored)?;
+        Some(Self {
+            headers: selected,
+            stored,
+            expires,
+            local_override: false,
+            direct_reuse: false,
+        })
+    }
+    fn select_headers(
+        headers: &HeaderMap,
+        old: Option<&Self>,
+    ) -> Option<std::collections::BTreeMap<String, String>> {
         let mut selected = old.map(|m| m.headers.clone()).unwrap_or_default();
         // A validation response supplies a new age observation, not the age of
         // the previous download. Synthesize its receipt Date if omitted.
@@ -176,6 +276,9 @@ impl Metadata {
             );
             return None;
         }
+        Some(selected)
+    }
+    fn validate_vary(selected: &std::collections::BTreeMap<String, String>) -> Option<()> {
         if let Some(vary) = selected.get("vary") {
             for name in vary.split(',').map(str::trim).filter(|n| !n.is_empty()) {
                 if name == "*" {
@@ -188,78 +291,7 @@ impl Metadata {
                 }
             }
         }
-        let mut max_age = None;
-        let mut validate = false;
-        for directive in cache_directives(
-            selected
-                .get("cache-control")
-                .map(String::as_str)
-                .unwrap_or(""),
-        )? {
-            let (name, value) = directive
-                .trim()
-                .split_once('=')
-                .map_or((directive.trim(), None), |(n, v)| {
-                    (n.trim(), Some(v.trim()))
-                });
-            match name.to_ascii_lowercase().as_str() {
-                "no-store" => return None,
-                "no-cache" => validate = true,
-                "max-age" => {
-                    let value = value?;
-                    let value = if let Some(value) = value.strip_prefix('"') {
-                        value.strip_suffix('"')?
-                    } else {
-                        value
-                    };
-                    if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
-                        return None;
-                    }
-                    let seconds = value.parse::<u64>().unwrap_or(u64::MAX);
-                    max_age = Some(max_age.map_or(seconds, |old: u64| old.min(seconds)));
-                }
-                // This is a private cache; private and s-maxage do not forbid
-                // storage. Unknown extensions do not override known directives.
-                _ => (),
-            }
-        }
-        let stored = now();
-        let response_date = selected.get("date").map(|v| date(v)).transpose_option()?;
-        let age = selected
-            .get("age")
-            .map(|v| v.parse::<u64>().ok())
-            .transpose_option()?
-            .unwrap_or(0);
-        let explicit = max_age.or_else(|| {
-            selected.get("expires").map(|v| {
-                date(v)
-                    .unwrap_or(0)
-                    .saturating_sub(response_date.unwrap_or(stored))
-            })
-        });
-        let lifetime = explicit;
-        let apparent = stored.saturating_sub(response_date.unwrap_or(stored));
-        let corrected = age
-            .saturating_add(delay.as_secs().saturating_add(1))
-            .max(apparent);
-        let expires = if validate {
-            0
-        } else {
-            stored.saturating_add(lifetime.unwrap_or(0).saturating_sub(corrected))
-        };
-        if lifetime.is_none()
-            && !selected.contains_key("etag")
-            && !selected.contains_key("last-modified")
-        {
-            return None;
-        }
-        Some(Self {
-            headers: selected,
-            stored,
-            expires,
-            local_override: false,
-            direct_reuse: false,
-        })
+        Some(())
     }
     /// Fixed labels only: never expose validator values or upstream header prose.
     pub fn policy_label(headers: &HeaderMap, metadata: Option<&Self>) -> &'static str {
