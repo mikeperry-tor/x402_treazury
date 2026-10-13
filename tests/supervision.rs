@@ -245,6 +245,48 @@ async fn unsigned_child_enforces_auth_refuses_payment_and_drains_on_parent_eof()
     server.abort();
 }
 #[tokio::test]
+async fn invalid_parent_control_drains_accepted_call_before_reporting_control_error() {
+    use tokio::io::AsyncWriteExt;
+
+    let (base, v, server) = vendor().await;
+    let dir = tempfile::tempdir().unwrap();
+    config(dir.path(), &base, false);
+    let mut child = spawn(dir.path(), true);
+    let mut pipe = child.stdin.take().unwrap();
+    let url = endpoint(&wait_log(dir.path(), "MCP listening").await);
+    let task = tokio::spawn(async move {
+        call(&url, "test_slow", TOKEN)
+            .await
+            .mcp_json::<Value>()
+            .await
+            .unwrap()
+    });
+    tokio::time::timeout(Duration::from_secs(5), v.arrived.notified())
+        .await
+        .unwrap();
+
+    pipe.write_all(b"invalid control").await.unwrap();
+    wait_log(dir.path(), "draining accepted work").await;
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "control error abandoned an accepted request"
+    );
+    v.release.notify_one();
+    let response = task.await.unwrap();
+    assert_eq!(response["result"]["isError"], false, "{response}");
+    assert!(response.to_string().contains("finished slow call"));
+    assert!(!exit(&mut child).await.success());
+    assert!(log(dir.path()).contains("accepts EOF only; received unexpected data"));
+    assert!(!dir.path().join("must-not-be-created").exists());
+    assert_eq!(
+        std::fs::metadata(dir.path().join("stdout")).unwrap().len(),
+        0
+    );
+    assert_eq!(v.signed.load(Ordering::SeqCst), 0);
+    server.abort();
+}
+
+#[tokio::test]
 async fn eof_interrupts_catalog_startup_and_invalid_control_data_fails_closed() {
     for invalid_data in [false, true] {
         let (base, v, server) = vendor().await;
