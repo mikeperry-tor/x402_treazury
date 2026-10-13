@@ -69,7 +69,7 @@ not removed by API filters.
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `network`, `category`. Browse supports pagination and directory filters; best supports ranking preferences and a result limit. |
+| `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `category`; the server always sets `network=BSE`. Browse supports pagination and directory filters; best supports ranking preferences and a result limit. |
 | `x402_treazury_source_details` | Required directory `slug` from search. Returns advertised endpoints, pricing and reliability; this is not a registered `source_id`. |
 | `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
 | `x402_treazury_tools_search` | Optional `query`, `source_id`, `cursor`, `limit`. |
@@ -90,11 +90,20 @@ to `GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, or
 `include_facilitator_context`. For example:
 `{"mode":"best","q":"weather","prefer":"cheapest","limit":3}`.
 The price filter is a directory recommendation filter, not a payment cap.
+The built-in search hides the network parameter and always sends `network=BSE` in both modes.
+Agent-supplied `network` arguments are rejected before I/O.
 The local `mode` selector is never sent upstream; unsupported or mixed-mode arguments
 fail before network I/O. Each call selects exactly one directory operation and preserves
 its response, including ranking information. Details dispatches to
 `GET /services/{slug}`; use `{"slug":"<slug from search>"}` to inspect a candidate
-before obtaining its published specification and adding it.
+before obtaining its published specification and adding it. Follow provider documentation or
+website links to the OpenAPI JSON document; the provider's `llms.txt` may link to those
+docs. Use available web tools to verify candidate URLs such as `/openapi.json` or
+`/.well-known/openapi.json` actually return an OpenAPI 3 JSON document for the intended
+API. Never invent URLs or derive request schemas from prose. If no published spec can
+be found, report that registration is unavailable. Pass the verified URL to
+`source_add`, then use `tools_search` with its returned `source_id` and invoke the
+chosen `tool_ref` through `tool_call`.
 
 Source management contributes five definitions; searches return directory leads
 and selected tool signatures on demand. Registered tools, including persisted

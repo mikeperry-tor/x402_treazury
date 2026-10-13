@@ -1454,9 +1454,9 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     assert_eq!(parsed["route"], "browse");
     assert_eq!(
         parsed["args"],
-        json!({"q":"weather","page":"2","per_page":"7"})
+        json!({"q":"weather","page":"2","per_page":"7","network":"BSE"})
     );
-    let result = invoke(directory::SEARCH, json!({"mode":"best","q":"weather","network":"BSE","prefer":"cheapest","max_price_usd":0.02,"require_verified":true,"limit":3})).await;
+    let result = invoke(directory::SEARCH, json!({"mode":"best","q":"weather","prefer":"cheapest","max_price_usd":0.02,"require_verified":true,"limit":3})).await;
     let parsed: Value =
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(parsed["route"], "best");
@@ -1476,6 +1476,8 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     assert_eq!(parsed["endpoints"][0]["path"], "/read");
     assert_eq!(requests.load(Ordering::SeqCst), 3);
     for (name, args) in [
+        (directory::SEARCH, json!({"network":"BSE"})),
+        (directory::SEARCH, json!({"mode":"best","network":"SOL"})),
         (directory::SEARCH, json!({"mode":"best","page":1})),
         (
             directory::SEARCH,
@@ -1520,6 +1522,10 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     );
     assert!(tools::definitions(false).is_empty());
     let schema = directory::search_schema();
+    assert!(schema["properties"].get("network").is_none());
+    for branch in schema["oneOf"].as_array().unwrap() {
+        assert!(branch["properties"].get("network").is_none());
+    }
     assert_eq!(schema["properties"]["mode"]["default"], "browse");
     assert_eq!(schema["oneOf"][0]["properties"]["mode"]["const"], "browse");
     assert!(schema["oneOf"][0]["properties"].get("limit").is_none());
@@ -1530,6 +1536,9 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
             .as_object()
             .unwrap()
         {
+            if name == "network" {
+                continue;
+            }
             let mut merged = schema["properties"][name].clone();
             let original_description = field["description"].as_str().unwrap();
             assert!(

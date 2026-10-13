@@ -323,7 +323,11 @@ and [the runtime architecture](docs/architecture.md).
   They require no static directory source or selector, do no startup catalog I/O,
   and expose only the management wrappers. Reject mixed-mode search arguments before
   I/O; dispatch once to /services or /best and use a directory slug for details.
-  Keep their schemas aligned with the pinned directory contract; importing sources never grants a directory transport bypass.
+  Keep their schemas aligned with the pinned directory contract, except that built-in search
+  hides `network` and always sends `BSE`; agent-supplied network arguments fail before I/O.
+  Tool descriptions guide agents through provider documentation to a verified public
+  OpenAPI JSON URL, then registration, tool search and invocation. Importing sources
+  never grants a directory transport bypass.
 - Agent imports require public HTTPS and bounded bytes/reference expansion. Direct
   DNS validation happens in the network factory's resolver; Tor preserves remote DNS
   and depends on Tor's internal-address rejection. Dynamic paid clients must retain

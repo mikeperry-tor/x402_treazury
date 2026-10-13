@@ -39,7 +39,7 @@ pub fn search_schema() -> Value {
     let mut properties = Map::new();
     for (mode, schema, other) in [("browse", browse, best), ("best", best, browse)] {
         for (name, field) in schema["properties"].as_object().unwrap() {
-            if properties.contains_key(name) {
+            if name == "network" || properties.contains_key(name) {
                 continue;
             }
             let mut field = field.clone();
@@ -64,6 +64,7 @@ pub fn search_schema() -> Value {
             .as_object()
             .unwrap()
             .keys()
+            .filter(|name| name.as_str() != "network")
             .map(|name| (name.clone(), json!({})))
             .collect();
         allowed.insert("mode".into(), json!({"const":mode}));
@@ -89,6 +90,10 @@ pub fn request(
     name: &str,
     args: &Map<String, Value>,
 ) -> Result<(&'static ToolSpec, Map<String, Value>)> {
+    ensure!(
+        !args.contains_key("network"),
+        "directory network is selected by the server; omit network"
+    );
     let mut args = args.clone();
     let (selected, mode) = match name {
         SEARCH => match args.remove("mode") {
@@ -100,6 +105,9 @@ pub fn request(
         DETAILS => (tool("/services/{slug}"), "details"),
         _ => bail!("unknown directory tool"),
     };
+    if name == SEARCH {
+        args.insert("network".into(), json!("BSE"));
+    }
     let schema = &selected.input_schema;
     let properties = schema["properties"]
         .as_object()
