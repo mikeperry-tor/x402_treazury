@@ -262,6 +262,51 @@ impl MetaConfig {
         Ok(resolution)
     }
 }
+fn validate_selected_cover(
+    wallet_resolution: &Resolution,
+    sources: &BTreeMap<String, Source>,
+    selected: &BTreeMap<String, Vec<(String, ToolSpec)>>,
+) -> Result<()> {
+    let mut cover_owners = BTreeMap::new();
+    for (server, tools) in selected {
+        for (id, tool) in tools {
+            let source = &sources[id];
+            if tool.help_url.is_some() {
+                continue;
+            }
+            if let Some(cover) = &source.config.cover_traffic {
+                let route = if tool.path.starts_with("https://") || tool.path.starts_with("http://")
+                {
+                    tool.path.clone()
+                } else {
+                    source.base_url.clone()
+                };
+                cover.validate_origin(&route)?;
+                let key = (
+                    wallet_resolution.bindings[server][id].wallet.clone(),
+                    reqwest::Url::parse(&route)?.origin().ascii_serialization(),
+                    source.config.transport(),
+                    crate::network::global()
+                        .read_timeout(
+                            source
+                                .config
+                                .read_timeout_seconds
+                                .map(Duration::from_secs_f64),
+                        )
+                        .as_millis(),
+                );
+                if let Some(previous) = cover_owners.insert(key, cover) {
+                    ensure!(
+                        previous == cover,
+                        "conflicting cover settings for shared wallet/origin"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Deployment {
     pub async fn show_config(path: &Path) -> Result<serde_json::Value> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
@@ -324,6 +369,75 @@ impl Deployment {
     ) -> Result<Self> {
         Self::load_with_warnings(path, true, Some((env, restriction))).await
     }
+    fn validate_listener_credentials(&self, env: &BTreeMap<String, String>) -> Result<()> {
+        for server in self.config.servers.values().filter(|s| s.auth) {
+            required_secret(env, &server.bearer_token_env)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "zcash")]
+    async fn validate_bootstrap_inputs(
+        &self,
+        path: &Path,
+        env: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        // Validate credentials and authored providers before funding can start.
+        self.validate_listener_credentials(env)?;
+        for source in self.config.sources.values() {
+            crate::config::resolve(source.provider.clone(), path).await?;
+        }
+        Ok(())
+    }
+
+    async fn initialize_discovery_relay(
+        &mut self,
+        path: &Path,
+        relay_env: Option<(
+            &BTreeMap<String, String>,
+            crate::rotation::restriction::FundingRestriction,
+        )>,
+    ) -> Result<crate::discovery_relay::Relays> {
+        Ok(
+            if let Some(policy) = self.config.discovery_relay.clone().filter(|p| p.serve)
+                && let Some((env, restriction)) = relay_env
+            {
+                ensure!(
+                    !crate::qualification::active() && !catalog_evidence::collecting(),
+                    "paid discovery relay is unavailable during qualification"
+                );
+                // Validate listener credentials before discovery can spend.
+                self.validate_listener_credentials(env)?;
+                let bindings = crate::discovery_relay::resolve_wallets(
+                    &policy,
+                    &self.config,
+                    &self.wallet_resolution,
+                    self.config.sources.keys().cloned(),
+                )?;
+                let needed = bindings.values().cloned().collect();
+                if self.initialized.is_none() {
+                    self.initialized = Some(
+                        self.initialize_wallets(env, restriction, None, &needed)
+                            .await?,
+                    );
+                }
+                crate::discovery_relay::build(
+                    &policy,
+                    path,
+                    &bindings,
+                    &self
+                        .initialized
+                        .as_ref()
+                        .expect("initialized discovery wallets")
+                        .wallets,
+                )
+                .await?
+            } else {
+                Default::default()
+            },
+        )
+    }
+
     async fn load_with_warnings(
         path: &Path,
         warn: bool,
@@ -364,60 +478,14 @@ impl Deployment {
                 .values()
                 .any(WalletConfig::managed)
         {
-            // Validate credentials and authored providers before funding can start.
-            for server in deployment.config.servers.values().filter(|s| s.auth) {
-                required_secret(env, &server.bearer_token_env)?;
-            }
-            for source in deployment.config.sources.values() {
-                crate::config::resolve(source.provider.clone(), path).await?;
-            }
+            deployment.validate_bootstrap_inputs(path, env).await?;
             deployment.initialized =
                 Some(deployment.bootstrap_for_serving(env, restriction).await?);
         }
         let loaded: Result<()> = async {
-            let relay = if let Some(policy) = deployment
-                .config
-                .discovery_relay
-                .clone()
-                .filter(|p| p.serve)
-                && let Some((env, restriction)) = relay_env
-            {
-                ensure!(
-                    !crate::qualification::active() && !catalog_evidence::collecting(),
-                    "paid discovery relay is unavailable during qualification"
-                );
-                // Validate listener credentials before discovery can spend.
-                for server in deployment.config.servers.values().filter(|s| s.auth) {
-                    required_secret(env, &server.bearer_token_env)?;
-                }
-                let bindings = crate::discovery_relay::resolve_wallets(
-                    &policy,
-                    &deployment.config,
-                    &deployment.wallet_resolution,
-                    deployment.config.sources.keys().cloned(),
-                )?;
-                let needed = bindings.values().cloned().collect();
-                if deployment.initialized.is_none() {
-                    deployment.initialized = Some(
-                        deployment
-                            .initialize_wallets(env, restriction, None, &needed)
-                            .await?,
-                    );
-                }
-                crate::discovery_relay::build(
-                    &policy,
-                    path,
-                    &bindings,
-                    &deployment
-                        .initialized
-                        .as_ref()
-                        .expect("initialized discovery wallets")
-                        .wallets,
-                )
-                .await?
-            } else {
-                Default::default()
-            };
+            let relay = deployment
+                .initialize_discovery_relay(path, relay_env)
+                .await?;
             let config = &deployment.config;
             let wallet_resolution = &deployment.wallet_resolution;
             let (sources, unavailable_sources) = startup::load(config, path, warn, relay).await?;
@@ -426,44 +494,7 @@ impl Deployment {
                 let tools = select_listener_tools(name, server, &sources, &unavailable_sources)?;
                 selected.insert(name.clone(), tools);
             }
-            let mut cover_owners = BTreeMap::new();
-            for (server, tools) in &selected {
-                for (id, tool) in tools {
-                    let source = &sources[id];
-                    if tool.help_url.is_some() {
-                        continue;
-                    }
-                    if let Some(cover) = &source.config.cover_traffic {
-                        let route = if tool.path.starts_with("https://")
-                            || tool.path.starts_with("http://")
-                        {
-                            tool.path.clone()
-                        } else {
-                            source.base_url.clone()
-                        };
-                        cover.validate_origin(&route)?;
-                        let key = (
-                            wallet_resolution.bindings[server][id].wallet.clone(),
-                            reqwest::Url::parse(&route)?.origin().ascii_serialization(),
-                            source.config.transport(),
-                            crate::network::global()
-                                .read_timeout(
-                                    source
-                                        .config
-                                        .read_timeout_seconds
-                                        .map(Duration::from_secs_f64),
-                                )
-                                .as_millis(),
-                        );
-                        if let Some(previous) = cover_owners.insert(key, cover) {
-                            ensure!(
-                                previous == cover,
-                                "conflicting cover settings for shared wallet/origin"
-                            );
-                        }
-                    }
-                }
-            }
+            validate_selected_cover(wallet_resolution, &sources, &selected)?;
             deployment.unavailable_sources = unavailable_sources.into_keys().collect();
             deployment.sources = sources;
             deployment.selected = selected;
