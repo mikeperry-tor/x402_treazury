@@ -318,6 +318,154 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn scalar_container_and_alternative_constraints_preserve_outcomes() {
+        for (schema, value, accepted) in [
+            (json!(true), json!(null), true),
+            (json!(false), json!(null), false),
+            (json!({"type":["null","string"]}), json!(null), true),
+            (json!({"type":["null","string"]}), json!(1), false),
+            (json!({"type":"integer"}), json!(1.5), false),
+            (json!({"enum":[1,2],"const":2}), json!(2), true),
+            (json!({"enum":[1,2],"const":2}), json!(1), false),
+            (
+                json!({"type":"array","minItems":2,"maxItems":2,"items":{"type":"boolean"}}),
+                json!([true, false]),
+                true,
+            ),
+            (json!({"items":false}), json!([]), true),
+            (json!({"items":false}), json!([null]), false),
+            (json!({"minItems":2}), json!([1]), false),
+            (json!({"maxItems":1}), json!([1, 2]), false),
+            (
+                json!({"minLength":2,"maxLength":2,"pattern":"^é.$"}),
+                json!("é水"),
+                true,
+            ),
+            (json!({"minLength":2}), json!("é"), false),
+            (json!({"pattern":"^a$"}), json!("b"), false),
+            (
+                json!({"properties":{"x":{"const":1}},"additionalProperties":{"type":"boolean"}}),
+                json!({"x":1,"y":false}),
+                true,
+            ),
+            (
+                json!({"additionalProperties":false}),
+                json!({"extra":null}),
+                false,
+            ),
+            (json!({"minimum":2,"maximum":2}), json!(2), true),
+            (json!({"exclusiveMinimum":2}), json!(2), false),
+            (json!({"exclusiveMaximum":2}), json!(2), false),
+            (
+                json!({"exclusiveMinimum":1,"exclusiveMaximum":3}),
+                json!(2),
+                true,
+            ),
+            (
+                json!({"maximum":9007199254740991u64}),
+                json!(9007199254740991u64),
+                true,
+            ),
+            (json!({"allOf":[true,false]}), json!(null), false),
+            (json!({"anyOf":[false,true]}), json!(null), true),
+            (json!({"oneOf":[true,true]}), json!(null), false),
+            (json!({"oneOf":[false,true]}), json!(null), true),
+            (json!({"not":false}), json!(null), true),
+            (json!({"not":true}), json!(null), false),
+        ] {
+            assert_eq!(
+                validate(&schema, &value).is_ok(),
+                accepted,
+                "schema={schema}, value={value}"
+            );
+        }
+    }
+
+    #[test]
+    fn competing_failures_keep_preflight_and_constraint_order() {
+        for (schema, value, expected) in [
+            (
+                json!({"anyOf":[true,{"unsupported":true}]}),
+                json!(9007199254740992u64),
+                "unsupported schema keyword unsupported; cannot certify arguments",
+            ),
+            (
+                json!({"type":"string","enum":[1]}),
+                json!(1),
+                "argument type mismatch",
+            ),
+            (
+                json!({"enum":[1],"const":2}),
+                json!(3),
+                "argument not in enum",
+            ),
+            (
+                json!({"required":["x"],"additionalProperties":false}),
+                json!({"y":1}),
+                "missing required argument",
+            ),
+            (
+                json!({"minItems":2,"items":false}),
+                json!([1]),
+                "argument below minimum length",
+            ),
+            (
+                json!({"maxLength":1,"pattern":"^a$"}),
+                json!("bb"),
+                "argument exceeds maximum length",
+            ),
+            (
+                json!({"allOf":[false],"not":true}),
+                json!(1),
+                "schema alternatives did not match",
+            ),
+        ] {
+            assert_eq!(validate(&schema, &value).unwrap_err().to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn public_validation_preserves_depth_and_shared_alternative_work_limits() {
+        let mut schema = json!(true);
+        let mut value = json!(null);
+        for _ in 0..63 {
+            schema = json!({"items":schema});
+            value = json!([value]);
+        }
+        assert!(validate(&schema, &value).is_ok());
+        assert_eq!(
+            validate(&json!({"items":schema}), &json!([value]))
+                .unwrap_err()
+                .to_string(),
+            "schema exceeds 64-level or 100000-node qualification limit"
+        );
+        let mut deep_value = json!(null);
+        for _ in 0..64 {
+            deep_value = json!([deep_value]);
+        }
+        assert_eq!(
+            validate(&json!(true), &deep_value).unwrap_err().to_string(),
+            "arguments exceed 64-level or 100000-node qualification limit"
+        );
+        // One root and two fully evaluated array branches consume 99999 visits.
+        let values = Value::Array(vec![Value::Null; 49_998]);
+        let branches = json!({"anyOf":[{"items":true},{"items":true}]});
+        assert!(validate(&branches, &values).is_ok());
+        // Even an already successful alternative does not skip later branches;
+        // exactly exhausting the shared budget fails at the public entry point.
+        for schema in [
+            json!({"anyOf":[true,{"items":true},{"items":true}]}),
+            json!({"anyOf":[{"items":true},{"items":true},true]}),
+            json!({"not":{"allOf":[{"items":true},{"items":true}]}}),
+        ] {
+            assert_eq!(
+                validate(&schema, &values).unwrap_err().to_string(),
+                "argument validation exceeded 100000-operation qualification limit"
+            );
+        }
+    }
+
+    #[test]
     fn nested_arguments_and_unknown_assertions_fail_closed() {
         let s = json!({"type":"object","required":["n"],"properties":{"n":{"type":"integer","minimum":2}},"additionalProperties":false});
         assert!(validate(&s, &json!({"n":2})).is_ok());

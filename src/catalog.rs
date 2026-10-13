@@ -1231,6 +1231,9 @@ fn operation_tool(
     })
 }
 
+#[cfg(test)]
+mod selection_tests;
+
 fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) {
     if let Some(ap) = cfg.additional_properties {
         tool.input_schema["additionalProperties"] = json!(ap);
