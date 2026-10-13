@@ -120,3 +120,54 @@ async fn queued_timeout_and_cancellation_never_transmit_headers_or_body() {
         let _ = server.await;
     }
 }
+
+#[tokio::test]
+async fn empty_http2_data_frames_do_not_renew_response_inactivity() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let socket = wire::tls().accept(socket).await.unwrap();
+        let mut conn = h2::server::handshake(socket).await.unwrap();
+        let mut replies = tokio::task::JoinSet::new();
+        while let Some(Ok((_, mut respond))) = conn.accept().await {
+            replies.spawn(async move {
+                let mut body = respond.send_response(Response::new(()), false).unwrap();
+                for _ in 0..20 {
+                    if body.send_data(Bytes::new(), false).is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                let _ = body.send_data(Bytes::from_static(b"too late"), true);
+            });
+        }
+    });
+    let socks = Socks::start(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(socks.address),
+        cover_traffic_enabled: Some(false),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
+    let client = context
+        .http_policy(
+            &IsolationId::bootstrap(),
+            "https://api.example.com",
+            Duration::from_millis(300),
+            false,
+            HttpPolicy::default(),
+        )
+        .unwrap();
+    let response = client.get("https://api.example.com").send().await.unwrap();
+    let started = tokio::time::Instant::now();
+    assert!(response.bytes().await.unwrap_err().is_timeout());
+    assert!(started.elapsed() < Duration::from_millis(900));
+    server.abort();
+}

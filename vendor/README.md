@@ -60,3 +60,15 @@ change to financial authority is introduced. Application real TLS/SOCKS tests
 check raw HEADERS absence, GET/POST cancellation and timeout, and reuse of the
 healthy multiplexed connection. Remove the patch only after equivalent upstream
 behavior passes those regressions.
+
+`reqwest` 0.13.5 is also preserved from its published archive, with
+`reqwest-transport.patch`. HTTP/1 and HTTP/2 header inactivity begins at the
+per-request Hyper connection capture (after DNS/SOCKS/TLS), body inactivity
+ignores empty DATA, and backpressured consumers can read available bytes before
+timeout rejection. The separate Hyper stale-connection automatic retry is
+disabled to match the application's no-automatic-retry policy; explicit unsigned
+Base RPC retries remain at their existing owning layer. The unenabled HTTP/3
+implementation is unchanged. Real direct/Tor DNS, SOCKS, TLS, stream contention,
+sibling response progress, body stalls and consumer backpressure are tested via
+the production factory. No large replacement timeout or connection-wide progress
+clock is used.

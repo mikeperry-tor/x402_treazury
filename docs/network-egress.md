@@ -112,6 +112,19 @@ mode. Connection values must be 1..300 seconds, and network read values must be
 1..86400 seconds; the read budget need not exceed the connection budget. Inspection
 reports the effective network values in both modes.
 
+The reviewed reqwest patch starts the HTTP/1 and HTTP/2 header timer only after
+that request acquires its connection, including DNS, SOCKS and TLS. No sibling
+request or keepalive can start or renew it. Stream-capacity waiting and request
+upload remain inside the post-connection header allowance (the same upload
+limitation documented for gRPC below); there is no whole-response deadline.
+Body inactivity renews only on nonempty DATA, and available buffered data is
+consumed before checking elapsed time after consumer backpressure. Hyper's
+separate stale-pool automatic retry is disabled too: an unsigned caller may use
+its existing finite retry policy, but the transport never silently reconnects
+and resends a signed request. Public destinations, remote DNS, TLS verification,
+identity-bound pooling and ordinary error classification remain unchanged.
+
+
 For compatibility, network `request_timeout_seconds` is an alias for
 `read_timeout_seconds`, with its literal value now specifying inactivity. Provider
 `timeout`, legacy pricing `probe_timeout`, import `fetch_timeout_seconds` and CLI

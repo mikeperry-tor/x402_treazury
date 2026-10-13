@@ -4,6 +4,9 @@ mod grpc;
 #[cfg(test)]
 #[path = "network/http_queue_tests.rs"]
 mod http_queue_tests;
+#[cfg(test)]
+#[path = "network/http_timeout_tests.rs"]
+mod http_timeout_tests;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -337,6 +340,12 @@ impl NetworkContext {
             if !transport.allow_tls12 {
                 builder = builder.min_tls_version(reqwest::tls::Version::TLS_1_3);
             }
+        }
+        #[cfg(test)]
+        if self.policy.mode == Mode::Direct
+            && let Some(resolver) = &self.test_dns
+        {
+            builder = builder.dns_resolver(resolver.clone());
         }
         if public_only && self.policy.mode == Mode::Direct {
             let resolver = PublicResolver::default();

@@ -12,6 +12,7 @@ pub const CA: &[u8] = include_bytes!("../fixtures/tls/ca.pem");
 struct Listener {
     tcp: TcpListener,
     tls: TlsAcceptor,
+    delay: std::time::Duration,
 }
 impl axum::serve::Listener for Listener {
     type Io = tokio_rustls::server::TlsStream<TcpStream>;
@@ -19,6 +20,7 @@ impl axum::serve::Listener for Listener {
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
             let (tcp, address) = self.tcp.accept().await.unwrap();
+            tokio::time::sleep(self.delay).await;
             if let Ok(Ok(tls)) =
                 tokio::time::timeout(std::time::Duration::from_secs(3), self.tls.accept(tcp)).await
             {
@@ -43,6 +45,15 @@ pub async fn serve_with(
     versions: &[&'static rustls::SupportedProtocolVersion],
     alpn: &[&[u8]],
 ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    serve_delayed(app, versions, alpn, std::time::Duration::ZERO).await
+}
+
+pub async fn serve_delayed(
+    app: axum::Router,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+    alpn: &[&[u8]],
+    delay: std::time::Duration,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let provider = tokio_rustls::rustls::crypto::ring::default_provider();
     let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
         .with_protocol_versions(versions)
@@ -63,6 +74,7 @@ pub async fn serve_with(
         axum::serve(
             Listener {
                 tcp,
+                delay,
                 tls: TlsAcceptor::from(Arc::new(config)),
             },
             app,

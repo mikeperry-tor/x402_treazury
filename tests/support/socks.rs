@@ -17,6 +17,7 @@ pub enum Fault {
     BadAuth,
     Refuse,
     Stall,
+    Delay(std::time::Duration),
 }
 #[derive(Clone, Debug)]
 pub struct Record {
@@ -72,6 +73,9 @@ async fn serve(
     fault: Fault,
     records: Arc<Mutex<Vec<Record>>>,
 ) -> std::io::Result<()> {
+    if let Fault::Delay(delay) = fault {
+        tokio::time::sleep(delay).await;
+    }
     if matches!(fault, Fault::Stall) {
         std::future::pending::<()>().await;
     }

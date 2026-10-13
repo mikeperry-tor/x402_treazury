@@ -16,6 +16,7 @@ zingolib = { path = "../../vendor/zingolib", default-features = false }
 
 # Experimental compatibility patch: see vendor/README.md.
 [patch.crates-io]
+reqwest = { path = "../../vendor/reqwest" }
 h2 = { path = "../../vendor/h2" }
 hyper = { path = "../../vendor/hyper" }
 # Required by zingolib v6.0.0's own workspace. Cargo does not inherit

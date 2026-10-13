@@ -1,0 +1,128 @@
+--- a/src/async_impl/body.rs
++++ b/src/async_impl/body.rs
+@@ -4,7 +4,7 @@
+ use std::task::{ready, Context, Poll};
+ use std::time::Duration;
+ 
+-use bytes::Bytes;
++use bytes::{Buf, Bytes};
+ use http_body::Body as HttpBody;
+ use http_body_util::combinators::BoxBody;
+ use pin_project_lite::pin_project;
+@@ -347,18 +347,26 @@
+             this.sleep.as_mut().as_pin_mut().unwrap()
+         };
+ 
+-        // Error if the timeout has expired.
+-        if let Poll::Ready(()) = sleep_pinned.poll(cx) {
+-            return Poll::Ready(Some(Err(crate::error::body(crate::error::TimedOut))));
+-        }
+-
+-        let item = ready!(this.inner.poll_frame(cx))
+-            .map(|opt_chunk| opt_chunk.map_err(crate::error::body));
+-        // a ready frame means timeout is reset for the next chunk
+-        if let Some(some) = this.sleep.as_mut().as_pin_mut() {
+-            some.reset(tokio::time::Instant::now() + *this.timeout);
+-        }
+-        Poll::Ready(item)
++        // Available data wins over time spent with a backpressured consumer.
++        // Only nonempty DATA renews this response's inactivity allowance.
++        match this.inner.poll_frame(cx) {
++            Poll::Ready(Some(Ok(frame))) => {
++                if frame.data_ref().is_some_and(|data| data.remaining() != 0) {
++                    sleep_pinned.reset(tokio::time::Instant::now() + *this.timeout);
++                } else if frame.is_data() && sleep_pinned.poll(cx).is_ready() {
++                    return Poll::Ready(Some(Err(crate::error::body(crate::error::TimedOut))));
++                }
++                Poll::Ready(Some(Ok(frame)))
++            }
++            Poll::Ready(frame) => Poll::Ready(frame.map(|result| result.map_err(crate::error::body))),
++            Poll::Pending => {
++                if sleep_pinned.poll(cx).is_ready() {
++                    Poll::Ready(Some(Err(crate::error::body(crate::error::TimedOut))))
++                } else {
++                    Poll::Pending
++                }
++            }
++        }
+     }
+ 
+     #[inline]
+--- a/src/async_impl/client.rs
++++ b/src/async_impl/client.rs
+@@ -139,6 +139,7 @@
+ #[derive(Clone)]
+ struct HyperService {
+     hyper: HyperClient,
++    read_timeout: Option<Duration>,
+ }
+ 
+ impl Service<hyper::Request<crate::async_impl::body::Body>> for HyperService {
+@@ -150,10 +151,31 @@
+         self.hyper.poll_ready(cx).map_err(crate::error::request)
+     }
+ 
+-    fn call(&mut self, req: hyper::Request<crate::async_impl::body::Body>) -> Self::Future {
++    fn call(&mut self, mut req: hyper::Request<crate::async_impl::body::Body>) -> Self::Future {
+         let clone = self.hyper.clone();
+         let mut inner = std::mem::replace(&mut self.hyper, clone);
+-        Box::pin(async move { inner.call(req).await.map_err(crate::error::request) })
++        let timeout = self.read_timeout;
++        // This request's connection acquisition includes DNS, SOCKS and TLS.
++        // Never use connection-wide traffic to start or renew a response timer.
++        let mut connected = hyper_util::client::legacy::connect::capture_connection(&mut req);
++        Box::pin(async move {
++            let response = inner.call(req);
++            tokio::pin!(response);
++            if let Some(timeout) = timeout {
++                tokio::select! {
++                    biased;
++                    result = &mut response => return result.map_err(crate::error::request),
++                    _ = connected.wait_for_connection_metadata() => {},
++                }
++                // Includes stream-capacity waiting and upload, as well as silent
++                // response headers; the connector retains its own full allowance.
++                tokio::time::timeout(timeout, response).await
++                    .map_err(|_| crate::error::request(crate::error::TimedOut))?
++                    .map_err(crate::error::request)
++            } else {
++                response.await.map_err(crate::error::request)
++            }
++        })
+     }
+ }
+ 
+@@ -1014,9 +1036,14 @@
+             Some(format!("{:?}", &config.redirect_policy))
+         };
+ 
++        // The application explicitly disables automatic retries. Do not let
++        // Hyper's separate stale-pool retry reconnect underneath a running
++        // response-header timer or create an unobserved second request attempt.
++        builder.retry_canceled_requests(false);
+         let hyper_client = builder.build(connector_builder.build(config.connector_layers));
+         let hyper_service = HyperService {
+             hyper: hyper_client,
++            read_timeout: config.read_timeout,
+         };
+ 
+         let redirect_policy = {
+@@ -2675,11 +2702,13 @@
+             .map(tokio::time::sleep)
+             .map(Box::pin);
+ 
+-        let read_timeout_fut = self
+-            .inner
+-            .read_timeout
+-            .map(tokio::time::sleep)
+-            .map(Box::pin);
++        // HTTP/1 and HTTP/2 header inactivity is measured in HyperService after
++        // connection acquisition. Preserve the separate HTTP/3 implementation.
++        let read_timeout_fut = match &in_flight {
++            ResponseFuture::Default(_) => None,
++            #[cfg(feature = "http3")]
++            ResponseFuture::H3(_) => self.inner.read_timeout.map(tokio::time::sleep).map(Box::pin),
++        };
+ 
+         Pending {
+             inner: PendingInner::Request(Box::pin(PendingRequest {
