@@ -734,4 +734,122 @@ mod tests {
         .unwrap();
         assert_eq!(result["pending_service_status"], "not_observed");
     }
+    fn assess(f: &Fixture) -> Result<Value> {
+        phase_result(&f.0, &f.1, &f.2, &f.3, &f.4, &f.5, &f.6)
+    }
+
+    #[test]
+    fn complete_shape_and_early_incomplete_results_preserve_precedence() {
+        let f = fixture();
+        let overlap = json!([{"case":"s","job":"j","pool":"p","payment_pool":"p",
+            "pending_before":"ALLOCATED","pending_after":"ALLOCATED",
+            "scope":"verified paid signed-request future through final headers bracketed by same-job pending observations in one application session"}]);
+        assert_eq!(assess(&f).unwrap(), json!({"status":"passed","failed_cases":[],
+            "unresolved_cases":[],"rotation_status":"passed","pending_service_status":"observed",
+            "pending_service":overlap,"unobserved_service_wallets":[],"replacement_job":"j",
+            "generation":1,"promotion":true,"refill_ready":true,"source_submissions":1}));
+        let mut missing = f.clone();
+        missing.1.retain(|e| e["kind"] != "rotation_promotion");
+        missing.2.clear(); // Missing promotion wins over missing cases.
+        assert_eq!(assess(&missing).unwrap(), json!({"status":"incomplete","reason":"promotion not observed"}));
+        missing = f.clone();
+        missing.1.retain(|e| e["kind"] != "rotation_refill_ready");
+        assert_eq!(assess(&missing).unwrap(), json!({"status":"incomplete",
+            "reason":"confirmed refill readiness not observed","pending_service":overlap,
+            "failed_cases":[],"unresolved_cases":[]}));
+        missing.3["estimate"] = Value::Null;
+        assert_eq!(assess(&missing).unwrap_err().to_string(), "recorded depletion estimate changed");
+    }
+
+    #[test]
+    fn failed_settlement_matrix_and_skipped_cases_preserve_outcome_order() {
+        for settlement in ["NOT_SIGNED", "EXPIRED_UNUSED", "USED", "UNKNOWN"] {
+            for proof in [true, false] {
+                let mut f = fixture();
+                f.2[0]["semantic"] = json!("FAILED");
+                f.2[0]["settlement"] = json!(settlement);
+                if !proof { f.6.remove("d"); }
+                let unresolved = settlement == "UNKNOWN" || (settlement == "USED" && !proof);
+                let mut expected = assess(&fixture()).unwrap();
+                expected["failed_cases"] = json!(["d"]);
+                expected["status"] = json!(if unresolved { "incomplete" } else { "failed" });
+                if unresolved {
+                    expected["unresolved_cases"] = json!(["d"]);
+                    expected["rotation_status"] = json!("incomplete");
+                }
+                assert_eq!(assess(&f).unwrap(), expected, "{settlement}, proof={proof}");
+            }
+        }
+        let mut f = fixture();
+        f.2[0] = json!({"case":"d","execution":"SKIPPED_TARGET_REACHED","semantic":"FAILED"});
+        f.1.retain(|e| e["detail"]["case"] != "d");
+        f.6.remove("d");
+        assert_eq!(assess(&f).unwrap(), assess(&fixture()).unwrap());
+        f.2.remove(0);
+        assert_eq!(assess(&f).unwrap_err().to_string(), "phase case missing");
+    }
+
+    #[test]
+    fn readiness_identity_and_duplicate_evidence_remain_strict() {
+        for (pointer, value, error) in [
+            ("/0/detail/before/treasury_id", json!("changed"), "promotion baseline differs from fresh observation"),
+            ("/0/detail/replacement_job", json!("other"), "replacement job mismatch"),
+            ("/1/detail/job", json!("other"), "refill readiness identity mismatch"),
+            ("/1/detail/state/treasury_id", json!("other"), "refill readiness identity mismatch"),
+            ("/1/detail/state/funding_jobs/0/pool_id", json!("other"), "refill changed its original funding operation/binding"),
+            ("/1/detail/state/funding_jobs/0/wallet_id", json!("other"), "refill changed its original funding operation/binding"),
+            ("/1/detail/state/funding_jobs/0/recipient", json!("other"), "refill changed its original funding operation/binding"),
+            ("/1/detail/state/funding_jobs/0/operation_id", json!("other"), "refill changed its original funding operation/binding"),
+        ] {
+            let mut f = fixture();
+            let mut events = json!(f.1);
+            *events.pointer_mut(pointer).unwrap() = value;
+            f.1 = events.as_array().unwrap().clone();
+            assert_eq!(assess(&f).unwrap_err().to_string(), error, "{pointer}");
+        }
+        for kind in ["application_claim", "application_payment", "application_receipt", "application_debit_verified"] {
+            let mut f = fixture();
+            let duplicate = f.1.iter().find(|e| e["kind"] == kind && e["detail"]["case"] == "s").unwrap().clone();
+            f.1.push(duplicate);
+            assert_eq!(assess(&f).unwrap_err().to_string(), format!("duplicate rotation evidence: {kind}"));
+        }
+        // Case lookup deliberately retains the first match.
+        let mut f = fixture();
+        f.2.push(json!({"case":"s","execution":"FAILED"}));
+        assert_eq!(assess(&f).unwrap(), assess(&fixture()).unwrap());
+    }
+
+    #[test]
+    fn delayed_replacement_allocation_does_not_rewrite_the_promotion_snapshot() {
+        let mut f = fixture();
+        let mut before = f.4["state"].clone();
+        before["schema_version"] = json!(2);
+        before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
+        before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,
+            "generation":4,"wallet_id":"b","destination_ready":true}]);
+        let mut after = f.1[0]["detail"]["after"].clone();
+        after["schema_version"] = json!(2);
+        after["pools"][0]["generation"] = json!(0);
+        after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
+        after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,
+            "generation":5,"wallet_id":"c","destination_ready":false}]);
+        let mut vacant = after.clone();
+        vacant["pools"][0]["addresses"].as_array_mut().unwrap().pop();
+        vacant["pools"][0]["reserve_claims"][0]["wallet_id"] = Value::Null;
+        vacant["funding_jobs"] = json!([]);
+        f.4["state"] = before.clone();
+        f.3["estimate"] = x402_treazury::qualification::depletion_estimate(&f.4,"10",1).unwrap();
+        f.1[0]["detail"]["before"] = before;
+        f.1[0]["detail"]["after"] = vacant;
+        f.1[0]["detail"]["replacement_job"] = Value::Null;
+        f.1[1]["detail"]["state"] = after;
+        // Skip cases to isolate the correlation between promotion and later allocation.
+        for case in &mut f.2 { case["execution"] = json!("SKIPPED_TARGET_REACHED"); }
+        let ready = f.1.remove(1);
+        assert_eq!(assess(&f).unwrap(), json!({"status":"incomplete",
+            "reason":"reserve consumption recorded; replacement readiness not yet observed"}));
+        f.1.insert(1, ready);
+        assert_eq!(assess(&f).unwrap_err().to_string(), "promoted job missing");
+    }
+
 }
