@@ -216,33 +216,76 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     x402_treazury::pricing::validate(&cfg)?;
     let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
     tracing::info!(target: "x402_treazury::startup", tools = tools.len(), "Catalog ready");
+    if inspect_standalone(&args, &cfg, &root, &prefix, &base, &mut tools).await? {
+        return Ok(());
+    }
+    let server = prepare_standalone_server(&args, &env, cfg, &root, &prefix, base, tools).await?;
+    if args.transport == "stdio" {
+        serve_standalone_stdio(server).await?;
+    } else {
+        let token = if args.no_auth {
+            None
+        } else {
+            Some(args
+            .bearer_token
+            .or_else(|| env.get("X402_MCP_BEARER_TOKEN").cloned())
+            .filter(|s| !s.is_empty())
+            .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
+        };
+        let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
+        tracing::info!(address = %listener.local_addr()?, "MCP listening at /mcp");
+        serve_http(listener, server, token, shutdown_signal()).await?;
+    }
+    Ok(())
+}
+
+async fn inspect_standalone(
+    args: &Args,
+    cfg: &Config,
+    root: &serde_json::Value,
+    prefix: &str,
+    base: &str,
+    tools: &mut Vec<catalog::ToolSpec>,
+) -> Result<bool> {
     if args.list_tools {
         if args.discover_pricing {
             let prices = x402_treazury::pricing::process_cache()
-                .discover(&cfg, &root, &tools, &base)
+                .discover(cfg, root, tools, base)
                 .await?;
             tracing::info!(target: "x402_treazury::startup", enabled = cfg.probe_pricing,
                 prices = prices.len(), "Startup pricing source finished");
-            tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
+            *tools = catalog::build_tools_with_prices(cfg, root, prefix, &prices)?;
         }
         println!("{}", serde_json::to_string_pretty(&tools)?);
-        return Ok(());
+        return Ok(true);
     }
-    if let Some(name) = args.route_tool {
+    if let Some(name) = &args.route_tool {
         let tool = tools
             .iter()
-            .find(|t| t.name == name)
+            .find(|t| t.name == *name)
             .context("unknown tool")?;
         println!(
             "{}",
-            serde_json::to_string_pretty(&tool.route(&base, &serde_json::from_str(&args.args)?)?)?
+            serde_json::to_string_pretty(&tool.route(base, &serde_json::from_str(&args.args)?)?)?
         );
-        return Ok(());
+        return Ok(true);
     }
     if args.check {
         println!("{} tools validated", tools.len());
-        return Ok(());
+        return Ok(true);
     }
+    Ok(false)
+}
+
+async fn prepare_standalone_server(
+    args: &Args,
+    env: &BTreeMap<String, String>,
+    cfg: Config,
+    root: &serde_json::Value,
+    prefix: &str,
+    base: String,
+    tools: Vec<catalog::ToolSpec>,
+) -> Result<Server> {
     let policy = SpendPolicy::dollars(
         args.max_api_payment_usdc
             .as_deref()
@@ -255,11 +298,11 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         policy,
     )?;
     let prices = x402_treazury::pricing::process_cache()
-        .discover(&cfg, &root, &tools, &base)
+        .discover(&cfg, root, &tools, &base)
         .await?;
     tracing::info!(target: "x402_treazury::startup", enabled = cfg.probe_pricing,
         prices = prices.len(), "Startup pricing source finished");
-    tools = catalog::build_tools_with_prices(&cfg, &root, &prefix, &prices)?;
+    let tools = catalog::build_tools_with_prices(&cfg, root, prefix, &prices)?;
     let mut server = Server::new(
         tools,
         PaidClient::new(payer)
@@ -280,50 +323,41 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if let Some(name) = cfg.name {
         server.name = name;
     }
-    server.host_policy =
-        x402_treazury::server::host::HostPolicy::new(args.allowed_hosts, args.disable_host_check)?;
-    if args.transport == "stdio" {
-        let work = server.work.clone();
-        let service = server.serve(stdio::transport()?).await?;
-        let cancel = service.cancellation_token();
-        let waiting = service.waiting();
-        tokio::pin!(waiting);
-        let result = tokio::select! {
-            result = &mut waiting => Some(result),
-            signal = shutdown_signal() => { signal?; None }
-        };
-        work.close();
-        cancel.cancel();
-        tracing::info!("Stdio stopping: draining accepted calls; signal to force exit");
-        if let Some(engine) = &x402_treazury::network::global().cover {
-            engine.stop_ranges().await;
-        }
-        let result = tokio::select! {
-            result = async {
-                let (result, ()) = tokio::join!(async {
-                    match result { Some(result) => result, None => waiting.await }
-                }, work.drain());
-                result
-            } => result,
-            signal = x402_treazury::server::force_signal() => { signal?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
-        };
-        result?;
-        if let Some(engine) = &x402_treazury::network::global().cover {
-            engine.shutdown().await;
-        }
-    } else {
-        let token = if args.no_auth {
-            None
-        } else {
-            Some(args
-            .bearer_token
-            .or_else(|| env.get("X402_MCP_BEARER_TOKEN").cloned())
-            .filter(|s| !s.is_empty())
-            .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
-        };
-        let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
-        tracing::info!(address = %listener.local_addr()?, "MCP listening at /mcp");
-        serve_http(listener, server, token, shutdown_signal()).await?;
+    server.host_policy = x402_treazury::server::host::HostPolicy::new(
+        args.allowed_hosts.clone(),
+        args.disable_host_check,
+    )?;
+    Ok(server)
+}
+
+async fn serve_standalone_stdio(server: Server) -> Result<()> {
+    let work = server.work.clone();
+    let service = server.serve(stdio::transport()?).await?;
+    let cancel = service.cancellation_token();
+    let waiting = service.waiting();
+    tokio::pin!(waiting);
+    let result = tokio::select! {
+        result = &mut waiting => Some(result),
+        signal = shutdown_signal() => { signal?; None }
+    };
+    work.close();
+    cancel.cancel();
+    tracing::info!("Stdio stopping: draining accepted calls; signal to force exit");
+    if let Some(engine) = &x402_treazury::network::global().cover {
+        engine.stop_ranges().await;
+    }
+    let result = tokio::select! {
+        result = async {
+            let (result, ()) = tokio::join!(async {
+                match result { Some(result) => result, None => waiting.await }
+            }, work.drain());
+            result
+        } => result,
+        signal = x402_treazury::server::force_signal() => { signal?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
+    };
+    result?;
+    if let Some(engine) = &x402_treazury::network::global().cover {
+        engine.shutdown().await;
     }
     Ok(())
 }

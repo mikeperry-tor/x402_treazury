@@ -181,25 +181,44 @@ fn capacity_consumption(before: &Value, after: &Value, pool: &str) -> Result<Opt
         previous["role"] == "READY" && previous["destination_recorded"] == true,
         "new payer did not consume funded reserve inventory"
     );
-    let claims = |value: &Value| -> Result<BTreeMap<String, Value>> {
-        let mut result = BTreeMap::new();
-        for claim in value["reserve_claims"]
-            .as_array()
-            .context("reserve claims missing")?
-        {
-            let slot = claim["slot"]
-                .as_str()
-                .filter(|s| matches!(*s, "small" | "large"))
-                .context("invalid reserve slot")?;
-            ensure!(
-                result.insert(slot.to_owned(), claim.clone()).is_none(),
-                "duplicate reserve slot"
-            );
-        }
-        Ok(result)
-    };
-    let old_claims = claims(old)?;
-    let new_claims = claims(new)?;
+    let replacement_claim = consumed_claim(old, new, payer)?;
+    preserve_consumption_wallets(&old_wallets, &new_wallets, payer)?;
+    if replacement_claim["wallet_id"].is_null() {
+        validate_vacant_consumption(before, after, pool, &old_wallets, &new_wallets)?;
+        return Ok(None);
+    }
+    validate_allocated_consumption(
+        before,
+        after,
+        pool,
+        &old_pools,
+        &old_wallets,
+        &new_wallets,
+        &replacement_claim,
+    )
+}
+
+fn reserve_claims(value: &Value) -> Result<BTreeMap<String, Value>> {
+    let mut result = BTreeMap::new();
+    for claim in value["reserve_claims"]
+        .as_array()
+        .context("reserve claims missing")?
+    {
+        let slot = claim["slot"]
+            .as_str()
+            .filter(|s| matches!(*s, "small" | "large"))
+            .context("invalid reserve slot")?;
+        ensure!(
+            result.insert(slot.to_owned(), claim.clone()).is_none(),
+            "duplicate reserve slot"
+        );
+    }
+    Ok(result)
+}
+
+fn consumed_claim(old: &Value, new: &Value, payer: &Value) -> Result<Value> {
+    let old_claims = reserve_claims(old)?;
+    let new_claims = reserve_claims(new)?;
     let (slot, claim) = old_claims
         .iter()
         .find(|(_, c)| c["wallet_id"] == payer["id"])
@@ -225,7 +244,15 @@ fn capacity_consumption(before: &Value, after: &Value, pool: &str) -> Result<Opt
             );
         }
     }
-    for (id, wallet) in &old_wallets {
+    Ok(replacement_claim.clone())
+}
+
+fn preserve_consumption_wallets(
+    old_wallets: &BTreeMap<&str, &Value>,
+    new_wallets: &BTreeMap<&str, &Value>,
+    payer: &Value,
+) -> Result<()> {
+    for (id, wallet) in old_wallets {
         let saved = new_wallets.get(id).context("consumption lost wallet")?;
         ensure!(
             saved["address"] == wallet["address"] && saved["target"] == wallet["target"],
@@ -260,32 +287,51 @@ fn capacity_consumption(before: &Value, after: &Value, pool: &str) -> Result<Opt
             "unexpected consumption role transition"
         );
     }
-    if replacement_claim["wallet_id"].is_null() {
-        ensure!(
-            new_wallets.len() == old_wallets.len(),
-            "vacant consumption changed inventory"
-        );
-        let old_jobs = indexed(before, "funding_jobs")?;
-        let new_jobs = indexed(after, "funding_jobs")?;
-        ensure!(
-            !new_jobs
-                .iter()
-                .any(|(id, job)| !old_jobs.contains_key(*id) && job["pool_id"] == pool),
-            "vacant consumption unexpectedly allocated selected inventory"
-        );
-        for (id, job) in &old_jobs {
-            let saved = new_jobs
-                .get(id)
-                .context("vacant consumption lost funding history")?;
-            for field in ["pool_id", "wallet_id", "recipient", "target"] {
-                ensure!(
-                    job[field] == saved[field],
-                    "vacant consumption changed funding identity"
-                );
-            }
+    Ok(())
+}
+
+fn validate_vacant_consumption(
+    before: &Value,
+    after: &Value,
+    pool: &str,
+    old_wallets: &BTreeMap<&str, &Value>,
+    new_wallets: &BTreeMap<&str, &Value>,
+) -> Result<()> {
+    ensure!(
+        new_wallets.len() == old_wallets.len(),
+        "vacant consumption changed inventory"
+    );
+    let old_jobs = indexed(before, "funding_jobs")?;
+    let new_jobs = indexed(after, "funding_jobs")?;
+    ensure!(
+        !new_jobs
+            .iter()
+            .any(|(id, job)| !old_jobs.contains_key(*id) && job["pool_id"] == pool),
+        "vacant consumption unexpectedly allocated selected inventory"
+    );
+    for (id, job) in &old_jobs {
+        let saved = new_jobs
+            .get(id)
+            .context("vacant consumption lost funding history")?;
+        for field in ["pool_id", "wallet_id", "recipient", "target"] {
+            ensure!(
+                job[field] == saved[field],
+                "vacant consumption changed funding identity"
+            );
         }
-        return Ok(None);
     }
+    Ok(())
+}
+
+fn validate_allocated_consumption(
+    before: &Value,
+    after: &Value,
+    pool: &str,
+    old_pools: &BTreeMap<&str, &Value>,
+    old_wallets: &BTreeMap<&str, &Value>,
+    new_wallets: &BTreeMap<&str, &Value>,
+    replacement_claim: &Value,
+) -> Result<Option<String>> {
     let replacement_id = replacement_claim["wallet_id"]
         .as_str()
         .context("replacement not yet allocated")?;

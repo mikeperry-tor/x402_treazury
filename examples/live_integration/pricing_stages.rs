@@ -210,47 +210,131 @@ pub fn qualification(r: &Value) -> Result<(bool, bool)> {
 
 /// Rebuild only description text from recorded startup prices. Names, selected
 /// routes, schemas and local tools remain exactly as frozen during preparation.
-pub fn inventory(snapshot:&Value,events:&Value,session:&str)->Result<Value> {
-    let mut result=snapshot.clone();let mut seen=BTreeSet::new();
+pub fn inventory(snapshot: &Value, events: &Value, session: &str) -> Result<Value> {
+    let mut result = snapshot.clone();
+    let mut seen = BTreeSet::new();
     for event in events.as_array().context("pricing events missing")? {
-        let e=&event["detail"];
-        if event["kind"]!="application_pricing" || e["session"]!=session || e["phase"]!="completed" {continue}
-        let source=e["source"].as_str().context("pricing source missing")?;
-        ensure!(seen.insert(source),"duplicate source pricing completion");
-        let data:x402_treazury::pricing::Evidence=serde_json::from_value(e["evidence"].clone())?;data.validate()?;
-        let rows:Vec<x402_treazury::pricing::Price>=serde_json::from_value(e["prices"].clone())?;
-        let prices=x402_treazury::pricing::price_map(&rows)?;
-        ensure!(prices.len()==data.available_prices,"pricing line count differs");
-        let record=&snapshot["sources"][source];
-        let cfg:x402_treazury::catalog::Config=serde_json::from_value(record["settings"].clone())?;
-        ensure!(cfg.probe_pricing==data.enabled,"runtime pricing policy changed");
-        if prices.is_empty(){continue}
-        let known:BTreeSet<_>=x402_treazury::catalog::operations(&record["document"],cfg.pricing_key.as_deref())?.into_iter()
-            .filter(|o|!o["pricing"].is_null()&&o["pricing"]!=json!({})).map(|o|(o["method"].as_str().unwrap_or_default().to_uppercase(),o["path"].as_str().unwrap_or_default().to_owned())).collect();
-        let mut eligible=BTreeSet::new();
-        for server in snapshot["inventory"].as_array().context("snapshot inventory missing")? {
-            for tool in server["tools"].as_array().context("snapshot tools missing")? {
-                if tool["source"]==source && tool["method"]=="GET" && tool["help_url"].is_null() {
-                    let path=tool["path"].as_str().context("tool route missing")?;
-                    let key=("GET".to_owned(),path.to_owned());
-                    if !path.contains('{')&&!known.contains(&key){eligible.insert(key);}
-                }
-            }
+        let e = &event["detail"];
+        if event["kind"] != "application_pricing"
+            || e["session"] != session
+            || e["phase"] != "completed"
+        {
+            continue;
         }
-        ensure!(prices.keys().all(|key|eligible.contains(key)),"price names an ineligible or unselected route");
-        let tools=x402_treazury::catalog::build_tools_with_prices(&cfg,&record["document"],cfg.prefix.as_deref().unwrap_or(source),&prices)?;
-        let tools:BTreeMap<_,_>=tools.into_iter().map(|t|(t.name.clone(),t)).collect();
-        for server in result["inventory"].as_array_mut().context("snapshot inventory missing")? {
-            for tool in server["tools"].as_array_mut().context("snapshot tools missing")? {
-                if tool["source"]==source {
-                    let generated=tools.get(tool["name"].as_str().context("tool name missing")?).context("priced tool disappeared")?;
-                    ensure!(tool["input_schema"]==generated.input_schema && tool["method"]==generated.method && tool["path"]==generated.path,"pricing changed a pinned route/schema");
-                    tool["description"]=json!(generated.description);
+        let source = e["source"].as_str().context("pricing source missing")?;
+        ensure!(seen.insert(source), "duplicate source pricing completion");
+        let (cfg, prices) = recorded_prices(snapshot, source, e)?;
+        if prices.is_empty() {
+            continue;
+        }
+        let record = &snapshot["sources"][source];
+        let eligible = eligible_priced_routes(snapshot, source, record, &cfg)?;
+        ensure!(
+            prices.keys().all(|key| eligible.contains(key)),
+            "price names an ineligible or unselected route"
+        );
+        let tools = x402_treazury::catalog::build_tools_with_prices(
+            &cfg,
+            &record["document"],
+            cfg.prefix.as_deref().unwrap_or(source),
+            &prices,
+        )?;
+        let tools: BTreeMap<_, _> = tools.into_iter().map(|t| (t.name.clone(), t)).collect();
+        apply_priced_descriptions(&mut result, source, &tools)?;
+    }
+    Ok(result)
+}
+
+type RecordedPrices = BTreeMap<(String, String), String>;
+
+fn recorded_prices(
+    snapshot: &Value,
+    source: &str,
+    e: &Value,
+) -> Result<(x402_treazury::catalog::Config, RecordedPrices)> {
+    let data: x402_treazury::pricing::Evidence = serde_json::from_value(e["evidence"].clone())?;
+    data.validate()?;
+    let rows: Vec<x402_treazury::pricing::Price> = serde_json::from_value(e["prices"].clone())?;
+    let prices = x402_treazury::pricing::price_map(&rows)?;
+    ensure!(
+        prices.len() == data.available_prices,
+        "pricing line count differs"
+    );
+    let record = &snapshot["sources"][source];
+    let cfg: x402_treazury::catalog::Config = serde_json::from_value(record["settings"].clone())?;
+    ensure!(
+        cfg.probe_pricing == data.enabled,
+        "runtime pricing policy changed"
+    );
+    Ok((cfg, prices))
+}
+
+fn eligible_priced_routes(
+    snapshot: &Value,
+    source: &str,
+    record: &Value,
+    cfg: &x402_treazury::catalog::Config,
+) -> Result<BTreeSet<(String, String)>> {
+    let known: BTreeSet<_> =
+        x402_treazury::catalog::operations(&record["document"], cfg.pricing_key.as_deref())?
+            .into_iter()
+            .filter(|o| !o["pricing"].is_null() && o["pricing"] != json!({}))
+            .map(|o| {
+                (
+                    o["method"].as_str().unwrap_or_default().to_uppercase(),
+                    o["path"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+    let mut eligible = BTreeSet::new();
+    for server in snapshot["inventory"]
+        .as_array()
+        .context("snapshot inventory missing")?
+    {
+        for tool in server["tools"]
+            .as_array()
+            .context("snapshot tools missing")?
+        {
+            if tool["source"] == source && tool["method"] == "GET" && tool["help_url"].is_null() {
+                let path = tool["path"].as_str().context("tool route missing")?;
+                let key = ("GET".to_owned(), path.to_owned());
+                if !path.contains('{') && !known.contains(&key) {
+                    eligible.insert(key);
                 }
             }
         }
     }
-    Ok(result)
+    Ok(eligible)
+}
+
+fn apply_priced_descriptions(
+    result: &mut Value,
+    source: &str,
+    tools: &BTreeMap<String, x402_treazury::catalog::ToolSpec>,
+) -> Result<()> {
+    for server in result["inventory"]
+        .as_array_mut()
+        .context("snapshot inventory missing")?
+    {
+        for tool in server["tools"]
+            .as_array_mut()
+            .context("snapshot tools missing")?
+        {
+            if tool["source"] == source {
+                let generated = tools
+                    .get(tool["name"].as_str().context("tool name missing")?)
+                    .context("priced tool disappeared")?;
+                ensure!(
+                    tool["input_schema"] == generated.input_schema
+                        && tool["method"] == generated.method
+                        && tool["path"] == generated.path,
+                    "pricing changed a pinned route/schema"
+                );
+                tool["description"] = json!(generated.description);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -280,20 +364,52 @@ mod tests {
     }
     #[test]
     fn priced_inventory_rebuilds_descriptions_but_refuses_route_and_schema_drift() {
-        let cfg=x402_treazury::catalog::Config{prefix:Some("api".into()),..Default::default()};
-        let document=json!({"paths":{"/read":{"get":{"description":"Instructions"}}}});
-        let tool=x402_treazury::catalog::build_tools(&cfg,&document,"api").unwrap().pop().unwrap();
-        let mut selected=serde_json::to_value(&tool).unwrap();selected["source"]=json!("api");
-        let snapshot=json!({"sources":{"api":{"settings":cfg,"document":document}},"inventory":[{"server":"main","tools":[selected]}]});
-        let mut data=x402_treazury::pricing::Evidence{enabled:true,selected_tools:1,eligible:1,observed:1,available_prices:1,..Default::default()};
-        data.cache.insert(x402_treazury::pricing::CachePath::Initialized,1);data.outcomes.insert(x402_treazury::pricing::Outcome::Discovered,1);data.http_statuses.insert(402,1);
-        let mut events=json!([{"kind":"application_pricing","detail":{"source":"api","session":"s","phase":"completed","evidence":data,"prices":[{"method":"GET","path":"/read","line":"Price: $0.014 per call."}]}}]);
-        let built=inventory(&snapshot,&events,"s").unwrap();
-        assert!(built["inventory"][0]["tools"][0]["description"].as_str().unwrap().contains("$0.014"));
-        assert_eq!(built["inventory"][0]["tools"][0]["input_schema"],snapshot["inventory"][0]["tools"][0]["input_schema"]);
-        assert_eq!(inventory(&snapshot,&events,"different").unwrap(),snapshot);
-        let mut bad=snapshot.clone();bad["inventory"][0]["tools"][0]["input_schema"]=json!({"type":"string"});assert!(inventory(&bad,&events,"s").is_err());
-        events[0]["detail"]["prices"][0]["path"]=json!("/unselected");assert!(inventory(&snapshot,&events,"s").is_err());
+        let cfg = x402_treazury::catalog::Config {
+            prefix: Some("api".into()),
+            ..Default::default()
+        };
+        let document = json!({"paths":{"/read":{"get":{"description":"Instructions"}}}});
+        let tool = x402_treazury::catalog::build_tools(&cfg, &document, "api")
+            .unwrap()
+            .pop()
+            .unwrap();
+        let mut selected = serde_json::to_value(&tool).unwrap();
+        selected["source"] = json!("api");
+        let snapshot = json!({"sources":{"api":{"settings":cfg,"document":document}},"inventory":[{"server":"main","tools":[selected]}]});
+        let mut data = x402_treazury::pricing::Evidence {
+            enabled: true,
+            selected_tools: 1,
+            eligible: 1,
+            observed: 1,
+            available_prices: 1,
+            ..Default::default()
+        };
+        data.cache
+            .insert(x402_treazury::pricing::CachePath::Initialized, 1);
+        data.outcomes
+            .insert(x402_treazury::pricing::Outcome::Discovered, 1);
+        data.http_statuses.insert(402, 1);
+        let mut events = json!([{"kind":"application_pricing","detail":{"source":"api","session":"s","phase":"completed","evidence":data,"prices":[{"method":"GET","path":"/read","line":"Price: $0.014 per call."}]}}]);
+        let built = inventory(&snapshot, &events, "s").unwrap();
+        assert!(
+            built["inventory"][0]["tools"][0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("$0.014")
+        );
+        assert_eq!(
+            built["inventory"][0]["tools"][0]["input_schema"],
+            snapshot["inventory"][0]["tools"][0]["input_schema"]
+        );
+        assert_eq!(
+            inventory(&snapshot, &events, "different").unwrap(),
+            snapshot
+        );
+        let mut bad = snapshot.clone();
+        bad["inventory"][0]["tools"][0]["input_schema"] = json!({"type":"string"});
+        assert!(inventory(&bad, &events, "s").is_err());
+        events[0]["detail"]["prices"][0]["path"] = json!("/unselected");
+        assert!(inventory(&snapshot, &events, "s").is_err());
     }
     #[test]
     fn empty_map_keeps_the_failure_and_never_means_provider_health() {
@@ -341,12 +457,17 @@ mod tests {
     }
     #[test]
     fn report_completion_matrix_preserves_full_rows() {
-        for outcome in [Expectation::Disabled, Expectation::Empty, Expectation::Nonempty] {
+        for outcome in [
+            Expectation::Disabled,
+            Expectation::Empty,
+            Expectation::Nonempty,
+        ] {
             let (mut m, mut config, mut r) = fixture();
             match outcome {
                 Expectation::Disabled => {
                     config["sources"]["api"]["settings"]["probe_pricing"] = json!(false);
-                    r["runtime_events"][2]["detail"]["evidence"] = json!(x402_treazury::pricing::Evidence::default());
+                    r["runtime_events"][2]["detail"]["evidence"] =
+                        json!(x402_treazury::pricing::Evidence::default());
                 }
                 Expectation::Empty => (),
                 Expectation::Nonempty => {
@@ -357,19 +478,29 @@ mod tests {
                     e["prices"] = json!([{"method":"GET","path":"/read","line":"Price: $0.01"}]);
                 }
             }
-            for expected in [None, Some(Expectation::Disabled), Some(Expectation::Empty), Some(Expectation::Nonempty)] {
+            for expected in [
+                None,
+                Some(Expectation::Disabled),
+                Some(Expectation::Empty),
+                Some(Expectation::Nonempty),
+            ] {
                 m.pricing_checks.clear();
-                if let Some(expected) = expected { m.pricing_checks.insert("api".into(), expected); }
+                if let Some(expected) = expected {
+                    m.pricing_checks.insert("api".into(), expected);
+                }
                 let assessment = match expected {
                     None => "not_required",
                     Some(expected) if json!(expected) == json!(outcome) => "passed",
                     Some(_) => "failed",
                 };
-                assert_eq!(report(&m, &config, &r).unwrap(), json!([{
-                    "session":"s", "source":"api", "required":expected.is_some(), "expected":expected,
-                    "stage":if matches!(outcome, Expectation::Disabled) {"disabled"} else {"completed"},
-                    "assessment":assessment, "evidence":r["runtime_events"][2]["detail"]["evidence"], "failure":null
-                }]));
+                assert_eq!(
+                    report(&m, &config, &r).unwrap(),
+                    json!([{
+                        "session":"s", "source":"api", "required":expected.is_some(), "expected":expected,
+                        "stage":if matches!(outcome, Expectation::Disabled) {"disabled"} else {"completed"},
+                        "assessment":assessment, "evidence":r["runtime_events"][2]["detail"]["evidence"], "failure":null
+                    }])
+                );
             }
         }
     }
@@ -378,7 +509,9 @@ mod tests {
     fn report_failure_and_unfinished_stages_preserve_requirement_status() {
         for required in [false, true] {
             let (mut m, config, original) = fixture();
-            if !required { m.pricing_checks.clear(); }
+            if !required {
+                m.pricing_checks.clear();
+            }
             for failure in ["http_connect", "http_timeout", "http_status", "other"] {
                 let mut r = original.clone();
                 let end = &mut r["runtime_events"][2]["detail"];
@@ -386,22 +519,32 @@ mod tests {
                 end["failure"] = json!(failure);
                 end["evidence"] = Value::Null;
                 end["prices"] = Value::Null;
-                assert_eq!(report(&m, &config, &r).unwrap(), json!([{
-                    "session":"s", "source":"api", "required":required,
-                    "expected":if required {json!("empty")} else {Value::Null},
-                    "stage":"failed", "assessment":if required {"failed"} else {"not_required"},
-                    "evidence":null, "failure":failure
-                }]));
+                assert_eq!(
+                    report(&m, &config, &r).unwrap(),
+                    json!([{
+                        "session":"s", "source":"api", "required":required,
+                        "expected":if required {json!("empty")} else {Value::Null},
+                        "stage":"failed", "assessment":if required {"failed"} else {"not_required"},
+                        "evidence":null, "failure":failure
+                    }])
+                );
             }
-            for (count, session, stage) in [(0, Value::Null, "not_observed"), (1, json!("s"), "not_observed"), (2, json!("s"), "incomplete")] {
+            for (count, session, stage) in [
+                (0, Value::Null, "not_observed"),
+                (1, json!("s"), "not_observed"),
+                (2, json!("s"), "incomplete"),
+            ] {
                 let mut r = original.clone();
                 r["runtime_events"].as_array_mut().unwrap().truncate(count);
-                assert_eq!(report(&m, &config, &r).unwrap(), json!([{
-                    "session":session, "source":"api", "required":required,
-                    "expected":if required {json!("empty")} else {Value::Null},
-                    "stage":stage, "assessment":if required {"incomplete"} else {"not_required"},
-                    "evidence":null, "failure":null
-                }]));
+                assert_eq!(
+                    report(&m, &config, &r).unwrap(),
+                    json!([{
+                        "session":session, "source":"api", "required":required,
+                        "expected":if required {json!("empty")} else {Value::Null},
+                        "stage":stage, "assessment":if required {"incomplete"} else {"not_required"},
+                        "evidence":null, "failure":null
+                    }])
+                );
             }
         }
     }
@@ -425,8 +568,14 @@ mod tests {
             ("/runtime_events/2/detail/evidence", Value::Null),
             ("/runtime_events/2/detail/evidence/observed", json!(2)),
             ("/runtime_events/2/detail/prices", json!({})),
-            ("/runtime_events/2/detail/prices", json!([{"method":"POST","path":"/read","line":"price"}])),
-            ("/runtime_events/2/detail/prices", json!([{"method":"GET","path":"/read","line":"price"}])),
+            (
+                "/runtime_events/2/detail/prices",
+                json!([{"method":"POST","path":"/read","line":"price"}]),
+            ),
+            (
+                "/runtime_events/2/detail/prices",
+                json!([{"method":"GET","path":"/read","line":"price"}]),
+            ),
         ] {
             let mut r = original.clone();
             *r.pointer_mut(pointer).unwrap() = value;
@@ -437,7 +586,11 @@ mod tests {
         assert!(report(&m, &config, &r).is_err(), "completion without start");
         let mut r = original.clone();
         r["runtime_events"][2]["detail"]["observed_micros"] = json!(1);
-        assert_eq!(report(&m, &config, &r).unwrap(), report(&m, &config, &original).unwrap(), "equal timestamps remain ordered");
+        assert_eq!(
+            report(&m, &config, &r).unwrap(),
+            report(&m, &config, &original).unwrap(),
+            "equal timestamps remain ordered"
+        );
         let mut r = original.clone();
         let end = &mut r["runtime_events"][2]["detail"];
         end["evidence"]["available_prices"] = json!(1);
@@ -445,7 +598,10 @@ mod tests {
         end["evidence"]["http_statuses"] = json!({"402":1});
         let price = json!({"method":"GET","path":"/read","line":"Price: $0.01"});
         end["prices"] = json!([price.clone(), price]);
-        assert!(report(&m, &config, &r).is_err(), "duplicate prices cannot collapse to a valid count");
+        assert!(
+            report(&m, &config, &r).is_err(),
+            "duplicate prices cannot collapse to a valid count"
+        );
         let mut r = original.clone();
         r["runtime_events"].as_array_mut().unwrap().swap(0, 1);
         assert!(report(&m, &config, &r).is_err(), "stage before session");
@@ -457,15 +613,25 @@ mod tests {
         assert!(report(&m, &json!({}), &json!({})).is_err());
         let mut optional = m;
         optional.pricing_checks.clear();
-        assert_eq!(report(&optional, &json!({}), &json!({})).unwrap(), json!([]));
+        assert_eq!(
+            report(&optional, &json!({}), &json!({})).unwrap(),
+            json!([])
+        );
     }
 
     #[test]
     fn report_row_bound_is_complete_and_ordered_across_sessions() {
         let (mut m, _, _) = fixture();
         m.pricing_checks.clear();
-        let sources: serde_json::Map<String, Value> = (0..5000).rev()
-            .map(|i| (format!("source_{i:04}"), json!({"settings":{"probe_pricing":true}}))).collect();
+        let sources: serde_json::Map<String, Value> = (0..5000)
+            .rev()
+            .map(|i| {
+                (
+                    format!("source_{i:04}"),
+                    json!({"settings":{"probe_pricing":true}}),
+                )
+            })
+            .collect();
         let mut config = json!({"sources":sources});
         let events = json!({"runtime_events":[
             {"kind":"application_session","detail":{"session":"z"}},
@@ -475,19 +641,32 @@ mod tests {
         let rows = report(&m, &config, &events).unwrap();
         assert_eq!(rows.as_array().unwrap().len(), 10000);
         for (index, row) in rows.as_array().unwrap().iter().enumerate() {
-            assert_eq!(row["session"], if index < 5000 {"a"} else {"z"});
+            assert_eq!(row["session"], if index < 5000 { "a" } else { "z" });
             assert_eq!(row["source"], format!("source_{:04}", index % 5000));
         }
-        config["sources"].as_object_mut().unwrap().insert("extra".into(), json!({}));
+        config["sources"]
+            .as_object_mut()
+            .unwrap()
+            .insert("extra".into(), json!({}));
         assert!(report(&m, &config, &events).is_err());
         // With no session yet, the synthetic unobserved rows have the same cap.
         let sources: serde_json::Map<String, Value> = (0..10000)
-            .map(|i| (format!("source_{i:05}"), json!({}))).collect();
+            .map(|i| (format!("source_{i:05}"), json!({})))
+            .collect();
         let mut config = json!({"sources":sources});
         let no_sessions = json!({"runtime_events":[]});
-        assert_eq!(report(&m, &config, &no_sessions).unwrap().as_array().unwrap().len(), 10000);
-        config["sources"].as_object_mut().unwrap().insert("extra".into(), json!({}));
+        assert_eq!(
+            report(&m, &config, &no_sessions)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            10000
+        );
+        config["sources"]
+            .as_object_mut()
+            .unwrap()
+            .insert("extra".into(), json!({}));
         assert!(report(&m, &config, &no_sessions).is_err());
     }
-
 }

@@ -43,6 +43,18 @@ factory. Use barriers and controlled clocks to expose concurrency boundaries;
 sleeps alone do not prove ordering. Retain positive fixture controls so a broken
 fixture cannot make every negative test pass.
 
+CLI contract fixtures count unsigned probes and assert inspection output and
+credential/error order; stdio and shutdown suites exercise accepted-call ownership.
+Recorded-pricing fixtures reconstruct full inventories from session-bound events,
+reject route/schema drift and check that only descriptions change. The real startup
+regression verifies reconstruction introduces no extra probes.
+
+Capacity lifecycle fixtures call `consumed_reserve` with claim, retained-wallet,
+retirement, vacant-replacement and allocated-replacement matrices. They pin exact
+funding correlations, readiness support and first-error order, including existing
+schema permissiveness. These structural validators certify recorded evidence;
+passing their synthetic fixtures does not qualify live settlement.
+
 The [coverage map](../tests/COVERAGE.md) identifies regression boundaries and
 optional qualification methods.
 

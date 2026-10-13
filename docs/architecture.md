@@ -8,6 +8,12 @@ See the [README](../README.md) for commands and configuration examples.
 
 ## Catalog, configuration and execution
 
+Standalone commands separate inspection/routing from server construction. Tags can
+return before base-URL validation; ordinary tools/check/route inspection needs no
+payment credentials. Serving validates spending policy and credentials before
+pricing discovery. The stdio lifecycle retains one pinned service waiter and the
+accepted-work owner through cancellation, drain and cover shutdown.
+
 `src/config.rs` composes inline source settings with one level of provider TOML
 inheritance. Local values replace inherited values, including lists/maps; omitted
 values inherit. Paths belong to the file declaring them. Unknown fields and
