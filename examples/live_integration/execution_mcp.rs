@@ -298,4 +298,5 @@ mod tests {
         assert!(client.check_inventory(&lazy, 10000).await.is_err());
         server.abort();
     }
+    include!("inventory_tests.rs");
 }
