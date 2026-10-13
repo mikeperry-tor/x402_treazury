@@ -308,15 +308,15 @@ and [the runtime architecture](docs/architecture.md).
   reserved in participating deployments. Every direct/fallback call captures one
   snapshot. Fallback validates an opaque endpoint/process/revision-bound tool reference before HTTP.
 - Optional listener `discover_on_demand=true` advertises only search/call wrappers
-  (all five wrappers when source management is enabled), hiding API definitions
+  (all seven wrappers when source management is enabled), hiding API definitions
   from tools/list. Search retains full schemas/descriptions and defaults to five
   results in this mode. It grants no registration permissions and preserves full
   startup/qualification inventories, filters and bound payment clients. Default
   eager listing and direct invocation remain supported.
 - HTTP is stateless: expose stable search/call tools, without advertising list-change
   notifications. Standalone stdio has no dynamic management. Cursors bind to process
-  catalog instance, generation and caller/query. The five tools are sources_search,
-  source_details, source_add, tools_search and tool_call under `x402_treazury_`.
+  catalog instance, generation and caller/query. The seven tools are sources_search,
+  source_details, source_add, raw_get, raw_post, tools_search and tool_call under `x402_treazury_`.
   Directory search (browse or best mode) and details use embedded reviewed x402 List
   schemas and the endpoint's source-management wallet through normal payment
   admission and network policy.
@@ -328,6 +328,13 @@ and [the runtime architecture](docs/architecture.md).
   Tool descriptions guide agents through provider documentation to a verified public
   OpenAPI JSON URL, then registration, tool search and invocation. Importing sources
   never grants a directory transport bypass.
+- Direct `raw_get`/`raw_post` are source-management-only tools and use the same resolved
+  wallet as added sources. Accept only public HTTPS URLs, scalar/repeated query values
+  and a JSON body for POST; reject headers, credentials and payment/wallet overrides.
+  Apply source-management allowed origins and byte/read limits through the production
+  PaidClient with public destinations and typed output; retain payment ownership on
+  cancellation. Direct calls register nothing. Tool instructions require documented
+  request arguments and prohibit automatic retries after uncertain paid outcomes.
 - Agent imports require public HTTPS and bounded bytes/reference expansion. Direct
   DNS validation happens in the network factory's resolver; Tor preserves remote DNS
   and depends on Tor's internal-address rejection. Dynamic paid clients must retain

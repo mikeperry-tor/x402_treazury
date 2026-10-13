@@ -169,7 +169,7 @@ and HTTP/2 authority validation still follow the MCP library's protocol rules.
 
 To reduce the initial tool context for a listener, add `discover_on_demand = true`
 to its `[servers.NAME]` table (default: `false`). It advertises only search/call
-wrappers, or all five management wrappers when `source_management = true`.
+wrappers, or all seven management wrappers when `source_management = true`.
 Search returns complete tool descriptions and schemas, five results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
 are unchanged. See [on-demand discovery](agent-sources.md) for the call workflow.
@@ -573,6 +573,14 @@ Existing listener filters still constrain imported API tools. Parallel callers o
 same endpoint share one import slot. Concurrent additions publish complete snapshots;
 repeat a busy or lost add with the same specification URL. Duplicate URLs return the
 existing registration on that endpoint. See the [agent source guide](agent-sources.md).
+
+Source-management-enabled listeners also expose `x402_treazury_raw_get` and
+`x402_treazury_raw_post` for documented public HTTPS endpoints without registering
+an OpenAPI catalog. They use the same resolved wallet, `allowed_origins`, response
+limits and network policy as imported APIs. These management tools are independent
+of API tool-name filters; enabling source management authorizes direct calls within
+that origin policy. POST accepts JSON only; neither tool accepts agent headers or
+payment settings.
 
 The stable `x402_treazury_tools_search` and `x402_treazury_tool_call` tools let clients use new
 APIs even when they cache their initial tool list. HTTP remains stateless and does

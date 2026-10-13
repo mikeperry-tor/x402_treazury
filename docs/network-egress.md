@@ -331,7 +331,8 @@ such rules globally on a user's machine as part of an application test.
 
 ## Agent-selected destinations
 
-Dynamic imports and paid API calls use the same factory with a `public_only` pool
+Dynamic imports and paid API calls, including source-management `raw_get` and
+`raw_post`, use the same factory with a `public_only` pool
 key. HTTPS, no credentials/fragments, public literal addresses and public hostnames
 are required. In direct mode, a custom resolver rejects the entire result if any
 answer is non-public, and returns only that validated set to the connector. Cached
@@ -341,7 +342,9 @@ Trusted TOML sources retain their existing local-fixture/private-provider behavi
 Tor uses authenticated `socks5h` with the same discovery/payer identities and never
 resolves the destination locally. Hostname answers hidden behind Tor rely on Tor's
 `ClientRejectInternalAddresses` protection. Keep it enabled; a generic SOCKS server
-may not provide it. Optional dynamic `allowed_origins` narrows public HTTPS access.
+may not provide it. Optional dynamic `allowed_origins` narrows public HTTPS access,
+including direct raw calls. Raw calls use the resolved source-management payer and
+existing response/read limits; redirects are not followed.
 Tests exercise the production resolver wrapper with injected DNS answers, including
 mixed/rebound rejection, plus actual direct-client rejection before connecting to
 private targets. A subprocess executes the production import and guarded x402

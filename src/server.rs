@@ -132,6 +132,12 @@ impl Server {
                         .await?,
                 ));
             }
+            if matches!(
+                name,
+                crate::discovery::raw::GET | crate::discovery::raw::POST
+            ) {
+                return Ok(self.limit(manager.invoke_raw(&self.catalog_server, name, args).await?));
+            }
             if name != "x402_treazury_tool_call" {
                 return Ok(crate::output::ToolOutput::text(serde_json::to_string(
                     &manager

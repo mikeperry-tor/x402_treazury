@@ -2,6 +2,7 @@
 mod directory;
 mod import;
 pub mod policy;
+pub(crate) mod raw;
 mod store;
 pub mod tools;
 use crate::{
@@ -141,17 +142,22 @@ impl Manager {
         find_catalog_reference(&self.catalog, owner, reference)
     }
 
-    pub fn directory(&self, owner: &str) -> Result<BoundTool> {
+    fn source_client(&self, owner: &str) -> Result<PaidClient> {
         ensure!(self.enabled(owner), "source_management_disabled");
         let wallet = policy::wallet(&self.policy, &self.listeners[owner]);
-        let client = self
+        Ok(self
             .payers
             .get(wallet)
-            .context("directory wallet unavailable")?
+            .context("source management wallet unavailable")?
             .clone()
-            .with_source_identity("builtin:x402-list")
             .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
-            .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes);
+            .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes))
+    }
+
+    pub fn directory(&self, owner: &str) -> Result<BoundTool> {
+        let client = self
+            .source_client(owner)?
+            .with_source_identity("builtin:x402-list");
         let base = directory::BASE.to_owned();
         #[cfg(test)]
         if let Some(base) = self.fixture_directory.lock().unwrap().clone() {

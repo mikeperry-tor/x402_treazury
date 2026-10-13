@@ -4,7 +4,7 @@ For a smaller initial MCP tool list, set `discover_on_demand = true` in a
 `[servers.NAME]` table. This is independent of `source_management` and defaults to
 `false`. Static listeners advertise just `x402_treazury_tools_search` and
 `x402_treazury_tool_call`; listeners with source management enabled advertise all
-five management tools. API tools, including subsequently registered tools, stay
+seven management tools. API tools, including subsequently registered tools, stay
 out of `tools/list`.
 
 Agents search the listener's catalog with `x402_treazury_tools_search`, receive
@@ -71,6 +71,8 @@ not removed by API filters.
 | --- | --- |
 | `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `category`; the server always sets `network=BSE`. Browse supports pagination and directory filters; best supports ranking preferences and a result limit. |
 | `x402_treazury_source_details` | Required directory `slug` from search. Returns advertised endpoints, pricing and reliability; this is not a registered `source_id`. |
+| `x402_treazury_raw_get` | Required public HTTPS `url`; optional `query` object. Direct GET, including automatic x402 payment when required. |
+| `x402_treazury_raw_post` | Required public HTTPS `url` and JSON `body`; optional `query` object. Direct POST, including automatic x402 payment when required. |
 | `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
 | `x402_treazury_tools_search` | Optional `query`, `source_id`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Required `tool_ref` and `arguments`. |
@@ -101,11 +103,38 @@ website links to the OpenAPI JSON document; the provider's `llms.txt` may link t
 docs. Use available web tools to verify candidate URLs such as `/openapi.json` or
 `/.well-known/openapi.json` actually return an OpenAPI 3 JSON document for the intended
 API. Never invent URLs or derive request schemas from prose. If no published spec can
-be found, report that registration is unavailable. Pass the verified URL to
+be found, registration is unavailable; use `raw_get` or `raw_post` only when the
+provider documents the endpoint, method and request arguments. Never guess paid
+request arguments. Pass the verified URL to
 `source_add`, then use `tools_search` with its returned `source_id` and invoke the
 chosen `tool_ref` through `tool_call`.
 
-Source management contributes five definitions; searches return directory leads
+Direct GET/POST tools are available only when this listener enables
+`source_management`; `discover_on_demand` alone does not enable them. They use the
+same resolved source-management wallet, including a listener wallet override, with
+normal payment admission, cancellation ownership, public-destination checks,
+`allowed_origins`, direct/Tor transport and source-management response limits.
+They create no registrations or per-endpoint wallets. API tool-name filters do not
+restrict these management tools: enabling source management permits direct calls
+to documented public HTTPS endpoints within the configured origin policy.
+
+Use direct calls for a one-off request or a documented API without a published
+OpenAPI document; prefer registration for reusable tool schemas. Query values can
+be strings, numbers, booleans or arrays of those values (arrays repeat the key).
+They are URL-encoded and appended to any existing URL query. POST sends the exact
+JSON value supplied as `body` with `Content-Type: application/json`; GET accepts
+no body. Headers, credentials, wallet selectors and payment settings are not
+agent arguments. Redirects are not followed. Raw binary PNG/JPEG/WebP responses
+use the normal bounded image output path; JSON image mappings require a configured
+provider and are not inferred by raw calls.
+
+Both tools can spend Base USDC, and POST can mutate provider state. Directory
+verification and a valid payment challenge do not establish the request schema
+or guarantee useful output. A failed, timed-out or ambiguous call can already have
+paid or changed state: never automatically repeat it, because each invocation
+may authorize another payment.
+
+Source management contributes seven definitions; searches return directory leads
 and selected tool signatures on demand. Registered tools, including persisted
 registrations restored at startup, are also advertised by `tools/list`, so clients
 that include their entire tool inventory may expand the prompt. The stable search/call pair also works with clients that cache their initial

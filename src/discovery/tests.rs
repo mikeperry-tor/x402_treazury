@@ -597,6 +597,8 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
         "sources_search",
         "source_details",
         "source_add",
+        "raw_get",
+        "raw_post",
         "tools_search",
         "tool_call",
     ] {
@@ -1159,7 +1161,7 @@ fn embedded_directory_matches_reviewed_search_contract() {
 }
 
 #[tokio::test]
-async fn management_only_deployment_starts_and_lists_exactly_five_tools() {
+async fn management_only_deployment_starts_and_lists_exactly_seven_tools() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("config.toml");
     std::fs::write(
@@ -1182,7 +1184,7 @@ exclude_tools = ["*"]
     .unwrap();
     let deployment = crate::deployment::Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
-    assert_eq!(inventory[0].management_tools.len(), 5);
+    assert_eq!(inventory[0].management_tools.len(), 7);
     assert!(inventory[0].tools.is_empty());
     let running = deployment
         .bind(&BTreeMap::from([
@@ -1202,7 +1204,7 @@ exclude_tools = ["*"]
     )
     .await;
     let actual = listed["tools"].as_array().unwrap();
-    assert_eq!(actual.len(), 5);
+    assert_eq!(actual.len(), 7);
     for expected in &inventory[0].management_tools {
         assert!(actual.contains(&serde_json::to_value(expected).unwrap()));
     }
@@ -1255,10 +1257,20 @@ async fn directory_payment_fixture() {
     let requests = Arc::new(AtomicUsize::new(0));
     let signatures = Arc::new(Mutex::new(Vec::new()));
     let (count, signed) = (requests.clone(), signatures.clone());
-    let seller = move |headers: HeaderMap, uri: axum::http::Uri| {
+    let seller = move |headers: HeaderMap,
+                       method: axum::http::Method,
+                       uri: axum::http::Uri,
+                       body: axum::body::Bytes| {
         let (count, signed) = (count.clone(), signed.clone());
         async move {
             count.fetch_add(1, Ordering::SeqCst);
+            if uri.path() == "/raw/redirect" {
+                return (
+                    StatusCode::FOUND,
+                    [("location", "https://api.example.com/api/v1/services")],
+                )
+                    .into_response();
+            }
             if let Some(header) = headers.get("payment-signature") {
                 let payload =
                     serde_json::from_slice(&STANDARD.decode(header.as_bytes()).unwrap()).unwrap();
@@ -1266,7 +1278,24 @@ async fn directory_payment_fixture() {
                     .lock()
                     .unwrap()
                     .push(crate::test_signatures::recover_exact(&payload).to_string());
-                return axum::Json(json!({"services":[]})).into_response();
+                match uri.path() {
+                    "/raw/image" => {
+                        return (
+                            [("content-type", "image/png")],
+                            b"\x89PNG\r\n\x1a\nfixture".to_vec(),
+                        )
+                            .into_response();
+                    }
+                    "/raw/bad-image" => {
+                        return ([("content-type", "image/png")], "invalid image").into_response();
+                    }
+                    "/raw/large" => {
+                        return ([("content-type", "text/plain")], "x".repeat(1024))
+                            .into_response();
+                    }
+                    _ => {}
+                }
+                return axum::Json(json!({"services":[], "method":method.as_str(), "query":uri.query(), "body":if body.is_empty() { Value::Null } else { serde_json::from_slice::<Value>(&body).unwrap() }, "content_type":headers.get("content-type").map(|v| v.to_str().unwrap())})).into_response();
             }
             let challenge = json!({"x402Version":2,"resource":{"url":format!("https://api.example.com{}", uri.path()),"description":"search","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (
@@ -1280,9 +1309,10 @@ async fn directory_payment_fixture() {
         }
     };
     let app = axum::Router::new()
-        .route("/api/v1/services", get(seller.clone()))
+        .route("/api/v1/services", get(seller.clone()).post(seller.clone()))
         .route("/api/v1/best", get(seller.clone()))
-        .route("/api/v1/services/{slug}", get(seller));
+        .route("/api/v1/services/{slug}", get(seller.clone()))
+        .route("/raw/{kind}", get(seller));
     let (address, vendor_task) = crate::test_tls::serve(app).await;
     let proxy = Socks::start(
         BTreeMap::from([("api.example.com".into(), address)]),
@@ -1323,8 +1353,10 @@ async fn directory_payment_fixture() {
         views: ls.keys().map(|name| (name.clone(), vec![])).collect(),
         ..Default::default()
     };
+    let mut policy = policy(None);
+    policy.max_response_bytes = 512;
     let manager = Manager::new(
-        policy(None),
+        policy,
         ls,
         clients,
         Arc::new(CatalogState::new(snapshot)),
@@ -1336,7 +1368,7 @@ async fn directory_payment_fixture() {
     // Use the public hostname on the fixture certificate; retain public-destination checks.
     *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
     assert!(manager.directory("hidden").is_err());
-    assert_eq!(tools::definitions(true).len(), 5);
+    assert_eq!(tools::definitions(true).len(), 7);
     assert_eq!(
         requests.load(Ordering::SeqCst),
         0,
@@ -1349,6 +1381,14 @@ async fn directory_payment_fixture() {
             json!({"mode":"best","q":"weather","limit":3}),
         ),
         (directory::DETAILS, json!({"slug":"weather"})),
+        (
+            raw::GET,
+            json!({"url":"https://api.example.com/api/v1/services?existing=yes","query":{"q":"a & b","tags":["one","two"],"enabled":true,"limit":2}}),
+        ),
+        (
+            raw::POST,
+            json!({"url":"https://api.example.com/api/v1/services","query":{"q":"post"},"body":{"items":[1,"two"],"nested":{"ok":true}}}),
+        ),
     ];
     for owner in ["writer", "reader"] {
         for (name, args) in &calls {
@@ -1357,6 +1397,21 @@ async fn directory_payment_fixture() {
                 .await
                 .unwrap();
             assert!(result.contains("services"));
+            let response: Value = serde_json::from_str(&result).unwrap();
+            if *name == raw::GET {
+                assert_eq!(response["method"], "GET");
+                assert_eq!(
+                    response["query"],
+                    "existing=yes&enabled=true&limit=2&q=a+%26+b&tags=one&tags=two"
+                );
+                assert!(response["body"].is_null());
+                assert!(response["content_type"].is_null());
+            } else if *name == raw::POST {
+                assert_eq!(response["method"], "POST");
+                assert_eq!(response["query"], "q=post");
+                assert_eq!(response["body"], args["body"]);
+                assert_eq!(response["content_type"], "application/json");
+            }
         }
     }
     for (name, args) in &calls {
@@ -1369,7 +1424,7 @@ async fn directory_payment_fixture() {
     }
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        15,
+        calls.len() * 5,
         "cap failure must not sign or retry"
     );
     let addresses: Vec<_> = (1..=3)
@@ -1383,7 +1438,7 @@ async fn directory_payment_fixture() {
         *signatures.lock().unwrap(),
         addresses[..2]
             .iter()
-            .flat_map(|a| [a.clone(), a.clone(), a.clone()])
+            .flat_map(|a| vec![a.clone(); calls.len()])
             .collect::<Vec<_>>()
     );
     {
@@ -1397,6 +1452,62 @@ async fn directory_payment_fixture() {
             );
         }
     }
+    // Exercise real MCP typed output and ensure output failures never replay paid work.
+    let (base, http_task) = listen(crate::server::http_app(
+        server(&manager, "writer"),
+        "test-token".into(),
+    ))
+    .await;
+    let local = NetworkContext::new(Default::default())
+        .unwrap()
+        .http(
+            &IsolationId::discovery(&base).unwrap(),
+            &base,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+    let invoke_raw = |url: String| {
+        let request = local.post(format!("{base}/mcp"))
+            .bearer_auth("test-token")
+            .header("accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":raw::GET,"arguments":{"url":url}}}));
+        async move {
+            request
+                .send()
+                .await
+                .unwrap()
+                .mcp_json::<Value>()
+                .await
+                .unwrap()["result"]
+                .clone()
+        }
+    };
+    let before = requests.load(Ordering::SeqCst);
+    let signed_before = signatures.lock().unwrap().len();
+    let image = invoke_raw("https://api.example.com/raw/image".into()).await;
+    assert_ne!(image["isError"], true, "{image}");
+    assert!(
+        image["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["type"] == "image" && c["mimeType"] == "image/png")
+    );
+    for path in ["bad-image", "large"] {
+        let result = invoke_raw(format!("https://api.example.com/raw/{path}")).await;
+        assert_eq!(result["isError"], true, "{result}");
+    }
+    assert_eq!(requests.load(Ordering::SeqCst), before + 6);
+    assert_eq!(signatures.lock().unwrap().len(), signed_before + 3);
+    let result = invoke_raw("https://api.example.com/raw/redirect".into()).await;
+    assert_eq!(result["isError"], true, "{result}");
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        before + 7,
+        "redirect was followed"
+    );
+    assert_eq!(signatures.lock().unwrap().len(), signed_before + 3);
+    http_task.abort();
     vendor_task.abort();
 }
 
@@ -1743,7 +1854,7 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
 }
 
 #[tokio::test]
-async fn on_demand_management_keeps_five_wrappers_and_scoped_dynamic_search() {
+async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
     let m = manager(None).await;
     add(&m, "demo", "", "").await;
     let mut writer = server(&m, "writer");
@@ -1753,7 +1864,7 @@ async fn on_demand_management_keeps_five_wrappers_and_scoped_dynamic_search() {
     let (base, task) = listen(crate::server::http_app(writer, "test-token".into())).await;
     let (other, other_task) = listen(crate::server::http_app(reader, "test-token".into())).await;
     let listed = rpc(&base, "test-token", "tools/list", json!({})).await;
-    assert_eq!(listed["tools"].as_array().unwrap().len(), 5);
+    assert_eq!(listed["tools"].as_array().unwrap().len(), 7);
     assert!(
         listed["tools"]
             .as_array()
@@ -1817,4 +1928,113 @@ async fn on_demand_management_keeps_five_wrappers_and_scoped_dynamic_search() {
     assert!(next["structuredContent"]["next_cursor"].is_null());
     task.abort();
     other_task.abort();
+}
+
+#[tokio::test]
+async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
+    use rmcp::ServerHandler;
+    let mut policy = policy(None);
+    policy.allowed_origins = vec!["https://api.example.com".into()];
+    let manager = manager_with(policy, listeners(false)).await;
+    for on_demand in [false, true] {
+        let mut disabled = server(&manager, "hidden");
+        disabled.discover_on_demand = on_demand;
+        let mut enabled = server(&manager, "writer");
+        enabled.discover_on_demand = on_demand;
+        for name in [raw::GET, raw::POST] {
+            assert!(disabled.get_tool(name).is_none());
+            assert!(enabled.get_tool(name).is_some());
+            let args = json!({"url":"https://api.example.com/read","body":{}});
+            assert!(
+                disabled
+                    .invoke_output(name, args.as_object().unwrap())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                manager
+                    .invoke_raw("hidden", name, args.as_object().unwrap())
+                    .await
+                    .is_err()
+            );
+        }
+    }
+    let standalone = Server::new(
+        vec![],
+        payer(),
+        "https://api.example.com".into(),
+        None,
+        None,
+    );
+    for name in [raw::GET, raw::POST] {
+        assert!(standalone.get_tool(name).is_none());
+    }
+    let enabled = server(&manager, "writer");
+    for (name, args) in [
+        (raw::GET, json!({"url":"http://api.example.com/read"})),
+        (raw::GET, json!({"url":"https://127.0.0.1/read"})),
+        (raw::GET, json!({"url":"https://[::1]/read"})),
+        (raw::GET, json!({"url":"https://foo.local/read"})),
+        (
+            raw::GET,
+            json!({"url":"https://user:password@api.example.com/read"}),
+        ),
+        (
+            raw::GET,
+            json!({"url":"https://api.example.com/read#fragment"}),
+        ),
+        (raw::GET, json!({"url":"https://other.example.com/read"})),
+        (
+            raw::GET,
+            json!({"url":"https://api.example.com/read","body":null}),
+        ),
+        (
+            raw::GET,
+            json!({"url":"https://api.example.com/read","query":{"nested":{"a":1}}}),
+        ),
+        (
+            raw::GET,
+            json!({"url":"https://api.example.com/read","query":{"null":null}}),
+        ),
+        (
+            raw::GET,
+            json!({"url":"https://api.example.com/read","query":{"array":[{}]}}),
+        ),
+        (raw::POST, json!({"url":"https://api.example.com/read"})),
+        (
+            raw::POST,
+            json!({"url":"https://api.example.com/read","body":{},"headers":{"Authorization":"secret"}}),
+        ),
+        (
+            raw::POST,
+            json!({"url":"https://api.example.com/read","body":{},"wallet":"other"}),
+        ),
+        (
+            raw::POST,
+            json!({"url":"https://api.example.com/read","body":{},"method":"DELETE"}),
+        ),
+    ] {
+        let error = enabled
+            .invoke_output(name, args.as_object().unwrap())
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            [
+                "HTTPS",
+                "non-public",
+                "destination origin",
+                "body",
+                "query values",
+                "unknown field"
+            ]
+            .iter()
+            .any(|category| message.contains(category)),
+            "unexpected failure (validation must precede I/O): {message}"
+        );
+        assert!(!error.to_string().contains("password"));
+        assert!(!error.to_string().contains("secret"));
+    }
+    assert!(manager.inner.lock().unwrap().state.records.is_empty());
+    assert!(manager.catalog.read().views["writer"].is_empty());
 }
