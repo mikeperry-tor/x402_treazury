@@ -110,10 +110,23 @@ Funded lifecycle, privacy and combined cover/payment acceptance retain the limit
 listed under [qualification status](#qualification-status).
 
 Bootstrap readiness tests distinguish captured-claim completion from ordinary
-serving readiness, including paged vacant inventory and assessment without writes.
-Store-level tests cover historical claim generations and obstruction dispositions;
+serving readiness, including paged vacant inventory, captured completion after
+current generations advance, durable recovery-count boundaries and assessment
+without writes. Store-level tests cover claim history and obstruction dispositions;
 owner tests cover cancellation and drain. These are complementary checks, not an
 exhaustive enumeration of concurrency schedules.
+
+Runner orchestration fixtures use real registry reservations, local MCP requests,
+completion records, settlement inspection and owned child close/reopen. Test-only
+external observations let them exercise two rounds, refusal before dispatch,
+rotation/settlement/restart failures and final readiness without funding. They
+assert retained reservations, no extra requests, unchanged expiry/funding authority
+and the same execution clock across restart. Registry and real-process runner
+regressions separately cover no replay, concurrent completion and cancellation
+while draining. Outage preparation refusal has a local fixture; non-promotion
+after a round error is established by review of the unchanged completion gate.
+These fixtures do not establish chain settlement, successful Tor outage
+qualification or the deferred automated funded lifecycle acceptance.
 
 ## Coverage and complexity
 

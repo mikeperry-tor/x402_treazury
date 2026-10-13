@@ -148,7 +148,10 @@ async fn run_inner(
     let mut clients = BTreeMap::new();
     let local = NetworkContext::new(NetworkPolicy::default())?;
     for (name, listener) in &config.servers {
-        ensure!(listener.auth, "live qualification requires authenticated listeners");
+        ensure!(
+            listener.auth,
+            "live qualification requires authenticated listeners"
+        );
         ensure!(
             listener.listen.ip().is_loopback() && listener.listen.port() != 0,
             "driver refuses non-loopback/ephemeral listener"
@@ -421,7 +424,13 @@ async fn execute(
     runtime: &mut Option<&mut crate::tor::session::Runtime>,
 ) -> Result<()> {
     let snapshot = prepare_execution(registry, m, clients, child, deadline, stop).await?;
-    let execution_origin = Instant::now();
+    let execution = ExecutionContext {
+        manifest: m,
+        clients,
+        snapshot: &snapshot,
+        origin: Instant::now(),
+        stop,
+    };
     for phase in &m.phases {
         let Some(phase_deadline) = phase_deadline(m, phase, deadline)? else {
             continue;
@@ -452,80 +461,9 @@ async fn execute(
             _ => 1,
         };
         for round_index in 0..round_count {
-            let mut rotation = rotation::Controller::start(
-                registry,
-                m,
-                (phase, round_index),
-                child.running()?,
-                phase_deadline,
-                stop,
-            )
-            .await?;
-            let batches = round_batches(phase, round_index);
-            for ids in batches {
-                let untouched = ids.iter().all(|id| {
-                    registry
-                        .execution_state(&m.run_id, id)
-                        .is_ok_and(|s| s == "UNATTEMPTED")
-                });
-                if !untouched {
-                    continue;
-                } // no replay, even after a reservation/dispatch crash
-                ensure!(
-                    Instant::now() < phase_deadline
-                        && !stop.is_cancelled()
-                        && !child.running()?.fault.is_cancelled()
-                        && !child.running()?.exited()?,
-                    "phase deadline/cancellation/child failure prevents dispatch"
-                );
-                if let Some(controller) = &rotation {
-                    ensure!(ids.len() == 1, "rotation dispatch must be sequential");
-                    controller.before_case(&ids[0])?;
-                }
-                let batch = format!("batch_{}", files::hash(ids.join(":")));
-                // Dependency refusal leaves these cases untouched, permitting independent phases.
-                if let Err(error) = registry.reserve_batch(&m.run_id, &batch, &ids, now()?) {
-                    eprintln!("phase {} cannot dispatch: {error:#}", phase.id);
-                    break;
-                }
-                let mut tasks = dispatch_batch(
-                    registry,
-                    m,
-                    &ids,
-                    clients,
-                    child,
-                    (phase_deadline, execution_origin),
-                    stop,
-                )?;
-                drain_batch(registry, m, &mut tasks).await?;
-                if let Some(controller) = &mut rotation {
-                    controller
-                        .after_case(registry, m, &ids[0], child.running()?, phase_deadline, stop)
-                        .await?;
-                }
-                settle_batch(registry, m, phase, &batch, child, phase_deadline, stop).await?;
-            }
-            if let Some(controller) = rotation {
-                if round_index == 0 && matches!(phase.scenario, Scenario::Lifecycle { .. }) {
-                    restart::perform(
-                        registry,
-                        m,
-                        phase,
-                        &controller,
-                        child,
-                        restart::Wait {
-                            clients,
-                            snapshot: &snapshot,
-                            deadline: phase_deadline,
-                            stop,
-                        },
-                    )
-                    .await?;
-                }
-                controller
-                    .finish(registry, m, child.running()?, phase_deadline, stop)
-                    .await?;
-            }
+            execution
+                .run_round(registry, phase, round_index, child, phase_deadline)
+                .await?;
         }
         if matches!(&phase.scenario, Scenario::TorOutage { .. }) {
             let evidence = crate::tor::outage::results(registry, m, phase)?;
@@ -541,6 +479,141 @@ async fn execute(
     }
     Ok(())
 }
+
+struct ExecutionContext<'a> {
+    manifest: &'a Manifest,
+    clients: &'a BTreeMap<String, mcp::Client>,
+    snapshot: &'a Value,
+    origin: Instant,
+    stop: &'a CancellationToken,
+}
+
+enum BatchOutcome {
+    Continue,
+    StopRound,
+}
+
+impl ExecutionContext<'_> {
+    async fn run_round(
+        &self,
+        registry: &mut Registry,
+        phase: &Phase,
+        round_index: usize,
+        child: &mut session::Application<'_>,
+        phase_deadline: Instant,
+    ) -> Result<()> {
+        let mut rotation = rotation::Controller::start(
+            registry,
+            self.manifest,
+            (phase, round_index),
+            child.running()?,
+            phase_deadline,
+            self.stop,
+        )
+        .await?;
+        let batches = round_batches(phase, round_index);
+        for ids in batches {
+            match self
+                .run_batch(registry, phase, &ids, &mut rotation, child, phase_deadline)
+                .await?
+            {
+                BatchOutcome::Continue => {}
+                BatchOutcome::StopRound => break,
+            }
+        }
+        if let Some(controller) = rotation {
+            if round_index == 0 && matches!(phase.scenario, Scenario::Lifecycle { .. }) {
+                restart::perform(
+                    registry,
+                    self.manifest,
+                    phase,
+                    &controller,
+                    child,
+                    restart::Wait {
+                        clients: self.clients,
+                        snapshot: self.snapshot,
+                        deadline: phase_deadline,
+                        stop: self.stop,
+                    },
+                )
+                .await?;
+            }
+            controller
+                .finish(
+                    registry,
+                    self.manifest,
+                    child.running()?,
+                    phase_deadline,
+                    self.stop,
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn run_batch(
+        &self,
+        registry: &mut Registry,
+        phase: &Phase,
+        ids: &[String],
+        rotation: &mut Option<rotation::Controller>,
+        child: &mut session::Application<'_>,
+        phase_deadline: Instant,
+    ) -> Result<BatchOutcome> {
+        let m = self.manifest;
+        let untouched = ids.iter().all(|id| {
+            registry
+                .execution_state(&m.run_id, id)
+                .is_ok_and(|s| s == "UNATTEMPTED")
+        });
+        if !untouched {
+            // No replay, even after a reservation/dispatch crash.
+            return Ok(BatchOutcome::Continue);
+        }
+        ensure!(
+            Instant::now() < phase_deadline
+                && !self.stop.is_cancelled()
+                && !child.running()?.fault.is_cancelled()
+                && !child.running()?.exited()?,
+            "phase deadline/cancellation/child failure prevents dispatch"
+        );
+        if let Some(controller) = rotation.as_ref() {
+            ensure!(ids.len() == 1, "rotation dispatch must be sequential");
+            controller.before_case(&ids[0])?;
+        }
+        let batch = format!("batch_{}", files::hash(ids.join(":")));
+        // Refusal stops this round's batches, but the controller still finalizes.
+        if let Err(error) = registry.reserve_batch(&m.run_id, &batch, ids, now()?) {
+            eprintln!("phase {} cannot dispatch: {error:#}", phase.id);
+            return Ok(BatchOutcome::StopRound);
+        }
+        let mut tasks = dispatch_batch(
+            registry,
+            m,
+            ids,
+            self.clients,
+            child,
+            (phase_deadline, self.origin),
+            self.stop,
+        )?;
+        drain_batch(registry, m, &mut tasks).await?;
+        if let Some(controller) = rotation.as_mut() {
+            controller
+                .after_case(
+                    registry,
+                    m,
+                    &ids[0],
+                    child.running()?,
+                    phase_deadline,
+                    self.stop,
+                )
+                .await?;
+        }
+        settle_batch(registry, m, phase, &batch, child, phase_deadline, self.stop).await?;
+        Ok(BatchOutcome::Continue)
+    }
+}
+
 fn round_batches(phase: &Phase, round_index: usize) -> Vec<Vec<String>> {
     match &phase.scenario {
         Scenario::Concurrency { batches } => batches.clone(),
@@ -873,7 +946,9 @@ fn managed_environment(
     let funding = config.funding.as_ref().context("managed funding missing")?;
     let mut names = BTreeMap::new();
     for name in [&treasury.indexer_url_env, &treasury.submission_url_env] {
-        if !name.is_empty() { names.insert(name.as_str(), true); }
+        if !name.is_empty() {
+            names.insert(name.as_str(), true);
+        }
     }
     names
         .entry(funding.base_rpc_url_env.as_str())

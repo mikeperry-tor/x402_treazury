@@ -6,6 +6,14 @@ serving, a multi-listener TOML deployment, or wallet/source administration. Ther
 is no Python server, external wallet daemon or payment logic in the calling agent.
 See the [README](../README.md) for commands and configuration examples.
 
+The qualification runner keeps phase prerequisites and outage handling around
+explicit round and batch operations. A round owns its rotation controller through
+restart and finalization; a batch reserves before dispatch and drains accepted work
+before assessing rotation and settlement. Reservation refusal stops that round's
+batch loop but still reaches controller finalization. The execution origin is
+captured once after preparation; extraction boundaries never renew deadlines or
+spending authority.
+
 ## Catalog, configuration and execution
 
 Standalone commands separate inspection/routing from server construction. Tags can
