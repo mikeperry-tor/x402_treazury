@@ -661,6 +661,83 @@ mod tests {
             "concurrency":[{"status":"incomplete","reason":"secret-error","mcp_overlap":true,"signed_request_future_overlap":false}],
             "rotation":[{"status":"incomplete","wallet":"secret-wallet"}],"runtime_events":[{"password":"secret-token","body":"secret-response"}]})
     }
+    // Synthetic evidence only: exercise composition across every optional section.
+    fn complete_report() -> Value {
+        let mut value = report();
+        value["summary"] = json!({"version":1,"source_inventory_complete":false,
+            "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429,"pricing_evidence":null}],
+                "help":[],"pricing":[],"cases":[]}],
+            "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_zatoshis":200000,"reserved_jobs":1},
+            "lifecycle":[],"network":"owned_control_audit_required"});
+        let data = crate::accounting::fixture();
+        let mut historical = data.clone();
+        historical["source_budget_entries"][2]["reserved"] = json!(100);
+        value["treasury_accounting"] = json!({"observations":[{
+            "session":"secret-session",
+            "summary":crate::accounting::summarize(&data).unwrap(),
+            "baseline_comparison":crate::accounting_baseline::compare(
+                &crate::accounting_baseline::snapshot(&historical), &data).unwrap(),
+            "run_source_accounting":crate::accounting_attribution::source(
+                &data, &[json!({"operation":"deposit","source_bound":110,"released":false})]).unwrap()
+        }]});
+        value["application_evidence"] = json!({"payment_attempts_correlated":1});
+        value["runtime_events"] = json!([{"kind":"application_payment","detail":{"case":"secret-case","amount":"14000"}}]);
+        value["fee_observations"] = crate::fees::report(&value).unwrap();
+        value["fee_observations"]["cases"][0]["challenge_observations"] = json!([
+            {"status":"observed","url":"secret-url","offers":[{"above_one_cent":true,"base_usdc":true,"amount_atomic":"14000"},
+                {"base_usdc":true,"amount_atomic":null}]},
+            {"status":"header_limit_exceeded","raw":"secret-content","offers":[]}]);
+        value["catalog_stages"] = json!([
+            {"phase":"initial_inspection","status":"unobserved"},
+            {"phase":"frozen_reload","status":"completed","sources":[{"source":"secret-source","state":"completed"},
+                {"state":"failed"},{"state":"cancelled"},{"state":"not_started"}]}]);
+        value["pricing_stages"] = json!([{"source":"secret-source","stage":"completed","required":true,"assessment":"passed",
+            "evidence":{"observed":2,"available_prices":0,"expired":1,"capped":3,"cache":{"initialized":1,"hit":1},"http_statuses":{"403":1,"429":1}}}]);
+        // Deliberately reverse evidence order: the output must follow case order.
+        value["help_stages"] = json!([
+            {"case":"failed-case","required":false,"status":"passed","cache":"hit","result":{"status":"succeeded"}},
+            {"case":"secret-case","required":true,"status":"failed","cache":"fetch","result":{"status":"failed","failure_category":"http_status","http_status":403,"body":"secret-docs"}}]);
+        value["reliability"] = json!([{"status":"incomplete","planned":3,"passed":1,"failed":1,"incomplete":1,"reason":"secret-reason"}]);
+        value["provider_semantics"] = json!([
+            {"case":"skipped-case","status":"not_executed","category":"validated_rotation_target_reached","required":true},
+            {"case":"failed-case","status":"failed","category":"nested_is_error","required":true},
+            {"case":"secret-case","status":"passed","category":"declared_assertions","required":true}]);
+        value["eligibility"] = json!({"status":"refused","run_unstarted":false,"execution_authorized":false,"reason":"secret-reason"});
+        value
+    }
+
+    #[test]
+    fn complete_projection_preserves_section_order_text_and_redaction() {
+        let text = markdown(&complete_report()).unwrap();
+        for private in ["secret", "private-", "failed-case", "skipped-case"] {
+            assert!(!text.contains(private), "private fixture detail rendered");
+        }
+        // The final empty line is part of the renderer contract.
+        assert_eq!(text, concat!(include_str!("fixtures/reporting_complete.txt"), "\n"));
+    }
+
+    #[test]
+    fn malformed_composed_reports_fail_instead_of_returning_partial_output() {
+        let complete = complete_report();
+        let mut duplicate = complete.clone();
+        duplicate["cases"][1]["case"] = duplicate["cases"][0]["case"].clone();
+        let mut incomplete_debits = complete.clone();
+        incomplete_debits["canonical_api_debits"]["status"] = json!("invalid_or_incomplete");
+        let mut missing_catalog_rows = complete.clone();
+        missing_catalog_rows["catalog_stages"][1]["sources"] = Value::Null;
+        let mut missing_assessment = complete;
+        missing_assessment["provider_semantics"].as_array_mut().unwrap().remove(0);
+        for (value, expected) in [
+            (duplicate, "duplicate case in single-run report"),
+            (incomplete_debits, "invalid debit report contains amounts"),
+            (missing_catalog_rows, "missing catalog observations"),
+            (missing_assessment, "provider assessment missing"),
+        ] {
+            let error = markdown(&value).unwrap_err();
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
     #[test]
     fn eligibility_projection_is_observational_and_redacts_private_details() {
         let mut r = report();

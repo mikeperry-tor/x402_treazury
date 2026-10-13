@@ -1,0 +1,127 @@
+# Live integration report
+
+This is a sanitized projection of private registry evidence, not a new qualification run.
+Case and assertion numbers follow the private JSON order. Identifiers, addresses,
+transaction references, credentials, paths and provider content are omitted.
+
+## Provider stages
+
+Stages are independent observations. Saved source accounting is not a fresh balance.
+Owned Tor requires its separate control audit; Tor-only failures do not establish Tor causation.
+Providers follow private JSON order; unselected calls remain not attempted.
+
+| Provider | Catalog | Help | Pricing | Execution | Provider semantics | Canonical payment |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | failed | not attempted | not attempted | not attempted | not attempted | not attempted |
+
+Historical source inventory is incomplete; this table includes known case sources only.
+
+## API accounting
+
+| Case | Execution | MCP result | Settlement | Charged reservation | Verified debit |
+| --- | --- | --- | --- | ---: | ---: |
+| 1 | completed | passed | used | $0.020000 | $0.014000 |
+| 2 | completed | failed | not signed | $0.020000 | not established |
+| 3 | skipped: target reached | not executed | not signed | $0.000000 | not established |
+
+Selected-run charged API reservations: **$0.040000**. These remain charged after failed calls.
+Verified API debits: **$0.014000** across **1** cases. Missing proofs are not zero-cost claims.
+
+Registry-wide charged API reservations: **$0.060000**; source reservations: **200000 zatoshis**; reserved funding jobs: **1**. Source reservations are limits, not measured Zcash fees.
+
+## Persisted treasury accounting
+
+Treasury-wide saved observations include history outside this run. These are not fresh chain reads or new spending authority. Refund outputs are reported separately, not subtracted again from costs. Missing observations do not establish zero balances.
+
+Changes since registry authorization (may span multiple runs; not payment or fresh-chain proofs):
+
+| Source bookkeeping (zatoshis) | Baseline | Saved observation | Change |
+| --- | ---: | ---: | ---: |
+| Principal | 100 | 100 | 0 |
+| Fees | 8 | 8 | 0 |
+| Consumed cost | 108 | 108 | 0 |
+| Treasury reservations | 100 | 70 | -30 |
+| Refund outputs | 10 | 10 | 0 |
+Aggregate USDC balance change: unobserved (missing wallet anchors).
+Saved shielded ZEC changes: confirmed **0 zatoshis**, spendable **0 zatoshis**; funding, change confirmation and external transfers may affect these values.
+Run-attributed source costs: principal **100 zatoshis**, fees **5 zatoshis**, consumed **105 zatoshis**; treasury reservations **0 zatoshis**. Registry unreleased bounds: **110 zatoshis**; released bounds: **0 zatoshis**; attempts without treasury budget evidence: **0**. Refund outputs: **10 zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.
+
+Snapshot 1: recorded principal **100 zatoshis**, recorded fees **8 zatoshis**, consumed cost **108 zatoshis**, pending source reservations **70 zatoshis**, refund outputs **10 zatoshis**.
+Saved unresolved payment exposure: **5 USDC atomic**; not a verified debit or available balance.
+Saved shielded ZEC: confirmed **60 zatoshis**, spendable **50 zatoshis** (freshness not asserted).
+
+| Wallet role | Wallets | Anchored observations | Unobserved | Saved balance (USDC atomic) |
+| --- | ---: | ---: | ---: | ---: |
+| ACTIVE | 1 | 1 | 0 | 0 |
+| ALLOCATED | 1 | 0 | 1 | 0 |
+| RETIRED | 1 | 1 | 0 | 7 |
+
+## Observed fee samples
+
+Admission is a pre-signing amount, not a debit. These samples do not establish a provider-wide maximum or minimum wallet size. Observed challenge offers may be rejected or unselected; they grant no payment authority.
+
+| Case | Admitted amount | Above $0.01 | Verified debit above $0.01 |
+| --- | ---: | --- | --- |
+| 1 | $0.014000 | yes | yes |
+| 2 | not established | not established | not established |
+| 3 | not established | not established | not established |
+
+| Case | Challenge observation | Offers | Base USDC offers above $0.01 | Base USDC amounts unknown |
+| --- | --- | ---: | ---: | ---: |
+| 1 | observed | 2 | 1 | 1 |
+| 1 | header limit exceeded (65536 bytes) | unavailable | unavailable | unavailable |
+| 2 | not observed | unavailable | unavailable | unavailable |
+| 3 | not observed | unavailable | unavailable | unavailable |
+
+Catalog inspection (initial inputs may be local or remote; shared loads are not separate network requests):
+
+| Inspection | Completed | Failed | Cancelled | Not started |
+| --- | ---: | ---: | ---: | ---: |
+| Initial inputs | unobserved | unobserved | unobserved | unobserved |
+| Frozen reload | 1 | 1 | 1 | 1 |
+
+| Pricing observation | Stage | Assertion | Observed endpoints | Available prices | Cache initializations | Cache hits | Shared results | Expired | Capped | HTTP codes (count) |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | completed | passed | 2 | 0 | 1 | 1 | 0 | 1 | 3 | 403 (1), 429 (1) |
+
+Pricing completion is not provider health or payment qualification. Cached failure/success outcomes are observations, not fresh requests; cache initialization does not prove a request reached the provider. Startup prices never authorize payment.
+
+| Help case | Assessment | Cache path | Retrieval | Required |
+| --- | --- | --- | --- | --- |
+| 1 | failed | fetch | HTTP 403 | yes |
+| 2 | passed | hit | succeeded | no |
+
+## Assertions
+
+| Concurrency batch | Result | MCP overlap | Application overlap | Payment-work overlap | Signed-request future overlap |
+| --- | --- | --- | --- | --- | --- |
+| 1 | incomplete | observed | unavailable | unavailable | not observed |
+
+| Rotation/lifecycle phase | Result |
+| --- | --- |
+| 1 | incomplete |
+
+| Reliability comparison | Result | Planned | Passed | Failed | Incomplete |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | incomplete | 3 | 1 | 1 | 1 |
+
+Reliability comparisons describe observed end-to-end cases. They do not automatically attribute failures to a provider or Tor or guarantee future reliability.
+
+| Provider case | Content assessment | Category | Required |
+| --- | --- | --- | --- |
+| 1 | passed | declared assertions | yes |
+| 2 | failed | nested JSON isError | yes |
+| 3 | not executed | validated rotation target reached | yes |
+
+Empty assertion tables mean no assertions were selected, not a pass.
+
+Tor/confinement and cover qualification require their separate retained artifacts;
+this registry report does not independently verify them. Treasury balances, actual
+source fees, residual assets and exhaustion warnings are not inferred from API
+reservations or missing debit proofs. No overall live-suite success is asserted.
+
+## Eligibility observation
+
+Case-window assessment: refused; inspect private JSON. Run unstarted: no.
+This grants no execution authority. Started or reserved runs cannot run again;
+window eligibility alone does not establish safe execution.
