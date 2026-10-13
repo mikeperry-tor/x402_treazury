@@ -339,4 +339,152 @@ mod tests {
             State::NotAttempted
         );
     }
+
+    fn input() -> Value {
+        json!({"cases":[{"case":"call","execution":"COMPLETED","semantic":"PASSED"}],
+            "provider_semantics":[{"case":"call","status":"failed"}],
+            "canonical_api_debits":{"status":"incomplete","cases":{}},
+            "catalog_stages":[],"help_stages":[],"pricing_stages":[],"rotation":[],
+            "treasury_accounting":{"status":"recorded","observations":[{}]},
+            "source_reserved_zatoshis":20,"funding_jobs_reserved":1})
+    }
+
+    fn unobserved(value: &str) -> Value {
+        json!([{"scope":"no_observation","state":value,"http_status":null,"pricing_evidence":null}])
+    }
+
+    #[test]
+    fn full_report_preserves_legacy_defaults_and_network_evidence() {
+        let mut m = crate::tests::manifest();
+        m.cases[0].unsigned = true;
+        let r = input();
+        for (mode, expected) in [
+            (TorMode::Direct, "direct"),
+            (TorMode::External, "external_proxy_only"),
+            (TorMode::Owned, "owned_control_audit_required"),
+        ] {
+            m.network.tor_mode = mode;
+            let report = serde_json::to_value(build(&m, &json!({}), &r).unwrap()).unwrap();
+            assert_eq!(
+                report,
+                json!({
+                    "version":1,"source_inventory_complete":false,
+                    "providers":[{"source":"api","catalog":unobserved("unobserved"),
+                        "help":unobserved("unobserved"),"pricing":unobserved("unobserved"),
+                        "cases":[{"case":"call","execution":"completed","mcp":"completed",
+                            "semantics":"failed","payment":"not_requested","verified_atomic":null}]}],
+                    "source_funding":{"saved_accounting":"completed","observations":1,
+                        "reserved_zatoshis":20,"reserved_jobs":1},
+                    "lifecycle":[],"network":expected
+                })
+            );
+        }
+        let report = build(&m, &json!({"sources":{"z_unused":{},"a_unused":{}}}), &r).unwrap();
+        assert!(report.source_inventory_complete);
+        assert_eq!(
+            report
+                .providers
+                .iter()
+                .map(|p| p.source.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a_unused", "api", "z_unused"]
+        );
+        assert_eq!(report.providers[0].help[0].state, State::NotAttempted);
+    }
+
+    #[test]
+    fn duplicate_evidence_selection_and_verified_zero_are_preserved() {
+        let m = crate::tests::manifest();
+        let mut r = input();
+        r["cases"] = json!([
+            {"case":"call","execution":"FAILED","semantic":"FAILED"},
+            {"case":"call","execution":"UNATTEMPTED","semantic":"PASSED"}]);
+        r["provider_semantics"] = json!([
+            {"case":"call","status":"failed"},{"case":"call","status":"passed"}]);
+        r["help_stages"] = json!([
+            {"case":"call","status":"completed","result":{"http_status":204}},
+            {"case":"call","status":"failed","result":{"http_status":9999}}]);
+        r["catalog_stages"] = json!([{"phase":"first","sources":[
+            {"source":"api","state":"failed","http_status":429},
+            {"source":"api","state":"completed","http_status":200}]}]);
+        let evidence = serde_json::to_value(x402_treazury::pricing::Evidence::default()).unwrap();
+        r["pricing_stages"] = json!([
+            {"source":"api","session":"one","stage":"disabled","evidence":evidence},
+            {"source":"api","session":"two","stage":"not_observed"}]);
+        for zero in [json!("0"), json!(0)] {
+            r["canonical_api_debits"] = json!({"status":"validated","cases":{"call":zero}});
+            let report = serde_json::to_value(build(&m, &json!({}), &r).unwrap()).unwrap();
+            assert_eq!(
+                report["providers"][0],
+                json!({"source":"api",
+                "catalog":[
+                    {"scope":"first","state":"failed","http_status":429,"pricing_evidence":null},
+                    {"scope":"first","state":"completed","http_status":200,"pricing_evidence":null}],
+                "help":[{"scope":"call","state":"not_attempted","http_status":204,"pricing_evidence":null}],
+                "pricing":[
+                    {"scope":"one","state":"disabled","http_status":null,"pricing_evidence":evidence},
+                    {"scope":"two","state":"unobserved","http_status":null,"pricing_evidence":null}],
+                "cases":[{"case":"call","execution":"not_attempted","mcp":"completed",
+                    "semantics":"failed","payment":"completed","verified_atomic":0}]})
+            );
+        }
+        r["canonical_api_debits"] = json!({"status":"incomplete","cases":{"call":"invalid"}});
+        let report = build(&m, &json!({}), &r).unwrap();
+        assert_eq!(report.providers[0].cases[0].payment, State::NotAttempted);
+        assert_eq!(report.providers[0].cases[0].verified_atomic, None);
+    }
+
+    #[test]
+    fn report_rejects_malformed_evidence_in_original_evaluation_order() {
+        let m = crate::tests::manifest();
+        let config = json!({"sources":{"api":{}}});
+        let mut r = input();
+        r["catalog_stages"] = json!([{"phase":"load","sources":[
+            {"source":"api","state":"failed","http_status":99}]}]);
+        r["help_stages"] = Value::Null;
+        r["pricing_stages"] = Value::Null;
+        let error = |r: &Value| build(&m, &config, r).err().unwrap().to_string();
+        assert_eq!(error(&r), "invalid stage HTTP status");
+        r["catalog_stages"] = json!([]);
+        assert_eq!(error(&r), "missing report section help_stages");
+        r["help_stages"] = json!([]);
+        r["provider_semantics"] = json!([]);
+        assert_eq!(error(&r), "provider semantic assessment missing");
+        r["provider_semantics"] = input()["provider_semantics"].clone();
+        r["canonical_api_debits"] = json!({"status":"validated","cases":{"call":-1}});
+        assert_eq!(error(&r), "invalid canonical debit amount");
+        r["canonical_api_debits"] = json!({"status":"incomplete"});
+        assert_eq!(error(&r), "missing report section pricing_stages");
+        let mut invalid =
+            serde_json::to_value(x402_treazury::pricing::Evidence::default()).unwrap();
+        invalid["observed"] = json!(1);
+        r["pricing_stages"] = json!([{"source":"api","evidence":invalid}]);
+        assert_eq!(error(&r), "pricing observation totals disagree");
+        r["pricing_stages"] = json!([]);
+        r["source_reserved_zatoshis"] = json!("20");
+        assert_eq!(error(&r), "invalid report amount source_reserved_zatoshis");
+        r["cases"] = json!([{ "case":"different" }]);
+        assert_eq!(error(&r), "manifest case missing from report");
+        r["cases"] = json!([]);
+        assert_eq!(error(&r), "report case inventory mismatch");
+    }
+
+    #[test]
+    fn source_limit_accepts_complete_boundary_and_rejects_overflow() {
+        let mut m = crate::tests::manifest();
+        m.cases.clear();
+        let mut r = input();
+        r["cases"] = json!([]);
+        let sources: serde_json::Map<String, Value> = (0..10000)
+            .map(|i| (format!("source_{i:05}"), json!({})))
+            .collect();
+        let mut config = json!({"sources": sources});
+        let report = build(&m, &config, &r).unwrap();
+        assert_eq!(report.providers.len(), 10000);
+        config["sources"]["overflow"] = json!({});
+        assert_eq!(
+            build(&m, &config, &r).err().unwrap().to_string(),
+            "provider report exceeds 10000 sources; no partial report"
+        );
+    }
 }
