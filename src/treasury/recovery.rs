@@ -480,4 +480,245 @@ mod tests {
         assert!(owner.status().await.unwrap().treasury_operations.is_empty());
         owner.close().await.unwrap();
     }
+
+    async fn unfunded_recovery_fixture() -> (tempfile::TempDir, Treasury, Vec<FundingJob>) {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        crate::rotation::test_capacity::treasury_pair(
+            &owner,
+            "disposition",
+            "2",
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0,
+        )
+        .await
+        .unwrap();
+        let jobs = owner.status().await.unwrap().funding_jobs;
+        (dir, owner, jobs)
+    }
+
+    fn recovery_rows(
+        dir: &std::path::Path,
+        financial_only: bool,
+    ) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        let db = rusqlite::Connection::open_with_flags(
+            dir.join("state/state.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let mut queries = vec![
+            "SELECT * FROM budget_entries ORDER BY id",
+            "SELECT * FROM outgoing ORDER BY id",
+            "SELECT * FROM treasury_operations ORDER BY id",
+            "SELECT * FROM payment_attempts ORDER BY id",
+            "SELECT * FROM reserve_claims ORDER BY pool_id,slot",
+            "SELECT id,role,balance,unresolved_exposure FROM wallets ORDER BY id",
+            "SELECT * FROM funding_jobs ORDER BY id",
+        ];
+        if !financial_only {
+            queries.extend([
+                "SELECT * FROM funding_progress ORDER BY job_id",
+                "SELECT * FROM funding_recovery ORDER BY operation_id",
+                "SELECT * FROM funding_quote_refreshes ORDER BY operation_id",
+                "SELECT * FROM funding_health ORDER BY job_id",
+                "SELECT * FROM funding_refunds ORDER BY job_id",
+            ]);
+        }
+        queries
+            .into_iter()
+            .map(|sql| {
+                let mut statement = db.prepare(sql).unwrap();
+                let columns = statement.column_count();
+                statement
+                    .query_map([], |row| {
+                        (0..columns).map(|column| row.get(column)).collect()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn early_recovery_dispositions_preserve_exact_journals_without_source_observation() {
+        let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
+        let stop = CancellationToken::new();
+        for (reason, expected) in [
+            (None, RecoveryOutcome::Waiting("funding_in_progress")),
+            (
+                Some("unsigned_quote_temporarily_unavailable"),
+                RecoveryOutcome::Waiting("funding_in_progress"),
+            ),
+            (
+                Some("treasury_insufficient_spendable_funds; detail"),
+                RecoveryOutcome::OperatorRequired(
+                    "funding_balance_budget_or_configuration_required",
+                ),
+            ),
+            (
+                Some("funding_cost_limit_exceeded; detail"),
+                RecoveryOutcome::OperatorRequired(
+                    "funding_balance_budget_or_configuration_required",
+                ),
+            ),
+            (
+                Some("funding_amount_limit_exceeded; detail"),
+                RecoveryOutcome::OperatorRequired(
+                    "funding_balance_budget_or_configuration_required",
+                ),
+            ),
+            (
+                Some("qualification_funding_denied; detail"),
+                RecoveryOutcome::OperatorRequired(
+                    "funding_balance_budget_or_configuration_required",
+                ),
+            ),
+            (
+                Some("near_authentication_required; detail"),
+                RecoveryOutcome::OperatorRequired(
+                    "funding_balance_budget_or_configuration_required",
+                ),
+            ),
+        ] {
+            let id = jobs[0].id.clone();
+            owner
+                .store
+                .call(move |store| store.defer_funding(&id, 0, reason, false))
+                .await
+                .unwrap();
+            let before = recovery_rows(dir.path(), false);
+            let observation = owner
+                .recover_funding_observed(jobs[0].id.clone(), 0, true, &mut NoNetwork, &stop)
+                .await
+                .unwrap();
+            assert_eq!(observation.outcome, expected, "{reason:?}");
+            assert!(!observation.source_observed);
+            assert_eq!(recovery_rows(dir.path(), false), before);
+        }
+        let conflict = jobs[0].id.clone();
+        owner.store.call(move |store| {
+            store.advance_funding(&conflict, FundingPhase::Allocated, FundingPhase::RecoveryRequired)?;
+            store.defer_funding(&conflict, 0, Some("funding_recovery_requires_operator; conflicting_transaction_or_input_evidence; retained"), false)
+        }).await.unwrap();
+        let refund = jobs[1].id.clone();
+        owner
+            .store
+            .call(move |store| {
+                // These are only synthetic workflow markers for an early refusal.
+                // No transaction, confirmation, credit or expiry proof is fabricated.
+                let phases = [
+                    FundingPhase::Allocated,
+                    FundingPhase::Quoted,
+                    FundingPhase::Preparing,
+                    FundingPhase::Prepared,
+                    FundingPhase::DepositPending,
+                    FundingPhase::RefundPending,
+                ];
+                for pair in phases.windows(2) {
+                    store.advance_funding(&refund, pair[0].clone(), pair[1].clone())?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        for (job, reason) in [
+            (&jobs[0], "conflicting_transaction_or_input_evidence"),
+            (&jobs[1], "refund_requires_review"),
+        ] {
+            let before = recovery_rows(dir.path(), false);
+            let observation = owner
+                .recover_funding_observed(job.id.clone(), 0, true, &mut NoNetwork, &stop)
+                .await
+                .unwrap();
+            assert_eq!(
+                observation.outcome,
+                RecoveryOutcome::OperatorRequired(reason)
+            );
+            assert!(!observation.source_observed);
+            assert_eq!(recovery_rows(dir.path(), false), before);
+        }
+        assert!(owner.status().await.unwrap().treasury_operations.is_empty());
+        owner.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn zero_recovery_allowance_closes_once_and_disabled_funding_precedes_attempt_limit() {
+        let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
+        let job = &jobs[0];
+        let id = job.id.clone();
+        owner
+            .store
+            .call(move |store| {
+                store.advance_funding(
+                    &id,
+                    FundingPhase::Allocated,
+                    FundingPhase::RecoveryRequired,
+                )?;
+                store.defer_funding(
+                    &id,
+                    0,
+                    Some("funding_quote_failed; no preparation started"),
+                    false,
+                )
+            })
+            .await
+            .unwrap();
+        let financial_before = recovery_rows(dir.path(), true);
+        let stop = CancellationToken::new();
+        for (allowed, reason) in [
+            (false, "funding_disabled"),
+            (true, "recovery_attempt_limit_reached"),
+            (false, "funding_disabled"),
+            (true, "recovery_attempt_limit_reached"),
+        ] {
+            let observation = owner
+                .recover_funding_observed(job.id.clone(), 0, allowed, &mut NoNetwork, &stop)
+                .await
+                .unwrap();
+            assert_eq!(
+                observation.outcome,
+                RecoveryOutcome::OperatorRequired(reason)
+            );
+            assert!(!observation.source_observed);
+            let id = job.id.clone();
+            let (current, count) = owner
+                .store
+                .call(move |store| {
+                    Ok((
+                        store.funding_job(&id)?.unwrap(),
+                        store.funding_recovery_count(&id)?,
+                    ))
+                })
+                .await
+                .unwrap();
+            assert_eq!(current.operation_id, job.operation_id);
+            assert_eq!(current.phase, FundingPhase::RecoveryRequired);
+            assert_eq!(count, 1, "closure must not archive the same attempt twice");
+            assert_eq!(recovery_rows(dir.path(), true), financial_before);
+        }
+        let observation = owner
+            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop)
+            .await
+            .unwrap();
+        assert_eq!(observation.outcome, RecoveryOutcome::Recovered);
+        assert!(!observation.source_observed);
+        let id = job.id.clone();
+        let (current, count) = owner
+            .store
+            .call(move |store| {
+                Ok((
+                    store.funding_job(&id)?.unwrap(),
+                    store.funding_recovery_count(&id)?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_ne!(current.operation_id, job.operation_id);
+        assert_eq!(current.phase, FundingPhase::Allocated);
+        assert_eq!(count, 1);
+        assert_eq!(recovery_rows(dir.path(), true), financial_before);
+        owner.close().await.unwrap();
+    }
 }
