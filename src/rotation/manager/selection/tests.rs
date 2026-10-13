@@ -1626,3 +1626,167 @@ async fn captured_pass_excludes_newly_allocated_wallet_even_with_published_capac
     drop(selected);
     f.close().await;
 }
+
+async fn read_only_candidate(
+    f: &Fixture,
+    cost: u64,
+    bound: Option<String>,
+    completed: Vec<ChainView>,
+) -> Option<String> {
+    // A held independent connection detects any committed store mutation,
+    // including journal/balance writes, without inspecting key material.
+    let db = f.db();
+    let version: i64 = db
+        .pragma_query_value(None, "data_version", |r| r.get(0))
+        .unwrap();
+    let calls = f.calls.lock().unwrap().clone();
+    let pool = f.manager.pool.clone();
+    let candidate = f
+        .manager
+        .store
+        .call(move |store| {
+            Ok(store
+                .payment_candidate_with_evidence(
+                    &pool,
+                    U256::from(cost),
+                    bound.as_deref(),
+                    i64::MAX,
+                    &completed,
+                )?
+                .map(|(candidate, _)| candidate.wallet))
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        db.pragma_query_value(None, "data_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        version,
+        "selection must not commit any balance, role, funding or payment journal mutation"
+    );
+    assert_eq!(
+        *f.calls.lock().unwrap(),
+        calls,
+        "selection must not acquire RPC evidence"
+    );
+    candidate
+}
+
+#[tokio::test]
+async fn competing_expired_or_foreign_owned_certificate_cannot_displace_cached_support() {
+    let f = fixture(0).await;
+    f.balance(&f.bound.wallet, 10);
+    let (_, view) = f
+        .manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    let mut expired = view.unwrap();
+    expired
+        .balance_certificates
+        .get_mut(&f.bound.wallet)
+        .unwrap()
+        .restrict_validity(0);
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![expired]).await,
+        Some(f.bound.wallet.clone())
+    );
+    let foreign = fixture(0).await;
+    foreign.balance(&foreign.bound.wallet, 20);
+    let (_, foreign_view) = foreign
+        .manager
+        .acquire_candidate_wallet(foreign.bound.wallet.clone())
+        .await
+        .unwrap();
+    let mut foreign_view = foreign_view.unwrap();
+    // Substitute a real proof from another owner under this wallet's lookup key.
+    // This changes no opaque certificate and must not create usable authority.
+    let certificate = foreign_view
+        .balance_certificates
+        .remove(&foreign.bound.wallet)
+        .unwrap();
+    foreign_view
+        .balance_certificates
+        .insert(f.bound.wallet.clone(), certificate);
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![foreign_view]).await,
+        Some(f.bound.wallet.clone())
+    );
+    foreign.close().await;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity_and_cap() {
+    let f = fixture(2).await;
+    for wallet in [&f.bound.wallet, &f.small, &f.large]
+        .into_iter()
+        .chain(&f.retained)
+    {
+        f.balance(wallet, 10);
+    }
+    cache_balances(&f, None).await;
+    // Equal capacity prefers active; lower sufficient capacity precedes role.
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![]).await,
+        Some(f.bound.wallet.clone())
+    );
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='5' WHERE role='RETAINED'",
+            [],
+        )
+        .unwrap();
+    let first_retained = f.retained.iter().min().unwrap().clone();
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![]).await,
+        Some(first_retained)
+    );
+    // The bound payer wins even with a worse fit than retained inventory.
+    assert_eq!(
+        read_only_candidate(&f, 5, Some(f.bound.wallet.clone()), vec![]).await,
+        Some(f.bound.wallet.clone())
+    );
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='11' WHERE role IN ('ACTIVE','RETAINED')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![]).await,
+        Some(f.small.clone())
+    );
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='5' WHERE id=?1",
+            [&f.large],
+        )
+        .unwrap();
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![]).await,
+        Some(f.large.clone())
+    );
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='6' WHERE id=?1",
+            [&f.large],
+        )
+        .unwrap();
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![]).await,
+        Some(f.small.clone())
+    );
+    f.db()
+        .execute("UPDATE pools SET payment_limit='5'", [])
+        .unwrap();
+    assert_eq!(
+        read_only_candidate(&f, 5, None, vec![]).await,
+        Some(f.small.clone())
+    );
+    assert_eq!(read_only_candidate(&f, 6, None, vec![]).await, None);
+    f.db()
+        .execute("UPDATE pools SET payment_limit='4'", [])
+        .unwrap();
+    assert_eq!(read_only_candidate(&f, 5, None, vec![]).await, None);
+    f.close().await;
+}
