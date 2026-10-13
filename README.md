@@ -208,15 +208,16 @@ target/release/x402_treazury catalog warm \
 **Direct warming reveals your IP address to providers; treasury traffic and
 paid API calls still use Tor**. Omit `--direct` to warm through Tor.
 
-> **NOTE: Tor block and ratelimit fallback relay
+> **NOTE: Tor 403/429/503 fallback relay**
 >
 > The privacy example conf automatically uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
 > when API catalog or pricing requests are blocked, rate limited, or time out over Tor.
-> This relay service is also contacted over Tor. Its requests are paid by the wallet that is attached to the provider that it
-> is contacting, and these requests use Tor circuit isolation derived from that
-> same target wallet to connect to this relay service. If multiple wallets are assigned to a provider through
+> This relay service is also contacted over Tor. Relayed requests cost $0.01
+> each, paid by the wallet that is attached to the provider that it
+> is contacting. The requests to this relay service use Tor circuit isolation derived from that
+> same target wallet. If multiple wallets are assigned to a provider through
 > multiple MCP servers (such as with the Exa provider in the privacy example conf),
-> one wallet is always chosen deterministically for any relayed API catalog requests.
+> one wallet is always chosen deterministically for relayed API catalog requests.
 
 ### 5. Start serving
 
