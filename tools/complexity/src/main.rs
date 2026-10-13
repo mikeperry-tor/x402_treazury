@@ -48,6 +48,21 @@ fn test_attrs(attrs: &[syn::Attribute]) -> bool {
                     .is_some_and(|m| cfg_without_test(&m) == Some(false)))
     })
 }
+
+// Lint levels cannot change item inclusion or test classification, regardless of
+// whether their cfg predicate is true. Other conditional attributes still need
+// review, including mixed lists and nested cfg_attr.
+fn conditional_lints_only(attr: &syn::Attribute) -> bool {
+    let Ok(args) = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) else {
+        return false;
+    };
+    args.len() >= 2
+        && args.iter().skip(1).all(|meta| {
+            matches!(meta, Meta::List(list) if ["allow", "warn", "deny", "forbid", "expect"]
+                .iter().any(|name| list.path.is_ident(name)))
+        })
+}
+
 #[derive(Default)]
 struct Inventory {
     test_ranges: Vec<(usize, usize)>,
@@ -99,7 +114,7 @@ impl<'ast> Visit<'ast> for Inventory {
         if test_attrs(std::slice::from_ref(node)) {
             self.test_attribute_lines.push(node.span().start().line);
         }
-        if node.path().is_ident("cfg_attr") {
+        if node.path().is_ident("cfg_attr") && !conditional_lints_only(node) {
             self.cfg_attr_lines.push(node.span().start().line);
         }
         syn::visit::visit_attribute(self, node);
@@ -226,5 +241,43 @@ mod tests {
         assert_eq!(v["test_ranges"], json!([[2, 3]]));
         assert_eq!(v["test_attribute_lines"], json!([2]));
         assert_eq!(v["cfg_attr_lines"], json!([5]));
+    }
+
+    #[test]
+    fn conditional_lint_levels_preserve_metrics_and_classification() {
+        for lint in ["allow", "warn", "deny", "forbid", "expect"] {
+            let code = format!(
+                "#[cfg_attr(not(feature=\"zcash\"), {lint}(dead_code), allow(clippy::all))]\nfn f(a: bool) {{ if a {{ work(); }} }}"
+            );
+            let v = analyze(Path::new("probe.rs"), &code);
+            assert_eq!(v["errors"], json!([]));
+            assert_eq!(v["cfg_attr_lines"], json!([]));
+            assert_eq!(v["test_ranges"], json!([]));
+            assert_eq!(score(&code), score("fn f(a: bool) { if a { work(); } }"));
+        }
+        let wallet = analyze(
+            Path::new("wallet.rs"),
+            "#[cfg_attr(not(feature=\"zcash\"), allow(dead_code))]\nenum Command { Recover }",
+        );
+        assert_eq!(wallet["errors"], json!([]));
+        assert_eq!(wallet["cfg_attr_lines"], json!([]));
+    }
+
+    #[test]
+    fn conditional_nonlint_attributes_still_require_review() {
+        for args in [
+            "feature=\"x\", allow(dead_code), test",
+            "feature=\"x\", cfg(test)",
+            "feature=\"x\", derive(Debug)",
+            "feature=\"x\", custom::allow(dead_code)",
+            "feature=\"x\", cfg_attr(test, allow(dead_code))",
+            "feature=\"x\"",
+        ] {
+            let v = analyze(
+                Path::new("probe.rs"),
+                &format!("#[cfg_attr({args})]\nfn f() {{}}"),
+            );
+            assert_eq!(v["cfg_attr_lines"], json!([1]), "{args}");
+        }
     }
 }

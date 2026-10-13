@@ -56,10 +56,14 @@ Test-only item spans come from Rust attributes and AST traversal. `cfg` predicat
 are evaluated with `test=false` and other predicates unknown; only definitely
 excluded items are classified as test-only. `#[test]`/`#[tokio::test]` and known
 standalone test paths (`tests/`, `tests.rs`, `*_tests.rs`, `regtest.rs`) also identify
-tests. Examples form a third category. `cfg_attr` is conservatively flagged for
-manual classification review and excludes its file rather than silently guessing.
+tests. Examples form a third category. Conditional lint levels (`allow`, `warn`,
+`deny`, `forbid`, `expect`) do not affect classification and are accepted regardless
+of their predicate. Other `cfg_attr` attributes, including mixed and nested lists,
+are flagged for manual classification review and exclude their file rather than
+silently guessing.
 
-This is not a compiled-feature report: all other feature branches remain present.
+This is not a compiled-feature report: all other feature branches remain present,
+including the default Zcash code. Cargo feature flags do not filter these metrics.
 A production function can contain test-only statements; its inclusive score still
 includes them, and the **Test attrs** column flags such functions. This also applies
 to production functions containing nested test-only callables. Macro bodies and
