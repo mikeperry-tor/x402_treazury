@@ -348,6 +348,9 @@ mod ownership_tests;
 #[path = "crash_tests.rs"]
 mod crash_tests;
 
+#[path = "io_failure_tests.rs"]
+mod io_failure_tests;
+
 #[tokio::test]
 async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused() {
     use crate::{

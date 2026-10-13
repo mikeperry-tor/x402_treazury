@@ -1,11 +1,15 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
 mod backup;
 mod capacity;
+#[cfg(test)]
+mod io_failure_tests;
 mod preflight;
 #[cfg(test)]
 mod query_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(test)]
+pub(crate) mod test_vfs;
 #[cfg(feature = "zcash")]
 mod treasury_reads;
 pub use capacity::AllocationKind;

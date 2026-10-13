@@ -119,6 +119,13 @@ reopen the real SQLite state, retain committed nonce/exposure records without
 replay, and verify independent peer-pool service. These use unfunded temporary
 wallets and loopback providers; they do not establish live settlement outcomes.
 
+SQLite fault fixtures install a non-default test VFS on temporary stores to fail
+real WAL writes/fsyncs and database checkpoint writes/fsyncs. They also exercise
+`SQLITE_FULL` using SQLite's page limit. Reopen checks require atomic preparation,
+retained reservations/exposure, exact committed bytes, database integrity and no
+provider dispatch after a failed payment journal acknowledgement. A sync error is
+allowed to leave an entire recoverable commit; it never proves no work occurred.
+
 The narrow conversion utility has synthetic fixtures for strict source-shape and
 proof validation, rejection before mutation, repeated/reopened inspection,
 exclusive ownership, and committed WAL inspection without changing source sidecars.
