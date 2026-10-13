@@ -1,7 +1,7 @@
 //! Explicit registry-bound execution; registry reservations precede every tools/call.
 use crate::{
     files,
-    manifest::{Manifest, Scenario},
+    manifest::{Manifest, Phase, Scenario},
     process::{Evidence, Process},
     registry::Registry,
 };
@@ -420,60 +420,12 @@ async fn execute(
     stop: &CancellationToken,
     runtime: &mut Option<&mut crate::tor::session::Runtime>,
 ) -> Result<()> {
-    let pins = registry.pins(&m.run_id)?;
-    let dir = &pins
-        .catalogs
-        .as_ref()
-        .context("catalog pins missing")?
-        .directory;
-    let snapshot: Value =
-        serde_json::from_slice(&files::read_catalog(&dir.join("snapshot.json"))?)?;
-    let session = child.current.binding.session.clone();
-    ready(
-        clients,
-        &snapshot,
-        child.running()?,
-        (registry, &m.run_id, &session),
-        m.limits.result_bytes,
-        deadline,
-        stop,
-    )
-    .await?;
-    if matches!(m.start.mode, crate::manifest::StartMode::TreasuryOnly) && !m.start.pools.is_empty()
-    {
-        let state_dir = config_state(&pins.resolved_config)?;
-        bootstrap::wait(
-            registry,
-            m,
-            &state_dir,
-            child.running()?,
-            deadline.min(Instant::now() + Duration::from_secs(m.limits.phase_seconds)),
-            stop,
-        )
-        .await?;
-    }
+    let snapshot = prepare_execution(registry, m, clients, child, deadline, stop).await?;
     let execution_origin = Instant::now();
     for phase in &m.phases {
-        let window = m
-            .windows
-            .iter()
-            .find(|w| w.id == phase.window)
-            .context("phase window missing")?;
-        let time = now()? as u64;
-        if time < window.not_before {
-            eprintln!(
-                "phase {} waiting_window; no daemon or automatic scheduling",
-                phase.id
-            );
+        let Some(phase_deadline) = phase_deadline(m, phase, deadline)? else {
             continue;
-        }
-        if time >= window.not_after {
-            eprintln!("phase {} expired_window; no calls dispatched", phase.id);
-            continue;
-        }
-        let phase_deadline = deadline
-            .min(Instant::now() + Duration::from_secs(m.limits.phase_seconds))
-            .min(Instant::now() + Duration::from_secs(window.not_after - time));
+        };
         if !m.start.pools.is_empty() && !phase.depends_on.is_empty() {
             bootstrap::wait_evidence(
                 registry,
@@ -485,55 +437,16 @@ async fn execute(
             )
             .await?;
         }
-        if let Scenario::TorOutage { warm_case, .. } = &phase.scenario {
-            ensure!(
-                m.start.pools.is_empty(),
-                "refusing Tor outage while a managed application is running; use a separate keyless deployment"
-            );
-            registry
-                .dependencies_ready(&m.run_id, &phase.id)
-                .context("outage prerequisites failed; refusing planned Tor shutdown")?;
-            let warm = registry.response(&m.run_id, warm_case)?;
-            ensure!(
-                warm["result"]["isError"] != true,
-                "warm help failed; refusing outage qualification"
-            );
-            tokio::time::timeout_at(
-                phase_deadline,
-                runtime
-                    .as_mut()
-                    .context("Tor outage requires owned runtime")?
-                    .outage(),
-            )
-            .await
-            .context("outage preparation deadline exceeded")??;
-            let observations = registry.report(Some(&m.run_id), now()?)?;
-            let priced = crate::pricing_stages::inventory(
-                &snapshot,
-                &observations["runtime_events"],
-                &child.current.binding.session,
-            )?;
-            for (name, client) in clients {
-                let expected = priced["inventory"]
-                    .as_array()
-                    .context("inventory missing")?
-                    .iter()
-                    .find(|i| i["server"] == *name)
-                    .context("listener missing")?;
-                tokio::time::timeout_at(
-                    phase_deadline,
-                    client.check_inventory(expected, m.limits.result_bytes),
-                )
-                .await
-                .context("outage tools/list deadline exceeded")??;
-            }
-            registry.event(
-                &m.run_id,
-                "tor_outage_started",
-                &json!({"phase":phase.id,"socks_closed":true,"inventory_unchanged":true}),
-                now()?,
-            )?;
-        }
+        prepare_outage(
+            registry,
+            m,
+            (phase, phase_deadline),
+            clients,
+            child,
+            &snapshot,
+            runtime,
+        )
+        .await?;
         let round_count = match &phase.scenario {
             Scenario::Lifecycle { rounds, .. } => rounds.len(),
             _ => 1,
@@ -743,6 +656,133 @@ async fn execute(
     }
     if !m.start.pools.is_empty() {
         bootstrap::wait_evidence(registry, m, None, child.running()?, deadline, stop).await?;
+    }
+    Ok(())
+}
+async fn prepare_execution(
+    registry: &mut Registry,
+    m: &Manifest,
+    clients: &BTreeMap<String, mcp::Client>,
+    child: &mut session::Application<'_>,
+    deadline: Instant,
+    stop: &CancellationToken,
+) -> Result<Value> {
+    let pins = registry.pins(&m.run_id)?;
+    let dir = &pins
+        .catalogs
+        .as_ref()
+        .context("catalog pins missing")?
+        .directory;
+    let snapshot: Value =
+        serde_json::from_slice(&files::read_catalog(&dir.join("snapshot.json"))?)?;
+    let session = child.current.binding.session.clone();
+    ready(
+        clients,
+        &snapshot,
+        child.running()?,
+        (registry, &m.run_id, &session),
+        m.limits.result_bytes,
+        deadline,
+        stop,
+    )
+    .await?;
+    if matches!(m.start.mode, crate::manifest::StartMode::TreasuryOnly) && !m.start.pools.is_empty()
+    {
+        let state_dir = config_state(&pins.resolved_config)?;
+        bootstrap::wait(
+            registry,
+            m,
+            &state_dir,
+            child.running()?,
+            deadline.min(Instant::now() + Duration::from_secs(m.limits.phase_seconds)),
+            stop,
+        )
+        .await?;
+    }
+    Ok(snapshot)
+}
+
+fn phase_deadline(m: &Manifest, phase: &Phase, deadline: Instant) -> Result<Option<Instant>> {
+    let window = m
+        .windows
+        .iter()
+        .find(|w| w.id == phase.window)
+        .context("phase window missing")?;
+    let time = now()? as u64;
+    if time < window.not_before {
+        eprintln!(
+            "phase {} waiting_window; no daemon or automatic scheduling",
+            phase.id
+        );
+        return Ok(None);
+    }
+    if time >= window.not_after {
+        eprintln!("phase {} expired_window; no calls dispatched", phase.id);
+        return Ok(None);
+    }
+    let end = deadline
+        .min(Instant::now() + Duration::from_secs(m.limits.phase_seconds))
+        .min(Instant::now() + Duration::from_secs(window.not_after - time));
+    Ok(Some(end))
+}
+
+async fn prepare_outage(
+    registry: &mut Registry,
+    m: &Manifest,
+    (phase, phase_deadline): (&Phase, Instant),
+    clients: &BTreeMap<String, mcp::Client>,
+    child: &mut session::Application<'_>,
+    snapshot: &Value,
+    runtime: &mut Option<&mut crate::tor::session::Runtime>,
+) -> Result<()> {
+    if let Scenario::TorOutage { warm_case, .. } = &phase.scenario {
+        ensure!(
+            m.start.pools.is_empty(),
+            "refusing Tor outage while a managed application is running; use a separate keyless deployment"
+        );
+        registry
+            .dependencies_ready(&m.run_id, &phase.id)
+            .context("outage prerequisites failed; refusing planned Tor shutdown")?;
+        let warm = registry.response(&m.run_id, warm_case)?;
+        ensure!(
+            warm["result"]["isError"] != true,
+            "warm help failed; refusing outage qualification"
+        );
+        tokio::time::timeout_at(
+            phase_deadline,
+            runtime
+                .as_mut()
+                .context("Tor outage requires owned runtime")?
+                .outage(),
+        )
+        .await
+        .context("outage preparation deadline exceeded")??;
+        let observations = registry.report(Some(&m.run_id), now()?)?;
+        let priced = crate::pricing_stages::inventory(
+            snapshot,
+            &observations["runtime_events"],
+            &child.current.binding.session,
+        )?;
+        for (name, client) in clients {
+            let expected = priced["inventory"]
+                .as_array()
+                .context("inventory missing")?
+                .iter()
+                .find(|i| i["server"] == *name)
+                .context("listener missing")?;
+            tokio::time::timeout_at(
+                phase_deadline,
+                client.check_inventory(expected, m.limits.result_bytes),
+            )
+            .await
+            .context("outage tools/list deadline exceeded")??;
+        }
+        registry.event(
+            &m.run_id,
+            "tor_outage_started",
+            &json!({"phase":phase.id,"socks_closed":true,"inventory_unchanged":true}),
+            now()?,
+        )?;
     }
     Ok(())
 }
