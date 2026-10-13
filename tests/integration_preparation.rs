@@ -1067,3 +1067,357 @@ spec="missing.json"
     reopened.close().await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn runner_skips_closed_windows_and_failed_dependencies_but_runs_independent_phase() {
+    use std::sync::{Arc, Mutex};
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut m, state) = fixture(tmp.path());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let requests = seen.clone();
+    let registry_path = state.join("live-integration/registry.sqlite");
+    let app = axum::Router::new().route("/read", axum::routing::get(move |axum::extract::Query(query): axum::extract::Query<std::collections::BTreeMap<String, String>>| {
+        let seen = requests.clone();
+        let registry_path = registry_path.clone();
+        async move {
+            let n: usize = query["n"].parse().unwrap();
+            let case = match n { 1 => "read", 5 => "independent", other => panic!("forbidden case reached provider: {other}") };
+            let db = rusqlite::Connection::open_with_flags(registry_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            let execution: String = db.query_row("SELECT execution FROM cases WHERE run='prepared' AND id=?1", [case], |r| r.get(0)).unwrap();
+            assert_eq!(execution, "DISPATCHING", "durable claim must precede provider I/O");
+            for kind in ["mcp_dispatch_intent", "application_claim"] {
+                let count: i64 = db.query_row("SELECT count(*) FROM events WHERE run='prepared' AND kind=?1 AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2", rusqlite::params![kind, case], |r| r.get(0)).unwrap();
+                assert_eq!(count, 1, "{kind} must exist exactly once at request arrival");
+            }
+            seen.lock().unwrap().push(case.to_owned());
+            axum::Json(json!({"degraded":true}))
+        }
+    }));
+    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let text = std::fs::read_to_string(&m.deployment)
+        .unwrap()
+        .replace("https://example.invalid", &base)
+        .replace("127.0.0.1:18777", &addr.to_string());
+    std::fs::write(&m.deployment, text).unwrap();
+    let original = m.cases[0].clone();
+    for (id, n) in [
+        ("expired", 2),
+        ("future", 3),
+        ("dependent", 4),
+        ("independent", 5),
+    ] {
+        let mut case = original.clone();
+        case.id = id.into();
+        case.arguments.insert("n".into(), json!(n));
+        m.cases.push(case);
+    }
+    m.cases[0].checks = vec![semantics::Check::JsonEquals {
+        pointer: "/degraded".into(),
+        value: json!(false),
+    }];
+    m.windows.push(
+        serde_json::from_value(json!({"id":"expired","not_before":1,"not_after":3})).unwrap(),
+    );
+    m.windows.push(
+        serde_json::from_value(
+            json!({"id":"future","not_before":4000000000u64,"not_after":4102444800u64}),
+        )
+        .unwrap(),
+    );
+    let template = m.phases[0].clone();
+    m.phases.clear();
+    for (id, window, case, dependencies) in [
+        ("expired", "expired", "expired", vec![]),
+        ("future", "future", "future", vec![]),
+        ("prerequisite", "now", "read", vec![]),
+        (
+            "dependent",
+            "now",
+            "dependent",
+            vec!["prerequisite".to_owned()],
+        ),
+        ("independent", "now", "independent", vec![]),
+    ] {
+        let mut phase = template.clone();
+        phase.id = id.into();
+        phase.window = window.into();
+        phase.cases = vec![case.into()];
+        phase.depends_on = dependencies;
+        m.phases.push(phase);
+    }
+    let (plan, pins) = preparation::collect_catalogs(&m, &state).await.unwrap();
+    let auth = registry::Authorization {
+        version: 1,
+        id: "reviewed".into(),
+        treasury_id: m.treasury_id.clone(),
+        cumulative_api_usdc: "0".into(),
+        cumulative_source_zec: "0".into(),
+        cumulative_new_jobs: 0,
+    };
+    let mut registry = registry::Registry::authorize(&state, &auth, 2).unwrap();
+    registry.prepare(&plan, &pins, 2).unwrap();
+    drop(registry);
+    assert_eq!(execution::run(&state, &m.run_id).await.unwrap(), 3);
+    assert_eq!(*seen.lock().unwrap(), ["read", "independent"]);
+    let registry = registry::Registry::open(&state, true).unwrap();
+    let report = registry.report(Some(&m.run_id), 3).unwrap();
+    for case in report["cases"].as_array().unwrap() {
+        let expected = match case["case"].as_str().unwrap() {
+            "read" | "independent" => "COMPLETED",
+            "expired" | "future" | "dependent" => "UNATTEMPTED",
+            other => panic!("unexpected case {other}"),
+        };
+        assert_eq!(case["execution"], expected);
+    }
+    assert_eq!(
+        registry.application_evidence(&m.run_id).unwrap()["claims"],
+        2
+    );
+    assert_eq!(report["api_reserved_atomic"], 0);
+    drop(registry);
+    assert!(
+        execution::run(&state, &m.run_id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("observation only")
+    );
+    assert_eq!(*seen.lock().unwrap(), ["read", "independent"]);
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "owned subprocess helper for runner cancellation characterization"]
+async fn runner_cancellation_subprocess_helper() {
+    let Some(state) = std::env::var_os("X402_TEST_CANCELLATION_STATE") else {
+        return;
+    };
+    assert_eq!(
+        execution::run(Path::new(&state), "prepared").await.unwrap(),
+        3
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn runner_cancellation_retains_completed_peer_and_pending_claim_while_draining_child() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use tokio::io::AsyncBufReadExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut m, state) = fixture(tmp.path());
+    let count = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let requests = count.clone();
+    let pending_entered = entered.clone();
+    let pending_release = release.clone();
+    let app = axum::Router::new()
+        .route(
+            "/read",
+            axum::routing::get(move || {
+                let count = requests.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    "completed"
+                }
+            }),
+        )
+        .route(
+            "/pending",
+            axum::routing::get({
+                let count = count.clone();
+                move || {
+                    let (count, entered, release) = (
+                        count.clone(),
+                        pending_entered.clone(),
+                        pending_release.clone(),
+                    );
+                    async move {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        entered.notify_one();
+                        release.notified().await;
+                        "accepted before cancellation"
+                    }
+                }
+            }),
+        );
+    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let text = std::fs::read_to_string(&m.deployment)
+        .unwrap()
+        .replace("https://example.invalid", &base)
+        .replace("127.0.0.1:18777", &addr.to_string());
+    std::fs::write(&m.deployment, text).unwrap();
+    let spec_path = tmp.path().join("spec.json");
+    let mut spec: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&spec_path).unwrap()).unwrap();
+    spec["paths"]["/pending"] = json!({"get":{}});
+    std::fs::write(spec_path, spec.to_string()).unwrap();
+    let mut pending = m.cases[0].clone();
+    pending.id = "pending".into();
+    pending.tool = "api_pending".into();
+    pending.arguments.clear();
+    m.cases.push(pending);
+    m.limits.max_in_flight = 2;
+    m.phases[0].cases.push("pending".into());
+    m.phases[0].scenario = manifest::Scenario::Concurrency {
+        batches: vec![vec!["read".into(), "pending".into()]],
+    };
+    let (plan, pins) = preparation::collect_catalogs(&m, &state).await.unwrap();
+    let auth = registry::Authorization {
+        version: 1,
+        id: "reviewed".into(),
+        treasury_id: m.treasury_id.clone(),
+        cumulative_api_usdc: "0".into(),
+        cumulative_source_zec: "0".into(),
+        cumulative_new_jobs: 0,
+    };
+    let mut registry = registry::Registry::authorize(&state, &auth, 2).unwrap();
+    registry.prepare(&plan, &pins, 2).unwrap();
+    drop(registry);
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "runner_cancellation_subprocess_helper",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("X402_TEST_CANCELLATION_STATE", &state)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let child_id = child.id().unwrap();
+    let stopping = Arc::new(tokio::sync::Notify::new());
+    let notify = stopping.clone();
+    let stderr = child.stderr.take().unwrap();
+    let drain = tokio::spawn(async move {
+        let mut lines = tokio::io::BufReader::new(stderr).lines();
+        let mut text = String::new();
+        while let Some(line) = lines.next_line().await.unwrap() {
+            if line.contains(
+                "qualification stopping: draining the supervised application deliberately",
+            ) {
+                notify.notify_one();
+            }
+            assert!(
+                text.len() + line.len() < 128 * 1024,
+                "bounded test child diagnostics"
+            );
+            text.push_str(&line);
+            text.push('\n');
+        }
+        text
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        entered.notified().await;
+        let db = rusqlite::Connection::open_with_flags(
+            state.join("live-integration/registry.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        loop {
+            let completed: bool = db
+                .query_row(
+                    "SELECT execution='COMPLETED' FROM cases WHERE run='prepared' AND id='read'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if completed {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let pending: String = db
+            .query_row(
+                "SELECT execution FROM cases WHERE run='prepared' AND id='pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, "DISPATCHING");
+    })
+    .await
+    .unwrap();
+    // Signal only the helper whose process handle we still own. Its production
+    // signal handler cancels execution and drains the separately owned app.
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-INT", &child_id.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), stopping.notified())
+        .await
+        .unwrap();
+    release.notify_one();
+    let status = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    let diagnostics = tokio::time::timeout(std::time::Duration::from_secs(10), drain)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.success(), "{diagnostics}");
+    assert!(
+        diagnostics.contains("qualification cancelled") || diagnostics.contains("case cancelled"),
+        "must observe explicit cancellation, not a coincident deadline: {diagnostics}"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    let registry = registry::Registry::open(&state, true).unwrap();
+    let report = registry.report(Some(&m.run_id), 3).unwrap();
+    let cases = report["cases"].as_array().unwrap();
+    assert_eq!(
+        cases.iter().find(|c| c["case"] == "read").unwrap()["execution"],
+        "COMPLETED"
+    );
+    let pending = cases.iter().find(|c| c["case"] == "pending").unwrap();
+    assert!(matches!(
+        pending["execution"].as_str(),
+        Some("DISPATCHING" | "TRANSPORT_UNCERTAIN")
+    ));
+    assert_eq!(pending["reservation_atomic"], 0);
+    assert!(
+        pending["result_hash"].is_null(),
+        "server completion cannot invent an unreceived runner result"
+    );
+    assert_eq!(
+        registry.application_evidence(&m.run_id).unwrap()["claims"],
+        2
+    );
+    let finished = report["runtime_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "child_finished")
+        .unwrap();
+    assert_eq!(finished["detail"]["success"], true);
+    assert_eq!(finished["detail"]["forced_kill"], false);
+    drop(registry);
+    assert!(
+        execution::run(&state, &m.run_id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("observation only")
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    server.abort();
+}
