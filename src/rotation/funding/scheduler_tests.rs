@@ -1394,3 +1394,338 @@ async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_s
     drop(store);
     actor.await.unwrap();
 }
+
+#[tokio::test]
+async fn fatal_store_error_retains_active_source_lease_and_signed_liability() {
+    let dir = tempfile::tempdir().unwrap();
+    let state_path = dir.path().join("state");
+    let key_path = dir.path().join("key");
+    let mut raw = Store::create(&state_path, &key_path, 1, b"fixture").unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = raw.funding_jobs().unwrap().remove(0);
+    submitted(&mut raw, &job);
+    let treasury = raw.id().to_owned();
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let (started, mut source_events) = mpsc::unbounded_channel();
+    let source_gate = Arc::new(Semaphore::new(0));
+    let credit_gate = Arc::new(Semaphore::new(0));
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: credit_gate.clone(),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Arc::new(std::collections::BTreeMap::from([(
+                    job.id.clone(),
+                    Arc::new(Semaphore::new(0)),
+                )])),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: None,
+            },
+            gate: source_gate.clone(),
+            started,
+        },
+        60,
+    );
+    let task = tokio::spawn({
+        let worker = worker.clone();
+        async move { worker.tick(1000).await }
+    });
+    assert_eq!(event(&mut source_events).await, job.id);
+    // Fail completion publication, only after mutable reconciliation owns its lease.
+    let db = rusqlite::Connection::open(state_path.join("state.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_completion BEFORE UPDATE ON funding_progress BEGIN SELECT RAISE(ABORT,'fixture storage failure'); END;").unwrap();
+    credit_gate.add_permits(1);
+    let error = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error.is::<rusqlite::Error>());
+    assert!(worker.tick(1001).await.unwrap_err().is::<AlreadyOwned>());
+    db.execute_batch("DROP TRIGGER reject_completion").unwrap();
+    drop(db);
+    source_gate.add_permits(1);
+    let lease = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        store.funding_owner().lock_owned(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        source_events.try_recv().is_err(),
+        "fatal error cannot admit replacement source work"
+    );
+    drop(lease);
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+    let reopened = Store::open(&state_path, &key_path, &treasury).unwrap();
+    assert_eq!(
+        reopened.funding_job(&job.id).unwrap().unwrap().operation_id,
+        job.operation_id
+    );
+    assert_eq!(
+        reopened
+            .prepared_bytes(&job.operation_id)
+            .unwrap()
+            .as_slice(),
+        b"signed"
+    );
+    assert!(reopened.operation_pending(&job.operation_id).unwrap());
+    let operation = reopened.operation(&job.operation_id).unwrap();
+    assert_eq!(operation.attempts, 1);
+    assert_eq!(operation.submission, "BROADCAST_REQUESTED");
+    assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
+}
+
+#[tokio::test]
+async fn cancellation_drops_unsigned_quotes_without_accepting_or_retrying_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let jobs = raw.funding_jobs().unwrap();
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, mut status_events) = mpsc::unbounded_channel();
+    let (started, mut source_events) = mpsc::unbounded_channel();
+    let (quotes, mut quote_events) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: Some(quotes),
+            },
+            gate: Arc::new(Semaphore::new(jobs.len())),
+            started,
+        },
+        60,
+    );
+    let stop = CancellationToken::new();
+    let task = tokio::spawn({
+        let worker = worker.clone();
+        let stop = stop.clone();
+        async move { worker.schedule(1000, stop, true).await }
+    });
+    let mut outstanding = Vec::new();
+    for _ in &jobs {
+        outstanding.push(event(&mut quote_events).await);
+    }
+    let mut accepted = BTreeSet::new();
+    for _ in &jobs {
+        assert!(accepted.insert(event(&mut source_events).await));
+    }
+    stop.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let lease = store
+        .funding_owner()
+        .try_lock_owned()
+        .expect("unsigned observations must not retain owner");
+    for read in outstanding {
+        assert!(
+            read.finish.is_closed(),
+            "cancelled quote future remains alive"
+        );
+    }
+    assert!(source_events.try_recv().is_err());
+    assert!(quote_events.try_recv().is_err());
+    assert!(status_events.try_recv().is_err());
+    for job in jobs {
+        store
+            .call(move |s| {
+                let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                assert!(!facts.accepted_quote);
+                assert_eq!(facts.source_attempts, 0);
+                let saved = s.funding_job(&job.id)?.unwrap();
+                assert_eq!(saved.phase, FundingPhase::Allocated);
+                assert_eq!(saved.attempts, 0);
+                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    drop(lease);
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+}
+
+#[tokio::test]
+async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
+    for once in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut raw = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            "initial",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+        let initial = raw.funding_jobs().unwrap();
+        submitted(&mut raw, &initial[0]);
+        raw.confirm_spend(&initial[0].operation_id, 60, 1).unwrap();
+        let (store, actor) = StoreHandle::spawn(raw);
+        let (statuses, mut status_events) = mpsc::unbounded_channel();
+        let (started, mut source_events) = mpsc::unbounded_channel();
+        let credits = Arc::new(AtomicUsize::new(0));
+        let source_gate = Arc::new(Semaphore::new(if once { initial.len() } else { 0 }));
+        let mut worker = FundingWorker::new(
+            store.clone(),
+            Source {
+                store: store.clone(),
+                reads: Reads {
+                    credits: Arc::new(Semaphore::new(64)),
+                    credit_calls: credits.clone(),
+                    statuses,
+                    status_gates: Default::default(),
+                    failed_job: Default::default(),
+                    processing: true,
+                    quotes: None,
+                },
+                gate: source_gate.clone(),
+                started,
+            },
+            1,
+        );
+        let (captured, captured_rx) = tokio::sync::oneshot::channel();
+        let (resume, resume_rx) = tokio::sync::oneshot::channel();
+        worker.inventory_test_hook = Some(Arc::new(InventoryTestHook {
+            lane: Kind::Credit,
+            barrier: Mutex::new(Some((captured, resume_rx))),
+        }));
+        let stop = CancellationToken::new();
+        let task = tokio::spawn({
+            let worker = worker.clone();
+            let stop = stop.clone();
+            async move { worker.schedule(1000, stop, once).await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), captured_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let added = store
+            .call(|s| {
+                crate::rotation::store::test_support::declare_two_reserves(
+                    s,
+                    "added",
+                    "5",
+                    Some(alloy_primitives::U256::from(1_000_000)),
+                    0,
+                )?;
+                let added: Vec<_> = s
+                    .funding_jobs()?
+                    .into_iter()
+                    .filter(|job| job.pool_name == "added")
+                    .collect();
+                for job in &added {
+                    submitted(s, job);
+                    s.confirm_spend(&job.operation_id, 60, 1)?;
+                }
+                Ok(added)
+            })
+            .await
+            .unwrap();
+        resume.send(()).unwrap();
+        if once {
+            tokio::time::timeout(std::time::Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let mut observed = BTreeSet::new();
+            while let Ok(id) = status_events.try_recv() {
+                assert!(observed.insert(id));
+            }
+            assert_eq!(observed, BTreeSet::from([initial[0].id.clone()]));
+            assert_eq!(credits.load(Ordering::SeqCst), initial.len());
+            let mut sources = BTreeSet::new();
+            while let Ok(id) = source_events.try_recv() {
+                assert!(sources.insert(id));
+            }
+            assert_eq!(sources, BTreeSet::from([initial[1].id.clone()]));
+        } else {
+            // An occupied mutable lane cannot prevent exhausted observation lanes
+            // from capturing the new upper boundary on their next pass.
+            let active = event(&mut source_events).await;
+            assert!(initial.iter().any(|job| job.id == active));
+            let expected: BTreeSet<_> = added.iter().map(|job| job.id.clone()).collect();
+            let mut seen = BTreeSet::new();
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !expected.is_subset(&seen) {
+                    seen.insert(event(&mut status_events).await);
+                }
+            })
+            .await
+            .expect("continuous pass failed to include new inventory");
+            assert!(source_events.try_recv().is_err());
+            stop.cancel();
+            source_gate.add_permits(1);
+            tokio::time::timeout(std::time::Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(source_events.try_recv().is_err());
+        }
+        for job in added {
+            store
+                .call(move |s| {
+                    assert_eq!(
+                        s.funding_facts(&job.id, &job.operation_id)?.source_attempts,
+                        1
+                    );
+                    assert!(!s.operation_pending(&job.operation_id)?);
+                    assert_eq!(s.prepared_bytes(&job.operation_id)?.as_slice(), b"signed");
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        drop(worker);
+        drop(store);
+        actor.await.unwrap();
+    }
+}
