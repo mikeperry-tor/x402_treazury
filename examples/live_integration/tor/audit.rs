@@ -72,6 +72,17 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
         events.len() <= 100000,
         "Tor event audit exceeds 100000-event limit"
     );
+    let labels = identity_labels(expected)?;
+    let mut audit = StreamAudit::default();
+    for line in events {
+        audit.apply_event(expected, &labels, line)?;
+    }
+    audit.finish(expected)
+}
+
+type Credential = (String, String);
+
+fn identity_labels(expected: &Identities) -> Result<BTreeMap<Credential, &String>> {
     let mut labels = BTreeMap::new();
     for (label, id) in expected {
         ensure!(
@@ -95,12 +106,25 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
             "required destinations exceed identity permissions"
         );
     }
-    let mut observed_targets: BTreeMap<&String, BTreeSet<String>> = BTreeMap::new();
-    let mut streams: BTreeMap<String, Stream> = BTreeMap::new();
-    let mut circuits: BTreeMap<&String, BTreeSet<String>> = BTreeMap::new();
-    let mut owners = BTreeMap::new();
-    let mut successes: BTreeMap<&String, usize> = BTreeMap::new();
-    for line in events {
+    Ok(labels)
+}
+
+#[derive(Default)]
+struct StreamAudit<'a> {
+    observed_targets: BTreeMap<&'a String, BTreeSet<String>>,
+    streams: BTreeMap<String, Stream>,
+    circuits: BTreeMap<&'a String, BTreeSet<String>>,
+    owners: BTreeMap<String, &'a String>,
+    successes: BTreeMap<&'a String, usize>,
+}
+
+impl<'a> StreamAudit<'a> {
+    fn apply_event(
+        &mut self,
+        expected: &'a Identities,
+        labels: &BTreeMap<Credential, &'a String>,
+        line: &str,
+    ) -> Result<()> {
         let f = fields(line)?;
         if f.first().map(String::as_str) != Some("650") {
             anyhow::bail!("non-event in Tor event evidence");
@@ -112,7 +136,7 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
         if f[1] == "CIRC" {
             ensure!(f.len() >= 4, "malformed Tor CIRC event");
             canonical_id(&f[2], false)?;
-            continue;
+            return Ok(());
         }
         ensure!(f.len() >= 6, "malformed Tor STREAM event");
         let stream = &f[2];
@@ -130,30 +154,8 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
                 );
             }
         }
-        let state = streams.entry(stream.clone()).or_default();
-        let user = attrs.get("SOCKS_USERNAME");
-        let password = attrs.get("SOCKS_PASSWORD");
-        if user.is_some() || password.is_some() {
-            let credential = (
-                user.context("Tor stream missing SOCKS username")?
-                    .to_string(),
-                password
-                    .context("Tor stream missing SOCKS password")?
-                    .to_string(),
-            );
-            ensure!(
-                state
-                    .credential
-                    .as_ref()
-                    .is_none_or(|old| *old == credential),
-                "Tor stream credentials changed"
-            );
-            ensure!(
-                labels.contains_key(&credential),
-                "authenticated Tor stream has an unknown identity"
-            );
-            state.credential = Some(credential);
-        }
+        let state = self.streams.entry(stream.clone()).or_default();
+        observe_credentials(state, &attrs, labels)?;
         if status == "NEW" && attrs.get("PURPOSE") == Some(&"USER") {
             ensure!(
                 state.credential.is_some(),
@@ -161,7 +163,7 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
             );
         }
         let Some(credential) = &state.credential else {
-            continue;
+            return Ok(());
         };
         let label = labels[credential];
         let identity = &expected[label];
@@ -170,40 +172,16 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
             "known Tor identity is not permitted in this phase"
         );
         if status == "NEW" {
-            let (host, port) = target
-                .rsplit_once(':')
-                .context("Tor stream target lacks port")?;
-            ensure!(
-                !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0),
-                "invalid Tor stream target"
-            );
-            let destination = reqwest::Url::parse(&format!("https://{target}/"))?;
-            ensure!(
-                destination.username().is_empty()
-                    && destination.password().is_none()
-                    && destination
-                        .domain()
-                        .is_some_and(|name| name == host.to_ascii_lowercase()),
-                "Tor stream used a locally resolved address or noncanonical hostname"
-            );
-            ensure!(
-                identity.targets.is_empty()
-                    || identity.targets.contains(&target.to_ascii_lowercase()),
-                "Tor identity used an unexpected destination"
-            );
-            let target = target.to_ascii_lowercase();
-            ensure!(
-                state.target.as_ref().is_none_or(|old| old == &target),
-                "Tor stream destination changed"
-            );
-            state.target = Some(target);
-            state.remote_host = true;
+            observe_destination(state, identity, target)?;
         }
         if circuit != "0" {
-            if let Some(other) = owners.insert(circuit.clone(), label) {
+            if let Some(other) = self.owners.insert(circuit.clone(), label) {
                 ensure!(other == label, "distinct identities shared a Tor circuit");
             }
-            circuits.entry(label).or_default().insert(circuit.clone());
+            self.circuits
+                .entry(label)
+                .or_default()
+                .insert(circuit.clone());
         }
         if status == "SUCCEEDED" {
             ensure!(
@@ -211,33 +189,100 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
                 "successful stream lacks remote-host/circuit evidence"
             );
             if !state.success {
-                *successes.entry(label).or_default() += 1;
+                *self.successes.entry(label).or_default() += 1;
                 state.success = true;
-                observed_targets
+                self.observed_targets
                     .entry(label)
                     .or_default()
                     .insert(state.target.clone().context("stream destination missing")?);
             }
         }
+        Ok(())
     }
-    let mut result = BTreeMap::new();
-    for (label, id) in expected {
-        let count = successes.get(label).copied().unwrap_or(0);
-        ensure!(
-            !id.required || count > 0,
-            "required Tor identity {label} has no successful remote-host stream"
+
+    fn finish(self, expected: &Identities) -> Result<Value> {
+        let mut result = BTreeMap::new();
+        for (label, id) in expected {
+            let count = self.successes.get(label).copied().unwrap_or(0);
+            ensure!(
+                !id.required || count > 0,
+                "required Tor identity {label} has no successful remote-host stream"
+            );
+            ensure!(
+                id.required_targets.iter().all(|t| self
+                    .observed_targets
+                    .get(label)
+                    .is_some_and(|seen| seen.contains(t))),
+                "required Tor identity {label} lacks a successful stream to a required destination"
+            );
+            result.insert(label,json!({"kind":id.kind,"required":id.required,"permitted":id.permitted,"successful_streams":count,"required_destinations":id.required_targets.len(),"circuits":self.circuits.get(label).map_or(0,BTreeSet::len),"status":if count>0 {"observed"}else{"not_observed"}}));
+        }
+        Ok(
+            json!({"identities":result,"scope":"Tor STREAM identity separation; not payment, settlement or complete unlinkability"}),
+        )
+    }
+}
+
+fn observe_credentials(
+    state: &mut Stream,
+    attrs: &BTreeMap<&str, &str>,
+    labels: &BTreeMap<Credential, &String>,
+) -> Result<()> {
+    let user = attrs.get("SOCKS_USERNAME");
+    let password = attrs.get("SOCKS_PASSWORD");
+    if user.is_some() || password.is_some() {
+        let credential = (
+            user.context("Tor stream missing SOCKS username")?
+                .to_string(),
+            password
+                .context("Tor stream missing SOCKS password")?
+                .to_string(),
         );
         ensure!(
-            id.required_targets.iter().all(|t| observed_targets
-                .get(label)
-                .is_some_and(|seen| seen.contains(t))),
-            "required Tor identity {label} lacks a successful stream to a required destination"
+            state
+                .credential
+                .as_ref()
+                .is_none_or(|old| *old == credential),
+            "Tor stream credentials changed"
         );
-        result.insert(label,json!({"kind":id.kind,"required":id.required,"permitted":id.permitted,"successful_streams":count,"required_destinations":id.required_targets.len(),"circuits":circuits.get(label).map_or(0,BTreeSet::len),"status":if count>0 {"observed"}else{"not_observed"}}));
+        ensure!(
+            labels.contains_key(&credential),
+            "authenticated Tor stream has an unknown identity"
+        );
+        state.credential = Some(credential);
     }
-    Ok(
-        json!({"identities":result,"scope":"Tor STREAM identity separation; not payment, settlement or complete unlinkability"}),
-    )
+    Ok(())
+}
+
+fn observe_destination(state: &mut Stream, identity: &Identity, target: &str) -> Result<()> {
+    let (host, port) = target
+        .rsplit_once(':')
+        .context("Tor stream target lacks port")?;
+    ensure!(
+        !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0),
+        "invalid Tor stream target"
+    );
+    let destination = reqwest::Url::parse(&format!("https://{target}/"))?;
+    ensure!(
+        destination.username().is_empty()
+            && destination.password().is_none()
+            && destination
+                .domain()
+                .is_some_and(|name| name == host.to_ascii_lowercase()),
+        "Tor stream used a locally resolved address or noncanonical hostname"
+    );
+    ensure!(
+        identity.targets.is_empty() || identity.targets.contains(&target.to_ascii_lowercase()),
+        "Tor identity used an unexpected destination"
+    );
+    let target = target.to_ascii_lowercase();
+    ensure!(
+        state.target.as_ref().is_none_or(|old| old == &target),
+        "Tor stream destination changed"
+    );
+    state.target = Some(target);
+    state.remote_host = true;
+    Ok(())
 }
 fn canonical_id(value: &str, zero: bool) -> Result<()> {
     let parsed: u64 = value.parse().context("invalid Tor identifier")?;
@@ -353,5 +398,4 @@ mod tests {
         assert!(fields(&"x".repeat(1024 * 1024 + 1)).is_err());
     }
     include!("audit_tests.rs");
-
 }

@@ -88,14 +88,40 @@ pub fn evaluate(response: &Value, checks: &[Check]) -> Result<Value> {
             "malformed_mcp_error_flag",
         ));
     }
-    let Some(content) = result["content"].as_array() else {
-        return Ok(outcome("manual_review_required", "unsupported_mcp_content"));
+    let content = match collect_provider_content(result) {
+        Ok(content) => content,
+        Err(category) => return Ok(outcome("manual_review_required", category)),
     };
-    if content.len() > 1000 {
+    match nested_error(&content.json_values) {
+        Ok(true) => return Ok(outcome("failed", "nested_is_error")),
+        Err(_) => {
+            return Ok(outcome(
+                "manual_review_required",
+                "semantic_scan_limit_100000_nodes_64_levels_exceeded",
+            ));
+        }
+        _ => (),
+    }
+    if checks.is_empty() {
         return Ok(outcome(
             "manual_review_required",
-            "content_block_limit_1000_exceeded",
+            "no_declared_provider_assertions",
         ));
+    }
+    Ok(evaluate_assertions(&content, checks))
+}
+
+struct ProviderContent<'a> {
+    json_values: Vec<Value>,
+    texts: Vec<&'a str>,
+}
+
+fn collect_provider_content(result: &Value) -> Result<ProviderContent<'_>, &'static str> {
+    let Some(content) = result["content"].as_array() else {
+        return Err("unsupported_mcp_content");
+    };
+    if content.len() > 1000 {
+        return Err("content_block_limit_1000_exceeded");
     }
     let mut json_values = Vec::new();
     let mut texts = Vec::new();
@@ -112,38 +138,23 @@ pub fn evaluate(response: &Value, checks: &[Check]) -> Result<Value> {
                     json_values.push(value);
                 }
             } else {
-                return Ok(outcome("manual_review_required", "malformed_text_content"));
+                return Err("malformed_text_content");
             }
         }
     }
-    match nested_error(&json_values) {
-        Ok(true) => return Ok(outcome("failed", "nested_is_error")),
-        Err(_) => {
-            return Ok(outcome(
-                "manual_review_required",
-                "semantic_scan_limit_100000_nodes_64_levels_exceeded",
-            ));
-        }
-        _ => (),
-    }
-    if checks.is_empty() {
-        return Ok(outcome(
-            "manual_review_required",
-            "no_declared_provider_assertions",
-        ));
-    }
+    Ok(ProviderContent { json_values, texts })
+}
+
+fn evaluate_assertions(content: &ProviderContent<'_>, checks: &[Check]) -> Value {
     let mut results = Vec::new();
     for (index, check) in checks.iter().enumerate() {
         let tested = match check {
-            Check::JsonEquals { pointer, value } => {
-                (json_values.len() == 1).then(|| json_values[0].pointer(pointer) == Some(value))
-            }
-            Check::JsonExists { pointer } => {
-                (json_values.len() == 1).then(|| json_values[0].pointer(pointer).is_some())
-            }
-            Check::TextContains { text } => {
-                (!texts.is_empty()).then(|| texts.iter().any(|actual| actual.contains(text)))
-            }
+            Check::JsonEquals { pointer, value } => (content.json_values.len() == 1)
+                .then(|| content.json_values[0].pointer(pointer) == Some(value)),
+            Check::JsonExists { pointer } => (content.json_values.len() == 1)
+                .then(|| content.json_values[0].pointer(pointer).is_some()),
+            Check::TextContains { text } => (!content.texts.is_empty())
+                .then(|| content.texts.iter().any(|actual| actual.contains(text))),
         };
         results.push(json!({"index":index,"status":match tested {Some(true)=>"passed",Some(false)=>"failed",None=>"manual_review_required"}}));
     }
@@ -157,8 +168,9 @@ pub fn evaluate(response: &Value, checks: &[Check]) -> Result<Value> {
     } else {
         "passed"
     };
-    Ok(json!({"status":status,"category":"declared_assertions","checks":results}))
+    json!({"status":status,"category":"declared_assertions","checks":results})
 }
+
 pub fn report(registry: &Registry, manifest: &Manifest, report: &Value) -> Result<Value> {
     let cases = report["cases"]
         .as_array()

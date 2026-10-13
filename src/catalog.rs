@@ -1089,7 +1089,36 @@ fn operation_input(op: &Value) -> Result<OperationInput> {
     let mut routes = BTreeMap::new();
     let mut required = BTreeSet::new();
     let mut body_names = BTreeMap::new();
-    for p in op["params"].as_array().into_iter().flatten() {
+    collect_input_parameters(&op["params"], &mut props, &mut routes, &mut required);
+    let has_body = !op["body"].is_null();
+    let body = &op["body"]["schema"];
+    merge_body_properties(
+        body,
+        &mut props,
+        &mut routes,
+        &mut required,
+        &mut body_names,
+    )?;
+    let mut input_schema = json!({"type":"object", "properties":props});
+    if !required.is_empty() {
+        input_schema["required"] = json!(required);
+    }
+    preserve_body_required_alternatives(body, &body_names, &mut input_schema);
+    Ok(OperationInput {
+        schema: sanitize(&input_schema),
+        routes,
+        body_names,
+        has_body,
+    })
+}
+
+fn collect_input_parameters(
+    params: &Value,
+    props: &mut Map<String, Value>,
+    routes: &mut BTreeMap<String, String>,
+    required: &mut BTreeSet<String>,
+) {
+    for p in params.as_array().into_iter().flatten() {
         if p["in"] == "header" {
             continue;
         }
@@ -1111,8 +1140,15 @@ fn operation_input(op: &Value) -> Result<OperationInput> {
             required.insert(key.to_string());
         }
     }
-    let has_body = !op["body"].is_null();
-    let body = &op["body"]["schema"];
+}
+
+fn merge_body_properties(
+    body: &Value,
+    props: &mut Map<String, Value>,
+    routes: &mut BTreeMap<String, String>,
+    required: &mut BTreeSet<String>,
+    body_names: &mut BTreeMap<String, String>,
+) -> Result<()> {
     for (key, value) in body["properties"].as_object().into_iter().flatten() {
         let name = if props.contains_key(key) {
             format!("{key}_body")
@@ -1140,17 +1176,7 @@ fn operation_input(op: &Value) -> Result<OperationInput> {
             required.insert(name);
         }
     }
-    let mut input_schema = json!({"type":"object", "properties":props});
-    if !required.is_empty() {
-        input_schema["required"] = json!(required);
-    }
-    preserve_body_required_alternatives(body, &body_names, &mut input_schema);
-    Ok(OperationInput {
-        schema: sanitize(&input_schema),
-        routes,
-        body_names,
-        has_body,
-    })
+    Ok(())
 }
 
 // Presence-only alternatives remain meaningful when a body is flattened together
