@@ -95,6 +95,155 @@ pub fn managed_map_frozen(
 ) -> Result<Identities> {
     managed_map_inner(m, snapshot, state, lookup, payments, false)
 }
+fn validate_assignments(
+    m: &Manifest,
+    inventory: &[Value],
+    resolution: &assignment::Resolution,
+) -> Result<()> {
+    for listener in inventory {
+        let server = listener["server"]
+            .as_str()
+            .context("listener name missing")?;
+        let bindings = resolution
+            .bindings
+            .get(server)
+            .context("listener has no resolved bindings")?;
+        ensure!(
+            serde_json::to_value(bindings)? == listener["wallet_bindings"],
+            "snapshot inventory wallet bindings differ from production resolution"
+        );
+    }
+    for pool in &m.start.pools {
+        ensure!(
+            resolution.wallets.get(pool).is_some_and(|w| w.managed()),
+            "selected managed pool missing from resolved execution config"
+        );
+    }
+    Ok(())
+}
+
+fn infrastructure_targets(
+    map: &mut Identities,
+    context: &NetworkContext,
+    config: &MetaConfig,
+    treasury: &x402_treazury::rotation::config::TreasuryConfig,
+    treasury_id: &str,
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> Result<BTreeSet<String>> {
+    let funding = config.funding.as_ref().context("funding config missing")?;
+    let indexer = target(&treasury.indexer_endpoint(lookup)?)?;
+    let submission = target(&treasury.submission_endpoint(lookup)?)?;
+    let mut wallet_targets = BTreeSet::new();
+    for url in funding.base_rpc_urls(lookup)? {
+        let destination = target(&url)?;
+        wallet_targets.insert(destination.clone());
+        infrastructure_discovery(map, context, &url)?;
+    }
+    // The public token catalog is fetched before a wallet-bound quote. It uses
+    // the origin discovery identity, independently of destination EVM wallets.
+    infrastructure_discovery(map, context, x402_treazury::rotation::near::ORIGIN)?;
+    // NEAR quotes and status, ZEC submission and lookup all bind to the
+    // destination EVM identity; historical pending operations may reconcile too.
+    wallet_targets.extend([
+        target(x402_treazury::rotation::near::ORIGIN)?,
+        indexer.clone(),
+        submission.clone(),
+    ]);
+    insert(
+        map,
+        context,
+        "treasury".into(),
+        IsolationId::treasury(treasury_id),
+        "treasury",
+        BTreeSet::from([indexer, submission]),
+        true,
+    )?;
+    map.get_mut("treasury").unwrap().required = true;
+    Ok(wallet_targets)
+}
+
+fn add_provider_targets(
+    destinations: &mut BTreeSet<String>,
+    snapshot: &Value,
+    inventory: &[Value],
+    resolution: &assignment::Resolution,
+    pool_name: &str,
+) -> Result<()> {
+    for listener in inventory {
+        let server = listener["server"]
+            .as_str()
+            .context("listener name missing")?;
+        for tool in listener["tools"].as_array().context("tools missing")? {
+            let source = tool["source"].as_str().context("tool source missing")?;
+            let binding = resolution
+                .bindings
+                .get(server)
+                .and_then(|b| b.get(source))
+                .context("tool source has no resolved wallet binding")?;
+            if binding.wallet != pool_name {
+                continue;
+            }
+            if tool["help_url"].is_string() {
+                continue;
+            }
+            let path = tool["path"].as_str().context("tool path missing")?;
+            let url = if path.starts_with("https://") || path.starts_with("http://") {
+                path
+            } else {
+                snapshot["sources"][source]["base_url"]
+                    .as_str()
+                    .context("source base URL missing")?
+            };
+            destinations.insert(target(url)?);
+        }
+    }
+    Ok(())
+}
+
+fn reviewed_payment_url<'a>(
+    m: &Manifest,
+    snapshot: &'a Value,
+    resolution: &assignment::Resolution,
+    payment: &Value,
+    pool_name: &str,
+) -> Result<&'a str> {
+    let case = m
+        .cases
+        .iter()
+        .find(|c| payment["case"] == c.id)
+        .context("payment case missing")?;
+    ensure!(
+        !case.unsigned
+            && resolution
+                .bindings
+                .get(&case.server)
+                .and_then(|b| b.get(&case.source))
+                .is_some_and(|b| b.wallet == pool_name),
+        "payment differs from reviewed wallet assignment"
+    );
+    let listener = snapshot["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["server"] == case.server)
+        .context("case listener missing")?;
+    let tool = listener["tools"]
+        .as_array()
+        .context("case tools missing")?
+        .iter()
+        .find(|t| t["name"] == case.tool && t["source"] == case.source)
+        .context("case tool missing")?;
+    let path = tool["path"].as_str().context("paid tool path missing")?;
+    let url = if path.starts_with("https://") || path.starts_with("http://") {
+        path
+    } else {
+        snapshot["sources"][&case.source]["base_url"]
+            .as_str()
+            .context("paid origin missing")?
+    };
+    Ok(url)
+}
+
 fn managed_map_inner(
     m: &Manifest,
     snapshot: &Value,
@@ -122,58 +271,19 @@ fn managed_map_inner(
     let inventory = snapshot["inventory"]
         .as_array()
         .context("inventory missing")?;
-    for listener in inventory {
-        let server = listener["server"]
-            .as_str()
-            .context("listener name missing")?;
-        let bindings = resolution
-            .bindings
-            .get(server)
-            .context("listener has no resolved bindings")?;
-        ensure!(
-            serde_json::to_value(bindings)? == listener["wallet_bindings"],
-            "snapshot inventory wallet bindings differ from production resolution"
-        );
-    }
-    for pool in &m.start.pools {
-        ensure!(
-            resolution.wallets.get(pool).is_some_and(|w| w.managed()),
-            "selected managed pool missing from resolved execution config"
-        );
-    }
+    validate_assignments(m, inventory, &resolution)?;
     ensure!(
         treasury.id.is_empty() || treasury.id == status.treasury_id,
         "configured treasury differs from durable identity"
     );
-    let funding = config.funding.as_ref().context("funding config missing")?;
-    let indexer = target(&treasury.indexer_endpoint(&lookup)?)?;
-    let submission = target(&treasury.submission_endpoint(&lookup)?)?;
-    let mut wallet_targets = BTreeSet::new();
-    for url in funding.base_rpc_urls(&lookup)? {
-        let destination = target(&url)?;
-        wallet_targets.insert(destination.clone());
-        infrastructure_discovery(&mut map, &context, &url)?;
-    }
-    // The public token catalog is fetched before a wallet-bound quote. It uses
-    // the origin discovery identity, independently of destination EVM wallets.
-    infrastructure_discovery(&mut map, &context, x402_treazury::rotation::near::ORIGIN)?;
-    // NEAR quotes and status, ZEC submission and lookup all bind to the
-    // destination EVM identity; historical pending operations may reconcile too.
-    wallet_targets.extend([
-        target(x402_treazury::rotation::near::ORIGIN)?,
-        indexer.clone(),
-        submission.clone(),
-    ]);
-    insert(
+    let wallet_targets = infrastructure_targets(
         &mut map,
         &context,
-        "treasury".into(),
-        IsolationId::treasury(&status.treasury_id),
-        "treasury",
-        BTreeSet::from([indexer, submission]),
-        true,
+        &config,
+        treasury,
+        &status.treasury_id,
+        &lookup,
     )?;
-    map.get_mut("treasury").unwrap().required = true;
     for pool in status.pools {
         let declared = resolution
             .wallets
@@ -185,34 +295,13 @@ fn managed_map_inner(
             BTreeSet::new()
         };
         if declared {
-            for listener in inventory {
-                let server = listener["server"]
-                    .as_str()
-                    .context("listener name missing")?;
-                for tool in listener["tools"].as_array().context("tools missing")? {
-                    let source = tool["source"].as_str().context("tool source missing")?;
-                    let binding = resolution
-                        .bindings
-                        .get(server)
-                        .and_then(|b| b.get(source))
-                        .context("tool source has no resolved wallet binding")?;
-                    if binding.wallet != pool.name {
-                        continue;
-                    }
-                    if tool["help_url"].is_string() {
-                        continue;
-                    }
-                    let path = tool["path"].as_str().context("tool path missing")?;
-                    let url = if path.starts_with("https://") || path.starts_with("http://") {
-                        path
-                    } else {
-                        snapshot["sources"][source]["base_url"]
-                            .as_str()
-                            .context("source base URL missing")?
-                    };
-                    destinations.insert(target(url)?);
-                }
-            }
+            add_provider_targets(
+                &mut destinations,
+                snapshot,
+                inventory,
+                &resolution,
+                &pool.name,
+            )?;
         }
         for wallet in pool.addresses {
             let label = format!("evm_{}_{}", pool.name, wallet.id);
@@ -234,40 +323,7 @@ fn managed_map_inner(
                             .is_some_and(|a| a.eq_ignore_ascii_case(&wallet.address)),
                     "payment identity differs from durable wallet"
                 );
-                let case = m
-                    .cases
-                    .iter()
-                    .find(|c| payment["case"] == c.id)
-                    .context("payment case missing")?;
-                ensure!(
-                    !case.unsigned
-                        && resolution
-                            .bindings
-                            .get(&case.server)
-                            .and_then(|b| b.get(&case.source))
-                            .is_some_and(|b| b.wallet == pool.name),
-                    "payment differs from reviewed wallet assignment"
-                );
-                let listener = snapshot["inventory"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|l| l["server"] == case.server)
-                    .context("case listener missing")?;
-                let tool = listener["tools"]
-                    .as_array()
-                    .context("case tools missing")?
-                    .iter()
-                    .find(|t| t["name"] == case.tool && t["source"] == case.source)
-                    .context("case tool missing")?;
-                let path = tool["path"].as_str().context("paid tool path missing")?;
-                let url = if path.starts_with("https://") || path.starts_with("http://") {
-                    path
-                } else {
-                    snapshot["sources"][&case.source]["base_url"]
-                        .as_str()
-                        .context("paid origin missing")?
-                };
+                let url = reviewed_payment_url(m, snapshot, &resolution, payment, &pool.name)?;
                 let entry = map.get_mut(&label).unwrap();
                 entry.required = true;
                 entry.required_targets.insert(target(url)?);
