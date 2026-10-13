@@ -409,63 +409,105 @@ async fn run_deployment(
         }
     }
     if args.qualification_snapshot {
-        let (result, stages) = tokio::select! {
-            result = x402_treazury::deployment::Deployment::inspect_catalogs(path) => result,
-            closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog inspection"); }
-        };
-        let mut snapshot = match &result {
-            Ok(deployment) => deployment.qualification_snapshot(),
-            Err(_) => serde_json::json!({"version":1,"preparation_failed":true}),
-        };
-        snapshot["catalog_stages"] = serde_json::to_value(stages)?;
-        let bytes = serde_json::to_vec(&snapshot)?;
-        ensure!(
-            bytes.len() < x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES,
-            "qualification snapshot exceeds {}-byte limit including newline; split the deployment into smaller qualification runs",
-            x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES
-        );
-        println!("{}", std::str::from_utf8(&bytes)?);
-        result?;
-        return Ok(());
+        return inspect_deployment_snapshot(path, &mut parent).await;
     }
-    let loading = async {
-        if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
-            x402_treazury::deployment::Deployment::load(path).await
-        } else if args.qualification_unsigned {
-            x402_treazury::deployment::Deployment::load_for_unsigned_serving(path).await
-        } else {
-            x402_treazury::deployment::Deployment::load_for_serving_with_relay(
-                path,
-                env,
-                // Supervised startup can be cancelled by parent EOF. Keep its
-                // funding lifecycle in the existing post-bind supervisor; ordinary
-                // startup bootstrap handles signals and drains before returning.
-                if args.qualification_no_new_funding || args.qualification_parent_stdin {
-                    x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
-                } else {
-                    Default::default()
-                },
-            )
-            .await
-        }
-    };
+    let loading = load_deployment(args, env, path);
     let mut deployment = tokio::select! {
         result = loading => result?,
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog startup; no server started"); }
     };
+    if print_deployment_inspection(args, &mut deployment).await? {
+        return Ok(());
+    }
+    let restriction = if args.qualification_no_new_funding {
+        x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
+    } else {
+        Default::default()
+    };
+    let binding = async {
+        if args.qualification_unsigned {
+            deployment.bind_unsigned(env).await
+        } else {
+            deployment.bind_restricted(env, restriction).await
+        }
+    };
+    let running = tokio::select! {
+        result = binding => result?,
+        closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during binding; startup cancelled"); }
+    };
+    for (server, address) in running.addresses() {
+        tracing::info!(server, %address, "MCP listening at /mcp");
+    }
+    serve_deployment(running, &mut parent).await
+}
+
+async fn inspect_deployment_snapshot(
+    path: &std::path::Path,
+    parent: &mut x402_treazury::supervision::Parent,
+) -> Result<()> {
+    let (result, stages) = tokio::select! {
+        result = x402_treazury::deployment::Deployment::inspect_catalogs(path) => result,
+        closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog inspection"); }
+    };
+    let mut snapshot = match &result {
+        Ok(deployment) => deployment.qualification_snapshot(),
+        Err(_) => serde_json::json!({"version":1,"preparation_failed":true}),
+    };
+    snapshot["catalog_stages"] = serde_json::to_value(stages)?;
+    let bytes = serde_json::to_vec(&snapshot)?;
+    ensure!(
+        bytes.len() < x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES,
+        "qualification snapshot exceeds {}-byte limit including newline; split the deployment into smaller qualification runs",
+        x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES
+    );
+    println!("{}", std::str::from_utf8(&bytes)?);
+    result?;
+    Ok(())
+}
+
+async fn load_deployment(
+    args: &Args,
+    env: &BTreeMap<String, String>,
+    path: &std::path::Path,
+) -> Result<x402_treazury::deployment::Deployment> {
+    if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
+        x402_treazury::deployment::Deployment::load(path).await
+    } else if args.qualification_unsigned {
+        x402_treazury::deployment::Deployment::load_for_unsigned_serving(path).await
+    } else {
+        x402_treazury::deployment::Deployment::load_for_serving_with_relay(
+            path,
+            env,
+            // Supervised startup can be cancelled by parent EOF. Keep its
+            // funding lifecycle in the existing post-bind supervisor; ordinary
+            // startup bootstrap handles signals and drains before returning.
+            if args.qualification_no_new_funding || args.qualification_parent_stdin {
+                x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
+            } else {
+                Default::default()
+            },
+        )
+        .await
+    }
+}
+
+async fn print_deployment_inspection(
+    args: &Args,
+    deployment: &mut x402_treazury::deployment::Deployment,
+) -> Result<bool> {
     if args.list_tags {
         println!(
             "{}",
             serde_json::to_string_pretty(&deployment.tag_inventory()?)?
         );
-        return Ok(());
+        return Ok(true);
     }
     if args.list_tools {
         if args.discover_pricing {
             deployment.discover_prices().await?;
         }
         println!("{}", serde_json::to_string_pretty(&deployment.inventory())?);
-        return Ok(());
+        return Ok(true);
     }
     if args.check {
         let summary = deployment.wallet_summary();
@@ -492,27 +534,15 @@ async fn run_deployment(
                 println!("  {source}: wallet {} ({})", binding.wallet, binding.origin);
             }
         }
-        return Ok(());
+        return Ok(true);
     }
-    let restriction = if args.qualification_no_new_funding {
-        x402_treazury::rotation::restriction::FundingRestriction::DenyNewFunding
-    } else {
-        Default::default()
-    };
-    let binding = async {
-        if args.qualification_unsigned {
-            deployment.bind_unsigned(env).await
-        } else {
-            deployment.bind_restricted(env, restriction).await
-        }
-    };
-    let running = tokio::select! {
-        result = binding => result?,
-        closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during binding; startup cancelled"); }
-    };
-    for (server, address) in running.addresses() {
-        tracing::info!(server, %address, "MCP listening at /mcp");
-    }
+    Ok(false)
+}
+
+async fn serve_deployment(
+    running: x402_treazury::deployment::RunningDeployment,
+    parent: &mut x402_treazury::supervision::Parent,
+) -> Result<()> {
     let shutdown = tokio_util::sync::CancellationToken::new();
     let serving = running.serve(shutdown.clone());
     tokio::pin!(serving);

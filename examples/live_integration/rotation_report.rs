@@ -1,6 +1,6 @@
 //! Per-round lifecycle assertions. Missing timing or fast refill is incomplete, never success.
 use crate::{
-    manifest::{Manifest, Phase, Scenario},
+    manifest::{Manifest, Phase, RotationRound, Scenario},
     registry::Registry,
 };
 use alloy_primitives::{Address, U256};
@@ -224,6 +224,70 @@ fn phase_result(
     let pool = observation["pool"]
         .as_str()
         .context("rotation pool ID missing")?;
+    let Some(job) = replacement_job(boundary, pool, events, &phase.id, index, rounds.len())? else {
+        return Ok(
+            json!({"status":"incomplete","reason":"reserve consumption recorded; replacement readiness not yet observed"}),
+        );
+    };
+    let promoted = selected(&boundary["after"], pool)?;
+    let generation = promoted["generation"]
+        .as_u64()
+        .context("promoted generation missing")?;
+    let active = promoted["addresses"]
+        .as_array()
+        .context("promoted wallets missing")?
+        .iter()
+        .find(|w| w["role"] == "ACTIVE")
+        .context("promoted active missing")?;
+    let promotion = Promotion {
+        pool,
+        generation,
+        active,
+        job: &job,
+    };
+    let CaseOutcomes {
+        overlap,
+        failures,
+        unresolved,
+        service_wallets,
+        overlap_wallets,
+    } = case_outcomes(
+        round,
+        events,
+        cases,
+        observation,
+        config,
+        proofs,
+        &promotion,
+    )?;
+    let Some(ready) = round_event(
+        events,
+        "rotation_refill_ready",
+        &phase.id,
+        index,
+        rounds.len(),
+    )?
+    else {
+        return Ok(
+            json!({"status":"incomplete","reason":"confirmed refill readiness not observed","pending_service":overlap,"failed_cases":failures,"unresolved_cases":unresolved}),
+        );
+    };
+    verify_refill_readiness(ready, boundary, observation, &promotion)?;
+    let unobserved: Vec<_> = service_wallets.difference(&overlap_wallets).collect();
+    Ok(
+        json!({"status":if !unobserved.is_empty() || !unresolved.is_empty(){"incomplete"}else if !failures.is_empty(){"failed"}else{"passed"},"failed_cases":failures,"unresolved_cases":unresolved,"rotation_status":if !unobserved.is_empty() || !unresolved.is_empty(){"incomplete"}else{"passed"},"pending_service_status":if !unobserved.is_empty(){"not_observed"}else{"observed"},"pending_service":overlap,"unobserved_service_wallets":unobserved,"replacement_job":job,"generation":generation,"promotion":true,"refill_ready":true,"source_submissions":1}),
+    )
+}
+
+// Keep the original promotion snapshot even when allocation is only seen later.
+fn replacement_job(
+    boundary: &Value,
+    pool: &str,
+    events: &[Value],
+    phase: &str,
+    index: usize,
+    count: usize,
+) -> Result<Option<String>> {
     let initial_job = x402_treazury::qualification::lifecycle::consumed_reserve(
         &boundary["before"],
         &boundary["after"],
@@ -236,17 +300,8 @@ fn phase_result(
     let job = if let Some(job) = initial_job {
         job
     } else {
-        let Some(ready) = round_event(
-            events,
-            "rotation_refill_ready",
-            &phase.id,
-            index,
-            rounds.len(),
-        )?
-        else {
-            return Ok(
-                json!({"status":"incomplete","reason":"reserve consumption recorded; replacement readiness not yet observed"}),
-            );
+        let Some(ready) = round_event(events, "rotation_refill_ready", phase, index, count)? else {
+            return Ok(None);
         };
         let job = x402_treazury::qualification::lifecycle::consumed_reserve(
             &boundary["before"],
@@ -260,16 +315,34 @@ fn phase_result(
         );
         job
     };
-    let promoted = selected(&boundary["after"], pool)?;
-    let generation = promoted["generation"]
-        .as_u64()
-        .context("promoted generation missing")?;
-    let active = promoted["addresses"]
-        .as_array()
-        .context("promoted wallets missing")?
-        .iter()
-        .find(|w| w["role"] == "ACTIVE")
-        .context("promoted active missing")?;
+    Ok(Some(job))
+}
+
+struct Promotion<'a> {
+    pool: &'a str,
+    generation: u64,
+    active: &'a Value,
+    job: &'a str,
+}
+
+struct CaseOutcomes {
+    overlap: Vec<Value>,
+    failures: Vec<String>,
+    unresolved: Vec<String>,
+    service_wallets: std::collections::BTreeSet<String>,
+    overlap_wallets: std::collections::BTreeSet<String>,
+}
+
+fn case_outcomes(
+    round: &RotationRound,
+    events: &[Value],
+    cases: &[Value],
+    observation: &Value,
+    config: &Value,
+    proofs: &std::collections::BTreeMap<String, Value>,
+    promotion: &Promotion<'_>,
+) -> Result<CaseOutcomes> {
+    let job = promotion.job;
     let mut overlap = Vec::new();
     let mut failures = Vec::new();
     let mut unresolved = Vec::new();
@@ -316,33 +389,7 @@ fn phase_result(
         }
         let payment = event(events, "application_payment", "case", id)?
             .context("rotation admission missing")?;
-        ensure!(
-            payment["session"] == observation["session"]
-                && payment["admitted_micros"]
-                    .as_u64()
-                    .zip(observation["observed_micros"].as_u64())
-                    .is_some_and(|(p, b)| p >= b),
-            "rotation payment predates baseline or uses another application session"
-        );
-        ensure!(
-            wallet.is_string() && payment["pool_name"] == *wallet,
-            "rotation payment wallet scope mismatch"
-        );
-        if round.service_cases.contains(id) && *wallet == round.pool {
-            ensure!(
-                payment["pool"] == pool
-                    && payment["generation"].as_u64() == Some(generation)
-                    && payment["address"]
-                        .as_str()
-                        .context("service payer missing")?
-                        .parse::<Address>()?
-                        == active["address"]
-                            .as_str()
-                            .context("promoted address missing")?
-                            .parse::<Address>()?,
-                "post-promotion service used another wallet generation"
-            );
-        }
+        verify_case_admission(payment, wallet, observation, round, id, promotion)?;
         if round.service_cases.contains(id) {
             let wallet_name = wallet
                 .as_str()
@@ -354,25 +401,78 @@ fn phase_result(
             let debit = event(events, "application_debit_verified", "case", id)?
                 .context("service debit missing")?;
             if let Some(evidence) = x402_treazury::qualification::lifecycle::refill_service(
-                payment, receipt, debit, &job,
+                payment, receipt, debit, job,
             )? {
                 overlap_wallets.insert(wallet_name);
                 overlap.push(evidence);
             }
         }
     }
-    let Some(ready) = round_event(
-        events,
-        "rotation_refill_ready",
-        &phase.id,
-        index,
-        rounds.len(),
-    )?
-    else {
-        return Ok(
-            json!({"status":"incomplete","reason":"confirmed refill readiness not observed","pending_service":overlap,"failed_cases":failures,"unresolved_cases":unresolved}),
+    Ok(CaseOutcomes {
+        overlap,
+        failures,
+        unresolved,
+        service_wallets,
+        overlap_wallets,
+    })
+}
+
+fn verify_case_admission(
+    payment: &Value,
+    wallet: &Value,
+    observation: &Value,
+    round: &RotationRound,
+    id: &str,
+    promotion: &Promotion<'_>,
+) -> Result<()> {
+    let Promotion {
+        pool,
+        generation,
+        active,
+        ..
+    } = *promotion;
+    ensure!(
+        payment["session"] == observation["session"]
+            && payment["admitted_micros"]
+                .as_u64()
+                .zip(observation["observed_micros"].as_u64())
+                .is_some_and(|(p, b)| p >= b),
+        "rotation payment predates baseline or uses another application session"
+    );
+    ensure!(
+        wallet.is_string() && payment["pool_name"] == *wallet,
+        "rotation payment wallet scope mismatch"
+    );
+    if round.service_cases.iter().any(|case| case == id) && *wallet == round.pool {
+        ensure!(
+            payment["pool"] == pool
+                && payment["generation"].as_u64() == Some(generation)
+                && payment["address"]
+                    .as_str()
+                    .context("service payer missing")?
+                    .parse::<Address>()?
+                    == active["address"]
+                        .as_str()
+                        .context("promoted address missing")?
+                        .parse::<Address>()?,
+            "post-promotion service used another wallet generation"
         );
-    };
+    }
+    Ok(())
+}
+
+fn verify_refill_readiness(
+    ready: &Value,
+    boundary: &Value,
+    observation: &Value,
+    promotion: &Promotion<'_>,
+) -> Result<()> {
+    let Promotion {
+        pool,
+        generation,
+        job,
+        ..
+    } = *promotion;
     ensure!(
         ready["job"] == job && ready["state"]["treasury_id"] == observation["state"]["treasury_id"],
         "refill readiness identity mismatch"
@@ -396,13 +496,10 @@ fn phase_result(
         );
     }
     ensure!(
-        refill_ready(&ready["state"], pool, &job, generation)?,
+        refill_ready(&ready["state"], pool, job, generation)?,
         "recorded refill is not ready"
     );
-    let unobserved: Vec<_> = service_wallets.difference(&overlap_wallets).collect();
-    Ok(
-        json!({"status":if !unobserved.is_empty() || !unresolved.is_empty(){"incomplete"}else if !failures.is_empty(){"failed"}else{"passed"},"failed_cases":failures,"unresolved_cases":unresolved,"rotation_status":if !unobserved.is_empty() || !unresolved.is_empty(){"incomplete"}else{"passed"},"pending_service_status":if !unobserved.is_empty(){"not_observed"}else{"observed"},"pending_service":overlap,"unobserved_service_wallets":unobserved,"replacement_job":job,"generation":generation,"promotion":true,"refill_ready":true,"source_submissions":1}),
-    )
+    Ok(())
 }
 
 #[cfg(test)]
@@ -744,21 +841,33 @@ mod tests {
         let overlap = json!([{"case":"s","job":"j","pool":"p","payment_pool":"p",
             "pending_before":"ALLOCATED","pending_after":"ALLOCATED",
             "scope":"verified paid signed-request future through final headers bracketed by same-job pending observations in one application session"}]);
-        assert_eq!(assess(&f).unwrap(), json!({"status":"passed","failed_cases":[],
+        assert_eq!(
+            assess(&f).unwrap(),
+            json!({"status":"passed","failed_cases":[],
             "unresolved_cases":[],"rotation_status":"passed","pending_service_status":"observed",
             "pending_service":overlap,"unobserved_service_wallets":[],"replacement_job":"j",
-            "generation":1,"promotion":true,"refill_ready":true,"source_submissions":1}));
+            "generation":1,"promotion":true,"refill_ready":true,"source_submissions":1})
+        );
         let mut missing = f.clone();
         missing.1.retain(|e| e["kind"] != "rotation_promotion");
         missing.2.clear(); // Missing promotion wins over missing cases.
-        assert_eq!(assess(&missing).unwrap(), json!({"status":"incomplete","reason":"promotion not observed"}));
+        assert_eq!(
+            assess(&missing).unwrap(),
+            json!({"status":"incomplete","reason":"promotion not observed"})
+        );
         missing = f.clone();
         missing.1.retain(|e| e["kind"] != "rotation_refill_ready");
-        assert_eq!(assess(&missing).unwrap(), json!({"status":"incomplete",
+        assert_eq!(
+            assess(&missing).unwrap(),
+            json!({"status":"incomplete",
             "reason":"confirmed refill readiness not observed","pending_service":overlap,
-            "failed_cases":[],"unresolved_cases":[]}));
+            "failed_cases":[],"unresolved_cases":[]})
+        );
         missing.3["estimate"] = Value::Null;
-        assert_eq!(assess(&missing).unwrap_err().to_string(), "recorded depletion estimate changed");
+        assert_eq!(
+            assess(&missing).unwrap_err().to_string(),
+            "recorded depletion estimate changed"
+        );
     }
 
     #[test]
@@ -768,7 +877,9 @@ mod tests {
                 let mut f = fixture();
                 f.2[0]["semantic"] = json!("FAILED");
                 f.2[0]["settlement"] = json!(settlement);
-                if !proof { f.6.remove("d"); }
+                if !proof {
+                    f.6.remove("d");
+                }
                 let unresolved = settlement == "UNKNOWN" || (settlement == "USED" && !proof);
                 let mut expected = assess(&fixture()).unwrap();
                 expected["failed_cases"] = json!(["d"]);
@@ -792,14 +903,46 @@ mod tests {
     #[test]
     fn readiness_identity_and_duplicate_evidence_remain_strict() {
         for (pointer, value, error) in [
-            ("/0/detail/before/treasury_id", json!("changed"), "promotion baseline differs from fresh observation"),
-            ("/0/detail/replacement_job", json!("other"), "replacement job mismatch"),
-            ("/1/detail/job", json!("other"), "refill readiness identity mismatch"),
-            ("/1/detail/state/treasury_id", json!("other"), "refill readiness identity mismatch"),
-            ("/1/detail/state/funding_jobs/0/pool_id", json!("other"), "refill changed its original funding operation/binding"),
-            ("/1/detail/state/funding_jobs/0/wallet_id", json!("other"), "refill changed its original funding operation/binding"),
-            ("/1/detail/state/funding_jobs/0/recipient", json!("other"), "refill changed its original funding operation/binding"),
-            ("/1/detail/state/funding_jobs/0/operation_id", json!("other"), "refill changed its original funding operation/binding"),
+            (
+                "/0/detail/before/treasury_id",
+                json!("changed"),
+                "promotion baseline differs from fresh observation",
+            ),
+            (
+                "/0/detail/replacement_job",
+                json!("other"),
+                "replacement job mismatch",
+            ),
+            (
+                "/1/detail/job",
+                json!("other"),
+                "refill readiness identity mismatch",
+            ),
+            (
+                "/1/detail/state/treasury_id",
+                json!("other"),
+                "refill readiness identity mismatch",
+            ),
+            (
+                "/1/detail/state/funding_jobs/0/pool_id",
+                json!("other"),
+                "refill changed its original funding operation/binding",
+            ),
+            (
+                "/1/detail/state/funding_jobs/0/wallet_id",
+                json!("other"),
+                "refill changed its original funding operation/binding",
+            ),
+            (
+                "/1/detail/state/funding_jobs/0/recipient",
+                json!("other"),
+                "refill changed its original funding operation/binding",
+            ),
+            (
+                "/1/detail/state/funding_jobs/0/operation_id",
+                json!("other"),
+                "refill changed its original funding operation/binding",
+            ),
         ] {
             let mut f = fixture();
             let mut events = json!(f.1);
@@ -807,11 +950,23 @@ mod tests {
             f.1 = events.as_array().unwrap().clone();
             assert_eq!(assess(&f).unwrap_err().to_string(), error, "{pointer}");
         }
-        for kind in ["application_claim", "application_payment", "application_receipt", "application_debit_verified"] {
+        for kind in [
+            "application_claim",
+            "application_payment",
+            "application_receipt",
+            "application_debit_verified",
+        ] {
             let mut f = fixture();
-            let duplicate = f.1.iter().find(|e| e["kind"] == kind && e["detail"]["case"] == "s").unwrap().clone();
+            let duplicate =
+                f.1.iter()
+                    .find(|e| e["kind"] == kind && e["detail"]["case"] == "s")
+                    .unwrap()
+                    .clone();
             f.1.push(duplicate);
-            assert_eq!(assess(&f).unwrap_err().to_string(), format!("duplicate rotation evidence: {kind}"));
+            assert_eq!(
+                assess(&f).unwrap_err().to_string(),
+                format!("duplicate rotation evidence: {kind}")
+            );
         }
         // Case lookup deliberately retains the first match.
         let mut f = fixture();
@@ -834,22 +989,29 @@ mod tests {
         after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,
             "generation":5,"wallet_id":"c","destination_ready":false}]);
         let mut vacant = after.clone();
-        vacant["pools"][0]["addresses"].as_array_mut().unwrap().pop();
+        vacant["pools"][0]["addresses"]
+            .as_array_mut()
+            .unwrap()
+            .pop();
         vacant["pools"][0]["reserve_claims"][0]["wallet_id"] = Value::Null;
         vacant["funding_jobs"] = json!([]);
         f.4["state"] = before.clone();
-        f.3["estimate"] = x402_treazury::qualification::depletion_estimate(&f.4,"10",1).unwrap();
+        f.3["estimate"] = x402_treazury::qualification::depletion_estimate(&f.4, "10", 1).unwrap();
         f.1[0]["detail"]["before"] = before;
         f.1[0]["detail"]["after"] = vacant;
         f.1[0]["detail"]["replacement_job"] = Value::Null;
         f.1[1]["detail"]["state"] = after;
         // Skip cases to isolate the correlation between promotion and later allocation.
-        for case in &mut f.2 { case["execution"] = json!("SKIPPED_TARGET_REACHED"); }
+        for case in &mut f.2 {
+            case["execution"] = json!("SKIPPED_TARGET_REACHED");
+        }
         let ready = f.1.remove(1);
-        assert_eq!(assess(&f).unwrap(), json!({"status":"incomplete",
-            "reason":"reserve consumption recorded; replacement readiness not yet observed"}));
+        assert_eq!(
+            assess(&f).unwrap(),
+            json!({"status":"incomplete",
+            "reason":"reserve consumption recorded; replacement readiness not yet observed"})
+        );
         f.1.insert(1, ready);
         assert_eq!(assess(&f).unwrap_err().to_string(), "promoted job missing");
     }
-
 }

@@ -945,121 +945,221 @@ impl Deployment {
         .await
     }
 
-    async fn bind_mode(
-        mut self,
+    async fn binding_wallets(
+        &mut self,
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
         unsigned: bool,
-    ) -> Result<RunningDeployment> {
-        let secret = |key: &str| required_secret(env, key);
-        let setup: Result<_> = async {
+    ) -> Result<(BTreeMap<String, Option<String>>, InitializedWallets)> {
         // Validate every credential before opening any port.
         let mut tokens = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
             tokens.insert(
                 name.clone(),
                 if cfg.auth {
-                    Some(secret(&cfg.bearer_token_env)?)
+                    Some(required_secret(env, &cfg.bearer_token_env)?)
                 } else {
                     None
                 },
             );
         }
         let initialized = if unsigned {
-            ensure!(
-                self.config.source_management.is_none()
-                    && self.config.servers.values().all(|s| !s.source_management),
-                "unsigned qualification forbids agent source management"
-            );
-            ensure!(
-                !self
-                    .wallet_resolution
-                    .wallets
-                    .values()
-                    .any(WalletConfig::managed),
-                "unsigned qualification forbids managed wallet profiles"
-            );
-            ensure!(
-                !self.config.funding.as_ref().is_some_and(|f| f.auto_fund),
-                "unsigned qualification forbids auto_fund"
-            );
-            tracing::warn!(
-                "unsigned-only qualification: no signing keys or treasury state opened; all payment challenges will be refused"
-            );
-            InitializedWallets {
-                wallets: self
-                    .wallet_resolution
-                    .wallets
-                    .keys()
-                    .map(|name| (name.clone(), PaidClient::unsigned()))
-                    .collect(),
-                #[cfg(feature = "zcash")]
-                treasury: None,
-                #[cfg(feature = "zcash")]
-                funding_runtime: None,
-                #[cfg(feature = "zcash")]
-                supervisor: None,
-                #[cfg(feature = "zcash")]
-                managed_pools: Vec::new(),
-            }
+            self.unsigned_wallets()?
         } else if self.initialized.is_some() {
-            let initialized=self.initialized.as_mut().expect("initialized serving wallets");
-            #[cfg(feature = "zcash")]
-            if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding
-                && let Some(store) = initialized
-                    .treasury
-                    .as_ref()
-                    .map(|treasury| treasury.store_handle())
-                    .or_else(|| {
-                        initialized
-                            .supervisor
-                            .as_ref()
-                            .map(|supervisor| supervisor.store())
-                    })
-            {
-                store
-                    .call(|store| {
-                        store.deny_new_funding();
-                        Ok(())
-                    })
-                    .await?;
-            }
-            // Catalog selection is now known: unused/overridden static profiles
-            // must still not require credentials merely because relay is enabled.
-            let needed: BTreeSet<_> = self
-                .selected
-                .iter()
-                .flat_map(|(server, tools)| {
-                    tools.iter().map(|(source, _)| {
-                        self.wallet_resolution.bindings[server][source]
-                            .wallet
-                            .clone()
-                    })
-                })
-                .collect();
-            for name in needed {
-                if !initialized.wallets.contains_key(&name)
-                    && let WalletConfig::Static {
-                        private_key_env,
-                        max_api_payment_usdc,
-                    } = &self.wallet_resolution.wallets[&name]
-                {
-                    let payer = Payer::new(
-                        &secret(private_key_env)?,
-                        SpendPolicy::dollars(max_api_payment_usdc)?,
-                    )
-                    .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
-                    initialized.wallets.insert(name, PaidClient::new(payer));
-                }
-            }
-            self.initialized.take().expect("initialized serving wallets")
+            self.complete_reused_wallets(env, restriction).await?;
+            self.initialized
+                .take()
+                .expect("initialized serving wallets")
         } else {
             self.initialize_wallets(env, restriction, None, &BTreeSet::new())
                 .await?
         };
-        Ok((tokens,initialized))
-        }.await;
-        let (mut tokens, initialized) = match setup {
+        Ok((tokens, initialized))
+    }
+
+    fn unsigned_wallets(&self) -> Result<InitializedWallets> {
+        ensure!(
+            self.config.source_management.is_none()
+                && self.config.servers.values().all(|s| !s.source_management),
+            "unsigned qualification forbids agent source management"
+        );
+        ensure!(
+            !self
+                .wallet_resolution
+                .wallets
+                .values()
+                .any(WalletConfig::managed),
+            "unsigned qualification forbids managed wallet profiles"
+        );
+        ensure!(
+            !self.config.funding.as_ref().is_some_and(|f| f.auto_fund),
+            "unsigned qualification forbids auto_fund"
+        );
+        tracing::warn!(
+            "unsigned-only qualification: no signing keys or treasury state opened; all payment challenges will be refused"
+        );
+        Ok(InitializedWallets {
+            wallets: self
+                .wallet_resolution
+                .wallets
+                .keys()
+                .map(|name| (name.clone(), PaidClient::unsigned()))
+                .collect(),
+            #[cfg(feature = "zcash")]
+            treasury: None,
+            #[cfg(feature = "zcash")]
+            funding_runtime: None,
+            #[cfg(feature = "zcash")]
+            supervisor: None,
+            #[cfg(feature = "zcash")]
+            managed_pools: Vec::new(),
+        })
+    }
+
+    async fn complete_reused_wallets(
+        &mut self,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+    ) -> Result<()> {
+        let secret = |key: &str| required_secret(env, key);
+        let initialized = self
+            .initialized
+            .as_mut()
+            .expect("initialized serving wallets");
+        #[cfg(feature = "zcash")]
+        if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding
+            && let Some(store) = initialized
+                .treasury
+                .as_ref()
+                .map(|treasury| treasury.store_handle())
+                .or_else(|| {
+                    initialized
+                        .supervisor
+                        .as_ref()
+                        .map(|supervisor| supervisor.store())
+                })
+        {
+            store
+                .call(|store| {
+                    store.deny_new_funding();
+                    Ok(())
+                })
+                .await?;
+        }
+        // Catalog selection is now known: unused/overridden static profiles
+        // must still not require credentials merely because relay is enabled.
+        let needed: BTreeSet<_> = self
+            .selected
+            .iter()
+            .flat_map(|(server, tools)| {
+                tools.iter().map(|(source, _)| {
+                    self.wallet_resolution.bindings[server][source]
+                        .wallet
+                        .clone()
+                })
+            })
+            .collect();
+        for name in needed {
+            if !initialized.wallets.contains_key(&name)
+                && let WalletConfig::Static {
+                    private_key_env,
+                    max_api_payment_usdc,
+                } = &self.wallet_resolution.wallets[&name]
+            {
+                let payer = Payer::new(
+                    &secret(private_key_env)?,
+                    SpendPolicy::dollars(max_api_payment_usdc)?,
+                )
+                .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
+                initialized.wallets.insert(name, PaidClient::new(payer));
+            }
+        }
+        Ok(())
+    }
+
+    async fn bind_catalog_listeners(
+        &mut self,
+        wallets: BTreeMap<String, PaidClient>,
+        mut tokens: BTreeMap<String, Option<String>>,
+    ) -> Result<BoundListeners> {
+        self.discover_prices().await?;
+        let mut servers = self.build_servers(&wallets);
+        let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
+        for (name, server) in &servers {
+            let tools = server.catalog.read().views["default"].clone();
+            if self.config.source_management.is_some()
+                || self.config.servers[name].discover_on_demand
+            {
+                ensure!(
+                    tools
+                        .iter()
+                        .all(|t| !t.tool.name.starts_with("x402_treazury_")
+                            && !t.tool.name.starts_with("dyn_")),
+                    "static tool uses reserved namespace"
+                );
+            }
+            snapshot.views.insert(name.clone(), tools);
+        }
+        let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
+        let protected = crate::discovery::policy::protected_paths(&self.config, &self.config_path);
+        let manager = if let Some(policy) = self.config.source_management.clone() {
+            Some(
+                crate::discovery::Manager::new(
+                    policy,
+                    self.config.servers.clone(),
+                    wallets,
+                    catalog.clone(),
+                    protected,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let mut listeners = Vec::new();
+        let mut accepted_work = Vec::new();
+        for (name, cfg) in &self.config.servers {
+            let mut server = servers.remove(name).unwrap();
+            server.catalog = catalog.clone();
+            server.catalog_server = name.clone();
+            server.host_policy = crate::server::host::HostPolicy::new(
+                cfg.allowed_hosts.clone(),
+                cfg.disable_host_check,
+            )?;
+            if cfg.source_management {
+                manager
+                    .as_ref()
+                    .context("source management unavailable")?
+                    .directory(name)
+                    .with_context(|| {
+                        format!("server {name}: directory search wallet unavailable")
+                    })?;
+            }
+            server.discovery = manager.clone();
+            let listener = TcpListener::bind(cfg.listen)
+                .await
+                .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
+            accepted_work.push(server.work.clone());
+            listeners.push((
+                name.clone(),
+                listener,
+                http_app_with_auth(server, tokens.remove(name).unwrap()),
+            ));
+        }
+        Ok(BoundListeners {
+            listeners,
+            accepted_work,
+        })
+    }
+
+    async fn bind_mode(
+        mut self,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+        unsigned: bool,
+    ) -> Result<RunningDeployment> {
+        let setup = self.binding_wallets(env, restriction, unsigned).await;
+        let (tokens, initialized) = match setup {
             Ok(setup) => setup,
             Err(error) => {
                 #[cfg(feature = "zcash")]
@@ -1081,76 +1181,11 @@ impl Deployment {
         let supervisor = initialized.supervisor;
         #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
-        let bound: Result<_> = async {
-            self.discover_prices().await?;
-            let mut servers = self.build_servers(&wallets);
-            let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
-            for (name, server) in &servers {
-                let tools = server.catalog.read().views["default"].clone();
-                if self.config.source_management.is_some()
-                    || self.config.servers[name].discover_on_demand
-                {
-                    ensure!(
-                        tools
-                            .iter()
-                            .all(|t| !t.tool.name.starts_with("x402_treazury_")
-                                && !t.tool.name.starts_with("dyn_")),
-                        "static tool uses reserved namespace"
-                    );
-                }
-                snapshot.views.insert(name.clone(), tools);
-            }
-            let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
-            let protected =
-                crate::discovery::policy::protected_paths(&self.config, &self.config_path);
-            let manager = if let Some(policy) = self.config.source_management.clone() {
-                Some(
-                    crate::discovery::Manager::new(
-                        policy,
-                        self.config.servers.clone(),
-                        wallets,
-                        catalog.clone(),
-                        protected,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            let mut listeners = Vec::new();
-            let mut accepted_work = Vec::new();
-            for (name, cfg) in &self.config.servers {
-                let mut server = servers.remove(name).unwrap();
-                server.catalog = catalog.clone();
-                server.catalog_server = name.clone();
-                server.host_policy = crate::server::host::HostPolicy::new(
-                    cfg.allowed_hosts.clone(),
-                    cfg.disable_host_check,
-                )?;
-                if cfg.source_management {
-                    manager
-                        .as_ref()
-                        .context("source management unavailable")?
-                        .directory(name)
-                        .with_context(|| {
-                            format!("server {name}: directory search wallet unavailable")
-                        })?;
-                }
-                server.discovery = manager.clone();
-                let listener = TcpListener::bind(cfg.listen)
-                    .await
-                    .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
-                accepted_work.push(server.work.clone());
-                listeners.push((
-                    name.clone(),
-                    listener,
-                    http_app_with_auth(server, tokens.remove(name).unwrap()),
-                ));
-            }
-            Ok((listeners, accepted_work))
-        }
-        .await;
-        let (listeners, accepted_work) = match bound {
+        let bound = self.bind_catalog_listeners(wallets, tokens).await;
+        let BoundListeners {
+            listeners,
+            accepted_work,
+        } = match bound {
             Ok(bound) => bound,
             Err(error) => {
                 #[cfg(feature = "zcash")]
@@ -1286,6 +1321,11 @@ fn required_secret(env: &BTreeMap<String, String>, key: &str) -> Result<String> 
         .filter(|s| !s.trim().is_empty())
         .cloned()
         .with_context(|| format!("required environment variable {key} is missing or empty"))
+}
+
+struct BoundListeners {
+    listeners: Vec<(String, TcpListener, axum::Router)>,
+    accepted_work: Vec<crate::server::work::Work>,
 }
 
 struct InitializedWallets {
