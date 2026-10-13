@@ -18,10 +18,6 @@ tokio::task_local! {
     static OWNERS: Vec<Arc<Inner>>;
 }
 
-pub(crate) fn retained() -> bool {
-    OWNERS.try_with(|_| ()).is_ok()
-}
-
 impl Work {
     pub fn run<T: Send + 'static>(
         &self,

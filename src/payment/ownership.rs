@@ -24,9 +24,8 @@ pub(crate) fn run<T: Send + 'static>(
 ) -> impl Future<Output = Result<T>> + Send + '_ {
     let work = Box::pin(work);
     async move {
-        if crate::server::work::retained() {
-            return owner.run(work).await;
-        }
+        // Retention alone grants no resource admission. Only HAS_FOREGROUND
+        // proves that an enclosing workflow actually owns this same permit.
         let permit = foreground()?;
         let context = crate::qualification::capture_case();
         owner

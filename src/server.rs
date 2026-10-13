@@ -263,9 +263,11 @@ impl ServerHandler for Server {
     ) -> Result<CallToolResponse, McpError> {
         let server = self.clone();
         let started = std::time::Instant::now();
-        let work = self
-            .work
-            .run(async move { server.call_tool_owned(request, context.id).await });
+        // Admit before spawning retained work, and hold the same resource
+        // permit through dispatch, body conversion and response construction.
+        let work = crate::payment::ownership::run(&self.work, async move {
+            server.call_tool_owned(request, context.id).await
+        });
         tokio::pin!(work);
         let result = tokio::select! {
             result = &mut work => result,

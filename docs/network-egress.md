@@ -209,7 +209,15 @@ Managed pool gates protect evidence publication, admission, signing and durable
 journaling. Base RPC acquisition and signed HTTP submission run outside the gate.
 Publication rechecks each wallet's captured evidence and shared endpoint generation;
 a completed RPC alone cannot grant authority. A seller delay cannot serialize other
-requests sharing a wallet. Exposure stays reserved until confirmed chain reconciliation.
+requests sharing a wallet.
+The existing 128 foreground-owner permits are acquired before retained MCP tasks
+are spawned and held through response-body conversion and result construction.
+Nested managed/static/directory workflows share the actual task-local permit;
+a retained lifetime token alone never bypasses admission. Disconnecting a waiter
+does not release its permit. Excess work is rejected before provider I/O; after
+owned work finishes the same capacity is available again. This bounds process
+work and response memory, not spending or treasury capital.
+Exposure stays reserved until confirmed chain reconciliation.
 A separate reconciliation owner keeps bounded wallet and authorization reads moving
 independently; cancellation of a response waiter does not abandon its accepted pass.
 Help coalesces requests for the same document without blocking other resources.

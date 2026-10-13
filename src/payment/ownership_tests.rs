@@ -246,3 +246,29 @@ async fn accepted_work_reenters_same_owner_during_drain_but_not_a_closed_other_o
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn retained_owner_without_a_permit_acquires_one_and_nested_work_reuses_it() {
+    let listener = crate::server::work::Work::default();
+    let payment = crate::server::work::Work::default();
+    listener
+        .run(async move {
+            // A Work token is a lifetime guarantee, never a capacity grant.
+            assert!(ownership::foreground().unwrap().is_some());
+            ownership::run(&payment, async {
+                assert!(ownership::foreground().unwrap().is_none());
+                let nested = crate::server::work::Work::default();
+                ownership::run(&nested, async {
+                    assert!(ownership::foreground().unwrap().is_none());
+                })
+                .await
+                .unwrap();
+            })
+            .await
+            .unwrap();
+        })
+        .await
+        .unwrap();
+    listener.drain().await;
+    assert!(ownership::foreground().unwrap().is_some());
+}

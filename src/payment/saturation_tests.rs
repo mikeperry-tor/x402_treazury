@@ -181,30 +181,42 @@ async fn saturation_child() {
     for n in 0..128 {
         let (client, request, failed) = (clients[n % 2].clone(), route(), failed.clone());
         waiters.push(tokio::spawn(async move {
-            let owned_client = client.clone();
-            client
-                .run_owned(async move {
-                    let progress = SubmissionProgress::default();
-                    let result = owned_client
-                        .execute_response_observed(request, &progress)
-                        .await;
-                    if let Err(error) = &result {
-                        assert_eq!(
-                            error.downcast_ref::<crate::rotation::error::AdmissionError>(),
-                            Some(&crate::rotation::error::AdmissionError::WalletNotReady(
-                                "candidate evidence acquisition incomplete; no payment signed"
-                            ))
-                        );
-                        assert!(
-                            !progress.possible(),
-                            "capacity rejection must stay unsigned"
-                        );
-                        failed.fetch_add(1, Ordering::SeqCst);
-                    }
-                    result
-                })
-                .await
-                .unwrap()
+            let execution = async move {
+                let owned_client = client.clone();
+                client
+                    .run_owned(async move {
+                        let progress = SubmissionProgress::default();
+                        let result = owned_client
+                            .execute_response_observed(request, &progress)
+                            .await;
+                        if let Err(error) = &result {
+                            assert_eq!(
+                                error.downcast_ref::<crate::rotation::error::AdmissionError>(),
+                                Some(&crate::rotation::error::AdmissionError::WalletNotReady(
+                                    "candidate evidence acquisition incomplete; no payment signed"
+                                ))
+                            );
+                            assert!(
+                                !progress.possible(),
+                                "capacity rejection must stay unsigned"
+                            );
+                            failed.fetch_add(1, Ordering::SeqCst);
+                        }
+                        result
+                    })
+                    .await
+                    .unwrap()
+            };
+            // Exercise both direct callers and callers already retained by a
+            // listener. A Work token cannot bypass resource admission.
+            if n % 2 == 0 {
+                crate::server::work::Work::default()
+                    .run(execution)
+                    .await
+                    .unwrap()
+            } else {
+                execution.await
+            }
         }));
     }
     until("all foreground owners", || {
