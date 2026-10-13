@@ -6,6 +6,13 @@ use std::sync::{Arc, Mutex};
 type Requests = Arc<Mutex<Vec<Value>>>;
 
 async fn fixture(reorg: bool) -> (BaseRpc, Requests, tokio::task::JoinHandle<()>, u64) {
+    fixture_nonce(reorg, 1).await
+}
+
+async fn fixture_nonce(
+    reorg: bool,
+    nonce: u64,
+) -> (BaseRpc, Requests, tokio::task::JoinHandle<()>, u64) {
     let stamp = now().unwrap();
     let requests = Requests::default();
     let head = Arc::new(std::sync::atomic::AtomicU64::new(100));
@@ -38,7 +45,7 @@ async fn fixture(reorg: bool) -> (BaseRpc, Requests, tokio::task::JoinHandle<()>
                             // Advance while scanning historical authorization state.
                             assert_eq!(v["params"][1]["blockHash"], format!("0x{:064x}", 88));
                             head.store(200, std::sync::atomic::Ordering::SeqCst);
-                            json!(format!("0x{:064x}", 1))
+                            json!(format!("0x{nonce:064x}"))
                         }
                     },
                     method => panic!("unexpected RPC {method}"),
@@ -185,6 +192,30 @@ async fn historical_resolution_and_compatibility_share_identical_anchors() {
     let view = rpc.view(query).await.unwrap();
     assert_eq!(header_reads(&requests, 88), 2);
     let original = view.resolution_certificates["attempt"].clone();
+    assert!(view.balances.is_empty());
+    assert!(view.observations.is_empty());
+    assert!(view.balance_certificates.is_empty());
+    assert_eq!(view.anchor, anchor(88));
+    {
+        let requests = requests.lock().unwrap();
+        let methods: Vec<_> = requests
+            .iter()
+            .map(|r| r["method"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            methods,
+            [
+                "eth_chainId",
+                "eth_getBlockByNumber",
+                "eth_getBlockByNumber",
+                "eth_call",
+                "eth_getBlockByNumber"
+            ]
+        );
+        assert_eq!(requests[1]["params"][0], "latest");
+        assert_eq!(requests[2]["params"][0], "0x58");
+        assert_eq!(requests[4]["params"][0], "0x58");
+    }
     requests.lock().unwrap().clear();
     let verified = rpc
         .recheck_resolution(original.clone(), captured)
@@ -370,5 +401,85 @@ async fn balance_only_rejects_anchor_replacement_after_balance_reads() {
             .to_string()
             .contains("Base view changed during reconciliation")
     );
+    server.abort();
+}
+
+#[tokio::test]
+async fn unused_authorization_requires_strictly_later_confirmed_time_for_release() {
+    for offset in [-1i64, 0, 1] {
+        let (rpc, requests, server, stamp) = fixture_nonce(false, 0).await;
+        let confirmed_time = stamp - 60;
+        let mut query = query(true);
+        query.wallets.clear();
+        query.pending[0].valid_before = confirmed_time.checked_add_signed(offset).unwrap();
+        query
+            .captures
+            .insert("wallet".into(), capture("wallet", Some(anchor(88))));
+        let view = rpc.view(query).await.unwrap();
+        assert!(
+            view.balances.is_empty()
+                && view.observations.is_empty()
+                && view.balance_certificates.is_empty()
+        );
+        if offset < 0 {
+            assert_eq!(view.released, ["attempt"]);
+            let resolution = &view.resolutions["attempt"];
+            assert_eq!(resolution.outcome, AuthorizationOutcome::ExpiredUnused);
+            assert_eq!(resolution.anchor.as_ref(), Some(&anchor(88)));
+            assert_eq!(resolution.block_time, confirmed_time);
+            let certificate = &view.resolution_certificates["attempt"];
+            assert_eq!(certificate.outcome(), &AuthorizationOutcome::ExpiredUnused);
+            assert_eq!(certificate.anchor(), &anchor(88));
+            assert_eq!(certificate.block_time(), confirmed_time);
+        } else {
+            assert!(
+                view.released.is_empty()
+                    && view.resolutions.is_empty()
+                    && view.resolution_certificates.is_empty(),
+                "equal/future expiry must preserve authorization liability"
+            );
+        }
+        let reads = requests.lock().unwrap();
+        assert_eq!(
+            reads.len(),
+            5,
+            "historical proof requires one exact anchor recheck and no balance acquisition"
+        );
+        assert_eq!(reads[3]["params"][1]["blockHash"], anchor(88).hash);
+        assert_eq!(reads[4]["params"][0], "0x58");
+        drop(reads);
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn invalid_authorization_boolean_fails_before_admission_balance_reads() {
+    let (rpc, requests, server, _) = fixture_nonce(false, 2).await;
+    let error = rpc
+        .view(query(true))
+        .await
+        .err()
+        .expect("non-boolean nonce result must fail");
+    assert!(
+        error.downcast_ref::<RpcFailure>().is_some(),
+        "malformed RPC evidence must retain its typed failure"
+    );
+    let reads = requests.lock().unwrap();
+    assert_eq!(
+        reads.len(),
+        4,
+        "invalid historical evidence must stop before fresh admission headers or balances"
+    );
+    assert_eq!(reads[0]["method"], "eth_chainId");
+    assert_eq!(reads[1]["params"][0], "latest");
+    assert_eq!(reads[2]["params"][0], "0x58");
+    assert_eq!(reads[3]["method"], "eth_call");
+    assert!(
+        !reads[3]["params"][0]["data"]
+            .as_str()
+            .unwrap()
+            .starts_with("0x70a08231")
+    );
+    drop(reads);
     server.abort();
 }
