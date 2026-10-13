@@ -444,6 +444,17 @@ snapshots; wallet count is not a deadline. Read-only readiness and quote prerequ
 precede proposal mutation or reservation. The same treasury actor and worker survive
 bootstrap into serving, and accepted work drains after waiter cancellation.
 
+The scheduler's response waiter does not own the funding lease. Accepted mutable
+source work retains it even if observation publication fails and the scheduler
+returns an error; another worker cannot enter until that source task finishes.
+Once accepted source work has drained, stopping drops any remaining unsigned
+observations without accepting their results or consuming transaction recovery
+attempts. A single pass uses its captured
+inventory boundary; continuous observation lanes can refresh their boundaries
+independently while source work remains occupied. Focused scheduler tests use
+explicit completion barriers and the durable store to exercise these boundaries;
+they do not exhaust all possible async interleavings.
+
 Funding logs distinguish progress from failed checks. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
 polls log at debug level, clear stale error status and use the normal polling interval.
