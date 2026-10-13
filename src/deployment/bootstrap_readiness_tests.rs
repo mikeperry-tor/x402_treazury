@@ -1,6 +1,122 @@
 use super::*;
 use crate::rotation::store::Store;
 
+fn allocated_readiness_fixture() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::test_capacity::declare_and_allocate!(
+        state,
+        "web",
+        crate::rotation::test_capacity::two_reserves("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    (dir, state)
+}
+
+#[tokio::test]
+async fn captured_completion_survives_current_claim_generation_advancement() {
+    let (dir, state) = allocated_readiness_fixture();
+    let jobs = state.funding_jobs().unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let names = BTreeSet::from(["web".to_owned()]);
+    let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+    let captured = capture_startup(&store, &names).await.unwrap();
+    assert!(
+        !check_startup(&store, &names, &attempts, Some(&captured), false)
+            .await
+            .unwrap()
+    );
+    store
+        .call(move |s| {
+            for job in jobs {
+                s.record_credit(&job.wallet_id, &job.target, "fixture", 100)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // Advance the current reserve slots while retaining completed historical
+    // jobs. This creates no replacement allocation or new spending authority.
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    assert_eq!(
+        db.execute(
+            "UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1",
+            []
+        )
+        .unwrap(),
+        2
+    );
+    let current = capture_startup(&store, &names).await.unwrap();
+    for (old, new) in captured["web"].iter().zip(&current["web"]) {
+        assert_eq!(old.slot, new.slot);
+        assert_eq!(old.generation + 1, new.generation);
+    }
+    for progress in [false, true] {
+        assert!(
+            check_startup(&store, &names, &attempts, Some(&captured), progress)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !check_startup(&store, &names, &attempts, Some(&current), progress)
+                .await
+                .unwrap()
+        );
+    }
+    drop(store);
+    worker.await.unwrap();
+}
+
+#[tokio::test]
+async fn startup_recovery_limit_uses_durable_count_and_inclusive_maximum() {
+    let (dir, state) = allocated_readiness_fixture();
+    let jobs = state.funding_jobs().unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    for job in &jobs {
+        for index in 0..3 {
+            db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,?2,'\"ALLOCATED\"')", rusqlite::params![format!("history-{}-{index}", job.id), job.id]).unwrap();
+        }
+        assert_eq!(state.funding_recovery_count(&job.id).unwrap(), 3);
+    }
+    let (store, worker) = StoreHandle::spawn(state);
+    let names = BTreeSet::from(["web".to_owned()]);
+    let captured = capture_startup(&store, &names).await.unwrap();
+    for progress in [false, true] {
+        for maximum in [3, 4] {
+            let attempts = BTreeMap::from([("web".to_owned(), maximum)]);
+            assert!(
+                !check_startup(&store, &names, &attempts, Some(&captured), progress)
+                    .await
+                    .unwrap()
+            );
+        }
+        let attempts = BTreeMap::from([("web".to_owned(), 2)]);
+        let error = check_startup(&store, &names, &attempts, Some(&captured), progress)
+            .await
+            .unwrap_err();
+        assert!(error.is::<StartupObstructed>());
+        let message = error.to_string();
+        assert!(
+            message.contains("recovery_attempt_limit_reached"),
+            "{message}"
+        );
+        for job in &jobs {
+            assert!(message.contains(&job.id));
+            assert!(!message.contains(&job.recipient));
+        }
+    }
+    drop(store);
+    worker.await.unwrap();
+}
+
 #[tokio::test]
 async fn paged_vacancies_remain_incomplete_without_mutation_or_missing_policy_shortcut() {
     let dir = tempfile::tempdir().unwrap();

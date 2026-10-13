@@ -271,100 +271,152 @@ async fn http_disconnect_does_not_abandon_accepted_payment() {
 #[tokio::test]
 async fn stdio_eof_and_signal_preserve_accepted_calls_before_and_after_signing() {
     for (before_signing, signal) in [(true, false), (false, false), (false, true)] {
-        let vendor = Vendor::default();
-        vendor
-            .pause_unsigned
-            .store(before_signing, Ordering::SeqCst);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let app = Router::new()
-            .route("/pay", post(payment))
-            .with_state(vendor.clone());
-        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("spec.json"),
-            json!({"paths":{"/pay":{"post":{}}}}).to_string(),
-        )
-        .unwrap();
-        let config = dir.path().join("provider.toml");
-        std::fs::write(
-            &config,
-            format!(
-                "spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\nprobe_pricing = false\n"
-            ),
-        )
-        .unwrap();
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
-            .env_clear()
-            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-            .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
-            .args(["serve", "--provider"])
-            .arg(&config)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let mut input = child.stdin.take().unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
-        let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}});
-        input
-            .write_all(format!("{init}\n").as_bytes())
-            .await
-            .unwrap();
-        tokio::time::timeout(Duration::from_secs(15), output.next_line())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        input.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"test_pay\",\"arguments\":{}}}\n").await.unwrap();
-        let arrived = if before_signing {
-            &vendor.unsigned_arrived
-        } else {
-            &vendor.arrived
-        };
-        tokio::time::timeout(Duration::from_secs(10), arrived.notified())
-            .await
-            .unwrap();
-        if signal {
-            assert!(
-                std::process::Command::new("/bin/kill")
-                    .args(["-TERM", &child.id().unwrap().to_string()])
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-        } else {
-            drop(input);
-        }
-        // Exceed rmcp's EOF response-drain allowance. Application work is owned
-        // separately even when the transport can no longer deliver its response.
-        tokio::time::sleep(Duration::from_secs(6)).await;
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "EOF abandoned accepted work"
-        );
-        if before_signing {
-            assert_eq!(vendor.signed.load(Ordering::SeqCst), 0);
-            vendor.unsigned_release.notify_one();
-            tokio::time::timeout(Duration::from_secs(10), vendor.arrived.notified())
-                .await
-                .unwrap();
-        }
-        vendor.release.notify_one();
-        let result = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        assert_eq!(vendor.unsigned.load(Ordering::SeqCst), 1);
-        assert_eq!(vendor.signed.load(Ordering::SeqCst), 1);
-        task.abort();
+        stdio_scenario(before_signing, signal, false).await;
     }
+}
+
+#[tokio::test]
+async fn stdio_explicit_force_reports_ambiguous_paid_calls_without_replay() {
+    stdio_scenario(false, true, true).await;
+}
+
+async fn stdio_scenario(before_signing: bool, signal: bool, force: bool) {
+    let vendor = Vendor::default();
+    vendor
+        .pause_unsigned
+        .store(before_signing, Ordering::SeqCst);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route("/pay", post(payment))
+        .with_state(vendor.clone());
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("spec.json"),
+        json!({"paths":{"/pay":{"post":{}}}}).to_string(),
+    )
+    .unwrap();
+    let config = dir.path().join("provider.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\nprobe_pricing = false\n"
+        ),
+    )
+    .unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
+        .args(["serve", "--provider"])
+        .arg(&config)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
+    let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}});
+    input
+        .write_all(format!("{init}\n").as_bytes())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), output.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    input.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"test_pay\",\"arguments\":{}}}\n").await.unwrap();
+    let (draining, mut drain_notice) = tokio::sync::mpsc::unbounded_channel();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let logs = tokio::spawn(async move {
+        let mut logs = String::new();
+        loop {
+            let mut line = String::new();
+            if stderr.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            if line.contains("Stdio stopping: draining accepted calls") {
+                let _ = draining.send(());
+            }
+            logs.push_str(&line);
+        }
+        logs
+    });
+    let arrived = if before_signing {
+        &vendor.unsigned_arrived
+    } else {
+        &vendor.arrived
+    };
+    tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    if signal {
+        assert!(
+            std::process::Command::new("/bin/kill")
+                .args(["-TERM", &child.id().unwrap().to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+    } else {
+        drop(input);
+    }
+    tokio::time::timeout(Duration::from_secs(10), drain_notice.recv())
+        .await
+        .expect("stdio must enter drain")
+        .expect("stderr ended before drain notice");
+    // Exceed rmcp's EOF response-drain allowance. Application work is owned
+    // separately even when the transport can no longer deliver its response.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "EOF abandoned accepted work"
+    );
+    if before_signing {
+        assert_eq!(vendor.signed.load(Ordering::SeqCst), 0);
+        vendor.unsigned_release.notify_one();
+        tokio::time::timeout(Duration::from_secs(10), vendor.arrived.notified())
+            .await
+            .unwrap();
+    }
+    if force {
+        assert!(
+            std::process::Command::new("/bin/kill")
+                .args(["-TERM", &child.id().unwrap().to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+    } else {
+        vendor.release.notify_one();
+    }
+    let result = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
+        .await
+        .unwrap()
+        .unwrap();
+    let logs = logs.await.unwrap();
+    assert_eq!(result.status.success(), !force, "{logs}");
+    assert_eq!(
+        logs.matches("Stdio stopping: draining accepted calls")
+            .count(),
+        1,
+        "{logs}"
+    );
+    if force {
+        assert!(
+            logs.contains("forced shutdown; unfinished paid operations may have unknown outcomes"),
+            "{logs}"
+        );
+        while let Some(line) = output.next_line().await.unwrap() {
+            let message: Value = serde_json::from_str(&line).expect("stdout remains MCP JSON");
+            assert_ne!(message["result"]["content"][0]["text"], "completed payment");
+        }
+    }
+    assert_eq!(vendor.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(vendor.signed.load(Ordering::SeqCst), 1);
+    task.abort();
 }
