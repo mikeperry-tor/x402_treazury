@@ -15,10 +15,21 @@ struct Reads {
     status_gates: Arc<std::collections::BTreeMap<String, Arc<Semaphore>>>,
     failed_job: Arc<std::sync::Mutex<Option<String>>>,
     processing: bool,
+    quotes: Option<mpsc::UnboundedSender<QuoteRead>>,
 }
 impl FundingObservations for Reads {
     type QuoteRequest = Quote;
     async fn quote(&self, quote: Quote) -> Result<Quote> {
+        if let Some(quotes) = &self.quotes {
+            let (finish, completed) = tokio::sync::oneshot::channel();
+            quotes
+                .send(QuoteRead {
+                    job: quote.request["fixture_job"].as_str().unwrap().to_owned(),
+                    finish,
+                })
+                .unwrap();
+            completed.await.unwrap()?;
+        }
         Ok(quote)
     }
     async fn credit(&self, _: FundingJob) -> Result<()> {
@@ -216,6 +227,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
                 status_gates: Default::default(),
                 failed_job: Default::default(),
                 processing: false,
+                quotes: None,
             },
             gate: Arc::new(Semaphore::new(0)),
             started,
@@ -313,6 +325,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                         status_gates: Default::default(),
                         failed_job: Default::default(),
                         processing: false,
+                        quotes: None,
                     },
                     gate: Arc::new(Semaphore::new(64)),
                     started,
@@ -515,6 +528,7 @@ async fn malformed_readiness_is_local_while_independent_source_work_drains() {
                 status_gates: Default::default(),
                 failed_job: Default::default(),
                 processing: false,
+                quotes: None,
             },
             gate: gate.clone(),
             started,
@@ -676,6 +690,7 @@ async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fat
                     status_gates: Default::default(),
                     failed_job: Default::default(),
                     processing: false,
+                    quotes: None,
                 },
                 gate: Arc::new(Semaphore::new(0)),
                 started,
@@ -813,6 +828,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
                 status_gates: Default::default(),
                 failed_job: Default::default(),
                 processing: false,
+                quotes: None,
             },
             gate: source_gate.clone(),
             started: source_tx,
@@ -918,6 +934,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
                 status_gates: Default::default(),
                 failed_job: Default::default(),
                 processing: false,
+                quotes: None,
             },
             gate: Arc::new(Semaphore::new(jobs.len())),
             started,
@@ -985,6 +1002,7 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
                 status_gates: gates.clone(),
                 failed_job: fail.clone(),
                 processing: false,
+                quotes: None,
             },
             gate: source_gate.clone(),
             started: source_tx,
@@ -1096,6 +1114,7 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
                 status_gates: Default::default(),
                 failed_job: Default::default(),
                 processing: true,
+                quotes: None,
             },
             gate: source_gate.clone(),
             started: source_tx,
@@ -1133,6 +1152,245 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
     assert_eq!(facts.source_attempts, 1);
     assert!(!facts.provider_success);
     assert!(!facts.readiness_recorded);
+    drop(store);
+    actor.await.unwrap();
+}
+
+/// Each read announces admission and stays pending until the test supplies its
+/// result. No elapsed-time assumption controls completion ordering.
+#[derive(Debug)]
+struct QuoteRead {
+    job: String,
+    finish: tokio::sync::oneshot::Sender<Result<()>>,
+}
+
+async fn event<T>(receiver: &mut mpsc::UnboundedReceiver<T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+        .await
+        .expect("scheduler event stalled")
+        .expect("scheduler event channel closed")
+}
+
+#[tokio::test]
+async fn quote_saturation_releases_failed_slot_and_single_pass_drains_all_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    for index in 0..3 {
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            &format!("pool{index}"),
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+    }
+    let mut jobs = raw.funding_jobs().unwrap();
+    jobs.sort_by(|a, b| a.id.cmp(&b.id));
+    let submitted_job = jobs.last().unwrap().clone();
+    submitted(&mut raw, &submitted_job);
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, mut status_events) = mpsc::unbounded_channel();
+    let (started, mut source_events) = mpsc::unbounded_channel();
+    let (quotes, mut quote_events) = mpsc::unbounded_channel();
+    let credit_calls = Arc::new(AtomicUsize::new(0));
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(jobs.len())),
+                credit_calls: credit_calls.clone(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: Some(quotes),
+            },
+            gate: Arc::new(Semaphore::new(jobs.len())),
+            started,
+        },
+        60,
+    );
+    let task = tokio::spawn({
+        let worker = worker.clone();
+        async move { worker.tick(1000).await }
+    });
+    let mut pending = Vec::new();
+    for _ in 0..QUOTE_READS {
+        pending.push(event(&mut quote_events).await);
+    }
+    assert_eq!(event(&mut status_events).await, submitted_job.id);
+    wait_until(|| credit_calls.load(Ordering::SeqCst) == jobs.len()).await;
+    assert!(
+        !task.is_finished(),
+        "once must retain outstanding quote reads"
+    );
+    assert!(worker.tick(1000).await.unwrap_err().is::<AlreadyOwned>());
+    assert!(quote_events.try_recv().is_err());
+
+    // Complete the most recently admitted read first, with an unsigned outage.
+    // Its slot must become usable while all earlier reads remain blocked.
+    let failed = pending.pop().unwrap();
+    let failed_id = failed.job.clone();
+    failed
+        .finish
+        .send(Err(anyhow::anyhow!("fixture quote outage")))
+        .unwrap();
+    pending.push(event(&mut quote_events).await);
+    let mut seen = BTreeSet::from([failed_id.clone()]);
+    for read in &pending {
+        assert!(seen.insert(read.job.clone()), "duplicate quote admission");
+    }
+    assert_eq!(seen.len(), jobs.len() - 1);
+    assert!(!task.is_finished());
+    for read in pending.into_iter().rev() {
+        read.finish.send(Ok(())).unwrap();
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        quote_events.try_recv().is_err(),
+        "single pass must not retry failed quotes"
+    );
+    let mut sources = BTreeSet::new();
+    while let Ok(id) = source_events.try_recv() {
+        assert!(sources.insert(id), "duplicate source admission");
+    }
+    assert_eq!(sources.len(), jobs.len());
+    for job in jobs {
+        let was_submitted = job.id == submitted_job.id;
+        let failed = job.id == failed_id;
+        store
+            .call(move |s| {
+                let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                assert_eq!(facts.accepted_quote, !failed);
+                assert_eq!(facts.source_attempts, u32::from(was_submitted));
+                assert_eq!(facts.provider_success, was_submitted);
+                if failed {
+                    let current = s.funding_job(&job.id)?.unwrap();
+                    assert_eq!(current.phase, FundingPhase::Allocated);
+                    assert_eq!(current.attempts, 0);
+                    assert!(current.error_streak > 0);
+                    assert!(current.next_poll > 1000);
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+}
+
+#[tokio::test]
+async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let jobs = raw.funding_jobs().unwrap();
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, mut status_events) = mpsc::unbounded_channel();
+    let (started, mut source_events) = mpsc::unbounded_channel();
+    let (quotes, mut quote_events) = mpsc::unbounded_channel();
+    let source_gate = Arc::new(Semaphore::new(0));
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Arc::new(AtomicUsize::new(0)),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: Some(quotes),
+            },
+            gate: source_gate.clone(),
+            started,
+        },
+        60,
+    );
+    let stop = CancellationToken::new();
+    let waiter = tokio::spawn({
+        let worker = worker.clone();
+        let stop = stop.clone();
+        async move { worker.schedule(1000, stop, true).await }
+    });
+    let accepted = event(&mut source_events).await;
+    stop.cancel();
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    assert!(worker.tick(1000).await.unwrap_err().is::<AlreadyOwned>());
+    assert!(quote_events.try_recv().is_err());
+    source_gate.add_permits(1);
+    // Acquiring the actual owner gate proves the detached scheduler and source
+    // have drained. Keep it held while inspecting forbidden follow-up effects.
+    let lease = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        store.funding_owner().lock_owned(),
+    )
+    .await
+    .unwrap();
+    assert!(source_events.try_recv().is_err());
+    assert!(quote_events.try_recv().is_err());
+    assert!(status_events.try_recv().is_err());
+    let accepted_job = jobs.iter().find(|job| job.id == accepted).unwrap();
+    {
+        let state = lease.state.lock().unwrap();
+        let record = state
+            .records
+            .get(&Key {
+                operation: accepted_job.operation_id.clone(),
+                kind: Kind::Source,
+            })
+            .expect("accepted source ownership lost");
+        assert!(
+            record.due > 1000,
+            "accepted source completion was not published"
+        );
+        assert!(record.error.is_none());
+    }
+    for job in jobs {
+        store
+            .call(move |s| {
+                let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                assert!(!facts.accepted_quote);
+                assert_eq!(facts.source_attempts, 0);
+                let current = s.funding_job(&job.id)?.unwrap();
+                assert_eq!(current.phase, FundingPhase::Allocated);
+                assert_eq!(current.attempts, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    drop(lease);
+    drop(worker);
     drop(store);
     actor.await.unwrap();
 }
