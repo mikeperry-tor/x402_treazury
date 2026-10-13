@@ -443,66 +443,16 @@ impl PaidClient {
             _ => None,
         };
         let (response, mut cover) = loop {
-            let identity = if unsigned_only {
-                crate::network::IsolationId::discovery(request.url().as_str())?
-            } else {
-                let address = candidate
-                    .as_ref()
-                    .map(|c| c.address.as_str())
-                    .or_else(|| payer.as_ref().map(|p| p.address.as_str()))
-                    .context("network_identity_missing: payer")?;
-                crate::network::IsolationId::evm(address)?
-            };
-            let factory = crate::network::global();
-            let http = factory.http_policy(
-                &identity,
-                request.url().as_str(),
-                self.timeout,
-                self.public_only,
-                self.transport,
-            )?;
-            let mut cover = self.cover.as_ref().and_then(|(config, scope)| {
-                let engine = factory.cover.as_ref()?;
-                let owner = crate::cover::registry::Owner {
-                    runtime: tokio::runtime::Handle::current().id(),
-                    identity: identity.clone(),
-                    origin: request.url().origin().ascii_serialization(),
-                    transport: self.transport,
-                    public_only: self.public_only,
-                    timeout_ms: factory.read_timeout(self.timeout).as_millis() as u64,
-                };
-                match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
-                    Ok(call) => Some(call),
-                    Err(error) => {
-                        tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
-                        None
-                    }
-                }
-            });
-            if let Some(call) = &cover {
-                call.prioritize().await;
-            }
-            let mut unsigned = request
-                .try_clone()
-                .context("request body cannot be retried")?;
-            let retry = request
-                .try_clone()
-                .context("request body cannot be retried")?;
-            let mut padding = cover.as_ref().and_then(|c| c.pad(&mut unsigned, true));
-            if let Some(p) = &mut padding {
-                p.dispatched();
-            }
-            let mut response = http
-                .execute(unsigned)
-                .await
-                .map_err(reqwest::Error::without_url)?;
-            let receipt = crate::pricing::runtime::received();
-            drop(padding);
-            if let Some(c) = &cover {
-                c.protocol(response.version());
-                c.rejected_padding(response.status());
-            }
-            crate::network::log_http(&response, "payment_challenge");
+            let (http, mut cover) = self
+                .execution_transport(
+                    &request,
+                    unsigned_only,
+                    candidate.as_ref(),
+                    payer.as_deref(),
+                )
+                .await?;
+            let (mut response, retry, receipt) =
+                unsigned_response(&http, &request, cover.as_ref()).await?;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 crate::qualification::record_challenge(response.headers()).await?;
                 if unsigned_only {
@@ -555,26 +505,15 @@ impl PaidClient {
                         Err(error) => return Err(error),
                     }
                 } else {
-                    sanitize_challenge(&mut response)?;
-                    // Selection (asset/network/cap) happens inside the SDK before signing.
-                    let headers = payer
-                        .as_ref()
-                        .expect("static payer")
-                        .client
-                        .make_payment_headers(response)
-                        .await
-                        .context("x402 challenge rejected or signing failed")?;
-                    let mut retry = retry;
-                    retry.headers_mut().extend(headers);
-                    let mut padding = cover.as_ref().and_then(|c| c.pad(&mut retry, true));
-                    if let Some(p) = &mut padding {
-                        p.dispatched();
-                    }
-                    progress.mark_possible();
-                    response = http
-                        .execute(retry)
-                        .await
-                        .map_err(reqwest::Error::without_url)?;
+                    response = static_payment(
+                        payer.as_deref(),
+                        &http,
+                        retry,
+                        response,
+                        cover.as_ref(),
+                        progress,
+                    )
+                    .await?;
                     paid_submission = true;
                 }
             }
@@ -599,6 +538,55 @@ impl PaidClient {
         } else {
             result
         }
+    }
+
+    async fn execution_transport(
+        &self,
+        request: &reqwest::Request,
+        unsigned_only: bool,
+        candidate: Option<&crate::rotation::manager::PaymentCandidateHandle>,
+        payer: Option<&Payer>,
+    ) -> Result<(reqwest::Client, Option<crate::cover::runtime::Call>)> {
+        let identity = if unsigned_only {
+            crate::network::IsolationId::discovery(request.url().as_str())?
+        } else {
+            let address = candidate
+                .as_ref()
+                .map(|c| c.address.as_str())
+                .or_else(|| payer.map(|p| p.address.as_str()))
+                .context("network_identity_missing: payer")?;
+            crate::network::IsolationId::evm(address)?
+        };
+        let factory = crate::network::global();
+        let http = factory.http_policy(
+            &identity,
+            request.url().as_str(),
+            self.timeout,
+            self.public_only,
+            self.transport,
+        )?;
+        let cover = self.cover.as_ref().and_then(|(config, scope)| {
+                let engine = factory.cover.as_ref()?;
+                let owner = crate::cover::registry::Owner {
+                    runtime: tokio::runtime::Handle::current().id(),
+                    identity: identity.clone(),
+                    origin: request.url().origin().ascii_serialization(),
+                    transport: self.transport,
+                    public_only: self.public_only,
+                    timeout_ms: factory.read_timeout(self.timeout).as_millis() as u64,
+                };
+                match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
+                    Ok(call) => Some(call),
+                    Err(error) => {
+                        tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
+                        None
+                    }
+                }
+            });
+        if let Some(call) = &cover {
+            call.prioritize().await;
+        }
+        Ok((http, cover))
     }
 
     async fn bound_challenge(&self, response: reqwest::Response) -> Result<reqwest::Response> {
@@ -652,6 +640,71 @@ impl PaidClient {
             paid_submission,
         })
     }
+}
+
+// Capture receipt time before challenge handling, and release unsigned padding
+// before recording response protocol observations.
+async fn unsigned_response(
+    http: &reqwest::Client,
+    request: &reqwest::Request,
+    cover: Option<&crate::cover::runtime::Call>,
+) -> Result<(
+    reqwest::Response,
+    reqwest::Request,
+    Option<crate::pricing::runtime::Receipt>,
+)> {
+    let mut unsigned = request
+        .try_clone()
+        .context("request body cannot be retried")?;
+    let retry = request
+        .try_clone()
+        .context("request body cannot be retried")?;
+    let mut padding = cover.and_then(|c| c.pad(&mut unsigned, true));
+    if let Some(p) = &mut padding {
+        p.dispatched();
+    }
+    let response = http
+        .execute(unsigned)
+        .await
+        .map_err(reqwest::Error::without_url)?;
+    let receipt = crate::pricing::runtime::received();
+    drop(padding);
+    if let Some(c) = cover {
+        c.protocol(response.version());
+        c.rejected_padding(response.status());
+    }
+    crate::network::log_http(&response, "payment_challenge");
+    Ok((response, retry, receipt))
+}
+
+async fn static_payment(
+    payer: Option<&Payer>,
+    http: &reqwest::Client,
+    retry: reqwest::Request,
+    mut response: reqwest::Response,
+    cover: Option<&crate::cover::runtime::Call>,
+    progress: &SubmissionProgress,
+) -> Result<reqwest::Response> {
+    sanitize_challenge(&mut response)?;
+    // Selection (asset/network/cap) happens inside the SDK before signing.
+    let headers = payer
+        .expect("static payer")
+        .client
+        .make_payment_headers(response)
+        .await
+        .context("x402 challenge rejected or signing failed")?;
+    let mut retry = retry;
+    retry.headers_mut().extend(headers);
+    let mut padding = cover.and_then(|c| c.pad(&mut retry, true));
+    if let Some(p) = &mut padding {
+        p.dispatched();
+    }
+    progress.mark_possible();
+    let response = http
+        .execute(retry)
+        .await
+        .map_err(reqwest::Error::without_url)?;
+    Ok(response)
 }
 
 fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {

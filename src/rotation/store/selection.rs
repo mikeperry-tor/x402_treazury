@@ -30,6 +30,12 @@ impl Rank {
     }
 }
 
+struct EligiblePaymentEvidence {
+    ownership: super::capacity::PaymentOwnership,
+    observation: super::super::base::evidence::BalanceObservation,
+    capacity: U256,
+}
+
 impl Store {
     /// Initial hint selection passes no bound payer. Challenge-time selection
     /// keeps a sufficient bound payer and otherwise uses the identical ranking.
@@ -68,6 +74,38 @@ impl Store {
     ) -> Result<Option<(PaymentCandidateHandle, super::super::base::ChainView)>> {
         let now = super::super::base::now()?;
         let mut best: Option<(Rank, PaymentCandidateHandle, super::super::base::ChainView)> = None;
+        let certificates = self.merge_payment_certificates(completed, now)?;
+        for (wallet, certificate) in certificates {
+            let Some(EligiblePaymentEvidence {
+                ownership,
+                observation,
+                capacity,
+            }) = self.eligible_payment_evidence(pool, wallet, cost, through, certificate, now)?
+            else {
+                continue;
+            };
+            let candidate = PaymentCandidateHandle {
+                wallet: wallet.clone(),
+                address: observation.address.clone(),
+            };
+            let view = payment_view(wallet, certificate, observation);
+            if bound == Some(wallet.as_str()) {
+                return Ok(Some((candidate, view)));
+            }
+            let rank = Rank::new(capacity, &ownership.role, ownership.slot.as_deref(), wallet);
+            if best.as_ref().is_none_or(|(current, _, _)| rank < *current) {
+                best = Some((rank, candidate, view));
+            }
+        }
+        Ok(best.map(|(_, candidate, view)| (candidate, view)))
+    }
+
+    fn merge_payment_certificates<'a>(
+        &'a self,
+        completed: &'a [super::super::base::ChainView],
+        now: u64,
+    ) -> Result<std::collections::BTreeMap<&'a String, &'a super::super::base::BalanceCertificate>>
+    {
         let mut certificates: std::collections::BTreeMap<_, _> = self
             .evidence_cache
             .iter()
@@ -101,65 +139,65 @@ impl Store {
             }
             certificates.insert(wallet, certificate);
         }
-        for (wallet, certificate) in certificates {
-            let within: bool = self.db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
-                params![wallet, pool, through],
-                |row| row.get(0),
-            )?;
-            if !within {
-                continue;
-            }
-            let ownership = match payment_ownership(&self.db, pool, wallet) {
-                Ok(Some(ownership)) => ownership,
-                Ok(None) => continue,
-                // The captured inventory pass retains this wallet's diagnostic.
-                // A bad historical binding cannot veto an independent cached payer.
-                Err(error)
-                    if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                        == Some(
-                            &super::super::base::evidence::EvidenceFailure::MalformedSupport,
-                        ) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            if cost > ownership.payment_limit {
-                continue;
-            }
-            let support =
-                match evidence::check_balance(&self.db, self.evidence_namespace, certificate) {
-                    Ok(support) => support,
-                    Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-            if now > support.observation.valid_until {
-                continue;
-            }
-            let capacity = available(
-                support.observation.available(),
-                evidence::exposure(&self.db, wallet)?,
-            );
-            if capacity < cost {
-                continue;
-            }
-            let candidate = PaymentCandidateHandle {
-                wallet: wallet.clone(),
-                address: support.observation.address.clone(),
-            };
-            let view = payment_view(wallet, certificate, support.observation);
-            if bound == Some(wallet.as_str()) {
-                return Ok(Some((candidate, view)));
-            }
-            let rank = Rank::new(capacity, &ownership.role, ownership.slot.as_deref(), wallet);
-            if best.as_ref().is_none_or(|(current, _, _)| rank < *current) {
-                best = Some((rank, candidate, view));
-            }
+        Ok(certificates)
+    }
+
+    fn eligible_payment_evidence(
+        &self,
+        pool: &str,
+        wallet: &str,
+        cost: U256,
+        through: i64,
+        certificate: &super::super::base::BalanceCertificate,
+        now: u64,
+    ) -> Result<Option<EligiblePaymentEvidence>> {
+        let within: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
+            params![wallet, pool, through],
+            |row| row.get(0),
+        )?;
+        if !within {
+            return Ok(None);
         }
-        Ok(best.map(|(_, candidate, view)| (candidate, view)))
+        let ownership = match payment_ownership(&self.db, pool, wallet) {
+            Ok(Some(ownership)) => ownership,
+            Ok(None) => return Ok(None),
+            // The captured inventory pass retains this wallet's diagnostic.
+            // A bad historical binding cannot veto an independent cached payer.
+            Err(error)
+                if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                    == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        if cost > ownership.payment_limit {
+            return Ok(None);
+        }
+        let support = match evidence::check_balance(&self.db, self.evidence_namespace, certificate)
+        {
+            Ok(support) => support,
+            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        if now > support.observation.valid_until {
+            return Ok(None);
+        }
+        let capacity = available(
+            support.observation.available(),
+            evidence::exposure(&self.db, wallet)?,
+        );
+        if capacity < cost {
+            return Ok(None);
+        }
+        Ok(Some(EligiblePaymentEvidence {
+            ownership,
+            observation: support.observation,
+            capacity,
+        }))
     }
 }
 
