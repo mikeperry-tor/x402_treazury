@@ -408,7 +408,7 @@ Registrations are
 shared by agents using the same MCP server endpoint, but are not visible on other MCP server endpoints.
 Agent tools cannot change your configured API sources, wallet settings, or spending limits.
 
-An enabled endpoint advertises these seven tools to the agent:
+An enabled endpoint advertises these eight tools to the agent:
 
 | Tool | How the agent uses it | Main inputs |
 | --- | --- | --- |
@@ -416,13 +416,14 @@ An enabled endpoint advertises these seven tools to the agent:
 | `x402_treazury_source_details` | Checks a candidate's advertised endpoints, pricing and reliability. | Directory `slug` returned by search. |
 | `x402_treazury_raw_get` | Calls a documented API directly, paying through the source-management wallet if required. | Public HTTPS `url` and optional query parameters. |
 | `x402_treazury_raw_post` | Sends a documented JSON request directly, with normal payment checks. | Public HTTPS `url`, JSON `body`, optional query parameters. |
+| `x402_treazury_source_url_info` | Checks common OpenAPI, x402 directory and LLM documentation URLs without paying provider probes. | Exactly one directory `slug` or public HTTPS `base_url`. |
 | `x402_treazury_source_add` | Registers an API on this endpoint so its tools become available. | Public OpenAPI `spec_url` and optional display name. |
 | `x402_treazury_tools_search` | Retrieves relevant tool descriptions, argument schemas and callable references. | Optional query, registered `source_id` and pagination. |
 | `x402_treazury_tool_call` | Invokes a discovered tool using normal wallet payment checks. | A returned `tool_ref` and arguments matching its schema. |
 
 By default, registered API tools also appear in the endpoint's tool list (but this list will not be refreshed until a new conversation).
 
-Set `discover_on_demand = true` to advertise only the seven management tools and
+Set `discover_on_demand = true` to advertise only the eight management tools and
 let clients retrieve API schemas as needed, rather than fill the tool list
 with all added APIs. Tool arguments and the API discovery
 workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).

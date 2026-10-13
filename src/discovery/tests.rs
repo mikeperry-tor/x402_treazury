@@ -596,6 +596,7 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
     for name in [
         "sources_search",
         "source_details",
+        "source_url_info",
         "source_add",
         "raw_get",
         "raw_post",
@@ -1161,7 +1162,7 @@ fn embedded_directory_matches_reviewed_search_contract() {
 }
 
 #[tokio::test]
-async fn management_only_deployment_starts_and_lists_exactly_seven_tools() {
+async fn management_only_deployment_starts_and_lists_exactly_eight_tools() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("config.toml");
     std::fs::write(
@@ -1184,7 +1185,7 @@ exclude_tools = ["*"]
     .unwrap();
     let deployment = crate::deployment::Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
-    assert_eq!(inventory[0].management_tools.len(), 7);
+    assert_eq!(inventory[0].management_tools.len(), 8);
     assert!(inventory[0].tools.is_empty());
     let running = deployment
         .bind(&BTreeMap::from([
@@ -1204,7 +1205,7 @@ exclude_tools = ["*"]
     )
     .await;
     let actual = listed["tools"].as_array().unwrap();
-    assert_eq!(actual.len(), 7);
+    assert_eq!(actual.len(), 8);
     for expected in &inventory[0].management_tools {
         assert!(actual.contains(&serde_json::to_value(expected).unwrap()));
     }
@@ -1368,7 +1369,7 @@ async fn directory_payment_fixture() {
     // Use the public hostname on the fixture certificate; retain public-destination checks.
     *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
     assert!(manager.directory("hidden").is_err());
-    assert_eq!(tools::definitions(true).len(), 7);
+    assert_eq!(tools::definitions(true).len(), 8);
     assert_eq!(
         requests.load(Ordering::SeqCst),
         0,
@@ -1854,7 +1855,7 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
 }
 
 #[tokio::test]
-async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
+async fn on_demand_management_keeps_eight_wrappers_and_scoped_dynamic_search() {
     let m = manager(None).await;
     add(&m, "demo", "", "").await;
     let mut writer = server(&m, "writer");
@@ -1864,7 +1865,7 @@ async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
     let (base, task) = listen(crate::server::http_app(writer, "test-token".into())).await;
     let (other, other_task) = listen(crate::server::http_app(reader, "test-token".into())).await;
     let listed = rpc(&base, "test-token", "tools/list", json!({})).await;
-    assert_eq!(listed["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(listed["tools"].as_array().unwrap().len(), 8);
     assert!(
         listed["tools"]
             .as_array()
@@ -2038,3 +2039,6 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
     assert!(manager.inner.lock().unwrap().state.records.is_empty());
     assert!(manager.catalog.read().views["writer"].is_empty());
 }
+
+#[path = "url_info_tests.rs"]
+mod url_info_tests;

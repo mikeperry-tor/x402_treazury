@@ -169,7 +169,7 @@ and HTTP/2 authority validation still follow the MCP library's protocol rules.
 
 To reduce the initial tool context for a listener, add `discover_on_demand = true`
 to its `[servers.NAME]` table (default: `false`). It advertises only search/call
-wrappers, or all seven management wrappers when `source_management = true`.
+wrappers, or all eight management wrappers when `source_management = true`.
 Search returns complete tool descriptions and schemas, five results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
 are unchanged. See [on-demand discovery](agent-sources.md) for the call workflow.
@@ -573,6 +573,13 @@ Existing listener filters still constrain imported API tools. Parallel callers o
 same endpoint share one import slot. Concurrent additions publish complete snapshots;
 repeat a busy or lost add with the same specification URL. Duplicate URLs return the
 existing registration on that endpoint. See the [agent source guide](agent-sources.md).
+
+`x402_treazury_source_url_info` discovers candidate specification and documentation
+URLs from exactly one directory slug or HTTPS API base URL. Only the slug's
+ordinary directory lookup can incur a charge. Provider HEAD/GET probes stay unsigned,
+use the resolved wallet's pinned isolation identity, and enforce allowed origins
+and existing spec/help download limits. An unavailable managed wallet identity
+fails without allocation or funding.
 
 Source-management-enabled listeners also expose `x402_treazury_raw_get` and
 `x402_treazury_raw_post` for documented public HTTPS endpoints without registering

@@ -308,15 +308,15 @@ and [the runtime architecture](docs/architecture.md).
   reserved in participating deployments. Every direct/fallback call captures one
   snapshot. Fallback validates an opaque endpoint/process/revision-bound tool reference before HTTP.
 - Optional listener `discover_on_demand=true` advertises only search/call wrappers
-  (all seven wrappers when source management is enabled), hiding API definitions
+  (all eight wrappers when source management is enabled), hiding API definitions
   from tools/list. Search retains full schemas/descriptions and defaults to five
   results in this mode. It grants no registration permissions and preserves full
   startup/qualification inventories, filters and bound payment clients. Default
   eager listing and direct invocation remain supported.
 - HTTP is stateless: expose stable search/call tools, without advertising list-change
   notifications. Standalone stdio has no dynamic management. Cursors bind to process
-  catalog instance, generation and caller/query. The seven tools are sources_search,
-  source_details, source_add, raw_get, raw_post, tools_search and tool_call under `x402_treazury_`.
+  catalog instance, generation and caller/query. The eight tools are sources_search,
+  source_details, source_url_info, source_add, raw_get, raw_post, tools_search and tool_call under `x402_treazury_`.
   Directory search (browse or best mode) and details use embedded reviewed x402 List
   schemas and the endpoint's source-management wallet through normal payment
   admission and network policy.
@@ -328,6 +328,15 @@ and [the runtime architecture](docs/architecture.md).
   Tool descriptions guide agents through provider documentation to a verified public
   OpenAPI JSON URL, then registration, tool search and invocation. Importing sources
   never grants a directory transport bypass.
+- `source_url_info` takes exactly one directory slug or public HTTPS base URL. Slugs
+  use ordinary directory payment policy; provider document probes are always unsigned.
+  Pin an existing resolved source-management wallet identity for the probe batch;
+  managed selection is read-only and never promotes, allocates or funds wallets.
+  Probe the fixed API-base/origin/website-root candidate set with at most four
+  concurrent requests. HEAD success or 405/501 permits a bounded GET; never pay 402s
+  or follow redirects. Enforce allowed origins, public destinations and existing
+  spec/help byte/read limits. Structural OpenAPI checks are not full import validation;
+  directory JSON and documentation remain untrusted leads. Preserve per-URL failures.
 - Direct `raw_get`/`raw_post` are source-management-only tools and use the same resolved
   wallet as added sources. Accept only public HTTPS URLs, scalar/repeated query values
   and a JSON body for POST; reject headers, credentials and payment/wallet overrides.

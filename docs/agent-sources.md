@@ -4,7 +4,7 @@ For a smaller initial MCP tool list, set `discover_on_demand = true` in a
 `[servers.NAME]` table. This is independent of `source_management` and defaults to
 `false`. Static listeners advertise just `x402_treazury_tools_search` and
 `x402_treazury_tool_call`; listeners with source management enabled advertise all
-seven management tools. API tools, including subsequently registered tools, stay
+eight management tools. API tools, including subsequently registered tools, stay
 out of `tools/list`.
 
 Agents search the listener's catalog with `x402_treazury_tools_search`, receive
@@ -71,6 +71,7 @@ not removed by API filters.
 | --- | --- |
 | `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `category`; the server always sets `network=BSE`. Browse supports pagination and directory filters; best supports ranking preferences and a result limit. |
 | `x402_treazury_source_details` | Required directory `slug` from search. Returns advertised endpoints, pricing and reliability; this is not a registered `source_id`. |
+| `x402_treazury_source_url_info` | Exactly one directory `slug` or public HTTPS `base_url`; checks common specification and documentation URLs. |
 | `x402_treazury_raw_get` | Required public HTTPS `url`; optional `query` object. Direct GET, including automatic x402 payment when required. |
 | `x402_treazury_raw_post` | Required public HTTPS `url` and JSON `body`; optional `query` object. Direct POST, including automatic x402 payment when required. |
 | `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
@@ -98,7 +99,8 @@ The local `mode` selector is never sent upstream; unsupported or mixed-mode argu
 fail before network I/O. Each call selects exactly one directory operation and preserves
 its response, including ranking information. Details dispatches to
 `GET /services/{slug}`; use `{"slug":"<slug from search>"}` to inspect a candidate
-before obtaining its published specification and adding it. Follow provider documentation or
+before obtaining its published specification and adding it. Use `source_url_info`
+with its slug or known API base to check common locations. Follow provider documentation or
 website links to the OpenAPI JSON document; the provider's `llms.txt` may link to those
 docs. Use available web tools to verify candidate URLs such as `/openapi.json` or
 `/.well-known/openapi.json` actually return an OpenAPI 3 JSON document for the intended
@@ -108,6 +110,47 @@ provider documents the endpoint, method and request arguments. Never guess paid
 request arguments. Pass the verified URL to
 `source_add`, then use `tools_search` with its returned `source_id` and invoke the
 chosen `tool_ref` through `tool_call`.
+
+Use `x402_treazury_source_url_info` to locate documents without manual URL guessing:
+
+```json
+{"slug":"vendor-slug-from-search"}
+```
+
+Or bypass the directory lookup when you already know the API base:
+
+```json
+{"base_url":"https://api.example.com/v1"}
+```
+
+Exactly one input is required. Slugs resolve through the ordinary x402 List details
+call, including its payment policy and attribution. Base URLs require public HTTPS
+without credentials, fragments or queries. The tool checks these relative paths
+under the API base, its origin root, and an allowed website origin from directory
+details: `openapi.json`, `api/openapi.json`, `.well-known/openapi.json`, `swagger.json`,
+`.well-known/x402`, `discovery/resources`, `llms.txt`, and `llms-full.txt`.
+Candidates are deduplicated: at most 24 documents, with four requests in flight per
+lookup. These bounds limit speculative requests and simultaneous document buffers;
+there is no separate whole-lookup deadline. This is not an exhaustive crawler.
+
+HEAD successes and HEAD 405/501 responses get an unsigned GET. HEAD or GET 402s
+are reported without signing or paying, and redirects are not followed. GET bodies
+use `max_spec_bytes` for JSON candidates and `max_help_bytes` for documentation,
+with the existing source-management read-inactivity policy. Checks share one pinned
+existing wallet isolation identity, including listener overrides; Tor uses that
+wallet's SOCKS identity with remote DNS. Managed identity selection does not
+promote wallets, allocate funds, or require a new spending reservation. It fails
+explicitly if no eligible existing identity is available.
+
+Each result includes URL, candidate kind, available HEAD/GET statuses, content type,
+and an outcome. `verified_openapi` means OpenAPI 3 JSON structure was checked;
+`source_add` still performs full import validation. `documentation_found` means
+nonempty Markdown-style text was found. `directory_json_unverified` means JSON was
+found at a directory candidate, without verifying its protocol schema. Other
+outcomes preserve unverified content, invalid documents, HTTP failures, blocked
+access, redirects, missing documents, transport failures and explicit byte-limit
+rejections. Disallowed website origins are reported as skipped. No document prose
+is returned or treated as authority. Nothing found does not mean the API is unusable.
 
 Direct GET/POST tools are available only when this listener enables
 `source_management`; `discover_on_demand` alone does not enable them. They use the
@@ -134,7 +177,7 @@ or guarantee useful output. A failed, timed-out or ambiguous call can already ha
 paid or changed state: never automatically repeat it, because each invocation
 may authorize another payment.
 
-Source management contributes seven definitions; searches return directory leads
+Source management contributes eight definitions; searches return directory leads
 and selected tool signatures on demand. Registered tools, including persisted
 registrations restored at startup, are also advertised by `tools/list`, so clients
 that include their entire tool inventory may expand the prompt. The stable search/call pair also works with clients that cache their initial

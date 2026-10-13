@@ -343,6 +343,23 @@ impl PaidClient {
     pub fn max_help_bytes(&self) -> usize {
         self.max_help_bytes
     }
+    /// Pin an existing wallet's isolation identity for unsigned documentation probes.
+    /// This selects no spending authority and never prepares or funds a wallet.
+    pub(crate) async fn documentation_identity(&self) -> Result<crate::network::IsolationId> {
+        let address = if let Some(pool) = &self.managed {
+            pool.documentation_address().await?
+        } else {
+            self.payer
+                .as_ref()
+                .context("documentation wallet unavailable")?
+                .read()
+                .expect("payer lock poisoned")
+                .address
+                .clone()
+        };
+        crate::network::IsolationId::evm(&address)
+    }
+
     pub fn public_destinations(mut self) -> Self {
         self.public_only = true;
         self

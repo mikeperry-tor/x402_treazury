@@ -243,6 +243,11 @@ impl Store {
         tx.commit()?;
         Ok(id)
     }
+    /// Same existing identity selection as payment, without role publication or allocation.
+    pub(crate) fn documentation_address(&self, pool: &str) -> Result<String> {
+        documentation_address(&self.db, pool)
+    }
+
     /// Resolve unsigned identity under the group gate, reconstructing an absent
     /// active role only from eligible retained capacity.
     /// Balance freshness and liabilities belong to later payment admission.
@@ -385,6 +390,17 @@ pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(St
         }
     }
     failure.map_or(Ok(None), Err)
+}
+
+fn documentation_address(db: &Connection, pool: &str) -> Result<String> {
+    let (wallet, _) = default_identity(db, pool)?
+        .context("documentation wallet identity unavailable; no wallet was allocated")?;
+    db.query_row(
+        "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
+        params![wallet, pool],
+        |r| r.get(0),
+    )
+    .map_err(Into::into)
 }
 
 fn resolve_identity(db: &Connection, pool: &str) -> Result<Option<String>> {
@@ -1080,6 +1096,28 @@ mod tests {
             .unwrap();
         assert!(payment_ownership(&db, "pool", &wallet).unwrap().is_none());
     }
+    #[test]
+    fn documentation_identity_never_allocates_or_promotes() {
+        let db = database();
+        let before = db.total_changes();
+        assert!(documentation_address(&db, "pool").is_err());
+        assert_eq!(db.total_changes(), before);
+        let job = active(&db);
+        db.execute("UPDATE wallets SET role='RETAINED'", [])
+            .unwrap();
+        let expected: String = db
+            .query_row(
+                "SELECT address FROM wallets WHERE id=?1",
+                [wallet(&db, &job)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let before = db.total_changes();
+        assert_eq!(documentation_address(&db, "pool").unwrap(), expected);
+        assert_eq!(role(&db, &job), "RETAINED");
+        assert_eq!(db.total_changes(), before);
+    }
+
     #[test]
     fn active_reconstruction_prefers_sequence_and_never_consumes_ready() {
         let mut db = database();

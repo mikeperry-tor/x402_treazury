@@ -132,6 +132,13 @@ impl Server {
                         .await?,
                 ));
             }
+            if name == crate::discovery::url_info::NAME {
+                return Ok(
+                    self.limit(crate::output::ToolOutput::text(serde_json::to_string(
+                        &manager.invoke_url_info(&self.catalog_server, args).await?,
+                    )?)),
+                );
+            }
             if matches!(
                 name,
                 crate::discovery::raw::GET | crate::discovery::raw::POST

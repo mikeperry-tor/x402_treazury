@@ -5,6 +5,7 @@ pub mod policy;
 pub(crate) mod raw;
 mod store;
 pub mod tools;
+pub(crate) mod url_info;
 use crate::{
     catalog_state::{BoundTool, CatalogSnapshot, CatalogState},
     deployment::ListenerConfig,

@@ -164,6 +164,13 @@ impl ManagedPool {
             }
         }
     }
+    pub(crate) async fn documentation_address(&self) -> Result<String> {
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| s.documentation_address(&pool))
+            .await
+    }
+
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
         self.candidate_for(None).await
     }

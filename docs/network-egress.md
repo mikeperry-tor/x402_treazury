@@ -331,6 +331,16 @@ such rules globally on a user's machine as part of an application test.
 
 ## Agent-selected destinations
 
+`source_url_info` makes unsigned HEAD requests and bounded GET validations for a
+fixed, deduplicated set of specification/directory/LLM-documentation candidates.
+At most 24 candidates and four concurrent requests limit speculative network traffic
+and simultaneous document buffers. It uses the source-management wallet's existing
+isolation identity, pinned for the batch, with public destination/origin checks.
+Managed identity selection is read-only; no funding or allocation occurs. Only a
+slug's directory lookup uses ordinary payment handling. Provider probes never sign,
+never follow redirects and use existing spec/help byte and response-inactivity limits.
+
+
 Dynamic imports and paid API calls, including source-management `raw_get` and
 `raw_post`, use the same factory with a `public_only` pool
 key. HTTPS, no credentials/fragments, public literal addresses and public hostnames
