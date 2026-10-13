@@ -82,6 +82,7 @@ Run these commands from the repository checkout directory:
 
 ```sh
 scripts/zcash.sh build
+
 cp examples/deployments/privacy.toml examples/deployments/privacy.local.toml
 ```
 
@@ -114,34 +115,17 @@ Keep Tor running throughout.
 ### 2. Create the treasury
 
 ```sh
-target/release/x402_treazury wallet init --config examples/deployments/privacy.local.toml
-target/release/x402_treazury wallet addresses --config examples/deployments/privacy.local.toml
+target/release/x402_treazury wallet init \
+  --config examples/deployments/privacy.local.toml
 ```
 
-Initialization creates the wallet directory specified by the config file. It
-then generates a seed and discovers its birthday through Tor.
+Initialization creates the wallet directory specified by the config file (`./state/privacy`). It then generates a seed and discovers its birthday through Tor.
 
-The default encryption key is `wallet.key` inside the wallet directory.
-Anyone obtaining that entire directory obtains both state and decryption material.
-
-No password or OS-keychain protection is provided at this time, but the keyfile
+The default encryption key is `wallet.key` inside the wallet directory. No
+password or OS-keychain protection is provided at this time, but the keyfile
 design is amenable to this protection in the future.
 
-Before funding, back up the wallet and encryption key. Create a private backup
-parent directory; the backup destination itself must not already exist.
-
-```sh
-mkdir -p secrets
-chmod 700 secrets
-target/release/x402_treazury wallet backup \
-  --config examples/deployments/privacy.local.toml --destination secrets/privacy-backup
-```
-
-Keep the backup secure: it contains spending material.
-
-> **NOTE: Single Instance Only**
->
-> Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchronized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
+Anyone obtaining the wallet directory obtains both state and decryption material.
 
 ### 3. Fund and bootstrap the wallets
 
@@ -174,7 +158,9 @@ After sending ZEC, sync the treasury and check its confirmed spendable balance:
 ```sh
 target/release/x402_treazury wallet sync \
   --config examples/deployments/privacy.local.toml
-target/release/x402_treazury wallet status --config examples/deployments/privacy.local.toml
+
+target/release/x402_treazury wallet status \
+  --config examples/deployments/privacy.local.toml
 ```
 
 Once `wallet status` shows sufficient confirmed spendable ZEC, fund the
@@ -196,17 +182,16 @@ failed USDC swap transactions.
 ### 4. Optionally warm the catalogs
 
 To speed up the MCP server launch, you can pre-warm the API catalog and
-pricing cache before serving, with or without Tor.
-
-The optional `--direct` flag bypasses Tor for these requests:
+pricing cache before serving. The optional `--direct` flag bypasses Tor
+for these requests, if Tor is configured.
 
 ```sh
-target/release/x402_treazury catalog warm \
-  --config examples/deployments/privacy.local.toml --direct --discover-pricing
+target/release/x402_treazury catalog warm --discover-pricing \
+  --config examples/deployments/privacy.local.toml
 ```
 
-**Direct warming reveals your IP address to providers; treasury traffic and
-paid API calls still use Tor**. Omit `--direct` to warm through Tor.
+**Non-Tor warming with `--direct` reveals your IP address to providers; treasury traffic and
+paid API calls still use Tor**.
 
 > **NOTE: Tor 403/429/503 fallback relay**
 >
@@ -231,8 +216,13 @@ target/release/x402_treazury config show \
 Set `TREAZURY_MCP_TOKEN` with secret bearer token, then launch:
 
 ```sh
-target/release/x402_treazury serve --config examples/deployments/privacy.local.toml
+target/release/x402_treazury serve \
+  --config examples/deployments/privacy.local.toml
 ```
+
+> **NOTE: Single Instance Only**
+>
+> Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchronized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
 
 Serving handles API catalog download and price discovery and wallet replacement funding automatically.
 
@@ -435,7 +425,8 @@ without it, additions last only until the process exits.
 To view all saved API sources currently saved in `registry_file`:
 
 ```sh
-target/release/x402_treazury sources inspect --config path/to/deployment_config.toml
+target/release/x402_treazury sources inspect \
+  --config path/to/deployment_config.toml
 ```
 
 Saved API specifications do
@@ -444,15 +435,15 @@ not automatically follow vendor updates; they must be updated manually.
 First, stop the server, then:
 
 ```sh
-target/release/x402_treazury sources refresh --config path/to/deployment_config.toml \
-  --server research --source-id SOURCE_ID
+target/release/x402_treazury sources refresh --server research --source-id SOURCE_ID \
+  --config path/to/deployment_config.toml
 ```
 
 To remove a source:
 
 ```sh
-target/release/x402_treazury sources remove --config path/to/deployment_config.toml \
-  --server research --source-id SOURCE_ID
+target/release/x402_treazury sources remove --server research --source-id SOURCE_ID \
+  --config path/to/deployment_config.toml
 ```
 
 Removal revokes API access without deleting wallet balances or financial journals.
@@ -472,7 +463,7 @@ target/release/x402_treazury serve --provider providers/socialfetch.toml \
 
 This uses Tor but does not rotate or fund the static wallet. MCP clients should spawn
 the binary with absolute config paths or a repository working directory. Logs go to
-stderr; stdout carries MCP or requested CLI output.
+stderr; stdout carries MCP output.
 
 ## Experimental HTTP/2 cover traffic
 
