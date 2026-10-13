@@ -422,36 +422,8 @@ impl Registry {
         )?)?)
     }
     pub fn report(&self, run: Option<&str>, now: i64) -> Result<Value> {
-        let count: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM cases WHERE (?1 IS NULL OR run=?1)",
-            [run],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            count <= 10000,
-            "report exceeds 10000 cases; select a single run instead"
-        );
-        let pin_count: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM pins WHERE (?1 IS NULL OR run=?1)",
-            [run],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            pin_count <= 10000,
-            "report exceeds 10000 pin revisions; select a single run instead"
-        );
-        let mut stmt=self.db.prepare("SELECT run,id,reservation,window_start,window_end,execution,semantic,settlement,result_hash FROM cases WHERE (?1 IS NULL OR run=?1) ORDER BY run,id")?;
-        let rows=stmt.query_map([run],|r|{
-            let state:String=r.get(5)?;let start:i64=r.get(3)?;let end:i64=r.get(4)?;
-            Ok(json!({"run":r.get::<_,String>(0)?,"case":r.get::<_,String>(1)?,"reservation_atomic":r.get::<_,i64>(2)?,"charged_reservation_atomic":if matches!(state.as_str(),"UNATTEMPTED"|"SKIPPED_TARGET_REACHED"){0}else{r.get::<_,i64>(2)?},"execution":state,"semantic":r.get::<_,String>(6)?,"settlement":r.get::<_,String>(7)?,"result_hash":r.get::<_,Option<String>>(8)?,"eligibility":if state!="UNATTEMPTED"{"observe_only"}else if now<start{"waiting_window"}else if now>=end{"expired_window"}else{"requires_execution_qualification"}}))
-        })?.collect::<rusqlite::Result<Vec<_>>>()?;
-        for id in rows
-            .iter()
-            .filter_map(|r| r["run"].as_str())
-            .collect::<std::collections::BTreeSet<_>>()
-        {
-            self.validated_skips(id)?;
-        }
+        self.check_report_bounds(run)?;
+        let rows = self.report_case_rows(run, now)?;
         let consumed: i64 = self.db.query_row(
             "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",
             [],
@@ -463,27 +435,11 @@ impl Registry {
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )?;
-        let mut pins=self.db.prepare("SELECT run,revision,digest FROM pins WHERE (?1 IS NULL OR run=?1) ORDER BY run,revision")?;
-        let revisions=pins.query_map([run],|r|Ok(json!({"run":r.get::<_,String>(0)?,"revision":r.get::<_,i64>(1)?,"digest":r.get::<_,String>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let revisions = self.report_pin_revisions(run)?;
         if let Some(id) = run {
             self.validated_skips(id)?;
         }
-        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','cover_observed','funding_execution','bootstrap_wait_started','bootstrap_wait_progress','bootstrap_ready','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_pricing','application_claim','application_help','application_challenge','application_payment','application_receipt','application_debit_check','application_debit_verified','application_finished','payment_observed','tor_outage_started','tor_outage_qualified','rotation_promotion','pool_observation_requested','application_pool_observation','rotation_started','rotation_refill_ready','application_session','restart_requested','restart_drained','restart_completed','restart_checkpoint_unobserved','outage_backup_completed') ORDER BY seq LIMIT 50001")?;
-        let runtime_events = events
-            .query_map([run], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, i64>(3)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        ensure!(
-            runtime_events.len() <= 50000,
-            "report exceeds 50000 runtime events; select a single run"
-        );
-        let runtime_events = runtime_events.into_iter().map(|(run,kind,detail,at)| Ok(json!({"run":run,"kind":kind,"detail":serde_json::from_str::<Value>(&detail)?,"at":at}))).collect::<Result<Vec<_>>>()?;
+        let runtime_events = self.report_runtime_events(run)?;
         let execution_available = match run {
             Some(id) => self.pins(id)?.catalogs.is_some(),
             None => false,
@@ -504,42 +460,7 @@ impl Registry {
         let report = json!({"funding_jobs_reserved":funding_jobs_reserved,"source_reserved_zatoshis":source_reserved_zatoshis,"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"application_evidence":application_evidence,"qualification_scope":if execution_available && managed { "managed_mcp_with_authorization_evidence" } else if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":execution_available && managed,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available && managed { "positive funding requires --allow-funding and registry authority; unresolved authorizations or missing debit proofs remain incomplete" } else if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare is required before execution" }});
         let mut report = report;
         if let Some(run) = run {
-            report["treasury_accounting"] = self.accounting_report(run)?;
-            report["catalog_stages"] =
-                crate::catalog_stages::report(&self.pins(run)?, &self.manifest(run)?)?;
-            report["provider_semantics"] =
-                crate::semantics::report(self, &self.manifest(run)?, &report)?;
-            report["canonical_api_debits"] = match self.verified_debits(run) {
-                Ok(proofs) => {
-                    json!({"status":"validated", "cases":proofs.into_iter().map(|(case, proof)| (case, proof["amount_atomic"].clone())).collect::<std::collections::BTreeMap<_,_>>() })
-                }
-                Err(_) => json!({"status":"invalid_or_incomplete","cases":{}}),
-            };
-            report["pricing_stages"] = crate::pricing_stages::report(
-                &self.manifest(run)?,
-                &self.pins(run)?.resolved_config,
-                &report,
-            )?;
-            report["help_stages"] = crate::help::report(&self.manifest(run)?, &report)?;
-            report["fee_observations"] = crate::fees::report(&report)?;
-            report["reliability"] = match crate::reliability::report(&self.manifest(run)?, &report)
-            {
-                Ok(value) => value,
-                Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
-            };
-            report["rotation"] =
-                match crate::rotation_report::report(self, &self.manifest(run)?, &report) {
-                    Ok(value) => value,
-                    Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
-                };
-            report["concurrency"] = match crate::concurrency::report(
-                &self.manifest(run)?,
-                &self.pins(run)?.resolved_config,
-                &report,
-            ) {
-                Ok(value) => value,
-                Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
-            };
+            self.append_run_report_sections(run, &mut report)?;
         }
         if let Some(run) = run {
             report["summary"] = serde_json::to_value(crate::report_model::build(
@@ -550,6 +471,109 @@ impl Registry {
         }
         bounded_json(&report)?;
         Ok(report)
+    }
+
+    fn check_report_bounds(&self, run: Option<&str>) -> Result<()> {
+        let count: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM cases WHERE (?1 IS NULL OR run=?1)",
+            [run],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            count <= 10000,
+            "report exceeds 10000 cases; select a single run instead"
+        );
+        let pin_count: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM pins WHERE (?1 IS NULL OR run=?1)",
+            [run],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            pin_count <= 10000,
+            "report exceeds 10000 pin revisions; select a single run instead"
+        );
+        Ok(())
+    }
+
+    fn report_case_rows(&self, run: Option<&str>, now: i64) -> Result<Vec<Value>> {
+        let mut stmt=self.db.prepare("SELECT run,id,reservation,window_start,window_end,execution,semantic,settlement,result_hash FROM cases WHERE (?1 IS NULL OR run=?1) ORDER BY run,id")?;
+        let rows=stmt.query_map([run],|r|{
+            let state:String=r.get(5)?;let start:i64=r.get(3)?;let end:i64=r.get(4)?;
+            Ok(json!({"run":r.get::<_,String>(0)?,"case":r.get::<_,String>(1)?,"reservation_atomic":r.get::<_,i64>(2)?,"charged_reservation_atomic":if matches!(state.as_str(),"UNATTEMPTED"|"SKIPPED_TARGET_REACHED"){0}else{r.get::<_,i64>(2)?},"execution":state,"semantic":r.get::<_,String>(6)?,"settlement":r.get::<_,String>(7)?,"result_hash":r.get::<_,Option<String>>(8)?,"eligibility":if state!="UNATTEMPTED"{"observe_only"}else if now<start{"waiting_window"}else if now>=end{"expired_window"}else{"requires_execution_qualification"}}))
+        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for id in rows
+            .iter()
+            .filter_map(|r| r["run"].as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            self.validated_skips(id)?;
+        }
+        Ok(rows)
+    }
+
+    fn report_pin_revisions(&self, run: Option<&str>) -> Result<Vec<Value>> {
+        let mut pins=self.db.prepare("SELECT run,revision,digest FROM pins WHERE (?1 IS NULL OR run=?1) ORDER BY run,revision")?;
+        let revisions=pins.query_map([run],|r|Ok(json!({"run":r.get::<_,String>(0)?,"revision":r.get::<_,i64>(1)?,"digest":r.get::<_,String>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(revisions)
+    }
+
+    fn report_runtime_events(&self, run: Option<&str>) -> Result<Vec<Value>> {
+        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','cover_observed','funding_execution','bootstrap_wait_started','bootstrap_wait_progress','bootstrap_ready','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_pricing','application_claim','application_help','application_challenge','application_payment','application_receipt','application_debit_check','application_debit_verified','application_finished','payment_observed','tor_outage_started','tor_outage_qualified','rotation_promotion','pool_observation_requested','application_pool_observation','rotation_started','rotation_refill_ready','application_session','restart_requested','restart_drained','restart_completed','restart_checkpoint_unobserved','outage_backup_completed') ORDER BY seq LIMIT 50001")?;
+        let runtime_events = events
+            .query_map([run], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ensure!(
+            runtime_events.len() <= 50000,
+            "report exceeds 50000 runtime events; select a single run"
+        );
+        let runtime_events = runtime_events.into_iter().map(|(run,kind,detail,at)| Ok(json!({"run":run,"kind":kind,"detail":serde_json::from_str::<Value>(&detail)?,"at":at}))).collect::<Result<Vec<_>>>()?;
+        Ok(runtime_events)
+    }
+
+    fn append_run_report_sections(&self, run: &str, report: &mut Value) -> Result<()> {
+        report["treasury_accounting"] = self.accounting_report(run)?;
+        report["catalog_stages"] =
+            crate::catalog_stages::report(&self.pins(run)?, &self.manifest(run)?)?;
+        report["provider_semantics"] =
+            crate::semantics::report(self, &self.manifest(run)?, report)?;
+        report["canonical_api_debits"] = match self.verified_debits(run) {
+            Ok(proofs) => {
+                json!({"status":"validated", "cases":proofs.into_iter().map(|(case, proof)| (case, proof["amount_atomic"].clone())).collect::<std::collections::BTreeMap<_,_>>() })
+            }
+            Err(_) => json!({"status":"invalid_or_incomplete","cases":{}}),
+        };
+        report["pricing_stages"] = crate::pricing_stages::report(
+            &self.manifest(run)?,
+            &self.pins(run)?.resolved_config,
+            report,
+        )?;
+        report["help_stages"] = crate::help::report(&self.manifest(run)?, report)?;
+        report["fee_observations"] = crate::fees::report(report)?;
+        report["reliability"] = match crate::reliability::report(&self.manifest(run)?, report) {
+            Ok(value) => value,
+            Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+        };
+        report["rotation"] =
+            match crate::rotation_report::report(self, &self.manifest(run)?, report) {
+                Ok(value) => value,
+                Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+            };
+        report["concurrency"] = match crate::concurrency::report(
+            &self.manifest(run)?,
+            &self.pins(run)?.resolved_config,
+            report,
+        ) {
+            Ok(value) => value,
+            Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+        };
+        Ok(())
     }
 }
 fn bounded_json(value: &impl Serialize) -> Result<String> {

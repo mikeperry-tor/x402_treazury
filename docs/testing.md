@@ -141,6 +141,16 @@ after a round error is established by review of the unchanged completion gate.
 These fixtures do not establish chain settlement, successful Tor outage
 qualification or the deferred automated funded lifecycle acceptance.
 
+Registry report composition tests compare complete JSON for all-runs and selected
+runs, configuration-only and prepared catalogs, revised authorization, global
+charged reservations and funding usage. They cover ordered corruption failures,
+nonfatal application/debit evidence, immutable pin revisions, selected event
+filtering and exact case/pin/event and complete-document bounds. Component and
+summary tests complement these fixtures. Read helpers preserve query order and
+repeated evidence reads; selected-run sections retain their dependency order and
+fatal versus incomplete error handling. These synthetic reports do not establish
+live settlement or qualification.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
