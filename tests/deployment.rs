@@ -1069,3 +1069,128 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
     task.await.unwrap().unwrap();
     vendor_task.abort();
 }
+
+#[tokio::test]
+async fn cover_compatibility_uses_selected_non_help_routes_and_complete_owner_key() {
+    let documented = include_str!("../docs/cover-traffic.md");
+    let table: toml::Table = toml::from_str(
+        documented
+            .split("```toml\n")
+            .nth(1)
+            .unwrap()
+            .split("```")
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    for case in [
+        "same",
+        "conflict",
+        "wallet",
+        "origin",
+        "transport",
+        "timeout",
+        "help_only",
+        "absolute",
+        "selection_first",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let ordinary = r#"{"operations":[{"method":"GET","path":"/read"}]}"#;
+        std::fs::write(dir.path().join("a.json"), ordinary).unwrap();
+        std::fs::write(
+            dir.path().join("b.json"),
+            if case == "absolute" {
+                r#"{"operations":[{"method":"GET","path":"https://other.example.com/read"}]}"#
+            } else {
+                ordinary
+            },
+        )
+        .unwrap();
+        let config: toml::Value = toml::from_str(
+            r#"
+version=1
+[network]
+cover_traffic_enabled=true
+[wallets.shared]
+mode='static'
+private_key_env='UNUSED'
+[wallets.other]
+mode='static'
+private_key_env='ALSO_UNUSED'
+[sources.a]
+spec='a.json'
+base_url='https://api.example.com'
+probe_pricing=false
+[sources.b]
+spec='b.json'
+base_url='https://api.example.com'
+probe_pricing=false
+[servers.one]
+listen='127.0.0.1:0'
+bearer_token_env='UNUSED_TOKEN'
+wallet='shared'
+sources=['a','b']
+"#,
+        )
+        .unwrap();
+        let mut config = serde_json::to_value(config).unwrap();
+        config["sources"]["a"]["cover_traffic"] =
+            serde_json::to_value(&table["cover_traffic"]).unwrap();
+        config["sources"]["b"]["cover_traffic"] =
+            serde_json::to_value(&table["cover_traffic"]).unwrap();
+        if case != "same" && case != "absolute" {
+            config["sources"]["b"]["cover_traffic"]["concurrency"] = 1.into();
+        }
+        match case {
+            "wallet" => config["sources"]["b"]["wallet"] = "other".into(),
+            "origin" => {
+                config["sources"]["b"]["base_url"] = "https://other.example.com".into();
+                config["sources"]["b"]["cover_traffic"]["url"] =
+                    "https://other.example.com/cover".into();
+            }
+            "transport" => config["sources"]["b"]["allow_http1"] = true.into(),
+            "timeout" => config["sources"]["b"]["read_timeout_seconds"] = 13.0.into(),
+            "help_only" => {
+                config["sources"]["b"]["help_url"] = "https://api.example.com/help".into();
+                config["servers"]["one"]["exclude_tools"] = json!(["b_read"]);
+            }
+            "selection_first" => config["servers"]["one"]["include_tools"] = json!(["missing"]),
+            _ => (),
+        }
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+        // Each CLI process owns its network policy. Catalogs are local and
+        // inspection neither loads signing keys nor starts cover requests.
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+                .args(["catalog", "tools", "--config", path.to_str().unwrap()])
+                .env_remove("RUST_LOG")
+                .env("RUST_BACKTRACE", "0")
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let error = String::from_utf8_lossy(&output.stderr);
+        let expected = match case {
+            "conflict" => Some("conflicting cover settings for shared wallet/origin"),
+            "absolute" => Some("origin"),
+            "selection_first" => Some("unknown tool selector missing"),
+            _ => None,
+        };
+        if let Some(expected) = expected {
+            assert!(!output.status.success(), "{case} unexpectedly succeeded");
+            assert!(error.contains(expected), "{case}: {error}");
+        } else {
+            assert!(output.status.success(), "{case}: {error}");
+            let inventory = String::from_utf8(output.stdout).unwrap();
+            assert!(inventory.contains("a_read"), "{case}: {inventory}");
+            if case == "help_only" {
+                assert!(inventory.contains("b_help"));
+                assert!(!inventory.contains("b_read"));
+            }
+        }
+    }
+}

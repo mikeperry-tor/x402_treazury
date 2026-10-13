@@ -1653,3 +1653,6 @@ bearer_token_env = "TOKEN"
         );
     }
 }
+
+#[cfg(all(test, feature = "zcash"))]
+mod initialization_tests;
