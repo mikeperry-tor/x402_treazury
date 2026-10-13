@@ -204,6 +204,21 @@ window tests cover the caller boundary. Eligibility remains offline information,
 never renewed authority or permission to replay attempted work; these checks do not
 exhaustively enumerate concurrency schedules.
 
+Treasury accounting fixtures compare complete persisted summaries, including
+principal, fees, reservations, refunds, unresolved exposure and every wallet role.
+They distinguish anchored zero from unobserved balances, retain permissive historical
+fields and opaque sync metadata, and pin ordered errors and reachable arithmetic
+boundaries. Baseline, attribution, registry ownership/reopen and report fixtures
+exercise the consumers. These summaries remain saved bookkeeping, never fresh
+chain evidence or new spending authority.
+
+Deployment validation fixtures pin complete static and managed wallet resolutions,
+ordered contextual failures, listener address uniqueness and port-zero exceptions,
+independent Host/auth settings, and treasury/funding prerequisites after assignment.
+They run without listener creation or credentials; deployment and assignment
+integration tests separately cover real local listeners and offline inspection.
+The characterization protects validation orchestration, not all runtime interleavings.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency

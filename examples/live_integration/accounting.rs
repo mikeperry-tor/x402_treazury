@@ -39,7 +39,21 @@ pub fn capture(snapshot: &Value) -> Result<Value> {
     summarize(&data)?;
     Ok(data)
 }
-pub fn summarize(data: &Value) -> Result<Value> {
+#[derive(Default)]
+struct SourceTotals {
+    reserved: u64,
+    consumed: u64,
+    principal: u64,
+    fees: u64,
+}
+
+struct SourceAccounting<'a> {
+    operations: BTreeMap<&'a str, &'a Value>,
+    totals: SourceTotals,
+}
+
+// Indexing, consumed facts and confirmed-operation reconciliation are one stage.
+fn source_accounting(data: &Value) -> Result<SourceAccounting<'_>> {
     let mut operations = BTreeMap::new();
     for op in rows(data, "operations")? {
         ensure!(
@@ -47,7 +61,7 @@ pub fn summarize(data: &Value) -> Result<Value> {
             "duplicate source operation"
         );
     }
-    let (mut reserved, mut consumed, mut principal, mut fees) = (0, 0, 0, 0);
+    let mut totals = SourceTotals::default();
     let mut entries = BTreeMap::new();
     for entry in rows(data, "source_budget_entries")? {
         let key = id(&entry["id"])?;
@@ -57,8 +71,8 @@ pub fn summarize(data: &Value) -> Result<Value> {
             "duplicate source budget entry"
         );
         let held = number(&entry["reserved"])?;
-        plus(&mut reserved, held)?;
-        plus(&mut consumed, cost)?;
+        plus(&mut totals.reserved, held)?;
+        plus(&mut totals.consumed, cost)?;
         if cost == 0 {
             continue;
         }
@@ -77,9 +91,9 @@ pub fn summarize(data: &Value) -> Result<Value> {
             cost == total || cost == fee,
             "source cost disagrees with transaction facts"
         );
-        plus(&mut fees, fee)?;
+        plus(&mut totals.fees, fee)?;
         if cost == total {
-            plus(&mut principal, value)?;
+            plus(&mut totals.principal, value)?;
         }
     }
     for (key, op) in &operations {
@@ -88,8 +102,24 @@ pub fn summarize(data: &Value) -> Result<Value> {
             "confirmed operation lacks consumed budget evidence"
         );
     }
+    Ok(SourceAccounting { operations, totals })
+}
+
+#[derive(Default)]
+struct RoleBalances {
+    wallets: u64,
+    anchored: u64,
+    saved_balance: U256,
+}
+
+struct WalletObservations<'a> {
+    identities: BTreeSet<&'a str>,
+    roles: BTreeMap<String, RoleBalances>,
+}
+
+fn wallet_observations(data: &Value) -> Result<WalletObservations<'_>> {
     let mut wallets = BTreeSet::new();
-    let mut roles = BTreeMap::<String, (u64, u64, U256)>::new();
+    let mut roles = BTreeMap::<String, RoleBalances>::new();
     for wallet in rows(data, "wallets")? {
         ensure!(
             wallets.insert(id(&wallet["id"])?),
@@ -104,13 +134,13 @@ pub fn summarize(data: &Value) -> Result<Value> {
             "unknown wallet role"
         );
         let bucket = roles.entry(role.to_owned()).or_default();
-        plus(&mut bucket.0, 1)?;
+        plus(&mut bucket.wallets, 1)?;
         let balance = amount(&wallet["balance"])?;
         match (wallet["height"].as_u64(), wallet["hash"].as_str()) {
             (Some(_), Some(hash)) if !hash.is_empty() => {
-                plus(&mut bucket.1, 1)?;
-                bucket.2 = bucket
-                    .2
+                plus(&mut bucket.anchored, 1)?;
+                bucket.saved_balance = bucket
+                    .saved_balance
                     .checked_add(balance)
                     .context("USDC balance sum overflow")?;
             }
@@ -118,6 +148,13 @@ pub fn summarize(data: &Value) -> Result<Value> {
             _ => anyhow::bail!("incomplete wallet balance anchor"),
         }
     }
+    Ok(WalletObservations {
+        identities: wallets,
+        roles,
+    })
+}
+
+fn payment_exposure(data: &Value, wallets: &BTreeSet<&str>) -> Result<U256> {
     let mut exposure = U256::ZERO;
     let mut attempts = BTreeSet::new();
     for attempt in rows(data, "payment_attempts")? {
@@ -143,6 +180,10 @@ pub fn summarize(data: &Value) -> Result<Value> {
                 .context("payment exposure overflow")?;
         }
     }
+    Ok(exposure)
+}
+
+fn refund_outputs(data: &Value, operations: &BTreeMap<&str, &Value>) -> Result<u64> {
     let mut refunds = BTreeSet::new();
     let mut returned = 0;
     for refund in rows(data, "refunds")? {
@@ -157,6 +198,14 @@ pub fn summarize(data: &Value) -> Result<Value> {
         number(&refund["height"])?;
         plus(&mut returned, number(&refund["amount"])?)?;
     }
+    Ok(returned)
+}
+
+pub fn summarize(data: &Value) -> Result<Value> {
+    let source = source_accounting(data)?;
+    let wallets = wallet_observations(data)?;
+    let exposure = payment_exposure(data, &wallets.identities)?;
+    let returned = refund_outputs(data, &source.operations)?;
     let sync = &data["sync"];
     if !sync.is_null() {
         number(&sync["confirmed_shielded_zatoshis"])?;
@@ -164,10 +213,10 @@ pub fn summarize(data: &Value) -> Result<Value> {
     }
     Ok(
         json!({"scope":"treasury_wide_persisted","fresh_chain_read":false,
-        "source_reserved_zatoshis":reserved,"recorded_consumed_zatoshis":consumed,
-        "recorded_principal_zatoshis":principal,"recorded_fees_zatoshis":fees,"recorded_refund_outputs_zatoshis":returned,
+        "source_reserved_zatoshis":source.totals.reserved,"recorded_consumed_zatoshis":source.totals.consumed,
+        "recorded_principal_zatoshis":source.totals.principal,"recorded_fees_zatoshis":source.totals.fees,"recorded_refund_outputs_zatoshis":returned,
         "unresolved_payment_exposure_atomic":exposure.to_string(),"zec_observation":sync,
-        "wallet_roles":roles.into_iter().map(|(role,(count,observed,sum))|(role,json!({"wallets":count,"anchored_observations":observed,"unobserved_wallets":count-observed,"saved_balance_atomic":sum.to_string()}))).collect::<BTreeMap<_,_>>() }),
+        "wallet_roles":wallets.roles.into_iter().map(|(role,balance)|(role,json!({"wallets":balance.wallets,"anchored_observations":balance.anchored,"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()}))).collect::<BTreeMap<_,_>>() }),
     )
 }
 
@@ -241,6 +290,398 @@ mod tests {
             let mut data = fixture();
             *data.pointer_mut(path).unwrap() = value;
             assert!(summarize(&data).is_err(), "{path}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod characterization {
+    use super::*;
+
+    fn empty() -> Value {
+        json!({"operations":[],"source_budget_entries":[],"wallets":[],"payment_attempts":[],"refunds":[]})
+    }
+
+    fn empty_summary() -> Value {
+        json!({"scope":"treasury_wide_persisted","fresh_chain_read":false,
+            "source_reserved_zatoshis":0,"recorded_consumed_zatoshis":0,
+            "recorded_principal_zatoshis":0,"recorded_fees_zatoshis":0,
+            "recorded_refund_outputs_zatoshis":0,"unresolved_payment_exposure_atomic":"0",
+            "zec_observation":null,"wallet_roles":{}})
+    }
+
+    fn error(data: &Value, expected: &str) {
+        assert_eq!(format!("{:#}", summarize(data).unwrap_err()), expected);
+    }
+
+    #[test]
+    fn complete_mixed_summary_preserves_distinct_facts() {
+        assert_eq!(
+            summarize(&fixture()).unwrap(),
+            json!({
+            "scope":"treasury_wide_persisted","fresh_chain_read":false,
+            "source_reserved_zatoshis":70,"recorded_consumed_zatoshis":108,
+            "recorded_principal_zatoshis":100,"recorded_fees_zatoshis":8,
+            "recorded_refund_outputs_zatoshis":10,"unresolved_payment_exposure_atomic":"5",
+            "zec_observation":{"height":200,"checked_at":10,"confirmed_shielded_zatoshis":60,"spendable_shielded_zatoshis":50},
+            "wallet_roles":{
+                "ACTIVE":{"wallets":1,"anchored_observations":1,"unobserved_wallets":0,"saved_balance_atomic":"0"},
+                "ALLOCATED":{"wallets":1,"anchored_observations":0,"unobserved_wallets":1,"saved_balance_atomic":"0"},
+                "RETIRED":{"wallets":1,"anchored_observations":1,"unobserved_wallets":0,"saved_balance_atomic":"7"}}})
+        );
+    }
+
+    #[test]
+    fn empty_and_permissive_historical_evidence_keep_full_projection() {
+        let mut data = empty();
+        assert_eq!(summarize(&data).unwrap(), empty_summary());
+        data["sync"] = Value::Null;
+        assert_eq!(summarize(&data).unwrap(), empty_summary());
+        data["operations"] = json!([{"operation_id":"opaque","facts":false}]);
+        data["source_budget_entries"] = json!([{"id":"no-operation","reserved":7,"consumed":0}]);
+        data["refunds"] = json!([{"txid":"opaque","output_index":0,"height":0,"operation_id":"opaque","amount":11}]);
+        data["wallets"] = json!([
+            {"id":"a","role":"ACTIVE","balance":"0000","height":0,"hash":"not-a-block-hash"},
+            {"id":"b","role":"ALLOCATED","balance":"999"},
+            {"id":"c","role":"READY","balance":"0005","height":0,"hash":" "},
+            {"id":"d","role":"RETAINED","balance":"9","height":1,"hash":"opaque"},
+            {"id":"e","role":"RETIRED","balance":"7","height":1,"hash":"opaque"},
+            {"id":"f","role":"READY","balance":"80","height":null,"hash":null}]);
+        data["sync"] = json!({"height":"opaque","checked_at":null,"confirmed_shielded_zatoshis":1,"spendable_shielded_zatoshis":9,"extra":{"keep":true}});
+        let mut expected = empty_summary();
+        expected["source_reserved_zatoshis"] = json!(7);
+        expected["recorded_refund_outputs_zatoshis"] = json!(11);
+        expected["zec_observation"] = json!({"height":"opaque","checked_at":null,"confirmed_shielded_zatoshis":1,"spendable_shielded_zatoshis":9,"extra":{"keep":true}});
+        expected["wallet_roles"] = json!({
+            "ACTIVE":{"wallets":1,"anchored_observations":1,"unobserved_wallets":0,"saved_balance_atomic":"0"},
+            "ALLOCATED":{"wallets":1,"anchored_observations":0,"unobserved_wallets":1,"saved_balance_atomic":"0"},
+            "READY":{"wallets":2,"anchored_observations":1,"unobserved_wallets":1,"saved_balance_atomic":"5"},
+            "RETAINED":{"wallets":1,"anchored_observations":1,"unobserved_wallets":0,"saved_balance_atomic":"9"},
+            "RETIRED":{"wallets":1,"anchored_observations":1,"unobserved_wallets":0,"saved_balance_atomic":"7"}});
+        assert_eq!(summarize(&data).unwrap(), expected);
+    }
+
+    #[test]
+    fn malformed_fields_preserve_exact_diagnostics() {
+        for (path, value, expected) in [
+            (
+                "/operations/0/operation_id",
+                json!(""),
+                "missing accounting identity",
+            ),
+            (
+                "/operations/1/operation_id",
+                json!("deposit"),
+                "duplicate source operation",
+            ),
+            (
+                "/source_budget_entries/1/id",
+                json!("deposit"),
+                "duplicate source budget entry",
+            ),
+            (
+                "/source_budget_entries/0/reserved",
+                json!(1),
+                "consumed source cost remains reserved",
+            ),
+            (
+                "/source_budget_entries/0/id",
+                json!("missing"),
+                "consumed source entry lacks operation",
+            ),
+            (
+                "/operations/0/submission",
+                json!("BROADCAST"),
+                "consumed source operation is not recorded confirmed",
+            ),
+            (
+                "/source_budget_entries/0/consumed",
+                json!(104),
+                "source cost disagrees with transaction facts",
+            ),
+            (
+                "/source_budget_entries/0/consumed",
+                json!(0),
+                "confirmed operation lacks consumed budget evidence",
+            ),
+            (
+                "/source_budget_entries/0/reserved",
+                json!("0"),
+                "invalid accounting amount",
+            ),
+            (
+                "/operations/0/facts/fee_zatoshis",
+                json!(-1),
+                "invalid accounting amount",
+            ),
+            (
+                "/operations/0/facts/amount_zatoshis",
+                json!(1.5),
+                "invalid accounting amount",
+            ),
+            (
+                "/wallets/1/id",
+                json!("private-active"),
+                "duplicate wallet observation",
+            ),
+            ("/wallets/0/role", json!("OTHER"), "unknown wallet role"),
+            ("/wallets/0/balance", json!(0), "missing atomic balance"),
+            (
+                "/wallets/1/hash",
+                json!("unexpected"),
+                "incomplete wallet balance anchor",
+            ),
+            (
+                "/wallets/0/hash",
+                json!(""),
+                "incomplete wallet balance anchor",
+            ),
+            (
+                "/wallets/0/height",
+                json!("100"),
+                "incomplete wallet balance anchor",
+            ),
+            (
+                "/payment_attempts/1/id",
+                json!("a"),
+                "duplicate payment attempt",
+            ),
+            (
+                "/payment_attempts/0/state",
+                json!("UNKNOWN"),
+                "unknown payment state",
+            ),
+            (
+                "/payment_attempts/0/wallet",
+                json!("unknown"),
+                "payment references missing wallet",
+            ),
+            (
+                "/payment_attempts/2/amount",
+                json!("invalid"),
+                "invalid atomic balance",
+            ),
+            (
+                "/refunds/0/operation_id",
+                json!("unknown"),
+                "refund references missing operation",
+            ),
+            (
+                "/refunds/0/height",
+                Value::Null,
+                "invalid accounting amount",
+            ),
+            (
+                "/refunds/0/output_index",
+                json!(-1),
+                "invalid accounting amount",
+            ),
+            (
+                "/sync/confirmed_shielded_zatoshis",
+                json!(false),
+                "invalid accounting amount",
+            ),
+            (
+                "/sync/spendable_shielded_zatoshis",
+                Value::Null,
+                "invalid accounting amount",
+            ),
+        ] {
+            let mut data = fixture();
+            *data.pointer_mut(path).unwrap() = value;
+            error(&data, expected);
+        }
+        for field in [
+            "operations",
+            "source_budget_entries",
+            "wallets",
+            "payment_attempts",
+            "refunds",
+        ] {
+            for malformed in [Value::Null, json!({}), json!(0)] {
+                let mut data = fixture();
+                data[field] = malformed;
+                error(&data, "missing accounting rows");
+            }
+        }
+        for invalid in ["", "-1", "+1", " 1", "1 ", "0x1", "1.0", "١"] {
+            let mut data = fixture();
+            data["wallets"][1]["balance"] = json!(invalid);
+            error(&data, "invalid atomic balance");
+        }
+        let mut data = fixture();
+        let refund = data["refunds"][0].clone();
+        data["refunds"].as_array_mut().unwrap().push(refund);
+        error(&data, "duplicate refund outpoint");
+    }
+
+    #[test]
+    fn checked_u64_boundaries_and_overflows() {
+        let mut data = empty();
+        data["source_budget_entries"] = json!([{"id":"a","consumed":0,"reserved":u64::MAX}]);
+        let mut expected = empty_summary();
+        expected["source_reserved_zatoshis"] = json!(u64::MAX);
+        assert_eq!(summarize(&data).unwrap(), expected);
+        data["source_budget_entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"b","consumed":0,"reserved":1}));
+        error(&data, "accounting sum overflow");
+
+        data = empty();
+        data["operations"] = json!([{"operation_id":"a","submission":"CONFIRMED","facts":{"amount_zatoshis":u64::MAX-1,"fee_zatoshis":1}}]);
+        data["source_budget_entries"] = json!([{"id":"a","consumed":u64::MAX,"reserved":0}]);
+        expected = empty_summary();
+        expected["recorded_consumed_zatoshis"] = json!(u64::MAX);
+        expected["recorded_principal_zatoshis"] = json!(u64::MAX - 1);
+        expected["recorded_fees_zatoshis"] = json!(1);
+        assert_eq!(summarize(&data).unwrap(), expected);
+        data["operations"][0]["facts"]["amount_zatoshis"] = json!(u64::MAX);
+        error(&data, "source facts overflow");
+        data["operations"][0]["facts"]["amount_zatoshis"] = json!(u64::MAX - 1);
+        data["source_budget_entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"b","consumed":1,"reserved":0}));
+        error(&data, "accounting sum overflow");
+
+        data = empty();
+        data["operations"] = json!([{"operation_id":"a"}]);
+        data["refunds"] =
+            json!([{"txid":"a","output_index":0,"height":0,"operation_id":"a","amount":u64::MAX}]);
+        expected = empty_summary();
+        expected["recorded_refund_outputs_zatoshis"] = json!(u64::MAX);
+        assert_eq!(summarize(&data).unwrap(), expected);
+        data["refunds"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"txid":"a","output_index":1,"height":0,"operation_id":"a","amount":1}));
+        error(&data, "accounting sum overflow");
+    }
+
+    #[test]
+    fn checked_atomic_boundaries_and_overflows() {
+        const MAX: &str =
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+        let mut data = empty();
+        data["wallets"] =
+            json!([{"id":"a","role":"ACTIVE","balance":MAX,"height":0,"hash":"opaque"}]);
+        data["payment_attempts"] = json!([{"id":"a","wallet":"a","state":"ADMITTED","amount":MAX},
+            {"id":"b","wallet":"a","state":"RESOLVED","amount":MAX}]);
+        let mut expected = empty_summary();
+        expected["wallet_roles"] = json!({"ACTIVE":{"wallets":1,"anchored_observations":1,"unobserved_wallets":0,"saved_balance_atomic":MAX}});
+        expected["unresolved_payment_exposure_atomic"] = json!(MAX);
+        assert_eq!(summarize(&data).unwrap(), expected);
+        data["payment_attempts"][1]["state"] = json!("POSSIBLY_SUBMITTED");
+        data["payment_attempts"][1]["amount"] = json!("1");
+        error(&data, "payment exposure overflow");
+        data["wallets"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"b","role":"ACTIVE","balance":"1","height":0,"hash":"opaque"}));
+        error(&data, "USDC balance sum overflow");
+        data["wallets"][0]["balance"] =
+            json!("115792089237316195423570985008687907853269984665640564039457584007913129639936");
+        // The pinned U256 parser supplies this diagnostic; it is part of the error chain.
+        error(
+            &data,
+            "the value is too large to fit the target type: the value is too large to fit the target type",
+        );
+    }
+
+    #[test]
+    fn first_error_follows_stage_and_row_order() {
+        let mut data = fixture();
+        data["operations"][1]["operation_id"] = json!("deposit");
+        data["source_budget_entries"][0]["reserved"] = json!(1);
+        data["wallets"][0]["role"] = json!("OTHER");
+        data["payment_attempts"][0]["state"] = json!("OTHER");
+        data["refunds"][0]["operation_id"] = json!("missing");
+        data["sync"]["confirmed_shielded_zatoshis"] = Value::Null;
+        error(&data, "duplicate source operation");
+        data["operations"][1]["operation_id"] = json!("shield");
+        error(&data, "consumed source cost remains reserved");
+        data["source_budget_entries"][0]["reserved"] = json!(0);
+        data["source_budget_entries"][0]["consumed"] = json!(0);
+        error(&data, "confirmed operation lacks consumed budget evidence");
+        data["source_budget_entries"][0]["consumed"] = json!(105);
+        error(&data, "unknown wallet role");
+        data["wallets"][0]["role"] = json!("ACTIVE");
+        error(&data, "unknown payment state");
+        data["payment_attempts"][0]["state"] = json!("ADMITTED");
+        error(&data, "refund references missing operation");
+        data["refunds"][0]["operation_id"] = json!("deposit");
+        error(&data, "invalid accounting amount");
+
+        for (early_path, early_value, later_path, later_value, expected) in [
+            (
+                "/source_budget_entries/1/consumed",
+                json!("bad"),
+                "/source_budget_entries/1/id",
+                json!("deposit"),
+                "invalid accounting amount",
+            ),
+            (
+                "/source_budget_entries/1/id",
+                json!("deposit"),
+                "/source_budget_entries/1/reserved",
+                json!("bad"),
+                "duplicate source budget entry",
+            ),
+            (
+                "/wallets/1/id",
+                json!("private-active"),
+                "/wallets/1/role",
+                json!("OTHER"),
+                "duplicate wallet observation",
+            ),
+            (
+                "/wallets/0/balance",
+                json!("bad"),
+                "/wallets/0/hash",
+                json!(""),
+                "invalid atomic balance",
+            ),
+            (
+                "/payment_attempts/1/id",
+                json!("a"),
+                "/payment_attempts/1/state",
+                json!("OTHER"),
+                "duplicate payment attempt",
+            ),
+            (
+                "/payment_attempts/0/state",
+                json!("OTHER"),
+                "/payment_attempts/0/wallet",
+                json!("missing"),
+                "unknown payment state",
+            ),
+            (
+                "/payment_attempts/0/wallet",
+                json!("missing"),
+                "/payment_attempts/0/amount",
+                json!("bad"),
+                "payment references missing wallet",
+            ),
+            (
+                "/refunds/0/output_index",
+                json!("bad"),
+                "/refunds/0/operation_id",
+                json!("missing"),
+                "invalid accounting amount",
+            ),
+            (
+                "/wallets/0/role",
+                json!("OTHER"),
+                "/wallets/1/id",
+                Value::Null,
+                "unknown wallet role",
+            ),
+        ] {
+            let mut data = fixture();
+            *data.pointer_mut(early_path).unwrap() = early_value;
+            *data.pointer_mut(later_path).unwrap() = later_value;
+            error(&data, expected);
         }
     }
 }

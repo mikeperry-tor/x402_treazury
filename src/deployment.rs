@@ -160,6 +160,14 @@ impl MetaConfig {
             self.version
         );
         ensure!(!self.servers.is_empty(), "at least one server is required");
+        self.validate_declarations()?;
+        self.validate_listeners()?;
+        let resolution = assignment::resolve(self)?;
+        self.validate_resolved_funding(&resolution)?;
+        Ok(resolution)
+    }
+
+    fn validate_declarations(&self) -> Result<()> {
         let identifier = Regex::new("^[a-z][a-z0-9_]*$")?;
         for name in self
             .sources
@@ -186,6 +194,10 @@ impl MetaConfig {
                 );
             }
         }
+        Ok(())
+    }
+
+    fn validate_listeners(&self) -> Result<()> {
         let mut addresses = BTreeSet::new();
         for (name, server) in &self.servers {
             crate::server::host::HostPolicy::new(
@@ -239,7 +251,10 @@ impl MetaConfig {
                 pattern(selector)?;
             }
         }
-        let resolution = assignment::resolve(self)?;
+        Ok(())
+    }
+
+    fn validate_resolved_funding(&self, resolution: &Resolution) -> Result<()> {
         if resolution.wallets.values().any(WalletConfig::managed) {
             let treasury = self
                 .treasury
@@ -259,7 +274,7 @@ impl MetaConfig {
                 f.validate()?;
             }
         }
-        Ok(resolution)
+        Ok(())
     }
 }
 #[cfg(feature = "zcash")]
@@ -1764,3 +1779,6 @@ bearer_token_env = "TOKEN"
 
 #[cfg(all(test, feature = "zcash"))]
 mod initialization_tests;
+
+#[cfg(test)]
+mod validation_tests;
