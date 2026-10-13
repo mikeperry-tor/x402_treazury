@@ -348,3 +348,145 @@ async fn managed_connection_preflight_fails_before_opening_missing_state() {
         assert!(!dir.path().join("key").exists());
     }
 }
+
+#[tokio::test]
+async fn binding_completes_only_effective_static_payers_from_reused_relay_initialization() {
+    for missing_effective in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        write_spec(dir.path());
+        let path = dir.path().join("deployment.toml");
+        let mut config = String::from("version=1\n");
+        for name in ["overridden", "effective", "relay", "unused"] {
+            config.push_str(&format!(
+                "[wallets.{name}]\nmode='static'\nprivate_key_env='{name}'\n"
+            ));
+        }
+        config.push_str(
+            "[sources.api]\nspec='spec.json'\nbase_url='http://127.0.0.1:1'\nwallet='effective'\nprobe_pricing=false\n[servers.api]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n",
+        );
+        std::fs::write(&path, config).unwrap();
+        let mut deployment = Deployment::load(&path).await.unwrap();
+        let selected = BTreeSet::from(["relay".to_owned()]);
+        let mut env = BTreeMap::from([
+            ("relay".to_owned(), format!("{:064x}", 1)),
+            ("TOKEN".to_owned(), "fixture-token".to_owned()),
+        ]);
+        let initialized = deployment
+            .initialize_wallets(
+                &env,
+                FundingRestriction::Ordinary,
+                Some(&selected),
+                &selected,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            initialized.wallets.keys().cloned().collect::<BTreeSet<_>>(),
+            selected
+        );
+        deployment.initialized = Some(initialized);
+        // Reuse must not read the already-initialized relay key again.
+        env.remove("relay");
+        if !missing_effective {
+            env.insert("effective".into(), format!("{:064x}", 2));
+        }
+        match deployment.bind(&env).await {
+            Ok(running) => {
+                assert!(!missing_effective);
+                assert_eq!(running.addresses().len(), 1);
+                let address = running.addresses()[0].1;
+                drop(running);
+                TcpListener::bind(address).await.unwrap();
+            }
+            Err(error) => {
+                assert!(missing_effective);
+                assert!(format!("{error:#}").contains("effective"), "{error:#}");
+            }
+        }
+        assert!(!dir.path().join("state").exists());
+    }
+}
+
+#[tokio::test]
+async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_it() {
+    for reserved_namespace in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let owner = crate::treasury::Treasury::create(
+            state.clone(),
+            key.clone(),
+            2_000_000,
+            Some(zeroize::Zeroizing::new(SEED.into())),
+        )
+        .await
+        .unwrap();
+        let id = owner.status().await.unwrap().treasury_id;
+        owner.close().await.unwrap();
+        write_spec(dir.path());
+        let path = dir.path().join("deployment.toml");
+        let mut config = managed_config().replace("auto_fund=false", "auto_fund=true");
+        if reserved_namespace {
+            config = config
+                .replace("[sources.api]", "[sources.api]\nprefix='dyn'")
+                .replace("[servers.one]", "[servers.one]\ndiscover_on_demand=true");
+        }
+        std::fs::write(&path, config).unwrap();
+        let mut deployment = Deployment::load(&path).await.unwrap();
+        let initialized = deployment
+            .initialize_wallets(&env(), FundingRestriction::Ordinary, None, &BTreeSet::new())
+            .await
+            .unwrap();
+        let status = initialized
+            .treasury
+            .as_ref()
+            .unwrap()
+            .status()
+            .await
+            .unwrap();
+        assert!(status.funding_jobs.is_empty());
+        assert!(status.pools.iter().all(|pool| pool.addresses.is_empty()));
+        assert!(initialized.supervisor.is_none());
+        let before = initialized
+            .treasury
+            .as_ref()
+            .unwrap()
+            .store_handle()
+            .call(|store| Ok(store.require_spend_ready(0, 1).unwrap_err().to_string()))
+            .await
+            .unwrap();
+        assert!(!before.contains("qualification_funding_denied"), "{before}");
+        deployment.initialized = Some(initialized);
+        match deployment
+            .bind_restricted(&env(), FundingRestriction::DenyNewFunding)
+            .await
+        {
+            Ok(mut running) => {
+                assert!(!reserved_namespace);
+                let owner = running.treasury.take().unwrap();
+                let after = owner
+                    .store_handle()
+                    .call(|store| Ok(store.require_spend_ready(0, 1).unwrap_err().to_string()))
+                    .await
+                    .unwrap();
+                assert!(after.contains("qualification_funding_denied"), "{after}");
+                let current = owner.status().await.unwrap();
+                assert!(current.funding_jobs.is_empty());
+                assert!(current.pools.iter().all(|pool| pool.addresses.is_empty()));
+                let address = running.addresses()[0].1;
+                drop(running);
+                owner.close().await.unwrap();
+                TcpListener::bind(address).await.unwrap();
+            }
+            Err(error) => {
+                assert!(reserved_namespace, "{error:#}");
+                assert_eq!(error.to_string(), "static tool uses reserved namespace");
+            }
+        }
+        let owner = reopen(&state, &key, &id).await;
+        let current = owner.status().await.unwrap();
+        assert!(current.funding_jobs.is_empty());
+        assert!(current.pools.iter().all(|pool| pool.addresses.is_empty()));
+        owner.close().await.unwrap();
+    }
+}
