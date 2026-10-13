@@ -154,6 +154,7 @@ pub fn inspect(manifest: &Manifest, report: &Value, now: u64) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("resumption_tests.rs");
     fn input() -> (Manifest, Value) {
         let mut m = crate::tests::manifest();
         m.limits.run_seconds = 200000;
