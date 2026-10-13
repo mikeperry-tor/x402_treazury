@@ -143,8 +143,25 @@ pub fn report(m: &Manifest, r: &Value) -> Result<Value> {
     }
     let cases = indexed(&r["cases"], "case")?;
     let semantics = indexed(&r["provider_semantics"], "case")?;
+    let times = dispatch_times(&r["runtime_events"], &cases)?;
+    let mut result = Vec::new();
+    for samples in groups.values() {
+        result.push(evaluate_group(
+            samples,
+            &cases,
+            &semantics,
+            &times,
+            &r["canonical_api_debits"],
+        )?);
+    }
+    Ok(json!(result))
+}
+fn dispatch_times<'a>(
+    events: &'a Value,
+    cases: &BTreeMap<&str, &Value>,
+) -> Result<BTreeMap<&'a str, u64>> {
     let mut times = BTreeMap::new();
-    for event in r["runtime_events"]
+    for event in events
         .as_array()
         .context("reliability runtime events missing")?
         .iter()
@@ -164,67 +181,74 @@ pub fn report(m: &Manifest, r: &Value) -> Result<Value> {
             "duplicate dispatch intent"
         );
     }
-    let mut result = Vec::new();
-    for samples in groups.values() {
-        let mut rows = Vec::new();
-        let mut previous = None;
-        let mut invalid = false;
-        let mut passed = 0;
-        let mut failed = 0;
-        let mut incomplete = 0;
-        for sample in samples {
-            let id = sample.case.id.as_str();
-            let row = cases.get(id).context("reliability case evidence missing")?;
-            let semantic = semantics
-                .get(id)
-                .context("reliability semantic evidence missing")?;
-            let time = times.get(id).copied();
-            let mut category = "observed";
-            let status = if row["execution"] == "UNATTEMPTED" && time.is_some() {
-                invalid = true;
-                category = "unattempted_case_has_dispatch";
-                "invalid"
-            } else if let Some(at) = time {
-                let in_window = at >= sample.window.not_before && at < sample.window.not_after;
-                let spaced = previous.is_none_or(|before: u64| {
-                    before
-                        .checked_add(sample.spacing)
-                        .is_some_and(|start| at >= start)
-                        && (!sample.later_day || at / 86400 > before / 86400)
-                });
-                previous = Some(at);
-                if !in_window || !spaced {
-                    invalid = true;
-                    category = "dispatch_outside_reviewed_window_or_spacing";
-                    "invalid"
-                } else {
-                    observation(row, semantic, &r["canonical_api_debits"], sample.case)
-                }
-            } else {
-                category = "dispatch_not_observed";
-                "incomplete"
-            };
-            match status {
-                "passed" => passed += 1,
-                "failed" => failed += 1,
-                _ => incomplete += 1,
-            }
-            rows.push(json!({"case":id,"phase":sample.phase.id,"window":sample.window.id,"dispatch_at":time,"status":status,"category":category,
-                "mcp":row["semantic"],"provider_semantics":semantic["status"],"settlement":row["settlement"]}));
-        }
-        let status = if invalid {
+    Ok(times)
+}
+fn evaluate_group(
+    samples: &[Sample<'_>],
+    cases: &BTreeMap<&str, &Value>,
+    semantics: &BTreeMap<&str, &Value>,
+    times: &BTreeMap<&str, u64>,
+    debits: &Value,
+) -> Result<Value> {
+    let mut rows = Vec::new();
+    let mut previous = None;
+    let mut invalid = false;
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut incomplete = 0;
+    for sample in samples {
+        let id = sample.case.id.as_str();
+        let row = cases.get(id).context("reliability case evidence missing")?;
+        let semantic = semantics
+            .get(id)
+            .context("reliability semantic evidence missing")?;
+        let time = times.get(id).copied();
+        let mut category = "observed";
+        let status = if row["execution"] == "UNATTEMPTED" && time.is_some() {
+            invalid = true;
+            category = "unattempted_case_has_dispatch";
             "invalid"
-        } else if incomplete > 0 {
-            "incomplete"
-        } else if failed > 0 {
-            "failed"
+        } else if let Some(at) = time {
+            let in_window = at >= sample.window.not_before && at < sample.window.not_after;
+            let spaced = previous.is_none_or(|before: u64| {
+                before
+                    .checked_add(sample.spacing)
+                    .is_some_and(|start| at >= start)
+                    && (!sample.later_day || at / 86400 > before / 86400)
+            });
+            previous = Some(at);
+            if !in_window || !spaced {
+                invalid = true;
+                category = "dispatch_outside_reviewed_window_or_spacing";
+                "invalid"
+            } else {
+                observation(row, semantic, debits, sample.case)
+            }
         } else {
-            "passed"
+            category = "dispatch_not_observed";
+            "incomplete"
         };
-        result.push(json!({"status":status,"planned":samples.len(),"passed":passed,"failed":failed,"incomplete":incomplete,"samples":rows,
-            "scope":"Repeated identical end-to-end cases using driver dispatch-intent wall-clock timestamps, not packet-arrival timing. Failure is not automatically attributed to the provider or Tor; no future reliability guarantee."}));
+        match status {
+            "passed" => passed += 1,
+            "failed" => failed += 1,
+            _ => incomplete += 1,
+        }
+        rows.push(json!({"case":id,"phase":sample.phase.id,"window":sample.window.id,"dispatch_at":time,"status":status,"category":category,
+            "mcp":row["semantic"],"provider_semantics":semantic["status"],"settlement":row["settlement"]}));
     }
-    Ok(json!(result))
+    let status = if invalid {
+        "invalid"
+    } else if incomplete > 0 {
+        "incomplete"
+    } else if failed > 0 {
+        "failed"
+    } else {
+        "passed"
+    };
+    Ok(
+        json!({"status":status,"planned":samples.len(),"passed":passed,"failed":failed,"incomplete":incomplete,"samples":rows,
+            "scope":"Repeated identical end-to-end cases using driver dispatch-intent wall-clock timestamps, not packet-arrival timing. Failure is not automatically attributed to the provider or Tor; no future reliability guarantee."}),
+    )
 }
 pub fn qualification(r: &Value) -> Result<(bool, bool)> {
     let rows = r["reliability"]

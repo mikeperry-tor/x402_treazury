@@ -69,6 +69,18 @@ impl Client {
         Ok(())
     }
     pub async fn check_inventory(&self, expected: &Value, limit: usize) -> Result<()> {
+        let mut actual = self.eager_inventory(limit).await?;
+        if expected["discover_on_demand"] == true {
+            self.discovered_inventory(&mut actual, limit).await?;
+        }
+        let prepared = prepared_inventory(expected)?;
+        ensure!(
+            actual == prepared,
+            "served MCP inventory differs from pinned catalog"
+        );
+        Ok(())
+    }
+    async fn eager_inventory(&self, limit: usize) -> Result<BTreeMap<String, Value>> {
         let mut actual = BTreeMap::new();
         let mut cursor = Value::Null;
         let mut seen_cursors = BTreeSet::new();
@@ -119,92 +131,63 @@ impl Client {
             complete,
             "MCP inventory exceeds 100-page qualification limit; inventory is incomplete"
         );
-        if expected["discover_on_demand"] == true {
-            let mut cursor = Value::Null;
-            let mut seen = BTreeSet::new();
-            let mut complete = false;
-            for page in 0..100 {
-                let mut arguments = json!({"limit":100});
-                if !cursor.is_null() {
-                    arguments["cursor"] = cursor.clone();
-                }
-                let (_, result) = self
-                    .rpc(
-                        &format!("qualification-discovery-{page}"),
-                        "tools/call",
-                        json!({"name":"x402_treazury_tools_search","arguments":arguments}),
-                        limit,
-                    )
-                    .await?;
-                ensure!(result["isError"] != true, "MCP discovery failed");
-                let page = &result["structuredContent"];
-                for tool in page["items"]
-                    .as_array()
-                    .context("MCP discovery items missing")?
-                {
-                    ensure!(
-                        actual.len() < 10000,
-                        "MCP discovered inventory exceeds 10000 tools"
-                    );
-                    let name = tool["tool_id"]
-                        .as_str()
-                        .context("discovered tool missing name")?;
-                    ensure!(actual.insert(name.to_owned(), json!({"description":tool["description"],"schema":tool["input_schema"]})).is_none(),
-                        "duplicate discovered or eagerly advertised tool");
-                }
-                cursor = page["next_cursor"].clone();
-                if cursor.is_null() {
-                    complete = true;
-                    break;
-                }
-                ensure!(
-                    cursor.is_string() && seen.insert(cursor.as_str().unwrap().to_owned()),
-                    "invalid/repeated discovery cursor"
-                );
+        Ok(actual)
+    }
+    async fn discovered_inventory(
+        &self,
+        actual: &mut BTreeMap<String, Value>,
+        limit: usize,
+    ) -> Result<()> {
+        let mut cursor = Value::Null;
+        let mut seen = BTreeSet::new();
+        let mut complete = false;
+        for page in 0..100 {
+            let mut arguments = json!({"limit":100});
+            if !cursor.is_null() {
+                arguments["cursor"] = cursor.clone();
             }
-            ensure!(complete, "MCP discovered inventory exceeds 100-page limit");
-        }
-        let mut prepared = BTreeMap::new();
-        for tool in expected["tools"]
-            .as_array()
-            .context("prepared inventory missing tools")?
-        {
-            let name = tool["name"]
-                .as_str()
-                .context("prepared tool missing name")?;
-            ensure!(
-                prepared
-                    .insert(
-                        name.to_owned(),
-                        json!({"description":tool["description"],"schema":tool["input_schema"]})
-                    )
-                    .is_none(),
-                "duplicate prepared tool name"
-            );
-        }
-        if let Some(local) = expected.get("management_tools") {
-            for tool in local
+            let (_, result) = self
+                .rpc(
+                    &format!("qualification-discovery-{page}"),
+                    "tools/call",
+                    json!({"name":"x402_treazury_tools_search","arguments":arguments}),
+                    limit,
+                )
+                .await?;
+            ensure!(result["isError"] != true, "MCP discovery failed");
+            let page = &result["structuredContent"];
+            for tool in page["items"]
                 .as_array()
-                .context("prepared local tools must be an array")?
+                .context("MCP discovery items missing")?
             {
-                let name = tool["name"]
-                    .as_str()
-                    .context("prepared local tool missing name")?;
                 ensure!(
-                    prepared
+                    actual.len() < 10000,
+                    "MCP discovered inventory exceeds 10000 tools"
+                );
+                let name = tool["tool_id"]
+                    .as_str()
+                    .context("discovered tool missing name")?;
+                ensure!(
+                    actual
                         .insert(
                             name.to_owned(),
-                            json!({"description":tool["description"],"schema":tool["inputSchema"]})
+                            json!({"description":tool["description"],"schema":tool["input_schema"]})
                         )
                         .is_none(),
-                    "duplicate prepared tool name"
+                    "duplicate discovered or eagerly advertised tool"
                 );
             }
+            cursor = page["next_cursor"].clone();
+            if cursor.is_null() {
+                complete = true;
+                break;
+            }
+            ensure!(
+                cursor.is_string() && seen.insert(cursor.as_str().unwrap().to_owned()),
+                "invalid/repeated discovery cursor"
+            );
         }
-        ensure!(
-            actual == prepared,
-            "served MCP inventory differs from pinned catalog"
-        );
+        ensure!(complete, "MCP discovered inventory exceeds 100-page limit");
         Ok(())
     }
     pub async fn call(
@@ -226,6 +209,47 @@ impl Client {
             serde_json::from_value(result).context("malformed MCP tool result")?;
         Ok((body, !result.is_error.unwrap_or(false)))
     }
+}
+
+fn prepared_inventory(expected: &Value) -> Result<BTreeMap<String, Value>> {
+    let mut prepared = BTreeMap::new();
+    for tool in expected["tools"]
+        .as_array()
+        .context("prepared inventory missing tools")?
+    {
+        let name = tool["name"]
+            .as_str()
+            .context("prepared tool missing name")?;
+        ensure!(
+            prepared
+                .insert(
+                    name.to_owned(),
+                    json!({"description":tool["description"],"schema":tool["input_schema"]})
+                )
+                .is_none(),
+            "duplicate prepared tool name"
+        );
+    }
+    if let Some(local) = expected.get("management_tools") {
+        for tool in local
+            .as_array()
+            .context("prepared local tools must be an array")?
+        {
+            let name = tool["name"]
+                .as_str()
+                .context("prepared local tool missing name")?;
+            ensure!(
+                prepared
+                    .insert(
+                        name.to_owned(),
+                        json!({"description":tool["description"],"schema":tool["inputSchema"]})
+                    )
+                    .is_none(),
+                "duplicate prepared tool name"
+            );
+        }
+    }
+    Ok(prepared)
 }
 
 #[cfg(test)]

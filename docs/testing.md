@@ -158,6 +158,23 @@ rejection and unusual accepted metadata. Caller tests cover original billing tex
 overrides, warnings and absence of pricing probes. Tariff conversion remains a
 display estimate and never grants payment authority.
 
+MCP inventory fixtures record exact eager-listing and discovery request sequences,
+including separate cursor protocols, shared duplicate detection, page/tool and
+response-byte boundaries, and prepared-inventory validation after traversal.
+Failure and acknowledged cancellation tests assert that no later request starts.
+A real keyless-runner test exercises the inventory gate before case execution.
+Full schemas and descriptions must still match the pinned catalog; these local
+fixtures do not qualify a live provider or prove remote cancellation.
+
+Reliability report fixtures compare complete outputs and qualification results for
+multiple ordered groups, malformed evidence, missing observations, canonical debit
+requirements and mixed statuses. Timestamp matrices preserve the distinction
+between invalid timestamped observations that advance the previous timestamp and
+missing or unattempted observations that do not. Window, spacing, checked-add and
+UTC-day boundaries are exercised alongside composed registry and summary tests.
+The report interprets saved dispatch evidence; it does not establish provider health
+or attribute failures to Tor.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
