@@ -28,81 +28,10 @@ pub fn report(m: &Manifest, config: &Value, r: &Value) -> Result<Value> {
         );
         return Ok(json!([]));
     };
-    let mut sessions = BTreeSet::new();
-    let mut starts = BTreeMap::new();
-    let mut ends = BTreeMap::new();
-    for event in r["runtime_events"]
-        .as_array()
-        .context("pricing runtime evidence missing")?
-    {
-        let e = &event["detail"];
-        if event["kind"] == "application_session" {
-            let session = e["session"]
-                .as_str()
-                .context("pricing session identity missing")?;
-            ensure!(
-                sessions.insert(session),
-                "duplicate pricing application session"
-            );
-        }
-        if event["kind"] != "application_pricing" {
-            continue;
-        }
-        let session = e["session"]
-            .as_str()
-            .context("pricing stage session missing")?;
-        let source = e["source"]
-            .as_str()
-            .context("pricing stage source missing")?;
-        ensure!(
-            sessions.contains(session) && sources.contains_key(source),
-            "pricing stage has unknown session/source"
-        );
-        let key = (session, source);
-        let at = e["observed_micros"]
-            .as_u64()
-            .context("pricing stage time missing")?;
-        match e["phase"].as_str() {
-            Some("started") => ensure!(
-                starts.insert(key, at).is_none(),
-                "duplicate pricing stage start"
-            ),
-            Some("completed" | "failed") => {
-                ensure!(
-                    starts.get(&key).is_some_and(|start| *start <= at),
-                    "pricing stage completion lacks an ordered start"
-                );
-                ensure!(
-                    ends.insert(key, e).is_none(),
-                    "duplicate pricing stage completion"
-                );
-                if e["phase"] == "completed" {
-                    let data = serde_json::from_value::<x402_treazury::pricing::Evidence>(
-                        e["evidence"].clone(),
-                    )?;
-                    data.validate()?;
-                    let prices:Vec<x402_treazury::pricing::Price>=serde_json::from_value(e["prices"].clone())?;
-                    ensure!(x402_treazury::pricing::price_map(&prices)?.len()==data.available_prices,"recorded pricing lines/count disagree");
-                    ensure!(
-                        sources[source]["settings"]["probe_pricing"].as_bool()
-                            == Some(data.enabled),
-                        "pricing state differs from pinned source policy"
-                    );
-                } else {
-                    ensure!(
-                        matches!(
-                            e["failure"].as_str(),
-                            Some("http_connect" | "http_timeout" | "http_status" | "other")
-                        ),
-                        "invalid pricing failure category"
-                    );
-                }
-            }
-            _ => anyhow::bail!("unknown pricing stage phase"),
-        }
-    }
+    let indexed = PricingEvents::collect(sources, r)?;
     ensure!(
-        sessions
+        indexed
+            .sessions
             .len()
             .max(1)
             .checked_mul(sources.len())
@@ -110,62 +39,161 @@ pub fn report(m: &Manifest, config: &Value, r: &Value) -> Result<Value> {
         "pricing report exceeds 10000 source/session rows; split qualification runs, no partial report"
     );
     let mut rows = Vec::new();
-    for session in sessions
-        .iter()
-        .copied()
-        .map(Some)
-        .chain(if sessions.is_empty() {
-            Some(None)
-        } else {
-            None
-        })
+    for session in
+        indexed
+            .sessions
+            .iter()
+            .copied()
+            .map(Some)
+            .chain(if indexed.sessions.is_empty() {
+                Some(None)
+            } else {
+                None
+            })
     {
         for source in sources.keys() {
-            let expected = m.pricing_checks.get(source);
-            let key = (session.unwrap_or_default(), source.as_str());
-            let end = ends.get(&key);
-            let mut stage = if starts.contains_key(&key) {
-                "incomplete"
-            } else {
-                "not_observed"
-            };
-            let mut assessment = if expected.is_some() {
-                "incomplete"
-            } else {
-                "not_required"
-            };
-            let mut evidence = Value::Null;
-            let mut failure = Value::Null;
-            if let Some(end) = end {
-                if end["phase"] == "failed" {
-                    stage = "failed";
-                    failure = end["failure"].clone();
-                    if expected.is_some() {
-                        assessment = "failed";
-                    }
-                } else {
-                    let data: x402_treazury::pricing::Evidence =
-                        serde_json::from_value(end["evidence"].clone())?;
-                    stage = if !data.enabled {
-                        "disabled"
-                    } else {
-                        "completed"
-                    };
-                    if let Some(expected) = expected {
-                        let matched = match expected {
-                            Expectation::Disabled => !data.enabled,
-                            Expectation::Empty => data.enabled && data.available_prices == 0,
-                            Expectation::Nonempty => data.enabled && data.available_prices > 0,
-                        };
-                        assessment = if matched { "passed" } else { "failed" };
-                    }
-                    evidence = serde_json::to_value(data)?;
-                }
-            }
-            rows.push(json!({"session":session,"source":source,"required":expected.is_some(),"expected":expected,"stage":stage,"assessment":assessment,"evidence":evidence,"failure":failure}));
+            rows.push(indexed.row(session, source, m.pricing_checks.get(source))?);
         }
     }
     Ok(json!(rows))
+}
+
+#[derive(Default)]
+struct PricingEvents<'a> {
+    sessions: BTreeSet<&'a str>,
+    starts: BTreeMap<(&'a str, &'a str), u64>,
+    ends: BTreeMap<(&'a str, &'a str), &'a Value>,
+}
+impl<'a> PricingEvents<'a> {
+    fn collect(sources: &serde_json::Map<String, Value>, r: &'a Value) -> Result<Self> {
+        let mut indexed = Self::default();
+        for event in r["runtime_events"]
+            .as_array()
+            .context("pricing runtime evidence missing")?
+        {
+            let e = &event["detail"];
+            if event["kind"] == "application_session" {
+                let session = e["session"]
+                    .as_str()
+                    .context("pricing session identity missing")?;
+                ensure!(
+                    indexed.sessions.insert(session),
+                    "duplicate pricing application session"
+                );
+            }
+            if event["kind"] != "application_pricing" {
+                continue;
+            }
+            let session = e["session"]
+                .as_str()
+                .context("pricing stage session missing")?;
+            let source = e["source"]
+                .as_str()
+                .context("pricing stage source missing")?;
+            ensure!(
+                indexed.sessions.contains(session) && sources.contains_key(source),
+                "pricing stage has unknown session/source"
+            );
+            let key = (session, source);
+            let at = e["observed_micros"]
+                .as_u64()
+                .context("pricing stage time missing")?;
+            match e["phase"].as_str() {
+                Some("started") => ensure!(
+                    indexed.starts.insert(key, at).is_none(),
+                    "duplicate pricing stage start"
+                ),
+                Some("completed" | "failed") => {
+                    ensure!(
+                        indexed.starts.get(&key).is_some_and(|start| *start <= at),
+                        "pricing stage completion lacks an ordered start"
+                    );
+                    ensure!(
+                        indexed.ends.insert(key, e).is_none(),
+                        "duplicate pricing stage completion"
+                    );
+                    if e["phase"] == "completed" {
+                        validate_completion(e, &sources[source])?;
+                    } else {
+                        ensure!(
+                            matches!(
+                                e["failure"].as_str(),
+                                Some("http_connect" | "http_timeout" | "http_status" | "other")
+                            ),
+                            "invalid pricing failure category"
+                        );
+                    }
+                }
+                _ => anyhow::bail!("unknown pricing stage phase"),
+            }
+        }
+        Ok(indexed)
+    }
+    fn row(
+        &self,
+        session: Option<&str>,
+        source: &str,
+        expected: Option<&Expectation>,
+    ) -> Result<Value> {
+        let key = (session.unwrap_or_default(), source);
+        let end = self.ends.get(&key);
+        let mut stage = if self.starts.contains_key(&key) {
+            "incomplete"
+        } else {
+            "not_observed"
+        };
+        let mut assessment = if expected.is_some() {
+            "incomplete"
+        } else {
+            "not_required"
+        };
+        let mut evidence = Value::Null;
+        let mut failure = Value::Null;
+        if let Some(end) = end {
+            if end["phase"] == "failed" {
+                stage = "failed";
+                failure = end["failure"].clone();
+                if expected.is_some() {
+                    assessment = "failed";
+                }
+            } else {
+                let data: x402_treazury::pricing::Evidence =
+                    serde_json::from_value(end["evidence"].clone())?;
+                stage = if !data.enabled {
+                    "disabled"
+                } else {
+                    "completed"
+                };
+                if let Some(expected) = expected {
+                    let matched = match expected {
+                        Expectation::Disabled => !data.enabled,
+                        Expectation::Empty => data.enabled && data.available_prices == 0,
+                        Expectation::Nonempty => data.enabled && data.available_prices > 0,
+                    };
+                    assessment = if matched { "passed" } else { "failed" };
+                }
+                evidence = serde_json::to_value(data)?;
+            }
+        }
+        Ok(
+            json!({"session":session,"source":source,"required":expected.is_some(),"expected":expected,"stage":stage,"assessment":assessment,"evidence":evidence,"failure":failure}),
+        )
+    }
+}
+
+fn validate_completion(e: &Value, source: &Value) -> Result<()> {
+    let data = serde_json::from_value::<x402_treazury::pricing::Evidence>(e["evidence"].clone())?;
+    data.validate()?;
+    let prices: Vec<x402_treazury::pricing::Price> = serde_json::from_value(e["prices"].clone())?;
+    ensure!(
+        x402_treazury::pricing::price_map(&prices)?.len() == data.available_prices,
+        "recorded pricing lines/count disagree"
+    );
+    ensure!(
+        source["settings"]["probe_pricing"].as_bool() == Some(data.enabled),
+        "pricing state differs from pinned source policy"
+    );
+    Ok(())
 }
 pub fn qualification(r: &Value) -> Result<(bool, bool)> {
     let rows = r["pricing_stages"]
