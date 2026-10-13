@@ -1203,3 +1203,5 @@ fn accounting_report_rejects_changed_authorization_baseline() {
     let error = r.report(Some(&f.manifest.run_id), 5).unwrap_err();
     assert!(error.to_string().contains("baseline hash mismatch"));
 }
+
+include!("registry_report_tests.rs");
