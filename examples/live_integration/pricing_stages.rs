@@ -310,4 +310,155 @@ mod tests {
         bad["runtime_events"].as_array_mut().unwrap().push(e);
         assert!(report(&m, &config, &bad).is_err());
     }
+    #[test]
+    fn report_completion_matrix_preserves_full_rows() {
+        for outcome in [Expectation::Disabled, Expectation::Empty, Expectation::Nonempty] {
+            let (mut m, mut config, mut r) = fixture();
+            match outcome {
+                Expectation::Disabled => {
+                    config["sources"]["api"]["settings"]["probe_pricing"] = json!(false);
+                    r["runtime_events"][2]["detail"]["evidence"] = json!(x402_treazury::pricing::Evidence::default());
+                }
+                Expectation::Empty => (),
+                Expectation::Nonempty => {
+                    let e = &mut r["runtime_events"][2]["detail"];
+                    e["evidence"]["available_prices"] = json!(1);
+                    e["evidence"]["outcomes"] = json!({"discovered":1});
+                    e["evidence"]["http_statuses"] = json!({"402":1});
+                    e["prices"] = json!([{"method":"GET","path":"/read","line":"Price: $0.01"}]);
+                }
+            }
+            for expected in [None, Some(Expectation::Disabled), Some(Expectation::Empty), Some(Expectation::Nonempty)] {
+                m.pricing_checks.clear();
+                if let Some(expected) = expected { m.pricing_checks.insert("api".into(), expected); }
+                let assessment = match expected {
+                    None => "not_required",
+                    Some(expected) if json!(expected) == json!(outcome) => "passed",
+                    Some(_) => "failed",
+                };
+                assert_eq!(report(&m, &config, &r).unwrap(), json!([{
+                    "session":"s", "source":"api", "required":expected.is_some(), "expected":expected,
+                    "stage":if matches!(outcome, Expectation::Disabled) {"disabled"} else {"completed"},
+                    "assessment":assessment, "evidence":r["runtime_events"][2]["detail"]["evidence"], "failure":null
+                }]));
+            }
+        }
+    }
+
+    #[test]
+    fn report_failure_and_unfinished_stages_preserve_requirement_status() {
+        for required in [false, true] {
+            let (mut m, config, original) = fixture();
+            if !required { m.pricing_checks.clear(); }
+            for failure in ["http_connect", "http_timeout", "http_status", "other"] {
+                let mut r = original.clone();
+                let end = &mut r["runtime_events"][2]["detail"];
+                end["phase"] = json!("failed");
+                end["failure"] = json!(failure);
+                end["evidence"] = Value::Null;
+                end["prices"] = Value::Null;
+                assert_eq!(report(&m, &config, &r).unwrap(), json!([{
+                    "session":"s", "source":"api", "required":required,
+                    "expected":if required {json!("empty")} else {Value::Null},
+                    "stage":"failed", "assessment":if required {"failed"} else {"not_required"},
+                    "evidence":null, "failure":failure
+                }]));
+            }
+            for (count, session, stage) in [(0, Value::Null, "not_observed"), (1, json!("s"), "not_observed"), (2, json!("s"), "incomplete")] {
+                let mut r = original.clone();
+                r["runtime_events"].as_array_mut().unwrap().truncate(count);
+                assert_eq!(report(&m, &config, &r).unwrap(), json!([{
+                    "session":session, "source":"api", "required":required,
+                    "expected":if required {json!("empty")} else {Value::Null},
+                    "stage":stage, "assessment":if required {"incomplete"} else {"not_required"},
+                    "evidence":null, "failure":null
+                }]));
+            }
+        }
+    }
+
+    #[test]
+    fn report_rejects_malformed_or_ambiguous_evidence_before_emitting_rows() {
+        let (m, config, original) = fixture();
+        for index in [0, 1, 2] {
+            let mut r = original.clone();
+            let duplicate = r["runtime_events"][index].clone();
+            r["runtime_events"].as_array_mut().unwrap().push(duplicate);
+            assert!(report(&m, &config, &r).is_err(), "duplicate event {index}");
+        }
+        for (pointer, value) in [
+            ("/runtime_events/0/detail/session", Value::Null),
+            ("/runtime_events/1/detail/session", Value::Null),
+            ("/runtime_events/1/detail/source", Value::Null),
+            ("/runtime_events/1/detail/source", json!("unknown")),
+            ("/runtime_events/1/detail/observed_micros", json!(-1)),
+            ("/runtime_events/1/detail/phase", json!("unknown")),
+            ("/runtime_events/2/detail/evidence", Value::Null),
+            ("/runtime_events/2/detail/evidence/observed", json!(2)),
+            ("/runtime_events/2/detail/prices", json!({})),
+            ("/runtime_events/2/detail/prices", json!([{"method":"POST","path":"/read","line":"price"}])),
+            ("/runtime_events/2/detail/prices", json!([{"method":"GET","path":"/read","line":"price"}])),
+        ] {
+            let mut r = original.clone();
+            *r.pointer_mut(pointer).unwrap() = value;
+            assert!(report(&m, &config, &r).is_err(), "accepted {pointer}");
+        }
+        let mut r = original.clone();
+        r["runtime_events"].as_array_mut().unwrap().remove(1);
+        assert!(report(&m, &config, &r).is_err(), "completion without start");
+        let mut r = original.clone();
+        r["runtime_events"][2]["detail"]["observed_micros"] = json!(1);
+        assert_eq!(report(&m, &config, &r).unwrap(), report(&m, &config, &original).unwrap(), "equal timestamps remain ordered");
+        let mut r = original.clone();
+        let end = &mut r["runtime_events"][2]["detail"];
+        end["evidence"]["available_prices"] = json!(1);
+        end["evidence"]["outcomes"] = json!({"discovered":1});
+        end["evidence"]["http_statuses"] = json!({"402":1});
+        let price = json!({"method":"GET","path":"/read","line":"Price: $0.01"});
+        end["prices"] = json!([price.clone(), price]);
+        assert!(report(&m, &config, &r).is_err(), "duplicate prices cannot collapse to a valid count");
+        let mut r = original.clone();
+        r["runtime_events"].as_array_mut().unwrap().swap(0, 1);
+        assert!(report(&m, &config, &r).is_err(), "stage before session");
+        let mut r = original;
+        r["runtime_events"][2]["detail"]["phase"] = json!("failed");
+        r["runtime_events"][2]["detail"]["failure"] = json!("upstream prose");
+        assert!(report(&m, &config, &r).is_err());
+        assert!(report(&m, &config, &json!({})).is_err());
+        assert!(report(&m, &json!({}), &json!({})).is_err());
+        let mut optional = m;
+        optional.pricing_checks.clear();
+        assert_eq!(report(&optional, &json!({}), &json!({})).unwrap(), json!([]));
+    }
+
+    #[test]
+    fn report_row_bound_is_complete_and_ordered_across_sessions() {
+        let (mut m, _, _) = fixture();
+        m.pricing_checks.clear();
+        let sources: serde_json::Map<String, Value> = (0..5000).rev()
+            .map(|i| (format!("source_{i:04}"), json!({"settings":{"probe_pricing":true}}))).collect();
+        let mut config = json!({"sources":sources});
+        let events = json!({"runtime_events":[
+            {"kind":"application_session","detail":{"session":"z"}},
+            {"kind":"ignored","detail":null},
+            {"kind":"application_session","detail":{"session":"a"}}
+        ]});
+        let rows = report(&m, &config, &events).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 10000);
+        for (index, row) in rows.as_array().unwrap().iter().enumerate() {
+            assert_eq!(row["session"], if index < 5000 {"a"} else {"z"});
+            assert_eq!(row["source"], format!("source_{:04}", index % 5000));
+        }
+        config["sources"].as_object_mut().unwrap().insert("extra".into(), json!({}));
+        assert!(report(&m, &config, &events).is_err());
+        // With no session yet, the synthetic unobserved rows have the same cap.
+        let sources: serde_json::Map<String, Value> = (0..10000)
+            .map(|i| (format!("source_{i:05}"), json!({}))).collect();
+        let mut config = json!({"sources":sources});
+        let no_sessions = json!({"runtime_events":[]});
+        assert_eq!(report(&m, &config, &no_sessions).unwrap().as_array().unwrap().len(), 10000);
+        config["sources"].as_object_mut().unwrap().insert("extra".into(), json!({}));
+        assert!(report(&m, &config, &no_sessions).is_err());
+    }
+
 }
