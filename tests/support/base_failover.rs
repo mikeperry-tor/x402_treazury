@@ -25,6 +25,10 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
                 && method == "eth_call" && v["params"][1]["blockHash"] == format!("0x{:064x}", 100) {
                 return (StatusCode::from_u16(code).unwrap(), "private error").into_response();
             }
+            if mode == "oversized" && method == "eth_call"
+                && v["params"][1]["blockHash"] == format!("0x{:064x}", 100) {
+                return "x".repeat(x402_treazury::limits::RESPONSE_BYTES + 1).into_response();
+            }
             if mode == "limited" {
                 return Json(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"private error"}})).into_response();
             }

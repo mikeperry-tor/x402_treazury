@@ -57,7 +57,11 @@ impl RpcFailure {
             || self.protocol == Some("invalid_http")
             || matches!(
                 self.category,
-                "invalid JSON body" | "invalid envelope" | "missing result" | "malformed result"
+                "invalid JSON body"
+                    | "invalid envelope"
+                    | "missing result"
+                    | "malformed result"
+                    | "response too large"
             )
             || matches!(self.http, Some(403 | 408 | 429 | 500 | 502 | 503 | 504))
             || matches!(self.code, Some(-32005 | -32016 | -32601))
@@ -188,10 +192,24 @@ async fn attempt(
         return Err(RpcFailure::new(method, "HTTP rejection", "headers", Some(status)).into());
     }
     // Read separately so an interrupted body is distinguishable from malformed JSON.
-    let body = response
-        .bytes()
-        .await
-        .map_err(|e| transport_failure(method, "body", Some(status), e))?;
+    let body = crate::limits::read(
+        response,
+        crate::limits::RESPONSE_BYTES,
+        "Base RPC response",
+        "RPC response byte limit",
+    )
+    .await
+    .map_err(|error| {
+        match error.downcast::<reqwest::Error>() {
+            Ok(error) => transport_failure(method, "body", Some(status), error),
+            Err(_) => {
+                // A fixed positive limit leaves only DownloadLimit here. Size
+                // rejection allows a complete view from another configured endpoint,
+                // never a retry of the oversized response or partial evidence.
+                RpcFailure::new(method, "response too large", "body", Some(status)).into()
+            }
+        }
+    })?;
     let value: Value = serde_json::from_slice(&body)
         .map_err(|_| RpcFailure::new(method, "invalid JSON body", "decode", Some(status)))?;
     if value.get("error").is_some() {

@@ -12,6 +12,7 @@ async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_
         "limited",
         "malformed",
         "malformed-chain",
+        "oversized",
     ] {
         logs.lock().unwrap().clear();
         let rpc = BaseRpc::with_fallbacks(

@@ -137,7 +137,11 @@ Base read RPCs, complete chain views and receipt verification use connection and
 read-inactivity timeouts, with no separate total deadline in either network mode.
 Progressing reads can finish; actual transport failures retain one unsigned retry
 and configured whole-view fallback. Block age, confirmations and canonical block
-rechecks still determine whether evidence is usable.
+rechecks still determine whether evidence is usable. Base RPC response collection
+has a fixed 16 MiB byte bound to protect memory before JSON decoding, including
+chunked and lengthless bodies. Oversized responses produce a redacted typed failure
+without retrying that endpoint. Configured fallback discards the partial view and
+reacquires all evidence; it cannot reuse a balance from the rejected response.
 Managed payment admission has no overall elapsed-time deadline, including while
 waiting for its pool gate. Legacy wallet `wait_seconds` is accepted but ignored
 with a warning and omitted from effective configuration.

@@ -305,3 +305,77 @@ fn acquisition_only_failures_allow_configured_fallback_but_not_local_errors() {
     let local = RpcFailure::new("eth_chainId", "request construction", "send", None);
     assert!(!local.can_failover());
 }
+
+#[tokio::test]
+async fn oversized_responses_reject_before_decoding_without_retry_and_allow_fallback() {
+    use tracing::instrument::WithSubscriber;
+    let limit = crate::limits::RESPONSE_BYTES;
+    let too_large = "s".repeat(limit + 1);
+    // Known length rejects without waiting for any body; the other encodings
+    // exercise cumulative streaming bounds without a Content-Length shortcut.
+    for raw in [
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            limit + 1
+        ),
+        format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n1\r\ns\r\n0\r\n\r\n",
+            limit,
+            &too_large[..limit]
+        ),
+        format!("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{too_large}"),
+    ] {
+        let logs = super::super::tests::Logs::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let (url, captured, server) = fixture(vec![(Duration::ZERO, raw)]).await;
+        let error = rpc(&client(), &url, "eth_call", json!(["secret-params"]))
+            .with_subscriber(subscriber)
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        let failure = error.downcast_ref::<RpcFailure>().unwrap();
+        assert_eq!(failure.category, "response too large");
+        assert_eq!(failure.phase, "body");
+        assert_eq!(failure.http, Some(200));
+        assert!(failure.can_failover());
+        assert_eq!(captured.lock().unwrap().len(), 1);
+        let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert!(logged.contains("retry=false"), "{logged}");
+        assert!(!logged.contains("retry=true"), "{logged}");
+        let diagnostic = format!("{error} {logged}");
+        for secret in ["secret-url", "secret-key", "secret-params", "127.0.0.1"] {
+            assert!(!diagnostic.contains(secret), "{diagnostic}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn exact_byte_boundary_and_concurrent_healthy_rpc_remain_usable() {
+    let limit = crate::limits::RESPONSE_BYTES;
+    let json = r#"{"jsonrpc":"2.0","id":1,"result":"0x01"}"#;
+    let body = format!("{json}{}", " ".repeat(limit - json.len()));
+    for raw in [
+        response(200, &body),
+        format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{limit:x}\r\n{body}\r\n0\r\n\r\n"
+        ),
+    ] {
+        let (url, _, server) = fixture(vec![(Duration::ZERO, raw)]).await;
+        let (healthy, _, healthy_server) =
+            fixture(vec![(Duration::ZERO, response(200, json))]).await;
+        let http = client();
+        let (large, small) = tokio::join!(
+            rpc(&http, &url, "eth_chainId", json!([])),
+            rpc(&http, &healthy, "eth_chainId", json!([])),
+        );
+        assert_eq!(large.unwrap(), "0x01");
+        assert_eq!(small.unwrap(), "0x01");
+        server.await.unwrap();
+        healthy_server.await.unwrap();
+    }
+}
