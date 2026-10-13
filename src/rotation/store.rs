@@ -1833,6 +1833,34 @@ fn apply_chain_view(
     retire: bool,
 ) -> Result<ChainPublication> {
     let mut depleted = ChainPublication::default();
+    validate_chain_balances(tx, pool, view, namespace)?;
+    apply_chain_resolutions(tx, pool, view, namespace)?;
+    let rows: Vec<(String, String, String)> = if complete {
+        tx.prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
+            .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    } else {
+        view.balances
+            .keys()
+            .map(|wallet| {
+                tx.query_row(
+                    "SELECT id,role,target FROM wallets WHERE pool_id=?1 AND id=?2",
+                    params![pool, wallet],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+            })
+            .collect::<rusqlite::Result<_>>()?
+    };
+    publish_chain_balances(tx, pool, view, namespace, retire, &rows, &mut depleted)?;
+    Ok(depleted)
+}
+
+fn validate_chain_balances(
+    tx: &Connection,
+    pool: &str,
+    view: &super::base::ChainView,
+    namespace: Uuid,
+) -> Result<()> {
     #[cfg(not(test))]
     ensure!(
         view.observations.len() == view.balances.len()
@@ -1871,6 +1899,15 @@ fn apply_chain_view(
             super::base::evidence::EvidenceFailure::ScopeMismatch
         );
     }
+    Ok(())
+}
+
+fn apply_chain_resolutions(
+    tx: &Connection,
+    pool: &str,
+    view: &super::base::ChainView,
+    namespace: Uuid,
+) -> Result<()> {
     ensure!(
         view.released.len() == view.resolutions.len()
             && view
@@ -1937,23 +1974,19 @@ fn apply_chain_view(
             }
         }
     }
-    let rows: Vec<(String, String, String)> = if complete {
-        tx.prepare("SELECT id,role,target FROM wallets WHERE pool_id=?1 ORDER BY sequence")?
-            .query_map([pool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-            .collect::<rusqlite::Result<_>>()?
-    } else {
-        view.balances
-            .keys()
-            .map(|wallet| {
-                tx.query_row(
-                    "SELECT id,role,target FROM wallets WHERE pool_id=?1 AND id=?2",
-                    params![pool, wallet],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )
-            })
-            .collect::<rusqlite::Result<_>>()?
-    };
-    for (id, role, _target) in &rows {
+    Ok(())
+}
+
+fn publish_chain_balances(
+    tx: &Connection,
+    pool: &str,
+    view: &super::base::ChainView,
+    namespace: Uuid,
+    retire: bool,
+    rows: &[(String, String, String)],
+    depleted: &mut ChainPublication,
+) -> Result<()> {
+    for (id, role, _target) in rows {
         let Some(balance) = view.balances.get(id) else {
             ensure!(role == "RETIRED", "incomplete Base view");
             continue;
@@ -2044,7 +2077,7 @@ fn apply_chain_view(
             }
         }
     }
-    Ok(depleted)
+    Ok(())
 }
 
 #[cfg(test)]

@@ -366,6 +366,11 @@ capacity; the original support and dispute remain durable. Current payment
 admission still subtracts all unresolved liabilities and verifies every actual
 financial checkpoint, including one at the same disputed historical anchor.
 
+Chain-view publication applies canonical resolutions, exposure release and balance,
+readiness and retirement updates in the caller's single transaction. A late failure
+rolls back those updates together. Scoped publication leaves unobserved wallets
+unchanged; complete publication requires balances for every non-retired wallet.
+
 The configured RPC policy defaults to PublicNode, dRPC and Base. Availability
 failure can restart an entire bounded view at another configured endpoint; it
 cannot combine one endpoint's header with another's balance/nonce evidence. Each
