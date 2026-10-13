@@ -267,6 +267,37 @@ impl ManagedPool {
     pub async fn drain_direct_payments(&self) {
         self.direct_work.drain().await;
     }
+    async fn recheck_payment_balances(
+        &self,
+        view: &mut super::base::ChainView,
+        expected_wallet: &str,
+        captures: &std::collections::BTreeMap<String, super::base::EvidenceCapture>,
+    ) -> Result<()> {
+        for (wallet, certificate) in &mut view.balance_certificates {
+            if wallet != expected_wallet {
+                continue;
+            }
+            match self
+                .base
+                .recheck_balance(certificate.clone(), captures[wallet].clone())
+                .await
+            {
+                Ok(verified) => *certificate = verified,
+                Err(error) => {
+                    let failure_guard = Arc::new(self.gate.clone().lock_owned().await);
+                    return self
+                        .store
+                        .call_with_guard(failure_guard, move |store| {
+                            store.record_base_failure(&error)?;
+                            Err(error)
+                        })
+                        .await;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn pay_with_cover_observed(
         &self,
         http: &reqwest::Client,
@@ -285,31 +316,7 @@ impl ManagedPool {
         // Bound foreground owners, including callers awaiting the group gate.
         // The permit lives through the one signed dispatch and cannot cancel it.
         let _foreground = crate::payment::ownership::foreground()?;
-        let header = response
-            .headers()
-            .get("payment-required")
-            .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
-        let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
-        let omitted = strip_extensions(&mut challenge)?;
-        let offer = select_offer(&challenge, &self.policy)?;
-        challenge["accepts"] = serde_json::json!([offer.raw.clone()]);
-        if let Some(desc) = challenge.pointer_mut("/resource/description")
-            && let Some(text) = desc.as_str()
-        {
-            if text.chars().count() > 500 {
-                tracing::warn!(
-                    limit_chars = 500,
-                    "x402 challenge description truncated for facilitator protocol compatibility"
-                );
-            }
-            *desc = Value::String(text.chars().take(500).collect());
-        }
-        // Parse once; the SDK signs this exact selected envelope on each
-        // permitted unpublished attempt, without reconstructing HTTP responses.
-        let envelope: x402_types::proto::v2::PaymentRequired<x402_types::proto::OriginalJson> =
-            serde_json::from_value(challenge)
-                .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
-        let challenge = x402_types::proto::PaymentRequired::V2(envelope);
+        let (challenge, offer, omitted) = prepare_challenge(&response, &self.policy)?;
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let pool = self.pool.clone();
         let amount = offer.amount;
@@ -383,29 +390,8 @@ impl ManagedPool {
                             })
                             .await?;
                         drop(guard);
-                        for (wallet, certificate) in &mut view.balance_certificates {
-                            if wallet != &expected.wallet {
-                                continue;
-                            }
-                            match self
-                                .base
-                                .recheck_balance(certificate.clone(), captures[wallet].clone())
-                                .await
-                            {
-                                Ok(verified) => *certificate = verified,
-                                Err(error) => {
-                                    let failure_guard =
-                                        Arc::new(self.gate.clone().lock_owned().await);
-                                    return self
-                                        .store
-                                        .call_with_guard(failure_guard, move |store| {
-                                            store.record_base_failure(&error)?;
-                                            Err(error)
-                                        })
-                                        .await;
-                                }
-                            }
-                        }
+                        self.recheck_payment_balances(&mut view, &expected.wallet, &captures)
+                            .await?;
                         guard = Arc::new(self.gate.clone().lock_owned().await);
                         continue;
                     }
@@ -434,25 +420,7 @@ impl ManagedPool {
                     }
                     Err(error) => return Err(error),
                 };
-                let signer = PrivateKeySigner::from_slice(&prepared.key)
-                    .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
-                ensure!(
-                    signer.address().to_string() == prepared.address,
-                    "stored signer identity mismatch"
-                );
-                let candidates = V2Eip155ExactClient::new(Arc::new(signer)).accept(&challenge);
-                let candidate = offer
-                    .select(&candidates)
-                    .context("managed SDK rejected selected requirements")?;
-                let signature = candidate.sign().await.context("managed signing failed")?;
-                let payload: Value = serde_json::from_slice(&STANDARD.decode(&signature)?)?;
-                ensure!(
-                    payload
-                        .get("extensions")
-                        .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
-                    "managed signer unexpectedly emitted extensions"
-                );
-                let auth = validate_payload(&payload, &offer, &prepared.address)?;
+                let (signature, auth) = sign_authorization(&prepared, &offer, &challenge).await?;
                 #[cfg(test)]
                 self.admission_test_stage(AdmissionTestStage::Signed {
                     nonce: auth.nonce.clone(),
@@ -547,6 +515,65 @@ impl ManagedPool {
         };
         Ok((response, omitted))
     }
+}
+
+fn prepare_challenge(
+    response: &reqwest::Response,
+    policy: &SpendPolicy,
+) -> Result<(x402_types::proto::PaymentRequired, Offer, bool)> {
+    let header = response
+        .headers()
+        .get("payment-required")
+        .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
+    let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
+    let omitted = strip_extensions(&mut challenge)?;
+    let offer = select_offer(&challenge, policy)?;
+    challenge["accepts"] = serde_json::json!([offer.raw.clone()]);
+    if let Some(desc) = challenge.pointer_mut("/resource/description")
+        && let Some(text) = desc.as_str()
+    {
+        if text.chars().count() > 500 {
+            tracing::warn!(
+                limit_chars = 500,
+                "x402 challenge description truncated for facilitator protocol compatibility"
+            );
+        }
+        *desc = Value::String(text.chars().take(500).collect());
+    }
+    // Parse once; the SDK signs this exact selected envelope on each
+    // permitted unpublished attempt, without reconstructing HTTP responses.
+    let envelope: x402_types::proto::v2::PaymentRequired<x402_types::proto::OriginalJson> =
+        serde_json::from_value(challenge)
+            .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
+    let challenge = x402_types::proto::PaymentRequired::V2(envelope);
+    Ok((challenge, offer, omitted))
+}
+
+async fn sign_authorization(
+    prepared: &super::store::PreparedPayment,
+    offer: &Offer,
+    challenge: &x402_types::proto::PaymentRequired,
+) -> Result<(String, Authorization)> {
+    let signer = PrivateKeySigner::from_slice(&prepared.key)
+        .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
+    ensure!(
+        signer.address().to_string() == prepared.address,
+        "stored signer identity mismatch"
+    );
+    let candidates = V2Eip155ExactClient::new(Arc::new(signer)).accept(challenge);
+    let candidate = offer
+        .select(&candidates)
+        .context("managed SDK rejected selected requirements")?;
+    let signature = candidate.sign().await.context("managed signing failed")?;
+    let payload: Value = serde_json::from_slice(&STANDARD.decode(&signature)?)?;
+    ensure!(
+        payload
+            .get("extensions")
+            .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
+        "managed signer unexpectedly emitted extensions"
+    );
+    let auth = validate_payload(&payload, offer, &prepared.address)?;
+    Ok((signature, auth))
 }
 
 fn strip_extensions(challenge: &mut Value) -> Result<bool> {
