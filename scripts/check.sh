@@ -19,6 +19,8 @@ sh scripts/check_toolchain.sh
 cargo fmt --check
 scripts/tests/coverage.sh
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity
+python3 scripts/complexity.py --base "${COMPLEXITY_BASE_REF:-main}"
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
 if [ "$with_zcash" = true ]; then

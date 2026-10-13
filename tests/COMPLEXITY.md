@@ -1,8 +1,9 @@
 # Rust complexity audit
 
-Use `python3 scripts/complexity.py` from the repository root. This is an optional,
-local, reporting-only development tool. There are no numerical complexity gates
-and no application/runtime dependencies. First use downloads development crates;
+Use `python3 scripts/complexity.py` from the repository root. `scripts/check.sh`
+runs it and the analyzer's syntax qualification tests by default, separately from
+application tests. Complexity warnings are advisory; there are no numerical merge
+gates or application/runtime dependencies. First use downloads development crates;
 subsequent runs can use `CARGO_NET_OFFLINE=true`. No source is sent to an external
 analysis service. The report orchestrator requires Python 3.11+.
 
@@ -15,6 +16,18 @@ source or changing the application's lockfile. Requalify the syntax probes and
 baseline when updating the analyzer or its grammar dependencies.
 
 ## Inputs and artifacts
+
+The default comparison uses the merge base of `HEAD` and local `main`. Supply
+`--base REF` for another PR target; `scripts/check.sh` accepts
+`COMPLEXITY_BASE_REF=REF`. CI must fetch that ref and enough history for a merge
+base. A missing ref or incomplete baseline fails visibly. `--no-compare` explicitly
+requests a standalone report without regression warnings; the default check never
+falls back to it silently.
+
+The same current analyzer binary evaluates current source and exact Git blobs from
+the base, including files omitted by archive attributes. No checkout, baseline build,
+or historical code execution occurs. Baseline source, raw metrics, hashes and the
+resolved commit are retained alongside the current report under ignored `target/`.
 
 The reporter inventories tracked and non-ignored new `.rs` files under `src/`,
 `tests/` and `examples/`. It excludes vendor code, reference checkouts, build output,
@@ -56,11 +69,20 @@ Test-only item spans come from Rust attributes and AST traversal. `cfg` predicat
 are evaluated with `test=false` and other predicates unknown; only definitely
 excluded items are classified as test-only. `#[test]`/`#[tokio::test]` and known
 standalone test paths (`tests/`, `tests.rs`, `*_tests.rs`, `regtest.rs`) also identify
-tests. Examples form a third category. Conditional lint levels (`allow`, `warn`,
+tests, as does the repository's `test_*.rs` helper naming convention. Test-only
+ranges take precedence over the examples category. Operational examples form a
+third category. Conditional lint levels (`allow`, `warn`,
 `deny`, `forbid`, `expect`) do not affect classification and are accepted regardless
 of their predicate. Other `cfg_attr` attributes, including mixed and nested lists,
 are flagged for manual classification review and exclude their file rather than
 silently guessing.
+
+The pinned grammar predates Rust C strings. After validating original source with
+`syn`, the helper replaces only each parsed C-string token's leading `c` with a
+space for metrics. This covers ordinary/raw literals and macro tokens, preserves
+byte positions/newlines and cannot add control-flow syntax. Raw evidence records
+`c_string_lines`; syntax probes compare scores and locations with equivalent string
+literals and still reject malformed Rust. Other grammar errors remain failures.
 
 This is not a compiled-feature report: all other feature branches remain present,
 including the default Zcash code. Cargo feature flags do not filter these metrics.
@@ -92,6 +114,22 @@ callables on the same line. It is a prioritization aid, **not LLVM's official
 per-function percentage**, branch coverage or a new execution of the test suite.
 
 ## Review discipline
+
+Review thresholds are **cognitive > 20** or **cyclomatic > 40**, using inclusive
+scores. Console and Markdown warnings flag new/unmatched production or operational
+example callables above either threshold, or matched callables whose above-threshold
+metric increased. Unchanged and improving hotspots remain visible in the rankings;
+test callables do not generate warnings. Warnings are also structured in
+`report.json` under `comparison`, with the base revision, thresholds and old/new
+values. Scores never change the command's exit status; incomplete current or base
+analysis does, and preserves the previous successful publication.
+
+Matching uses path, qualified name and category, never line numbers. Renames and
+ambiguous duplicate names/closures are reported as new or unmatched rather than
+guessed. Unchanged score multisets for duplicate identities do not warn. Review
+those warnings in context; helper extraction does not automatically justify a new
+hotspot. These are review triggers, not an instruction to split coherent code merely
+to meet a number. Own scores and nested callable rows remain available for review.
 
 Prioritize functions that combine financial transitions, permissions, network
 routing or cancellation with many branches. Extract coherent responsibilities,

@@ -86,11 +86,14 @@ Python-generated Keccak/EIP-712 vectors are committed as test data. See
 
 ### Local complexity metrics
 
-Run `python3 scripts/complexity.py` for an optional local audit using pinned
+Run `python3 scripts/complexity.py` for a local audit using pinned
 `rust-code-analysis`. Open `target/complexity/report.md`; full JSON/CSV retain all
 scores. Production callables, tests and examples are separated, parser failures
 are explicit, and existing coverage is joined only for unchanged source files.
-No complexity thresholds are enforced. See [definitions and findings](../tests/COMPLEXITY.md)
+`scripts/check.sh` runs the audit by default. New or worsening hotspots above CogC
+20 or CycC 40 receive advisory review warnings against the merge base with `main`;
+scores do not fail the check. Use `--base REF` or `COMPLEXITY_BASE_REF` for another
+review target. Incomplete analysis fails visibly. See [definitions and findings](../tests/COMPLEXITY.md)
 for syntax qualification, macro/feature limitations and the independent tool build.
 
 ### Local coverage

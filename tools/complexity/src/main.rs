@@ -120,12 +120,39 @@ impl<'ast> Visit<'ast> for Inventory {
         syn::visit::visit_attribute(self, node);
     }
 }
-fn analyze(path: &Path, code: &str) -> Value {
-    let parser = RustParser::new(code.as_bytes().to_vec(), path, None);
-    let mut errors = vec![];
-    if parser.get_root().has_error() {
-        errors.push("rust-code-analysis grammar reported an error or missing node".to_owned());
+// The pinned grammar predates C string literals. Replace only their token prefix
+// with whitespace for metrics, retaining every byte offset and newline. Original
+// Rust is still checked by syn; string contents cannot introduce control flow.
+fn c_string_compatibility(code: &str) -> Result<(Vec<u8>, Vec<usize>), String> {
+    fn visit(tokens: proc_macro2::TokenStream, bytes: &mut [u8], lines: &mut Vec<usize>) {
+        for token in tokens {
+            match token {
+                proc_macro2::TokenTree::Group(group) => visit(group.stream(), bytes, lines),
+                proc_macro2::TokenTree::Literal(literal)
+                    if syn::parse_str::<syn::LitCStr>(&literal.to_string()).is_ok() =>
+                {
+                    let offset = literal.span().byte_range().start;
+                    assert_eq!(bytes[offset], b'c');
+                    bytes[offset] = b' ';
+                    lines.push(literal.span().start().line);
+                }
+                _ => {}
+            }
+        }
     }
+    let tokens = code
+        .parse()
+        .map_err(|e| format!("token syntax error: {e}"))?;
+    let mut bytes = code.as_bytes().to_vec();
+    let mut lines = Vec::new();
+    visit(tokens, &mut bytes, &mut lines);
+    Ok((bytes, lines))
+}
+
+fn analyze(path: &Path, code: &str) -> Value {
+    let mut errors = vec![];
+    let mut metric_code = code.as_bytes().to_vec();
+    let mut c_string_lines = Vec::new();
     let mut inventory = Inventory::default();
     match syn::parse_file(code) {
         Ok(file) => {
@@ -133,17 +160,28 @@ fn analyze(path: &Path, code: &str) -> Value {
                 inventory.test_ranges.push((1, code.lines().count()));
             }
             inventory.visit_file(&file);
+            match c_string_compatibility(code) {
+                Ok((bytes, lines)) => {
+                    metric_code = bytes;
+                    c_string_lines = lines;
+                }
+                Err(error) => errors.push(error),
+            }
         }
         Err(e) => errors.push(format!(
             "syn syntax error at line {}: {e}",
             e.span().start().line
         )),
     }
+    let parser = RustParser::new(metric_code, path, None);
+    if parser.get_root().has_error() {
+        errors.push("rust-code-analysis grammar reported an error or missing node".to_owned());
+    }
     let metrics = rust_code_analysis::metrics(&parser, path);
     if metrics.is_none() {
         errors.push("analyzer returned no metric tree".into());
     }
-    json!({"path":path,"errors":errors,"test_ranges":inventory.test_ranges,
+    json!({"path":path,"errors":errors,"c_string_lines":c_string_lines,"test_ranges":inventory.test_ranges,
         "macro_lines":inventory.macro_lines,"test_attribute_lines":inventory.test_attribute_lines,"cfg_attr_lines":inventory.cfg_attr_lines,"metrics":metrics})
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -217,6 +255,31 @@ mod tests {
         for code in ["fn f( {", "fn f() { if true { foo(); }"] {
             assert!(
                 !analyze(Path::new("bad.rs"), code)["errors"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn c_strings_preserve_scores_locations_and_literal_contents() {
+        let code = "// c\"untouched\"\nfn f(a: bool) { let _ = \"é\"; let _ = c\"if else\";\nlet _ = cr#\"match \\\"\nwhile\"#; call!(c\"macro\"); if a { work(); } }";
+        let (bytes, lines) = c_string_compatibility(code).unwrap();
+        let normalized = String::from_utf8(bytes).unwrap();
+        assert_eq!(normalized.len(), code.len());
+        assert_eq!(lines, vec![2, 3, 4]);
+        assert!(normalized.starts_with("// c\"untouched\""));
+        assert_eq!(score(code), score(&normalized));
+        let original = analyze(Path::new("probe.rs"), code);
+        let compatible = analyze(Path::new("probe.rs"), &normalized);
+        assert_eq!(original["metrics"], compatible["metrics"]);
+        for bad in [
+            "fn f() { let _ = c\"unterminated; }",
+            "fn f( { let _ = c\"ok\"; }",
+        ] {
+            assert!(
+                !analyze(Path::new("bad.rs"), bad)["errors"]
                     .as_array()
                     .unwrap()
                     .is_empty()

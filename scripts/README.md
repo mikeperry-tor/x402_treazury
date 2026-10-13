@@ -7,9 +7,9 @@ any working directory unless a command explicitly supplies relative data paths.
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
 | `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
-| `check.sh` | Format, vendor provenance, default Zcash tests, offline refund-accounting tests, all-feature Clippy and compatibility suite |
+| `check.sh` | Format, advisory complexity regressions, vendor provenance, default Zcash tests, offline refund-accounting tests, all-feature Clippy and compatibility suite |
 | `check.sh --no-default-features` | Explicit opt-in only: tests and Clippy without the embedded wallet, plus format/provenance |
-| `python3 scripts/complexity.py` | Pinned source complexity metrics; ranked Markdown and complete JSON/CSV under `target/complexity` |
+| `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
 | `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
 | `coverage.sh --proving` | Only the named synthetic proving test; `target/coverage-proving` |
@@ -24,6 +24,10 @@ requested. The standard build includes Zcash; static-wallet deployments need no 
 configuration. If both variants are requested, run them sequentially: CLI tests share
 `target/debug/x402_treazury`.
 `check.sh` leaves the Zcash-enabled executable available at that path.
+Its complexity audit warns above CogC 20 or CycC 40 for new/unmatched or worsening
+callables; scores never fail tests. Missing baseline history or incomplete analysis
+fails the audit. Set `COMPLEXITY_BASE_REF` for another review target; CI must fetch
+that ref and its merge-base history. See [audit details](../tests/COMPLEXITY.md).
 It also runs the feature-gated `treasury::refunds::tests` with `zcash-testutils`
 after the default suite, exercising return attribution and canonical credit
 revalidation through local sync fixtures.
