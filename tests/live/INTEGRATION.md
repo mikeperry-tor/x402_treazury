@@ -123,6 +123,12 @@ exposure. Allow deliberate draining to finish; never restart to replay a reserve
 uncertain or completed case. Run exits are 0 for qualified success, 2 for completed
 failure, 3 for incomplete work and 4 for safety/configuration/process-evidence errors.
 Report success only means evidence was read and rendered.
+Each batch is reserved before dispatch, and each case records its dispatch intent
+before its MCP task starts. Future or expired phases stay untouched; a dependency
+refusal does not prevent an independent phase from running. Cancellation drops
+runner-side waits while the outer owner drains the supervised application.
+Completed peers and pending claims remain recorded; application completion during
+drain cannot invent a response that the runner did not receive.
 Canonical `EXPIRED_UNUSED` or `NOT_SIGNED` outcomes stop payment observation with
 an explicit warning; a successful MCP response still cannot qualify as paid without
 a verified debit. Pending authorizations and consumed authorizations without debit

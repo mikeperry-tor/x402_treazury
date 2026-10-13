@@ -461,16 +461,7 @@ async fn execute(
                 stop,
             )
             .await?;
-            let batches = match &phase.scenario {
-                Scenario::Concurrency { batches } => batches.clone(),
-                Scenario::Lifecycle { rounds, .. } => rounds[round_index]
-                    .depletion_cases
-                    .iter()
-                    .chain(&rounds[round_index].service_cases)
-                    .map(|id| vec![id.clone()])
-                    .collect(),
-                _ => phase.cases.iter().map(|c| vec![c.clone()]).collect(),
-            };
+            let batches = round_batches(phase, round_index);
             for ids in batches {
                 let untouched = ids.iter().all(|id| {
                     registry
@@ -497,131 +488,22 @@ async fn execute(
                     eprintln!("phase {} cannot dispatch: {error:#}", phase.id);
                     break;
                 }
-                let mut tasks = tokio::task::JoinSet::new();
-                let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(ids.len()));
-                for id in &ids {
-                    let case = m
-                        .cases
-                        .iter()
-                        .find(|c| &c.id == id)
-                        .context("unknown reserved case")?
-                        .clone();
-                    registry.dispatching(&m.run_id, id)?;
-                    registry.event(
-                        &m.run_id,
-                        "mcp_dispatch_intent",
-                        &json!({"case":id,"server":case.server,"source":case.source}),
-                        now()?,
-                    )?;
-                    let client = clients[&case.server].clone();
-                    let barrier = barrier.clone();
-                    let limit = m.limits.result_bytes;
-                    let end = phase_deadline
-                        .min(Instant::now() + Duration::from_secs(m.limits.call_seconds));
-                    let stop = stop.clone();
-                    let fault = child.running()?.fault.clone();
-                    tasks.spawn(async move {
-                    let mut began = None;
-                    let result = tokio::select! {
-                        _ = stop.cancelled() => Err(anyhow::anyhow!("case cancelled")),
-                        _ = fault.cancelled() => Err(anyhow::anyhow!("child output failure")),
-                        result = tokio::time::timeout_at(end, async {
-                            barrier.wait().await;
-                            began = Some(execution_origin.elapsed().as_millis());
-                            client.call(&case.id, &case.tool, Value::Object(case.arguments), limit).await
-                        }) => result.context("case deadline exceeded").and_then(|r|r),
-                    }; (case.id, result, began, execution_origin.elapsed().as_millis())
-                });
-                }
-                let mut progress = tokio::time::interval(Duration::from_secs(15));
-                progress.tick().await;
-                while !tasks.is_empty() {
-                    let result = tokio::select! {
-                        value = tasks.join_next() => value.context("missing MCP task result")?,
-                        _ = progress.tick() => {
-                            eprintln!("qualification awaiting {} in-flight MCP calls within their deadlines; reservations remain held", tasks.len());
-                            continue;
-                        }
-                    };
-                    let (id, result, began, ended) = result
-                        .context("MCP driver task failed; reserved cases remain uncertain")?;
-                    match result {
-                        Ok((bytes, passed)) => {
-                            if m.cases.iter().any(|c| c.id == id && c.unsigned) {
-                                registry.finish_unsigned(&m.run_id, &id, &bytes, passed)?
-                            } else {
-                                registry.finish_managed(&m.run_id, &id, Some(&bytes), passed)?
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("case {id} incomplete: {error:#}");
-                            if m.cases.iter().any(|c| c.id == id && c.unsigned) {
-                                registry.uncertain_unsigned(&m.run_id, &id)?;
-                            } else {
-                                registry.finish_managed(&m.run_id, &id, None, false)?;
-                            }
-                            let category = if error
-                                .downcast_ref::<reqwest::Error>()
-                                .is_some_and(|e| e.is_timeout())
-                            {
-                                "mcp_transport_timeout"
-                            } else if error
-                                .downcast_ref::<tokio::time::error::Elapsed>()
-                                .is_some()
-                            {
-                                "case_deadline"
-                            } else {
-                                "mcp_request_failure"
-                            };
-                            registry.event(
-                            &m.run_id,
-                            "mcp_failure",
-                            &json!({"case":id,"category":category,"error":format!("{error:#}")}),
-                            now()?,
-                        )?;
-                        }
-                    }
-                    registry.event(&m.run_id, "mcp_finished", &json!({"case":id,"mcp_started_ms":began,"mcp_finished_ms":ended,"scope":"MCP request interval, not payment/signature interval"}), now()?)?;
-                }
+                let mut tasks = dispatch_batch(
+                    registry,
+                    m,
+                    &ids,
+                    clients,
+                    child,
+                    (phase_deadline, execution_origin),
+                    stop,
+                )?;
+                drain_batch(registry, m, &mut tasks).await?;
                 if let Some(controller) = &mut rotation {
                     controller
                         .after_case(registry, m, &ids[0], child.running()?, phase_deadline, stop)
                         .await?;
                 }
-                if m.limits.post_batch_wait_ms > 0
-                    && !matches!(phase.scenario, Scenario::TorOutage { .. })
-                {
-                    let wait = Duration::from_millis(m.limits.post_batch_wait_ms);
-                    ensure!(
-                        Instant::now() + wait <= phase_deadline,
-                        "post-batch wait cannot fit within remaining phase/run/window deadline"
-                    );
-                    eprintln!(
-                        "qualification settling for {} ms after batch; no new API calls are dispatched",
-                        m.limits.post_batch_wait_ms
-                    );
-                    registry.event(
-                        &m.run_id,
-                        "post_batch_wait",
-                        &json!({"batch":batch,"milliseconds":m.limits.post_batch_wait_ms}),
-                        now()?,
-                    )?;
-                    let fault = child.running()?.fault.clone();
-                    tokio::select! {
-                        _ = stop.cancelled() => anyhow::bail!("post-batch wait cancelled"),
-                        _ = fault.cancelled() => anyhow::bail!("child evidence failed during post-batch wait"),
-                        _ = tokio::time::sleep(wait) => {},
-                    }
-                    registry.event(
-                        &m.run_id,
-                        "post_batch_wait_completed",
-                        &json!({"batch":batch}),
-                        now()?,
-                    )?;
-                }
-                if !m.start.pools.is_empty() {
-                    registry.observe_settlement(&m.run_id, false)?;
-                }
+                settle_batch(registry, m, phase, &batch, child, phase_deadline, stop).await?;
             }
             if let Some(controller) = rotation {
                 if round_index == 0 && matches!(phase.scenario, Scenario::Lifecycle { .. }) {
@@ -656,6 +538,184 @@ async fn execute(
     }
     if !m.start.pools.is_empty() {
         bootstrap::wait_evidence(registry, m, None, child.running()?, deadline, stop).await?;
+    }
+    Ok(())
+}
+fn round_batches(phase: &Phase, round_index: usize) -> Vec<Vec<String>> {
+    match &phase.scenario {
+        Scenario::Concurrency { batches } => batches.clone(),
+        Scenario::Lifecycle { rounds, .. } => rounds[round_index]
+            .depletion_cases
+            .iter()
+            .chain(&rounds[round_index].service_cases)
+            .map(|id| vec![id.clone()])
+            .collect(),
+        _ => phase.cases.iter().map(|c| vec![c.clone()]).collect(),
+    }
+}
+
+type McpCompletion = (String, Result<(Vec<u8>, bool)>, Option<u128>, u128);
+
+fn dispatch_batch(
+    registry: &mut Registry,
+    m: &Manifest,
+    ids: &[String],
+    clients: &BTreeMap<String, mcp::Client>,
+    child: &mut session::Application<'_>,
+    (phase_deadline, execution_origin): (Instant, Instant),
+    stop: &CancellationToken,
+) -> Result<tokio::task::JoinSet<McpCompletion>> {
+    let mut tasks = tokio::task::JoinSet::new();
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(ids.len()));
+    for id in ids {
+        let case = m
+            .cases
+            .iter()
+            .find(|c| &c.id == id)
+            .context("unknown reserved case")?
+            .clone();
+        registry.dispatching(&m.run_id, id)?;
+        registry.event(
+            &m.run_id,
+            "mcp_dispatch_intent",
+            &json!({"case":id,"server":case.server,"source":case.source}),
+            now()?,
+        )?;
+        let client = clients[&case.server].clone();
+        let barrier = barrier.clone();
+        let limit = m.limits.result_bytes;
+        let end = phase_deadline.min(Instant::now() + Duration::from_secs(m.limits.call_seconds));
+        let stop = stop.clone();
+        let fault = child.running()?.fault.clone();
+        tasks.spawn(async move {
+            let mut began = None;
+            let result = tokio::select! {
+                _ = stop.cancelled() => Err(anyhow::anyhow!("case cancelled")),
+                _ = fault.cancelled() => Err(anyhow::anyhow!("child output failure")),
+                result = tokio::time::timeout_at(end, async {
+                    barrier.wait().await;
+                    began = Some(execution_origin.elapsed().as_millis());
+                    client.call(&case.id, &case.tool, Value::Object(case.arguments), limit).await
+                }) => result.context("case deadline exceeded").and_then(|r|r),
+            };
+            (
+                case.id,
+                result,
+                began,
+                execution_origin.elapsed().as_millis(),
+            )
+        });
+    }
+    Ok(tasks)
+}
+
+async fn drain_batch(
+    registry: &mut Registry,
+    m: &Manifest,
+    tasks: &mut tokio::task::JoinSet<McpCompletion>,
+) -> Result<()> {
+    let mut progress = tokio::time::interval(Duration::from_secs(15));
+    progress.tick().await;
+    while !tasks.is_empty() {
+        let result = tokio::select! {
+            value = tasks.join_next() => value.context("missing MCP task result")?,
+            _ = progress.tick() => {
+                eprintln!("qualification awaiting {} in-flight MCP calls within their deadlines; reservations remain held", tasks.len());
+                continue;
+            }
+        };
+        let completion =
+            result.context("MCP driver task failed; reserved cases remain uncertain")?;
+        record_completion(registry, m, completion)?;
+    }
+    Ok(())
+}
+
+fn record_completion(
+    registry: &mut Registry,
+    m: &Manifest,
+    (id, result, began, ended): McpCompletion,
+) -> Result<()> {
+    match result {
+        Ok((bytes, passed)) => {
+            if m.cases.iter().any(|c| c.id == id && c.unsigned) {
+                registry.finish_unsigned(&m.run_id, &id, &bytes, passed)?
+            } else {
+                registry.finish_managed(&m.run_id, &id, Some(&bytes), passed)?
+            }
+        }
+        Err(error) => {
+            eprintln!("case {id} incomplete: {error:#}");
+            if m.cases.iter().any(|c| c.id == id && c.unsigned) {
+                registry.uncertain_unsigned(&m.run_id, &id)?;
+            } else {
+                registry.finish_managed(&m.run_id, &id, None, false)?;
+            }
+            let category = if error
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(|e| e.is_timeout())
+            {
+                "mcp_transport_timeout"
+            } else if error
+                .downcast_ref::<tokio::time::error::Elapsed>()
+                .is_some()
+            {
+                "case_deadline"
+            } else {
+                "mcp_request_failure"
+            };
+            registry.event(
+                &m.run_id,
+                "mcp_failure",
+                &json!({"case":id,"category":category,"error":format!("{error:#}")}),
+                now()?,
+            )?;
+        }
+    }
+    registry.event(&m.run_id, "mcp_finished", &json!({"case":id,"mcp_started_ms":began,"mcp_finished_ms":ended,"scope":"MCP request interval, not payment/signature interval"}), now()?)?;
+    Ok(())
+}
+
+async fn settle_batch(
+    registry: &mut Registry,
+    m: &Manifest,
+    phase: &Phase,
+    batch: &str,
+    child: &mut session::Application<'_>,
+    phase_deadline: Instant,
+    stop: &CancellationToken,
+) -> Result<()> {
+    if m.limits.post_batch_wait_ms > 0 && !matches!(phase.scenario, Scenario::TorOutage { .. }) {
+        let wait = Duration::from_millis(m.limits.post_batch_wait_ms);
+        ensure!(
+            Instant::now() + wait <= phase_deadline,
+            "post-batch wait cannot fit within remaining phase/run/window deadline"
+        );
+        eprintln!(
+            "qualification settling for {} ms after batch; no new API calls are dispatched",
+            m.limits.post_batch_wait_ms
+        );
+        registry.event(
+            &m.run_id,
+            "post_batch_wait",
+            &json!({"batch":batch,"milliseconds":m.limits.post_batch_wait_ms}),
+            now()?,
+        )?;
+        let fault = child.running()?.fault.clone();
+        tokio::select! {
+            _ = stop.cancelled() => anyhow::bail!("post-batch wait cancelled"),
+            _ = fault.cancelled() => anyhow::bail!("child evidence failed during post-batch wait"),
+            _ = tokio::time::sleep(wait) => {},
+        }
+        registry.event(
+            &m.run_id,
+            "post_batch_wait_completed",
+            &json!({"batch":batch}),
+            now()?,
+        )?;
+    }
+    if !m.start.pools.is_empty() {
+        registry.observe_settlement(&m.run_id, false)?;
     }
     Ok(())
 }
