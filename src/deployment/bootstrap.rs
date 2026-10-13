@@ -434,33 +434,19 @@ async fn check_startup(
                 .and_then(|c| c.get(&group.name))
                 .unwrap_or(&group.claims)
                 .clone();
-            let mut path_count = 0;
-            let mut pending = 0;
-            let mut actionable = false;
-            let mut logged = 0;
             let maximum = *attempts
                 .get(&group.name)
                 .context("startup funding policy missing")?;
-            {
-                let pool = group.pool.clone();
-                let claims = claims.clone();
-                let paths = store
-                    .call(move |s| s.startup_claim_paths(&pool, &claims))
-                    .await?;
-                for path in paths {
-                    path_count += 1;
-                    let disposition = path.disposition(maximum, group.source_pending);
-                    if disposition == StartupDisposition::DestinationReady {
-                        continue;
-                    }
-                    pending += 1;
-                    actionable |= !matches!(disposition, StartupDisposition::Obstructed(_));
-                    if progress && logged < 8 {
-                        logged += 1;
-                        tracing::info!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap awaiting destination inventory; original operation remains owned");
-                    }
-                }
-            }
+            let pool = group.pool.clone();
+            let query_claims = claims.clone();
+            let paths = store
+                .call(move |s| s.startup_claim_paths(&pool, &query_claims))
+                .await?;
+            let PathAssessment {
+                path_count,
+                pending,
+                actionable,
+            } = assess_startup_paths(paths, maximum, &group, progress);
             if captured.is_some() && path_count == claims.len() && pending == 0 {
                 continue;
             }
@@ -487,6 +473,42 @@ async fn check_startup(
     }
     Ok(all_ready)
 }
+struct PathAssessment {
+    path_count: usize,
+    pending: usize,
+    actionable: bool,
+}
+
+fn assess_startup_paths(
+    paths: Vec<crate::rotation::store::bootstrap::StartupPath>,
+    maximum: u32,
+    group: &crate::rotation::store::bootstrap::StartupGroup,
+    progress: bool,
+) -> PathAssessment {
+    let mut path_count = 0;
+    let mut pending = 0;
+    let mut actionable = false;
+    let mut logged = 0;
+    for path in paths {
+        path_count += 1;
+        let disposition = path.disposition(maximum, group.source_pending);
+        if disposition == StartupDisposition::DestinationReady {
+            continue;
+        }
+        pending += 1;
+        actionable |= !matches!(disposition, StartupDisposition::Obstructed(_));
+        if progress && logged < 8 {
+            logged += 1;
+            tracing::info!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap awaiting destination inventory; original operation remains owned");
+        }
+    }
+    PathAssessment {
+        path_count,
+        pending,
+        actionable,
+    }
+}
+
 #[derive(Debug)]
 struct StartupObstructed {
     group: String,

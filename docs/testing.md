@@ -97,6 +97,12 @@ Synthetic checks do not supply that missing proof or qualify a live migration.
 Funded lifecycle, privacy and combined cover/payment acceptance retain the limits
 listed under [qualification status](#qualification-status).
 
+Bootstrap readiness tests distinguish captured-claim completion from ordinary
+serving readiness, including paged vacant inventory and assessment without writes.
+Store-level tests cover historical claim generations and obstruction dispositions;
+owner tests cover cancellation and drain. These are complementary checks, not an
+exhaustive enumeration of concurrency schedules.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency

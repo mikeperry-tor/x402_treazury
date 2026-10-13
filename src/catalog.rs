@@ -722,19 +722,7 @@ pub(crate) fn operations_with_credits(
     credit_key: Option<&str>,
 ) -> Result<Vec<Value>> {
     if root.get("paths").is_none() {
-        let mut ops = root
-            .get("operations")
-            .and_then(Value::as_array)
-            .cloned()
-            .context("expected OpenAPI paths or operations digest")?;
-        if let Some(key) = credit_key {
-            for op in &mut ops {
-                if let Some(metadata) = op.get(key).cloned() {
-                    op["credit_pricing"] = metadata;
-                }
-            }
-        }
-        return Ok(ops);
+        return digest_operations(root, credit_key);
     }
     let mut ops = Vec::new();
     for (path, item) in root["paths"]
@@ -745,33 +733,73 @@ pub(crate) fn operations_with_credits(
             if !["get", "post", "put", "patch", "delete"].contains(&method.as_str()) {
                 continue;
             }
-            let mut params = Vec::new();
-            for p in op["parameters"].as_array().into_iter().flatten() {
-                let p = resolve(root, p, &mut BTreeSet::new());
-                if !p["name"].is_string() {
-                    continue;
-                }
-                let s = schema(&resolve(
-                    root,
-                    p.get("schema").unwrap_or(&json!({})),
-                    &mut BTreeSet::new(),
-                ));
-                params.push(json!({"name": p["name"], "in": p["in"],
-                    "required": p["required"].as_bool().unwrap_or(false),
-                    "description": p.get("description").filter(|v| !v.is_null()).unwrap_or(&s["description"]),
-                    "schema": s}));
-            }
-            let body = op.get("requestBody").filter(|v| !v.is_null()).map(|rb| {
-                let rb = resolve(root, rb, &mut BTreeSet::new());
-                json!({"required": rb["required"].as_bool().unwrap_or(false),
-                    "schema": schema(rb.pointer("/content/application~1json/schema").unwrap_or(&json!({})))})
-            });
-            ops.push(json!({"path":path, "method":method, "summary":op["summary"],
-                "description":op["description"], "tags":op.get("tags").cloned().unwrap_or(json!([])),
-                "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body}));
+            ops.push(openapi_operation(
+                root,
+                path,
+                method,
+                op,
+                pricing_key,
+                credit_key,
+            ));
         }
     }
     Ok(ops)
+}
+
+fn digest_operations(root: &Value, credit_key: Option<&str>) -> Result<Vec<Value>> {
+    let mut ops = root
+        .get("operations")
+        .and_then(Value::as_array)
+        .cloned()
+        .context("expected OpenAPI paths or operations digest")?;
+    if let Some(key) = credit_key {
+        for op in &mut ops {
+            if let Some(metadata) = op.get(key).cloned() {
+                op["credit_pricing"] = metadata;
+            }
+        }
+    }
+    Ok(ops)
+}
+
+fn openapi_operation(
+    root: &Value,
+    path: &str,
+    method: &str,
+    op: &Value,
+    pricing_key: Option<&str>,
+    credit_key: Option<&str>,
+) -> Value {
+    let params: Vec<_> = op["parameters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| openapi_parameter(root, p))
+        .collect();
+    let body = op.get("requestBody").filter(|v| !v.is_null()).map(|rb| {
+        let rb = resolve(root, rb, &mut BTreeSet::new());
+        json!({"required": rb["required"].as_bool().unwrap_or(false),
+            "schema": schema(rb.pointer("/content/application~1json/schema").unwrap_or(&json!({})))})
+    });
+    json!({"path":path, "method":method, "summary":op["summary"],
+        "description":op["description"], "tags":op.get("tags").cloned().unwrap_or(json!([])),
+        "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body})
+}
+
+fn openapi_parameter(root: &Value, parameter: &Value) -> Option<Value> {
+    let p = resolve(root, parameter, &mut BTreeSet::new());
+    if !p["name"].is_string() {
+        return None;
+    }
+    let s = schema(&resolve(
+        root,
+        p.get("schema").unwrap_or(&json!({})),
+        &mut BTreeSet::new(),
+    ));
+    Some(json!({"name": p["name"], "in": p["in"],
+        "required": p["required"].as_bool().unwrap_or(false),
+        "description": p.get("description").filter(|v| !v.is_null()).unwrap_or(&s["description"]),
+        "schema": s}))
 }
 
 /// Listener tags match the exact path and case-insensitive HTTP method. Tag values

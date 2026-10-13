@@ -21,7 +21,9 @@ local specs are inputs for providers whose public schema needs adaptation; the
 fixture utility is `examples/snapshot_spec.rs`. Tests pin generated contracts
 against `tests/fixtures/`. Operation validation and stable sorting precede path,
 method and tag selection; only selected operations contribute to name collisions.
-Tool-name filters apply after collision resolution. Header parameters do not grant agents control over
+Tool-name filters apply after collision resolution. Digest metadata copying and
+OpenAPI operation conversion remain separate; conversion retains operation-level
+parameters and the existing reference-resolution rules. Header parameters do not grant agents control over
 payment headers. Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 
