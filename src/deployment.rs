@@ -262,6 +262,36 @@ impl MetaConfig {
         Ok(resolution)
     }
 }
+#[cfg(feature = "zcash")]
+async fn install_funding_restrictions(
+    store: &crate::rotation::store::StoreHandle,
+    restriction: crate::rotation::restriction::FundingRestriction,
+    auto_fund: bool,
+) -> Result<()> {
+    if let Some(permits) = crate::qualification::managed_permits() {
+        store
+            .call(move |s| s.install_funding_permits(permits))
+            .await?;
+    }
+    if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding {
+        store
+            .call(|s| {
+                s.deny_new_funding();
+                Ok(())
+            })
+            .await?;
+    }
+    if !auto_fund {
+        store
+            .call(|s| {
+                s.pause_new_funding();
+                Ok(())
+            })
+            .await?;
+    }
+    Ok(())
+}
+
 fn validate_selected_cover(
     wallet_resolution: &Resolution,
     sources: &BTreeMap<String, Source>,
@@ -559,16 +589,10 @@ impl Deployment {
             .map(|(id, source)| Ok((id.clone(), catalog::tag_counts(&source.document)?)))
             .collect()
     }
-    async fn initialize_wallets(
+    async fn validate_static_identities(
         &self,
-        env: &BTreeMap<String, String>,
-        restriction: crate::rotation::restriction::FundingRestriction,
         only_wallets: Option<&BTreeSet<String>>,
-        relay_wallets: &BTreeSet<String>,
-    ) -> Result<InitializedWallets> {
-        #[cfg(not(feature = "zcash"))]
-        let _ = restriction;
-        let secret = |key: &str| required_secret(env, key);
+    ) -> Result<()> {
         // Static-only serving does not unlock state, but must not reuse a known
         // managed profile name as a different wallet identity.
         if !self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
@@ -591,6 +615,15 @@ impl Deployment {
                 );
             }
         }
+        Ok(())
+    }
+
+    fn static_wallets(
+        &self,
+        env: &BTreeMap<String, String>,
+        only_wallets: Option<&BTreeSet<String>>,
+        relay_wallets: &BTreeSet<String>,
+    ) -> Result<BTreeMap<String, PaidClient>> {
         let mut wallets = BTreeMap::new();
         // Only effective static profiles for selected tools need keys. An overridden
         // default or a source removed by listener filters must not load a signer.
@@ -615,13 +648,62 @@ impl Deployment {
             } = &self.wallet_resolution.wallets[&name]
             {
                 let payer = Payer::new(
-                    &secret(private_key_env)?,
+                    &required_secret(env, private_key_env)?,
                     SpendPolicy::dollars(max_api_payment_usdc)?,
                 )
                 .with_context(|| format!("wallet {name}: invalid signing configuration"))?;
                 wallets.insert(name, PaidClient::new(payer));
             }
         }
+        Ok(wallets)
+    }
+
+    #[cfg(feature = "zcash")]
+    fn managed_connection_preflight(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<(
+        crate::treasury::SyncSettings,
+        crate::rotation::base::BaseRpc,
+    )> {
+        use crate::rotation::base::{BaseRpc, secure_endpoint};
+        let t = self.config.treasury.as_ref().unwrap();
+        let f = self.config.funding.as_ref().unwrap();
+        // Resolve endpoints before starting supervised bootstrap or serving workers.
+        let sync_settings = crate::treasury::SyncSettings::new(
+            t.indexer_endpoint(|name| env.get(name).cloned())?,
+            t.confirmations,
+            t.max_sync_age_seconds,
+        )?;
+        secure_endpoint(&t.submission_endpoint(|name| env.get(name).cloned())?)?;
+        if let Some(key) = &f.near_api_key_env {
+            required_secret(env, key)?;
+        }
+        let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
+        if self.config.network.mode == crate::network::Mode::Direct {
+            tracing::warn!(
+                provider_count = urls.len(),
+                default_fallbacks = f.base_rpc_fallback_url_envs.is_none(),
+                "Direct Base RPC verification exposes your client IP address and queried wallet addresses to each contacted RPC provider, including fallbacks; see config show base_rpc_policy"
+            );
+        }
+        let base =
+            BaseRpc::with_fallbacks(&urls, f.base_confirmations, f.base_max_block_age_seconds)?;
+        Ok((sync_settings, base))
+    }
+
+    async fn initialize_wallets(
+        &self,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+        only_wallets: Option<&BTreeSet<String>>,
+        relay_wallets: &BTreeSet<String>,
+    ) -> Result<InitializedWallets> {
+        #[cfg(not(feature = "zcash"))]
+        let _ = restriction;
+        let secret = |key: &str| required_secret(env, key);
+        self.validate_static_identities(only_wallets).await?;
+        let mut wallets = self.static_wallets(env, only_wallets, relay_wallets)?;
         #[cfg(feature = "zcash")]
         let mut treasury = None;
         #[cfg(feature = "zcash")]
@@ -635,35 +717,10 @@ impl Deployment {
             bail!("managed serving requires a build with --features zcash");
             #[cfg(feature = "zcash")]
             {
-                use crate::rotation::{
-                    base::{BaseRpc, secure_endpoint},
-                    manager::ManagedPool,
-                };
+                use crate::rotation::manager::ManagedPool;
                 let t = self.config.treasury.as_ref().unwrap();
                 let f = self.config.funding.as_ref().unwrap();
-                // Resolve endpoints before starting supervised bootstrap or serving workers.
-                let sync_settings = crate::treasury::SyncSettings::new(
-                    t.indexer_endpoint(|name| env.get(name).cloned())?,
-                    t.confirmations,
-                    t.max_sync_age_seconds,
-                )?;
-                secure_endpoint(&t.submission_endpoint(|name| env.get(name).cloned())?)?;
-                if let Some(key) = &f.near_api_key_env {
-                    secret(key)?;
-                }
-                let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
-                if self.config.network.mode == crate::network::Mode::Direct {
-                    tracing::warn!(
-                        provider_count = urls.len(),
-                        default_fallbacks = f.base_rpc_fallback_url_envs.is_none(),
-                        "Direct Base RPC verification exposes your client IP address and queried wallet addresses to each contacted RPC provider, including fallbacks; see config show base_rpc_policy"
-                    );
-                }
-                let base = BaseRpc::with_fallbacks(
-                    &urls,
-                    f.base_confirmations,
-                    f.base_max_block_age_seconds,
-                )?;
+                let (sync_settings, base) = self.managed_connection_preflight(env)?;
                 let mut owner = crate::treasury::Treasury::open(
                     t.state_dir.clone(),
                     t.key_file.clone(),
@@ -672,27 +729,7 @@ impl Deployment {
                 .await?;
                 owner.configure_sync(sync_settings);
                 let store = owner.store_handle();
-                if let Some(permits) = crate::qualification::managed_permits() {
-                    store
-                        .call(move |s| s.install_funding_permits(permits))
-                        .await?;
-                }
-                if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding {
-                    store
-                        .call(|s| {
-                            s.deny_new_funding();
-                            Ok(())
-                        })
-                        .await?;
-                }
-                if !f.auto_fund {
-                    store
-                        .call(|s| {
-                            s.pause_new_funding();
-                            Ok(())
-                        })
-                        .await?;
-                }
+                install_funding_restrictions(&store, restriction, f.auto_fund).await?;
                 let managed = self
                     .wallet_resolution
                     .wallets

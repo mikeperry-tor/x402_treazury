@@ -62,6 +62,12 @@ reserve vacancies follow their exact current claims; there is no separate initia
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#paid-discovery-relay).
 
+Deployment initialization checks managed connection settings before opening the
+treasury and installs qualification, funding-denial and pause restrictions before
+configuring pools. Static signers are loaded only for effective selected bindings,
+including source management and relay wallets. If discovery fails after wallets
+are initialized, loading shuts down the retained owner before returning an error.
+
 `src/catalog_state.rs` publishes immutable snapshots. A tool invocation captures
 its route, output policy and payer binding so a concurrent catalog replacement
 cannot redirect an in-flight call. Listener filters constrain invocation as well
