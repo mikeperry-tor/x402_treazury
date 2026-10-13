@@ -272,6 +272,9 @@ apply. Dispatched requests stay charged on failure; in-flight reservations do no
 expire. Completed budget entries remain charged for a full window after completion,
 a conservative rolling limit. Budget/history/owner exhaustion is an explicit
 refusal, never permission to drop accounting or queue real calls indefinitely.
+Preemption and shutdown await local range cleanup. Partially received body bytes
+remain charged when that cleanup releases the unused reservation; cancellation
+cannot turn an incomplete qualification into success.
 
 At the owner bound, insertion reclaims the least-recently-used fully inactive
 entry. Reclamation requires an exhausted episode, zero real calls and streams,

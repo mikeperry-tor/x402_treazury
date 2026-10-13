@@ -52,6 +52,8 @@ pub struct Call {
     completed: bool,
     request_pending: bool,
 }
+type RangeCompletion = (bool, Result<Representation, range::Failure>);
+
 impl Engine {
     pub fn new(limits: Limits) -> Arc<Self> {
         Arc::new(Self {
@@ -215,6 +217,245 @@ impl Engine {
             serde_json::json!({"version":1,"connection_affinity":"pooled_best_effort_unobserved","metrics":*self.metrics.lock().unwrap()})
         );
     }
+    fn choose_range(
+        &self,
+        owner: &Owner,
+        s: &Arc<Session>,
+        available: u64,
+    ) -> Result<Option<(Range, bool)>, &'static str> {
+        let capability = self.registry.lock().unwrap().owners[owner]
+            .capability
+            .clone();
+        let choice = match capability {
+            Capability::Unknown => (Range::qualification(&s.config), true),
+            Capability::Available { length, validator } => {
+                let requested = match self.random(|r| s.config.ranges.sample(Unit::Bytes, r)) {
+                    Ok(n) => n,
+                    Err(_) => {
+                        return Err("cover_sampling_exhausted");
+                    }
+                };
+                let length_request = requested.min(length).min(available);
+                if length_request != requested {
+                    tracing::warn!(
+                        code = "cover_range_size_adjusted",
+                        sampled_bytes = requested,
+                        admitted_bytes = length_request,
+                        "optional range reduced to resource/remaining episode capacity"
+                    );
+                    self.record(s, "cover_range_size_adjusted");
+                }
+                let start = self
+                    .random(|r| Ok(r.random_range(0..=length - length_request)))
+                    .unwrap();
+                (
+                    Range {
+                        start,
+                        length: length_request,
+                        expected: Some(Representation { length, validator }),
+                    },
+                    false,
+                )
+            }
+            Capability::Unavailable(code) => {
+                return Err(code);
+            }
+            Capability::Checking => {
+                return Ok(None);
+            }
+        };
+        Ok(Some(choice))
+    }
+    fn dispatch_range(
+        &self,
+        owner: &Owner,
+        s: &Arc<Session>,
+        http: &reqwest::Client,
+        pending: &mut JoinSet<RangeCompletion>,
+        (range, qualifying): (Range, bool),
+        (now, deadline): (Instant, Instant),
+    ) -> Result<bool, &'static str> {
+        let reserved = match s
+            .episode
+            .lock()
+            .unwrap()
+            .reserve(&s.config, now, range.length)
+        {
+            Ok(n) => n,
+            Err(_) => {
+                return Err("cover_episode_limit");
+            }
+        };
+        let budget = match self.budget.reserve(now, reserved, 0, true) {
+            Ok(b) => b,
+            Err(e) => {
+                s.episode.lock().unwrap().finish(reserved, 0, false);
+                return Err(e.code());
+            }
+        };
+        if qualifying {
+            self.registry
+                .lock()
+                .unwrap()
+                .owners
+                .get_mut(owner)
+                .unwrap()
+                .begin_qualification();
+        }
+        let mut range = range;
+        if reserved != range.length {
+            tracing::warn!(
+                code = "cover_range_size_adjusted",
+                requested_bytes = range.length,
+                admitted_bytes = reserved,
+                "optional qualification reduced to remaining episode capacity"
+            );
+            self.record(s, "cover_range_size_adjusted");
+        }
+        range.length = reserved;
+        let resource_url = self.registry.lock().unwrap().owners[owner]
+            .resource_url()
+            .to_owned();
+        let mut padding_request = reqwest::Request::new(
+            reqwest::Method::GET,
+            resource_url.parse().expect("validated cover URL"),
+        );
+        padding_request.headers_mut().insert(
+            reqwest::header::RANGE,
+            format!("bytes={}-{}", range.start, range.start + reserved - 1)
+                .parse()
+                .unwrap(),
+        );
+        padding_request.headers_mut().insert(
+            reqwest::header::ACCEPT_ENCODING,
+            reqwest::header::HeaderValue::from_static("identity"),
+        );
+        let padding_budget = self.pad(s, &mut padding_request, false);
+        let padding = s.config.padding.as_ref().and_then(|p| {
+            padding_request
+                .headers()
+                .get(p.header_name.as_str())
+                .cloned()
+                .map(|v| (p.header_name.parse().unwrap(), v))
+        });
+        let counter = budget.counter();
+        #[cfg(test)]
+        {
+            *self.last_range_counter.lock().unwrap() = Some(counter.clone());
+        }
+        let mut guard = RangeGuard {
+            metrics: self.metrics.clone(),
+            outcome: None,
+            dispatched: false,
+            session: s.clone(),
+            reserved,
+            counter,
+        };
+        let mut cfg = (*s.config).clone();
+        cfg.url = resource_url;
+        cfg.fallback_url = None;
+        let client = http.clone();
+        let mut gate = s.gate.lock().unwrap();
+        if gate.paused > 0 {
+            drop(gate);
+            if qualifying {
+                self.registry
+                    .lock()
+                    .unwrap()
+                    .owners
+                    .get_mut(owner)
+                    .unwrap()
+                    .capability = Capability::Unknown;
+            }
+            drop(guard);
+            drop(budget);
+            return Ok(false);
+        }
+        gate.handles.retain(|h| !h.is_finished());
+        let handle = pending.spawn(async move {
+            guard.dispatched = true;
+            {
+                let mut m = guard.metrics.lock().unwrap();
+                m.in_flight_ranges += 1;
+                m.peak_in_flight_ranges = m.peak_in_flight_ranges.max(m.in_flight_ranges);
+            }
+            let mut padding_budget = padding_budget;
+            if let Some(p) = &mut padding_budget {
+                p.dispatched();
+            }
+            let result = range::download(&client, &cfg, range, deadline, budget, padding).await;
+            guard.outcome = Some(result.as_ref().map(|_| "qualified").unwrap_or_else(|e| e.0));
+            drop(guard);
+            (qualifying, result)
+        });
+        gate.handles.push(handle);
+        drop(gate);
+        Ok(true)
+    }
+    fn complete_range(
+        &self,
+        owner: &Owner,
+        s: &Arc<Session>,
+        item: Option<Result<RangeCompletion, tokio::task::JoinError>>,
+    ) -> Result<Option<Instant>, &'static str> {
+        match item {
+            Some(Ok((qualifying, result))) => {
+                let mut next = None;
+                if qualifying {
+                    if let Err(error) = &result {
+                        let switched = self
+                            .registry
+                            .lock()
+                            .unwrap()
+                            .owners
+                            .get_mut(owner)
+                            .unwrap()
+                            .try_fallback(*error);
+                        if switched {
+                            self.record(s, error.0);
+                            self.record(s, "cover_fallback_selected");
+                            tracing::warn!(
+                                code = "cover_fallback_selected",
+                                reason = error.0,
+                                "Primary cover qualification failed; trying configured fallback within existing budgets"
+                            );
+                            return Ok(Some(Instant::now()));
+                        }
+                    }
+                    self.registry
+                        .lock()
+                        .unwrap()
+                        .owners
+                        .get_mut(owner)
+                        .unwrap()
+                        .qualified(result.clone());
+                    next = Some(Instant::now());
+                }
+                if let Err(error) = result {
+                    self.registry
+                        .lock()
+                        .unwrap()
+                        .owners
+                        .get_mut(owner)
+                        .unwrap()
+                        .capability = Capability::Unavailable(error.0);
+                    return Err(error.0);
+                }
+                Ok(next)
+            }
+            Some(Err(error)) if error.is_cancelled() => {
+                if matches!(
+                    self.registry.lock().unwrap().owners[owner].capability,
+                    Capability::Checking
+                ) {
+                    return Err("cover_qualification_preempted");
+                }
+                self.record(s, "cover_preempted_for_api");
+                Ok(None)
+            }
+            _ => Err("cover_task_failed"),
+        }
+    }
     async fn run(self: Arc<Self>, owner: Owner, s: Arc<Session>, http: reqwest::Client) {
         let mut pending = JoinSet::new();
         let mut next = s.episode.lock().unwrap().first_dispatch;
@@ -259,170 +500,32 @@ impl Engine {
                 && available > 0
                 && requests < s.config.max_requests_per_episode;
             if can_schedule {
-                let capability = self.registry.lock().unwrap().owners[&owner]
-                    .capability
-                    .clone();
-                let (range, qualifying) = match capability {
-                    Capability::Unknown => (Range::qualification(&s.config), true),
-                    Capability::Available { length, validator } => {
-                        let requested =
-                            match self.random(|r| s.config.ranges.sample(Unit::Bytes, r)) {
-                                Ok(n) => n,
-                                Err(_) => {
-                                    reason = "cover_sampling_exhausted";
-                                    break;
-                                }
-                            };
-                        let length_request = requested.min(length).min(available);
-                        if length_request != requested {
-                            tracing::warn!(
-                                code = "cover_range_size_adjusted",
-                                sampled_bytes = requested,
-                                admitted_bytes = length_request,
-                                "optional range reduced to resource/remaining episode capacity"
-                            );
-                            self.record(&s, "cover_range_size_adjusted");
-                        }
-                        let start = self
-                            .random(|r| Ok(r.random_range(0..=length - length_request)))
-                            .unwrap();
-                        (
-                            Range {
-                                start,
-                                length: length_request,
-                                expected: Some(Representation { length, validator }),
-                            },
-                            false,
-                        )
-                    }
-                    Capability::Unavailable(code) => {
-                        reason = code;
-                        break;
-                    }
-                    Capability::Checking => {
+                let (range, qualifying) = match self.choose_range(&owner, &s, available) {
+                    Ok(Some(choice)) => choice,
+                    Ok(None) => {
                         next = deadline;
                         continue;
                     }
-                };
-                let reserved = match s
-                    .episode
-                    .lock()
-                    .unwrap()
-                    .reserve(&s.config, now, range.length)
-                {
-                    Ok(n) => n,
-                    Err(_) => {
-                        reason = "cover_episode_limit";
+                    Err(code) => {
+                        reason = code;
                         break;
                     }
                 };
-                let budget = match self.budget.reserve(now, reserved, 0, true) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        s.episode.lock().unwrap().finish(reserved, 0, false);
-                        reason = e.code();
+                match self.dispatch_range(
+                    &owner,
+                    &s,
+                    &http,
+                    &mut pending,
+                    (range, qualifying),
+                    (now, deadline),
+                ) {
+                    Ok(true) => (),
+                    Ok(false) => continue,
+                    Err(code) => {
+                        reason = code;
                         break;
                     }
-                };
-                if qualifying {
-                    self.registry
-                        .lock()
-                        .unwrap()
-                        .owners
-                        .get_mut(&owner)
-                        .unwrap()
-                        .begin_qualification();
                 }
-                let mut range = range;
-                if reserved != range.length {
-                    tracing::warn!(
-                        code = "cover_range_size_adjusted",
-                        requested_bytes = range.length,
-                        admitted_bytes = reserved,
-                        "optional qualification reduced to remaining episode capacity"
-                    );
-                    self.record(&s, "cover_range_size_adjusted");
-                }
-                range.length = reserved;
-                let resource_url = self.registry.lock().unwrap().owners[&owner]
-                    .resource_url()
-                    .to_owned();
-                let mut padding_request = reqwest::Request::new(
-                    reqwest::Method::GET,
-                    resource_url.parse().expect("validated cover URL"),
-                );
-                padding_request.headers_mut().insert(
-                    reqwest::header::RANGE,
-                    format!("bytes={}-{}", range.start, range.start + reserved - 1)
-                        .parse()
-                        .unwrap(),
-                );
-                padding_request.headers_mut().insert(
-                    reqwest::header::ACCEPT_ENCODING,
-                    reqwest::header::HeaderValue::from_static("identity"),
-                );
-                let padding_budget = self.pad(&s, &mut padding_request, false);
-                let padding = s.config.padding.as_ref().and_then(|p| {
-                    padding_request
-                        .headers()
-                        .get(p.header_name.as_str())
-                        .cloned()
-                        .map(|v| (p.header_name.parse().unwrap(), v))
-                });
-                let counter = budget.counter();
-                #[cfg(test)]
-                {
-                    *self.last_range_counter.lock().unwrap() = Some(counter.clone());
-                }
-                let mut guard = RangeGuard {
-                    metrics: self.metrics.clone(),
-                    outcome: None,
-                    dispatched: false,
-                    session: s.clone(),
-                    reserved,
-                    counter,
-                };
-                let mut cfg = (*s.config).clone();
-                cfg.url = resource_url;
-                cfg.fallback_url = None;
-                let client = http.clone();
-                let mut gate = s.gate.lock().unwrap();
-                if gate.paused > 0 {
-                    drop(gate);
-                    if qualifying {
-                        self.registry
-                            .lock()
-                            .unwrap()
-                            .owners
-                            .get_mut(&owner)
-                            .unwrap()
-                            .capability = Capability::Unknown;
-                    }
-                    drop(guard);
-                    drop(budget);
-                    continue;
-                }
-                gate.handles.retain(|h| !h.is_finished());
-                let handle = pending.spawn(async move {
-                    guard.dispatched = true;
-                    {
-                        let mut m = guard.metrics.lock().unwrap();
-                        m.in_flight_ranges += 1;
-                        m.peak_in_flight_ranges = m.peak_in_flight_ranges.max(m.in_flight_ranges);
-                    }
-                    let mut padding_budget = padding_budget;
-                    if let Some(p) = &mut padding_budget {
-                        p.dispatched();
-                    }
-                    let result =
-                        range::download(&client, &cfg, range, deadline, budget, padding).await;
-                    guard.outcome =
-                        Some(result.as_ref().map(|_| "qualified").unwrap_or_else(|e| e.0));
-                    drop(guard);
-                    (qualifying, result)
-                });
-                gate.handles.push(handle);
-                drop(gate);
                 // Qualification is serialized; range replenishment rolls as slots free.
                 let gap =
                     match self.random(|rng| s.config.request_gap.sample(Unit::Milliseconds, rng)) {
@@ -449,28 +552,10 @@ impl Engine {
                 _=s.notify.notified()=>{},
                 _=tokio::time::sleep_until(wake)=>{},
                 item=pending.join_next(),if !pending.is_empty()=>{
-                    match item {
-                        Some(Ok((qualifying,result)))=>{
-                            if qualifying {
-                                if let Err(error) = &result {
-                                    let switched = self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().try_fallback(*error);
-                                    if switched {
-                                        self.record(&s, error.0);
-                                        self.record(&s, "cover_fallback_selected");
-                                        tracing::warn!(code = "cover_fallback_selected", reason = error.0, "Primary cover qualification failed; trying configured fallback within existing budgets");
-                                        next=Instant::now();
-                                        continue;
-                                    }
-                                }
-                                self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().qualified(result.clone());next=Instant::now();
-                            }
-                            if let Err(error)=result {self.registry.lock().unwrap().owners.get_mut(&owner).unwrap().capability=Capability::Unavailable(error.0);reason=error.0;break;}
-                        },
-                        Some(Err(error)) if error.is_cancelled()=>{
-                            if matches!(self.registry.lock().unwrap().owners[&owner].capability,Capability::Checking) {reason="cover_qualification_preempted";break;}
-                            self.record(&s,"cover_preempted_for_api");
-                        },
-                        _=>{reason="cover_task_failed";break;},
+                    match self.complete_range(&owner, &s, item) {
+                        Ok(Some(at)) => next = at,
+                        Ok(None) => (),
+                        Err(code) => { reason = code; break; }
                     }
                 }
             }
