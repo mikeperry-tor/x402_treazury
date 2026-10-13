@@ -95,13 +95,26 @@ pub fn markdown(report: &Value) -> Result<String> {
         valid || proofs.is_empty(),
         "invalid debit report contains amounts"
     );
-    let mut charged = 0u64;
-    let mut total = 0u64;
-    let mut proof_count = 0usize;
-    let mut known = std::collections::BTreeSet::new();
     let mut out = String::from(
         "# Live integration report\n\nThis is a sanitized projection of private registry evidence, not a new qualification run.\nCase and assertion numbers follow the private JSON order. Identifiers, addresses,\ntransaction references, credentials, paths and provider content are omitted.\n\n## API accounting\n\n| Case | Execution | MCP result | Settlement | Charged reservation | Verified debit |\n| --- | --- | --- | --- | ---: | ---: |\n",
     );
+    render_provider_stages(&mut out, report)?;
+    render_api_accounting(&mut out, report, cases, proofs, valid)?;
+    render_treasury_accounting(&mut out, report)?;
+    render_fee_observations(&mut out, report, cases)?;
+    render_catalog_stages(&mut out, report)?;
+    render_pricing_stages(&mut out, report)?;
+    render_help_stages(&mut out, report, cases)?;
+    render_assertions(&mut out, report, cases)?;
+    render_eligibility(&mut out, report)?;
+    ensure!(
+        out.len() <= crate::files::DOCUMENT_BYTES,
+        "Markdown report exceeds evidence byte limit; no partial report emitted"
+    );
+    Ok(out)
+}
+
+fn render_provider_stages(out: &mut String, report: &Value) -> Result<()> {
     if let Some(summary) = report.get("summary") {
         let view: crate::report_model::Report = serde_json::from_value(summary.clone())?;
         ensure!(view.version == 1, "unsupported summary version");
@@ -157,6 +170,20 @@ pub fn markdown(report: &Value) -> Result<String> {
             .context("report accounting section missing")?;
         out.insert_str(index, &overview);
     }
+    Ok(())
+}
+
+fn render_api_accounting(
+    out: &mut String,
+    report: &Value,
+    cases: &[Value],
+    proofs: &serde_json::Map<String, Value>,
+    valid: bool,
+) -> Result<()> {
+    let mut charged = 0u64;
+    let mut total = 0u64;
+    let mut proof_count = 0usize;
+    let mut known = std::collections::BTreeSet::new();
     for (i, case) in cases.iter().enumerate() {
         let id = case["case"].as_str().context("case identity missing")?;
         ensure!(known.insert(id), "duplicate case in single-run report");
@@ -212,130 +239,144 @@ pub fn markdown(report: &Value) -> Result<String> {
         atomics(&report["source_reserved_zatoshis"])?,
         atomics(&report["funding_jobs_reserved"])?
     )?;
+    Ok(())
+}
+
+fn render_treasury_accounting(out: &mut String, report: &Value) -> Result<()> {
     if let Some(observations) = report["treasury_accounting"]["observations"].as_array() {
         out.push_str("\n## Persisted treasury accounting\n\nTreasury-wide saved observations include history outside this run. These are not fresh chain reads or new spending authority. Refund outputs are reported separately, not subtracted again from costs. Missing observations do not establish zero balances.\n");
         if observations.is_empty() {
             out.push_str("No clean-shutdown accounting snapshot was recorded.\n");
         }
         for (index, observation) in observations.iter().enumerate() {
-            let summary = &observation["summary"];
-            let comparison = &observation["baseline_comparison"];
-            if comparison["scope"] == "registry_authorization_to_snapshot" {
-                out.push_str("\nChanges since registry authorization (may span multiple runs; not payment or fresh-chain proofs):\n\n| Source bookkeeping (zatoshis) | Baseline | Saved observation | Change |\n| --- | ---: | ---: | ---: |\n");
-                for (key, label) in [
-                    ("recorded_principal_zatoshis", "Principal"),
-                    ("recorded_fees_zatoshis", "Fees"),
-                    ("recorded_consumed_zatoshis", "Consumed cost"),
-                    ("source_reserved_zatoshis", "Treasury reservations"),
-                    ("recorded_refund_outputs_zatoshis", "Refund outputs"),
-                ] {
-                    let row = &comparison["source"][key];
-                    writeln!(
-                        out,
-                        "| {label} | {} | {} | {} |",
-                        atomics(&row["baseline"])?,
-                        atomics(&row["observed"])?,
-                        signed_atomics(&row["change"])?
-                    )?;
-                }
-                if comparison["wallets"]["aggregate_change_atomic"].is_null() {
-                    out.push_str(
-                        "Aggregate USDC balance change: unobserved (missing wallet anchors).\n",
-                    );
-                } else {
-                    writeln!(
-                        out,
-                        "Aggregate saved USDC balance change: **{} atomic**; role changes and external deposits are not API debits.",
-                        signed_atomics(&comparison["wallets"]["aggregate_change_atomic"])?
-                    )?;
-                }
-                if comparison["zec"]["status"] == "recorded" {
-                    writeln!(
-                        out,
-                        "Saved shielded ZEC changes: confirmed **{} zatoshis**, spendable **{} zatoshis**; funding, change confirmation and external transfers may affect these values.",
-                        signed_atomics(
-                            &comparison["zec"]["balances"]["confirmed_shielded_zatoshis"]["change"]
-                        )?,
-                        signed_atomics(
-                            &comparison["zec"]["balances"]["spendable_shielded_zatoshis"]["change"]
-                        )?
-                    )?;
-                } else {
-                    out.push_str(
-                        "ZEC baseline change: unobserved (missing saved sync observations).\n",
-                    );
-                }
-            }
-            let attributed = &observation["run_source_accounting"];
-            if attributed["scope"] == "run_funding_permits" {
-                writeln!(
-                    out,
-                    "Run-attributed source costs: principal **{} zatoshis**, fees **{} zatoshis**, consumed **{} zatoshis**; treasury reservations **{} zatoshis**. Registry unreleased bounds: **{} zatoshis**; released bounds: **{} zatoshis**; attempts without treasury budget evidence: **{}**. Refund outputs: **{} zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.",
-                    atomics(&attributed["recorded_principal_zatoshis"])?,
-                    atomics(&attributed["recorded_fees_zatoshis"])?,
-                    atomics(&attributed["recorded_consumed_zatoshis"])?,
-                    atomics(&attributed["source_reserved_zatoshis"])?,
-                    atomics(&attributed["registry_unreleased_bounds_zatoshis"])?,
-                    atomics(&attributed["registry_released_bounds_zatoshis"])?,
-                    atomics(&attributed["attempts_without_treasury_budget"])?,
-                    atomics(&attributed["recorded_refund_outputs_zatoshis"])?
-                )?;
-            } else {
-                out.push_str("Run source-cost attribution was not recorded for this snapshot.\n");
-            }
-
-            writeln!(
-                out,
-                "\nSnapshot {}: recorded principal **{} zatoshis**, recorded fees **{} zatoshis**, consumed cost **{} zatoshis**, pending source reservations **{} zatoshis**, refund outputs **{} zatoshis**.",
-                index + 1,
-                atomics(&summary["recorded_principal_zatoshis"])?,
-                atomics(&summary["recorded_fees_zatoshis"])?,
-                atomics(&summary["recorded_consumed_zatoshis"])?,
-                atomics(&summary["source_reserved_zatoshis"])?,
-                atomics(&summary["recorded_refund_outputs_zatoshis"])?
-            )?;
-            let exposure = summary["unresolved_payment_exposure_atomic"]
-                .as_str()
-                .context("missing saved payment exposure")?;
-            ensure!(
-                !exposure.is_empty() && exposure.bytes().all(|b| b.is_ascii_digit()),
-                "invalid saved payment exposure"
-            );
-            writeln!(
-                out,
-                "Saved unresolved payment exposure: **{exposure} USDC atomic**; not a verified debit or available balance."
-            )?;
-            if !summary["zec_observation"].is_null() {
-                writeln!(
-                    out,
-                    "Saved shielded ZEC: confirmed **{} zatoshis**, spendable **{} zatoshis** (freshness not asserted).",
-                    atomics(&summary["zec_observation"]["confirmed_shielded_zatoshis"])?,
-                    atomics(&summary["zec_observation"]["spendable_shielded_zatoshis"])?
-                )?;
-            }
-            out.push_str("\n| Wallet role | Wallets | Anchored observations | Unobserved | Saved balance (USDC atomic) |\n| --- | ---: | ---: | ---: | ---: |\n");
-            for role in ["ACTIVE", "READY", "RETAINED", "ALLOCATED", "RETIRED"] {
-                let row = &summary["wallet_roles"][role];
-                if row.is_null() {
-                    continue;
-                }
-                let balance = row["saved_balance_atomic"]
-                    .as_str()
-                    .context("missing saved wallet balance")?;
-                ensure!(
-                    !balance.is_empty() && balance.bytes().all(|b| b.is_ascii_digit()),
-                    "invalid saved wallet balance"
-                );
-                writeln!(
-                    out,
-                    "| {role} | {} | {} | {} | {balance} |",
-                    atomics(&row["wallets"])?,
-                    atomics(&row["anchored_observations"])?,
-                    atomics(&row["unobserved_wallets"])?
-                )?;
-            }
+            render_treasury_observation(out, observation, index)?;
         }
     }
+    Ok(())
+}
+
+fn render_treasury_observation(out: &mut String, observation: &Value, index: usize) -> Result<()> {
+    let summary = &observation["summary"];
+    render_baseline_comparison(out, observation)?;
+    let attributed = &observation["run_source_accounting"];
+    if attributed["scope"] == "run_funding_permits" {
+        writeln!(
+            out,
+            "Run-attributed source costs: principal **{} zatoshis**, fees **{} zatoshis**, consumed **{} zatoshis**; treasury reservations **{} zatoshis**. Registry unreleased bounds: **{} zatoshis**; released bounds: **{} zatoshis**; attempts without treasury budget evidence: **{}**. Refund outputs: **{} zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.",
+            atomics(&attributed["recorded_principal_zatoshis"])?,
+            atomics(&attributed["recorded_fees_zatoshis"])?,
+            atomics(&attributed["recorded_consumed_zatoshis"])?,
+            atomics(&attributed["source_reserved_zatoshis"])?,
+            atomics(&attributed["registry_unreleased_bounds_zatoshis"])?,
+            atomics(&attributed["registry_released_bounds_zatoshis"])?,
+            atomics(&attributed["attempts_without_treasury_budget"])?,
+            atomics(&attributed["recorded_refund_outputs_zatoshis"])?
+        )?;
+    } else {
+        out.push_str("Run source-cost attribution was not recorded for this snapshot.\n");
+    }
+
+    writeln!(
+        out,
+        "\nSnapshot {}: recorded principal **{} zatoshis**, recorded fees **{} zatoshis**, consumed cost **{} zatoshis**, pending source reservations **{} zatoshis**, refund outputs **{} zatoshis**.",
+        index + 1,
+        atomics(&summary["recorded_principal_zatoshis"])?,
+        atomics(&summary["recorded_fees_zatoshis"])?,
+        atomics(&summary["recorded_consumed_zatoshis"])?,
+        atomics(&summary["source_reserved_zatoshis"])?,
+        atomics(&summary["recorded_refund_outputs_zatoshis"])?
+    )?;
+    let exposure = summary["unresolved_payment_exposure_atomic"]
+        .as_str()
+        .context("missing saved payment exposure")?;
+    ensure!(
+        !exposure.is_empty() && exposure.bytes().all(|b| b.is_ascii_digit()),
+        "invalid saved payment exposure"
+    );
+    writeln!(
+        out,
+        "Saved unresolved payment exposure: **{exposure} USDC atomic**; not a verified debit or available balance."
+    )?;
+    if !summary["zec_observation"].is_null() {
+        writeln!(
+            out,
+            "Saved shielded ZEC: confirmed **{} zatoshis**, spendable **{} zatoshis** (freshness not asserted).",
+            atomics(&summary["zec_observation"]["confirmed_shielded_zatoshis"])?,
+            atomics(&summary["zec_observation"]["spendable_shielded_zatoshis"])?
+        )?;
+    }
+    out.push_str("\n| Wallet role | Wallets | Anchored observations | Unobserved | Saved balance (USDC atomic) |\n| --- | ---: | ---: | ---: | ---: |\n");
+    for role in ["ACTIVE", "READY", "RETAINED", "ALLOCATED", "RETIRED"] {
+        let row = &summary["wallet_roles"][role];
+        if row.is_null() {
+            continue;
+        }
+        let balance = row["saved_balance_atomic"]
+            .as_str()
+            .context("missing saved wallet balance")?;
+        ensure!(
+            !balance.is_empty() && balance.bytes().all(|b| b.is_ascii_digit()),
+            "invalid saved wallet balance"
+        );
+        writeln!(
+            out,
+            "| {role} | {} | {} | {} | {balance} |",
+            atomics(&row["wallets"])?,
+            atomics(&row["anchored_observations"])?,
+            atomics(&row["unobserved_wallets"])?
+        )?;
+    }
+    Ok(())
+}
+
+fn render_baseline_comparison(out: &mut String, observation: &Value) -> Result<()> {
+    let comparison = &observation["baseline_comparison"];
+    if comparison["scope"] == "registry_authorization_to_snapshot" {
+        out.push_str("\nChanges since registry authorization (may span multiple runs; not payment or fresh-chain proofs):\n\n| Source bookkeeping (zatoshis) | Baseline | Saved observation | Change |\n| --- | ---: | ---: | ---: |\n");
+        for (key, label) in [
+            ("recorded_principal_zatoshis", "Principal"),
+            ("recorded_fees_zatoshis", "Fees"),
+            ("recorded_consumed_zatoshis", "Consumed cost"),
+            ("source_reserved_zatoshis", "Treasury reservations"),
+            ("recorded_refund_outputs_zatoshis", "Refund outputs"),
+        ] {
+            let row = &comparison["source"][key];
+            writeln!(
+                out,
+                "| {label} | {} | {} | {} |",
+                atomics(&row["baseline"])?,
+                atomics(&row["observed"])?,
+                signed_atomics(&row["change"])?
+            )?;
+        }
+        if comparison["wallets"]["aggregate_change_atomic"].is_null() {
+            out.push_str("Aggregate USDC balance change: unobserved (missing wallet anchors).\n");
+        } else {
+            writeln!(
+                out,
+                "Aggregate saved USDC balance change: **{} atomic**; role changes and external deposits are not API debits.",
+                signed_atomics(&comparison["wallets"]["aggregate_change_atomic"])?
+            )?;
+        }
+        if comparison["zec"]["status"] == "recorded" {
+            writeln!(
+                out,
+                "Saved shielded ZEC changes: confirmed **{} zatoshis**, spendable **{} zatoshis**; funding, change confirmation and external transfers may affect these values.",
+                signed_atomics(
+                    &comparison["zec"]["balances"]["confirmed_shielded_zatoshis"]["change"]
+                )?,
+                signed_atomics(
+                    &comparison["zec"]["balances"]["spendable_shielded_zatoshis"]["change"]
+                )?
+            )?;
+        } else {
+            out.push_str("ZEC baseline change: unobserved (missing saved sync observations).\n");
+        }
+    }
+    Ok(())
+}
+
+fn render_fee_observations(out: &mut String, report: &Value, cases: &[Value]) -> Result<()> {
     if let Some(rows) = report["fee_observations"]["cases"].as_array() {
         ensure!(
             rows.len() == cases.len(),
@@ -366,58 +407,67 @@ pub fn markdown(report: &Value) -> Result<String> {
                 flag(&row["verified_debit_above_one_cent"])
             )?;
         }
-        out.push_str("\n| Case | Challenge observation | Offers | Base USDC offers above $0.01 | Base USDC amounts unknown |\n| --- | --- | ---: | ---: | ---: |\n");
-        for (index, row) in rows.iter().enumerate() {
-            let observations = row["challenge_observations"].as_array();
-            if observations.is_none_or(|v| v.is_empty()) {
-                writeln!(
-                    out,
-                    "| {} | not observed | unavailable | unavailable | unavailable |",
-                    index + 1
-                )?;
-                continue;
-            }
-            for observation in observations.expect("checked") {
-                let label = match observation["status"].as_str() {
-                    Some("observed") => "observed",
-                    Some("header_absent") => "header absent; body offers not observed",
-                    Some("duplicate_headers") => "duplicate headers",
-                    Some("header_limit_exceeded") => "header limit exceeded (65536 bytes)",
-                    Some("offer_limit_exceeded") => "offer limit exceeded (128 offers)",
-                    Some("malformed_header" | "malformed_offers") => "malformed",
-                    _ => "unknown (inspect private JSON)",
-                };
-                if label == "observed" {
-                    let offers = observation["offers"]
-                        .as_array()
-                        .context("observed offers missing")?;
-                    let above = offers
-                        .iter()
-                        .filter(|o| o["above_one_cent"] == true)
-                        .count();
-                    let unknown = offers
-                        .iter()
-                        .filter(|o| o["base_usdc"] == true && o["amount_atomic"].is_null())
-                        .count();
-                    writeln!(
-                        out,
-                        "| {} | {label} | {} | {above} | {unknown} |",
-                        index + 1,
-                        offers.len()
-                    )?;
-                } else {
-                    writeln!(
-                        out,
-                        "| {} | {label} | unavailable | unavailable | unavailable |",
-                        index + 1
-                    )?;
-                }
-            }
-        }
+        render_challenge_observations(out, rows)?;
         if report["fee_observations"]["challenges_status"] != "validated" {
             out.push_str("\nChallenge correlation is unavailable or invalid; no offer prices are qualified.\n");
         }
     }
+    Ok(())
+}
+
+fn render_challenge_observations(out: &mut String, rows: &[Value]) -> Result<()> {
+    out.push_str("\n| Case | Challenge observation | Offers | Base USDC offers above $0.01 | Base USDC amounts unknown |\n| --- | --- | ---: | ---: | ---: |\n");
+    for (index, row) in rows.iter().enumerate() {
+        let observations = row["challenge_observations"].as_array();
+        if observations.is_none_or(|v| v.is_empty()) {
+            writeln!(
+                out,
+                "| {} | not observed | unavailable | unavailable | unavailable |",
+                index + 1
+            )?;
+            continue;
+        }
+        for observation in observations.expect("checked") {
+            let label = match observation["status"].as_str() {
+                Some("observed") => "observed",
+                Some("header_absent") => "header absent; body offers not observed",
+                Some("duplicate_headers") => "duplicate headers",
+                Some("header_limit_exceeded") => "header limit exceeded (65536 bytes)",
+                Some("offer_limit_exceeded") => "offer limit exceeded (128 offers)",
+                Some("malformed_header" | "malformed_offers") => "malformed",
+                _ => "unknown (inspect private JSON)",
+            };
+            if label == "observed" {
+                let offers = observation["offers"]
+                    .as_array()
+                    .context("observed offers missing")?;
+                let above = offers
+                    .iter()
+                    .filter(|o| o["above_one_cent"] == true)
+                    .count();
+                let unknown = offers
+                    .iter()
+                    .filter(|o| o["base_usdc"] == true && o["amount_atomic"].is_null())
+                    .count();
+                writeln!(
+                    out,
+                    "| {} | {label} | {} | {above} | {unknown} |",
+                    index + 1,
+                    offers.len()
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "| {} | {label} | unavailable | unavailable | unavailable |",
+                    index + 1
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_catalog_stages(out: &mut String, report: &Value) -> Result<()> {
     if let Some(phases) = report["catalog_stages"].as_array() {
         writeln!(
             out,
@@ -454,6 +504,10 @@ pub fn markdown(report: &Value) -> Result<String> {
             )?;
         }
     }
+    Ok(())
+}
+
+fn render_pricing_stages(out: &mut String, report: &Value) -> Result<()> {
     if let Some(rows) = report["pricing_stages"].as_array() {
         out.push_str("\n| Pricing observation | Stage | Assertion | Observed endpoints | Available prices | Cache initializations | Cache hits | Shared results | Expired | Capped | HTTP codes (count) |\n| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
         for (index, row) in rows.iter().enumerate() {
@@ -482,23 +536,7 @@ pub fn markdown(report: &Value) -> Result<String> {
                     "unavailable".into()
                 }
             };
-            let codes = if let Some(codes) = e["http_statuses"].as_object() {
-                let mut rows = Vec::new();
-                for (code, n) in codes {
-                    if let (Ok(code), Some(n)) = (code.parse::<u16>(), n.as_u64())
-                        && (100..=999).contains(&code)
-                    {
-                        rows.push(format!("{code} ({n})"));
-                    }
-                }
-                if rows.is_empty() {
-                    "none observed".into()
-                } else {
-                    rows.join(", ")
-                }
-            } else {
-                "unavailable".into()
-            };
+            let codes = pricing_http_codes(e);
             writeln!(
                 out,
                 "| {} | {stage} | {assertion} | {} | {} | {} | {} | {} | {} | {} | {codes} |",
@@ -514,6 +552,30 @@ pub fn markdown(report: &Value) -> Result<String> {
         }
         out.push_str("\nPricing completion is not provider health or payment qualification. Cached failure/success outcomes are observations, not fresh requests; cache initialization does not prove a request reached the provider. Startup prices never authorize payment.\n");
     }
+    Ok(())
+}
+
+fn pricing_http_codes(evidence: &Value) -> String {
+    if let Some(codes) = evidence["http_statuses"].as_object() {
+        let mut rows = Vec::new();
+        for (code, n) in codes {
+            if let (Ok(code), Some(n)) = (code.parse::<u16>(), n.as_u64())
+                && (100..=999).contains(&code)
+            {
+                rows.push(format!("{code} ({n})"));
+            }
+        }
+        if rows.is_empty() {
+            "none observed".into()
+        } else {
+            rows.join(", ")
+        }
+    } else {
+        "unavailable".into()
+    }
+}
+
+fn render_help_stages(out: &mut String, report: &Value, cases: &[Value]) -> Result<()> {
     if let Some(rows) = report["help_stages"].as_array() {
         out.push_str("\n| Help case | Assessment | Cache path | Retrieval | Required |\n| --- | --- | --- | --- | --- |\n");
         for (index, case) in cases.iter().enumerate() {
@@ -553,6 +615,10 @@ pub fn markdown(report: &Value) -> Result<String> {
             }
         }
     }
+    Ok(())
+}
+
+fn render_assertions(out: &mut String, report: &Value, cases: &[Value]) -> Result<()> {
     out.push_str("\n## Assertions\n\n| Concurrency batch | Result | MCP overlap | Application overlap | Payment-work overlap | Signed-request future overlap |\n| --- | --- | --- | --- | --- | --- |\n");
     for (i, batch) in report["concurrency"]
         .as_array()
@@ -622,6 +688,10 @@ pub fn markdown(report: &Value) -> Result<String> {
         out.push_str("\nProvider-content assessment is unavailable in this report.\n");
     }
     out.push_str("\nEmpty assertion tables mean no assertions were selected, not a pass.\n\nTor/confinement and cover qualification require their separate retained artifacts;\nthis registry report does not independently verify them. Treasury balances, actual\nsource fees, residual assets and exhaustion warnings are not inferred from API\nreservations or missing debit proofs. No overall live-suite success is asserted.\n");
+    Ok(())
+}
+
+fn render_eligibility(out: &mut String, report: &Value) -> Result<()> {
     if let Some(eligibility) = report.get("eligibility") {
         ensure!(
             eligibility["execution_authorized"] == false,
@@ -641,11 +711,7 @@ pub fn markdown(report: &Value) -> Result<String> {
             if unstarted { "yes" } else { "no" }
         )?;
     }
-    ensure!(
-        out.len() <= crate::files::DOCUMENT_BYTES,
-        "Markdown report exceeds evidence byte limit; no partial report emitted"
-    );
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -713,7 +779,10 @@ mod tests {
             assert!(!text.contains(private), "private fixture detail rendered");
         }
         // The final empty line is part of the renderer contract.
-        assert_eq!(text, concat!(include_str!("fixtures/reporting_complete.txt"), "\n"));
+        assert_eq!(
+            text,
+            concat!(include_str!("fixtures/reporting_complete.txt"), "\n")
+        );
     }
 
     #[test]
@@ -726,7 +795,10 @@ mod tests {
         let mut missing_catalog_rows = complete.clone();
         missing_catalog_rows["catalog_stages"][1]["sources"] = Value::Null;
         let mut missing_assessment = complete;
-        missing_assessment["provider_semantics"].as_array_mut().unwrap().remove(0);
+        missing_assessment["provider_semantics"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
         for (value, expected) in [
             (duplicate, "duplicate case in single-run report"),
             (incomplete_debits, "invalid debit report contains amounts"),
