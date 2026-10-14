@@ -109,6 +109,10 @@ impl Treasury {
             !dir.exists() && !key.exists(),
             "refusing to overwrite treasury state or key"
         );
+        tracing::info!(
+            import = mnemonic.is_some(),
+            "wallet init: creating offline wallet"
+        );
         let wallet = match mnemonic {
             Some(seed) => WalletConfig::MnemonicPhrase {
                 mnemonic_phrase: seed.trim().to_owned(),
@@ -130,15 +134,19 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "offline treasury must not connect to an indexer"
         );
+        tracing::info!("wallet init: offline wallet created; deriving shielded receive address");
         client
             .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("address derivation failed"))?;
+        tracing::info!("wallet init: receive address derived; serializing wallet");
         let bytes = snapshot(&client).await?;
+        tracing::info!("wallet init: wallet serialized; writing encrypted state and key");
         let store = tokio::task::spawn_blocking(move || {
             Store::create_with_network(&dir, &key, birthday, &bytes, network)
         })
         .await??;
+        tracing::info!("wallet init: encrypted state and key saved; initialization completed");
         let (store, worker) = StoreHandle::spawn(store);
         Ok(Self {
             network,

@@ -752,13 +752,20 @@ async fn init(
         !state_dir.exists() && !key_file.exists(),
         "treasury state or key already exists; init only creates a new wallet. Use `wallet addresses --state-dir PATH --key-file PATH` to display existing receive addresses, or `wallet status --state-dir PATH` for its treasury ID"
     );
+    tracing::info!("wallet init: new state and key locations verified");
     // Imports must never infer a recent birthday and skip historical funds.
     anyhow::ensure!(
         mnemonic_file.is_none() || birthday.is_some(),
         "seed import requires --birthday"
     );
     let birthday = match birthday {
-        Some(height) => height,
+        Some(height) => {
+            tracing::info!(
+                birthday = height,
+                "wallet init: using explicit birthday; indexer discovery skipped"
+            );
+            height
+        }
         None => {
             let endpoint = if let Some(endpoint) = indexer_url {
                 endpoint
@@ -777,6 +784,7 @@ async fn init(
         }
     };
     let seed = if let Some(path) = mnemonic_file {
+        tracing::info!("wallet init: validating and reading mnemonic file");
         let metadata = std::fs::symlink_metadata(&path)?;
         anyhow::ensure!(
             metadata.file_type().is_file(),
@@ -796,6 +804,7 @@ async fn init(
     } else {
         None
     };
+    tracing::info!("wallet init: preparing state parent directory");
     if let Some(parent) = state_dir.parent().filter(|p| !p.as_os_str().is_empty()) {
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true);

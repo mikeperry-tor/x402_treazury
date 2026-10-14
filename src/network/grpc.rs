@@ -273,3 +273,49 @@ impl HttpBody for ProgressBody {
         self.inner.size_hint()
     }
 }
+
+/// Preserve typed causes without retaining transport prose, URLs or credentials.
+pub(super) fn connection_failure(
+    error: &(dyn std::error::Error + 'static),
+    category: &'static str,
+) -> anyhow::Error {
+    let mut current = Some(error);
+    let mut reason = "transport_error";
+    while let Some(error) = current {
+        if error.downcast_ref::<rustls::Error>().is_some() {
+            reason = "tls_error";
+            break;
+        }
+        if let Some(error) = error.downcast_ref::<std::io::Error>() {
+            reason = match error.kind() {
+                std::io::ErrorKind::ConnectionRefused => "connection_refused",
+                std::io::ErrorKind::ConnectionReset => "connection_reset",
+                std::io::ErrorKind::TimedOut => "connection_timeout",
+                std::io::ErrorKind::NotFound => "address_not_found",
+                std::io::ErrorKind::PermissionDenied => "permission_denied",
+                _ => "io_error",
+            };
+        }
+        current = error.source();
+    }
+    anyhow::anyhow!("{category}: reason={reason}")
+}
+
+#[cfg(test)]
+#[test]
+fn connection_diagnostic_omits_upstream_secrets() {
+    let error = std::io::Error::new(
+        std::io::ErrorKind::ConnectionRefused,
+        "https://secret:token@example.invalid/private",
+    );
+    let safe = connection_failure(&error, "grpc_connection_failed");
+    assert_eq!(
+        format!("{safe:#}"),
+        "grpc_connection_failed: reason=connection_refused"
+    );
+    let tls = rustls::Error::General("secret certificate details".into());
+    assert_eq!(
+        connection_failure(&tls, "grpc_connection_failed").to_string(),
+        "grpc_connection_failed: reason=tls_error"
+    );
+}

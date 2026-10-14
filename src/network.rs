@@ -476,7 +476,7 @@ impl NetworkContext {
             endpoint
                 .connect_with_connector(readiness.connector(connector))
                 .await
-                .map_err(|_| anyhow::anyhow!("tor_grpc_connection_failed"))?
+                .map_err(|error| grpc::connection_failure(&error, "tor_grpc_connection_failed"))?
         } else {
             let mut tcp = hyper_util::client::legacy::connect::HttpConnector::new();
             tcp.enforce_http(false);
@@ -484,7 +484,7 @@ impl NetworkContext {
             endpoint
                 .connect_with_connector(readiness.connector(tcp))
                 .await
-                .map_err(|_| anyhow::anyhow!("grpc_connection_failed"))?
+                .map_err(|error| grpc::connection_failure(&error, "grpc_connection_failed"))?
         };
         readiness.established();
         let client = zingo_netutils::GrpcIndexer::from_transport(

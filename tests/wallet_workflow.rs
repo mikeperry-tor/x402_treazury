@@ -38,7 +38,19 @@ confidentiality="public"
 spec="https://unreachable.invalid/openapi.json"
 "#;
     std::fs::write(&config, text).unwrap();
-    let initialized = success(wallet(&config, &["init", "--birthday", "1"]));
+    let output = wallet(&config, &["init", "--birthday", "1"]);
+    let logs = String::from_utf8_lossy(&output.stderr);
+    for stage in [
+        "using explicit birthday",
+        "creating offline wallet",
+        "receive address derived",
+        "writing encrypted state and key",
+        "initialization completed",
+    ] {
+        assert!(logs.contains(stage), "missing {stage}: {logs}");
+    }
+    assert!(!logs.contains("connecting to birthday indexer"));
+    let initialized = success(output);
     assert!(dir.path().join("nested/wallet/wallet.key").is_file());
     let before = success(wallet(&config, &["status"]));
     assert!(before["pools"].as_array().unwrap().is_empty());
@@ -207,4 +219,37 @@ async fn wallet_rejections_and_saved_inspection_never_request_catalogs() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(before["pools"].as_array().unwrap().is_empty());
     server.abort();
+}
+
+#[test]
+fn birthday_connection_failure_is_actionable_and_creates_no_state() {
+    let dir = tempfile::tempdir().unwrap();
+    // A bound, non-listening socket fails connection setup without a port reuse race.
+    // Depending on the OS, this produces refusal or a connect timeout.
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let output = Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .args(["wallet", "init", "--state-dir"])
+        .arg(dir.path().join("wallet"))
+        .env_clear()
+        .env(
+            "ZCASH_INDEXER_URL",
+            format!("http://127.0.0.1:{port}/private-token"),
+        )
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let logs = String::from_utf8_lossy(&output.stderr);
+    assert!(logs.contains("connecting to birthday indexer"), "{logs}");
+    assert!(
+        logs.contains("reason=connection_refused") || logs.contains("reason=connection_timeout"),
+        "{logs}"
+    );
+    assert!(logs.contains("before wallet creation"), "{logs}");
+    assert!(logs.contains("--indexer-url-env"), "{logs}");
+    assert!(!logs.contains("private-token"), "{logs}");
+    assert!(!logs.contains("initialization completed"), "{logs}");
+    assert!(!dir.path().join("wallet").exists());
+    assert!(output.stdout.is_empty());
 }
