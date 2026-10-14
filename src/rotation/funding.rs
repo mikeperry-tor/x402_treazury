@@ -41,6 +41,12 @@ pub trait FundingBackend: Send + 'static {
     fn swap_timeout_seconds(&self) -> u64 {
         1800
     }
+    /// Read-only source refresh before preparation admission. Implementations
+    /// without an owned treasury can leave refresh to their existing observer.
+    fn refresh_source(&mut self) -> impl Future<Output = Result<()>> + Send {
+        async { Ok(()) }
+    }
+
     fn ready(
         &mut self,
         _job: &FundingJob,
@@ -322,7 +328,17 @@ impl<B: FundingBackend> FundingWorker<B> {
             .call(move |s| s.funding_source_ready(instant))
             .await?
         {
-            return Ok(());
+            // Refund-address derivation advances the wallet revision. Waiting for
+            // periodic maintenance here would strand otherwise-ready quotes.
+            self.backend.lock().await.refresh_source().await?;
+            let instant = now()?;
+            if !self
+                .store
+                .call(move |s| s.funding_source_ready(instant))
+                .await?
+            {
+                return Ok(());
+            }
         }
         self.backend.lock().await.ready(job, &quote).await?;
         if quote.deadline.saturating_sub(clock.now())
@@ -451,6 +467,21 @@ impl FundingBackend for Backend {
     fn swap_timeout_seconds(&self) -> u64 {
         self.funding.swap_timeout_seconds
     }
+    async fn refresh_source(&mut self) -> Result<()> {
+        self.require_auto_funding()?;
+        let state = self.store.call(|s| s.treasury_sync_state()).await?;
+        // Pending source bytes retain ownership. Their normal reconciliation
+        // drives confirmation; another waiting quote must not duplicate scans.
+        let instant = now()?;
+        if !state.outgoing_pending
+            && state
+                .sync
+                .is_none_or(|sync| !sync.fresh(instant, state.snapshot_revision))
+        {
+            self.treasury.sync().await?;
+        }
+        Ok(())
+    }
     async fn ready(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()?;
         let (limits, _) = self.policy(job)?;
@@ -522,21 +553,23 @@ impl FundingBackend for Backend {
             .await?;
         limits.max_output = u64::try_from(claim.maximum_output)
             .context("funding output exceeds route amount range")?;
-        let checked = super::near::validate_quote(
-            quote.request.clone(),
-            quote.response.clone(),
-            &limits,
-            now()?,
-        )
-        .map_err(|error| {
-            // The scheduler may have committed PREPARING while this quote crossed
-            // its delivery boundary. No treasury command has been sent here.
-            if error.is::<super::near::QuoteWindowExpired>() {
-                error.context(super::transaction::PreparationDeferred)
-            } else {
-                error
-            }
-        })?;
+        let checked = self
+            .near
+            .validate_quote(
+                quote.request.clone(),
+                quote.response.clone(),
+                &limits,
+                now()?,
+            )
+            .map_err(|error| {
+                // The scheduler may have committed PREPARING while this quote crossed
+                // its delivery boundary. No treasury command has been sent here.
+                if error.is::<super::near::QuoteWindowExpired>() {
+                    error.context(super::transaction::PreparationDeferred)
+                } else {
+                    error
+                }
+            })?;
         ensure!(
             checked.request["recipient"] == job.recipient
                 && checked.request["confidentiality"] == self.funding.confidentiality,
@@ -672,7 +705,7 @@ impl FundingObservations for Observations {
             .await
             .context(NearStage("asset catalog"))?;
         let instant = now()?;
-        let quote_request = super::near::request(
+        let quote_request = self.near.request(
             &assets,
             &request.job.recipient,
             &request.refund,

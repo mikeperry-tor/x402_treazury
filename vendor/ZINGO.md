@@ -28,6 +28,21 @@ unit fixture exercises actual conflicting merges in all three shielded pools,
 without wallet keys or network requests. Pepper Sync retains its upstream unit-test
 dependencies for this fixture.
 
+`pepper-sync-tip-reorg.patch` fixes same-height fork verification. Once the stored
+chain-tip hash is known to disagree with the indexer, sync truncates that block's
+wallet data and verifies the replacement tip against its retained predecessor.
+Deeper forks use the existing backward verification/truncation path and reorg
+allowance. Starting with a wide range could span a whole fork with matching seams
+and retain orphaned confirmed transactions. The application's funded synthetic
+lifecycle covers both a tip-only and a deeper same-height fork, retained source
+accounting, blocked new work and canonical reappearance. Apply this patch after
+the diagnostic/progress patches above.
+
+`zingo-mock-chain.patch` fixes the optional synthetic-chain indexer fixture: its
+`GetLatestBlock` hash comes from the current stored branch, matching `GetBlock`
+and tree states after a same-height reorg. It does not change production indexer
+behavior. Apply it after the patches above.
+
 Every existing RPC, cloned indexer and pepper-sync stream uses the supplied channel.
 The application constructs both direct and authenticated SOCKS channels through
 `network.rs`; it creates LightClient offline and installs that indexer before sync

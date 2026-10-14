@@ -474,7 +474,10 @@ impl CompactTxStreamer for MockIndexerService {
         let chain = self.chain.read().await;
         Ok(Response::new(BlockId {
             height: u64::from(chain.tip()),
-            hash: fabricated_block_hash(chain.tip()),
+            hash: chain.blocks.last().map_or_else(
+                || fabricated_block_hash(0),
+                |block| block.hash.clone(),
+            ),
         }))
     }
 

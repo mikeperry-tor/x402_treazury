@@ -287,10 +287,22 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
         x402_treazury::rotation::store::funding::FundingPhase::Complete
     );
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    assert!(logs.contains("funding phase changed"), "{logs}");
-    assert!(logs.contains("to=Quoted"), "{logs}");
-    assert!(logs.contains("to=Complete"), "{logs}");
-    assert!(logs.contains("job_id="), "{logs}");
+    assert!(
+        logs.contains("Funding progress wallet=a size=small status=Quoted"),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("Funding progress wallet=a size=small status=Complete"),
+        "{logs}"
+    );
+    assert!(
+        !logs.contains("job_id="),
+        "INFO must omit raw correlations: {logs}"
+    );
+    assert!(
+        !logs.contains("pool_id="),
+        "INFO must omit raw correlations: {logs}"
+    );
     drop(worker);
     drop(store);
     task.await.unwrap();
@@ -1252,7 +1264,9 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
     let output = std::fs::read_to_string(log.path()).unwrap();
     let waiting = output[baseline..]
         .lines()
-        .filter(|line| line.contains(&focus))
+        // This fixture's focused job is a/small. WARN uses that readable
+        // scope; raw job correlation is deliberately a separate DEBUG event.
+        .filter(|line| line.contains(&focus) || line.contains("wallet=a size=small"))
         .collect::<Vec<_>>()
         .join("\n");
     assert!(waiting.contains("zcash_confirmations_pending"));
@@ -1271,11 +1285,13 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
     let output = std::fs::read_to_string(log.path()).unwrap();
     let failed = output[baseline..]
         .lines()
-        .filter(|line| line.contains(&focus))
+        // This fixture's focused job is a/small. WARN uses that readable
+        // scope; raw job correlation is deliberately a separate DEBUG event.
+        .filter(|line| line.contains(&focus) || line.contains("wallet=a size=small"))
         .collect::<Vec<_>>()
         .join("\n");
     assert!(failed.contains("WARN"));
-    assert!(failed.contains("funding observation failed"));
+    assert!(failed.contains("Funding observation failed"));
     assert!(!failed.contains("private upstream error"));
     assert!(!failed.contains("source_confirmation_pending"));
     worker.backend.lock().await.reconcile_error = None;

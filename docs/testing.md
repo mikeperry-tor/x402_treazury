@@ -101,7 +101,11 @@ insufficient remaining capacity, and preserve those decisions across restart.
 Synthetic proving checks actual-fee affordability and exact saved bytes through
 failed persistence/reopen. The optional synthetic-chain lifecycle exercises two
 managed recipients through the real treasury actor, scan reuse, confirmation depth,
-restart and cancellation after submission intent. Default fixtures cover concurrent
+restart, cancellation after submission intent and funded same-height reorgs.
+The production funding worker also runs against local bridge/Base fixtures through
+concurrent quote acquisition, refund derivation, bootstrap completion and signed
+payment-triggered replacement funding, with scan-reuse and no-replay assertions.
+Default fixtures cover concurrent
 replacement allocation/credit with retained old payment liabilities and paged,
 scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).
 These are unfunded/local tests, not evidence of live

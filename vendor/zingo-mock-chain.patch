@@ -1,0 +1,16 @@
+diff --git a/zingolib/src/testutils/mock_indexer.rs b/zingolib/src/testutils/mock_indexer.rs
+index 3e067ee..45d9994 100644
+--- a/zingolib/src/testutils/mock_indexer.rs
++++ b/zingolib/src/testutils/mock_indexer.rs
+@@ -474,7 +474,10 @@ impl CompactTxStreamer for MockIndexerService {
+         let chain = self.chain.read().await;
+         Ok(Response::new(BlockId {
+             height: u64::from(chain.tip()),
+-            hash: fabricated_block_hash(chain.tip()),
++            hash: chain.blocks.last().map_or_else(
++                || fabricated_block_hash(0),
++                |block| block.hash.clone(),
++            ),
+         }))
+     }
+ 

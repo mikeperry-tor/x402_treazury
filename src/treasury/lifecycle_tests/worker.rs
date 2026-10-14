@@ -1,0 +1,424 @@
+//! Real scheduler + Backend + treasury actor; only the chains and bridge are local fixtures.
+use super::*;
+use crate::rotation::{
+    base::BaseRpc,
+    funding::{Backend, FundingWorker},
+    near::NearClient,
+};
+use axum::{
+    Json, Router,
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
+
+#[derive(Clone)]
+struct Bridge {
+    store: StoreHandle,
+    deposits: Arc<Vec<String>>,
+    quotes: Arc<Mutex<BTreeMap<String, Value>>>,
+    quote_count: Arc<AtomicUsize>,
+    quotes_entered: Arc<tokio::sync::Semaphore>,
+    release_quotes: CancellationToken,
+    signed: Arc<Mutex<Vec<Value>>>,
+    destination: Arc<Mutex<DestinationChain>>,
+    timestamp: u64,
+}
+struct DestinationChain {
+    height: u64,
+    credits: BTreeMap<String, u64>,
+}
+async fn quote(State(f): State<Bridge>, Json(request): Json<Value>) -> Json<Value> {
+    let index = f.quote_count.fetch_add(1, Ordering::SeqCst);
+    let deposit = &f.deposits[index];
+    let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":request["amount"],"amountInUsd":"5","depositAddress":deposit,"deadline":request["deadline"]}});
+    assert!(
+        f.quotes
+            .lock()
+            .unwrap()
+            .insert(deposit.clone(), response.clone())
+            .is_none()
+    );
+    f.quotes_entered.add_permits(1);
+    f.release_quotes.cancelled().await;
+    Json(response)
+}
+async fn status(
+    State(f): State<Bridge>,
+    Query(query): Query<BTreeMap<String, String>>,
+) -> Json<Value> {
+    let response = f.quotes.lock().unwrap()[&query["depositAddress"]].clone();
+    // Destination delivery is tied to the source journal, not just a quote.
+    let recipient = response["quoteRequest"]["recipient"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let delivered = credited(&f.store, recipient).await;
+    Json(
+        json!({"status":if delivered {"SUCCESS"} else {"PENDING_DEPOSIT"},"quoteResponse":response}),
+    )
+}
+async fn credited(store: &StoreHandle, recipient: String) -> bool {
+    store
+        .call(move |s| {
+            Ok(s.funding_jobs()?.into_iter().any(|j| {
+                j.recipient.eq_ignore_ascii_case(&recipient)
+                    && s.operation(&j.operation_id)
+                        .is_ok_and(|o| o.submission == "CONFIRMED")
+            }))
+        })
+        .await
+        .unwrap()
+}
+async fn base(State(f): State<Bridge>, Json(v): Json<Value>) -> Json<Value> {
+    let confirmed = f
+        .store
+        .call(|s| {
+            Ok(s.funding_jobs()?
+                .into_iter()
+                .filter(|j| {
+                    s.operation(&j.operation_id)
+                        .is_ok_and(|o| o.submission == "CONFIRMED")
+                })
+                .map(|j| j.recipient.to_ascii_lowercase())
+                .collect::<Vec<_>>())
+        })
+        .await
+        .unwrap();
+    // Mine destination delivery once per source confirmation. Historical block
+    // hashes keep their original balances when another wallet is funded later.
+    let mut chain = f.destination.lock().unwrap();
+    for recipient in confirmed {
+        if !chain.credits.contains_key(&recipient) {
+            chain.height += 10;
+            let height = chain.height - 2;
+            chain.credits.insert(recipient, height);
+        }
+    }
+    let result = match v["method"].as_str().unwrap() {
+        "eth_chainId" => json!("0x2105"),
+        "eth_getBlockByNumber" => {
+            let tag = v["params"][0].as_str().unwrap();
+            let h = if tag == "latest" {
+                chain.height
+            } else {
+                u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
+            };
+            json!({"number":format!("0x{h:x}"),"hash":format!("0x{h:064x}"),"timestamp":format!("0x{:x}",f.timestamp)})
+        }
+        "eth_call" => {
+            let data = v["params"][0]["data"].as_str().unwrap();
+            assert_eq!(v["params"][1]["requireCanonical"], true);
+            let hash = v["params"][1]["blockHash"].as_str().unwrap();
+            let height = u64::from_str_radix(hash.trim_start_matches("0x"), 16).unwrap();
+            let recipient = format!("0x{}", &data[data.len() - 40..]).to_ascii_lowercase();
+            let amount = if data.starts_with("0x70a08231")
+                && chain
+                    .credits
+                    .get(&recipient)
+                    .is_some_and(|at| *at <= height)
+            {
+                5_000_000u64
+            } else {
+                0
+            };
+            json!(format!("0x{amount:064x}"))
+        }
+        method => panic!("unexpected Base method {method}"),
+    };
+    Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
+}
+async fn seller(State(f): State<Bridge>, headers: HeaderMap) -> Response {
+    if let Some(signature) = headers.get("payment-signature") {
+        let value: Value = serde_json::from_slice(&STANDARD.decode(signature).unwrap()).unwrap();
+        f.signed.lock().unwrap().push(value);
+        return "paid".into_response();
+    }
+    let challenge = json!({"x402Version":2,"resource":{"url":"https://fixture.invalid/pay","description":"fixture","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"1000000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+    (
+        StatusCode::PAYMENT_REQUIRED,
+        [(
+            "payment-required",
+            STANDARD.encode(serde_json::to_vec(&challenge).unwrap()),
+        )],
+    )
+        .into_response()
+}
+struct CountedSender {
+    inner: submission::GrpcSubmission,
+    sends: Arc<AtomicUsize>,
+    lookups: Arc<AtomicUsize>,
+}
+impl TransactionSubmission for CountedSender {
+    async fn preflight(&mut self, tx: &PreparedTransaction, retry: bool) -> Result<()> {
+        self.inner.preflight(tx, retry).await
+    }
+    async fn submit(&mut self, tx: BroadcastTransaction) -> Result<SubmissionOutcome> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        self.inner.submit(tx).await
+    }
+    async fn lookup(&mut self, tx: &PreparedTransaction) -> Result<TransactionPresence> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        self.inner.lookup(tx).await
+    }
+}
+async fn tick(worker: &FundingWorker<Backend>) {
+    // Respect the production one-second poll cadence between finite passes.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::timeout(Duration::from_secs(90), worker.tick(now().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+}
+async fn complete(worker: &FundingWorker<Backend>, net: &MockNet, count: usize) {
+    for _ in 0..20 {
+        tick(worker).await;
+        let done = worker
+            .store
+            .call(move |s| {
+                Ok(s.funding_jobs()?
+                    .iter()
+                    .filter(|j| j.phase == crate::rotation::store::funding::FundingPhase::Complete)
+                    .count())
+            })
+            .await
+            .unwrap();
+        if done == count {
+            return;
+        }
+        let mut chain = net.chain.write().await;
+        chain.mine_mempool();
+        chain.mine_empty_blocks(1);
+    }
+    panic!(
+        "funding did not complete: {:?}",
+        worker.store.call(|s| s.funding_jobs()).await.unwrap()
+    );
+}
+
+#[tokio::test]
+async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
+    let (dir, mut net, owner, endpoint) = funded_fixture(2).await;
+    let mut external = net
+        .client("legal winner thank year wave sausage worth useful legal winner thank yellow")
+        .await;
+    let mut deposits = Vec::new();
+    for _ in 0..3 {
+        let (_, address) = external
+            .generate_transparent_address(zip32::AccountId::ZERO, false)
+            .await
+            .unwrap();
+        deposits.push(
+            zcash_keys::address::Address::Transparent(address)
+                .encode(&TreasuryNetwork::Synthetic.chain()),
+        );
+    }
+    for name in ["alpha", "beta"] {
+        owner
+            .ensure_capacity_group(
+                name.into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .await
+            .unwrap();
+    }
+    let store = owner.store_handle();
+    let f = Bridge {
+        store: store.clone(),
+        deposits: Arc::new(deposits),
+        quotes: Default::default(),
+        quote_count: Default::default(),
+        quotes_entered: Arc::new(tokio::sync::Semaphore::new(0)),
+        release_quotes: CancellationToken::new(),
+        signed: Default::default(),
+        destination: Arc::new(Mutex::new(DestinationChain {
+            height: 100,
+            credits: BTreeMap::new(),
+        })),
+        timestamp: now().unwrap(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route(
+            "/v0/tokens",
+            get(|| async {
+                Json(
+                    serde_json::from_str::<Value>(include_str!(
+                        "../../../tests/fixtures/near/tokens.json"
+                    ))
+                    .unwrap(),
+                )
+            }),
+        )
+        .route("/v0/quote", post(quote))
+        .route("/v0/status", get(status))
+        .route("/base", post(base))
+        .route("/pay", get(seller))
+        .with_state(f.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let base = BaseRpc::new(&format!("{origin}/base"), 2, 120).unwrap();
+    let (handle, commands) = actor::channel();
+    let backend = Backend { treasury: handle.clone(), store: store.clone(), near: NearClient::synthetic_at(&origin).unwrap(), base: base.clone(),
+        wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())).collect(),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(), max_network_fee: 30_000 };
+    let worker = FundingWorker::new(store.clone(), backend, 1);
+    let sends = Arc::new(AtomicUsize::new(0));
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let sender = CountedSender {
+        inner: submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap(),
+        sends: sends.clone(),
+        lookups: lookups.clone(),
+    };
+    let stop = CancellationToken::new();
+    let actor = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
+    let first = worker.clone();
+    let first = tokio::spawn(async move { tick(&first).await });
+    tokio::time::timeout(Duration::from_secs(30), f.quotes_entered.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert_eq!(sends.load(Ordering::SeqCst), 0);
+    let jobs = store.call(|s| s.funding_jobs()).await.unwrap();
+    assert_eq!(jobs.len(), 2);
+    let refunds = store
+        .call(|s| {
+            s.funding_jobs()?
+                .iter()
+                .map(|j| s.refund_address(&j.id).map(|a| a.unwrap()))
+                .collect::<Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+    assert_ne!(refunds[0], refunds[1]);
+    let quotes = f.quotes.lock().unwrap().clone();
+    for (job, refund) in jobs.iter().zip(&refunds) {
+        let request = &quotes
+            .values()
+            .find(|q| q["quoteRequest"]["recipient"] == job.recipient)
+            .unwrap()["quoteRequest"];
+        assert_eq!(request["refundTo"], *refund);
+        let operation = job.operation_id.clone();
+        store
+            .call(move |s| s.require_unstarted_preparation(&operation))
+            .await
+            .unwrap();
+    }
+    f.release_quotes.cancel();
+    first.await.unwrap();
+    for _ in 0..6 {
+        if sends.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tick(&worker).await;
+    }
+    assert_eq!(
+        sends.load(Ordering::SeqCst),
+        1,
+        "jobs: {:?}",
+        store.call(|s| s.funding_jobs()).await.unwrap()
+    );
+    // No new block or refund derivation: repeated scheduler passes reuse scans.
+    tick(&worker).await;
+    let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
+    let observed = lookups.load(Ordering::SeqCst);
+    for _ in 0..2 {
+        tick(&worker).await;
+    }
+    let after = store.call(|s| s.treasury_sync_state()).await.unwrap();
+    assert!(
+        lookups.load(Ordering::SeqCst) >= observed + 2,
+        "passes must actually reconcile the pending source"
+    );
+    assert_eq!(before.snapshot_revision, after.snapshot_revision);
+    assert_eq!(
+        before.sync.unwrap().checked_at,
+        after.sync.unwrap().checked_at
+    );
+    assert_eq!(sends.load(Ordering::SeqCst), 1);
+    complete(&worker, &net, 2).await;
+    assert_eq!(sends.load(Ordering::SeqCst), 2);
+    let pool = store
+        .call(|s| {
+            Ok(s.status()?
+                .pools
+                .into_iter()
+                .find(|p| p.name == "alpha")
+                .unwrap()
+                .id)
+        })
+        .await
+        .unwrap();
+    let manager = Arc::new(
+        crate::rotation::manager::ManagedPool::new(
+            store.clone(),
+            pool,
+            base,
+            crate::payment::SpendPolicy::dollars("1").unwrap(),
+        )
+        .unwrap(),
+    );
+    let payer = crate::payment::PaidClient::managed(manager);
+    payer
+        .execute(crate::catalog::RoutedRequest {
+            method: "GET".into(),
+            url: format!("{origin}/pay"),
+            query: BTreeMap::new(),
+            body: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(f.signed.lock().unwrap().len(), 1);
+    // Actual signed admission consumes the reserve, then the same worker funds
+    // exactly one replacement without resolving the old payment liability.
+    complete(&worker, &net, 3).await;
+    assert_eq!(f.quote_count.load(Ordering::SeqCst), 3);
+    assert_eq!(sends.load(Ordering::SeqCst), 3);
+    store
+        .call(|s| {
+            let jobs = s.funding_jobs()?;
+            assert_eq!(jobs.len(), 3);
+            for job in jobs {
+                assert_eq!(s.operation(&job.operation_id)?.attempts, 1);
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let unresolved: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved, 1);
+    drop(db);
+    drop(payer);
+    drop(worker);
+    drop(f);
+    server.abort();
+    let _ = server.await;
+    drop(store);
+    stop.cancel();
+    actor.await.unwrap().unwrap();
+}

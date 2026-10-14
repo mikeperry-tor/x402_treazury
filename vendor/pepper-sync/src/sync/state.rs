@@ -22,7 +22,9 @@ use crate::{
     sync::ScanRange,
     wallet::{
         InitialSyncState, ScanTarget, SyncState, TreeBounds, WalletTransaction,
-        traits::{SyncBlocks, SyncNullifiers, SyncWallet},
+        traits::{
+            SyncBlocks, SyncNullifiers, SyncOutPoints, SyncShardTrees, SyncTransactions, SyncWallet,
+        },
     },
 };
 
@@ -70,7 +72,7 @@ pub(super) async fn update_scan_ranges<W>(
     wallet: &mut W,
 ) -> Result<BlockHeight, SyncError<W::Error>>
 where
-    W: SyncWallet + SyncBlocks,
+    W: SyncWallet + SyncBlocks + SyncTransactions + SyncNullifiers + SyncOutPoints + SyncShardTrees,
 {
     let sync_state = wallet
         .get_sync_state_mut()
@@ -103,11 +105,29 @@ where
         let chain_height_wallet_block = wallet
             .get_wallet_block(chain_height)
             .map_err(SyncError::WalletError)?;
-        let sync_state = wallet
-            .get_sync_state_mut()
-            .map_err(SyncError::WalletError)?;
         if chain_height_wallet_block.block_hash().0.to_vec() != chain_height_server_block.hash {
-            set_verify_scan_range(sync_state, chain_height, VerifyEnd::VerifyHighest);
+            // The tip is already proven to be from another branch. Invalidate
+            // its transactions before replacing it, then verify just that block
+            // against the retained predecessor. A wider initial range can span
+            // the entire fork with matching seams and leave orphaned confirmed
+            // transactions behind. Deeper forks use the ordinary bounded
+            // backward verification and truncation path after a seam mismatch.
+            super::truncate_wallet_data(wallet, chain_height - 1)?;
+            let sync_state = wallet
+                .get_sync_state_mut()
+                .map_err(SyncError::WalletError)?;
+            let (index, range) = sync_state
+                .scan_ranges
+                .iter()
+                .enumerate()
+                .find(|(_, range)| range.block_range().contains(&chain_height))
+                .expect("the scanned chain tip has a scan range");
+            let split = split_out_scan_range(
+                range.clone(),
+                chain_height..chain_height + 1,
+                ScanPriority::Verify,
+            );
+            sync_state.scan_ranges.splice(index..=index, split);
         }
     }
     wallet.set_save_flag().map_err(SyncError::WalletError)?;

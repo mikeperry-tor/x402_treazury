@@ -67,8 +67,74 @@ fn bridge_minimum(value: &Value) -> Option<u64> {
 pub struct NearClient {
     headers: reqwest::header::HeaderMap,
     origin: String,
+    address_network: AddressNetwork,
+}
+// Production bridge routes are mainnet-only. The synthetic chain is available
+// solely in opted-in unit tests, and is scoped to one client (never global).
+#[derive(Clone, Copy)]
+enum AddressNetwork {
+    Mainnet,
+    #[cfg(all(test, feature = "zcash-testutils"))]
+    Synthetic,
+}
+impl AddressNetwork {
+    fn transparent(self, address: &str) -> Result<()> {
+        let network = match self {
+            Self::Mainnet => zcash_protocol::consensus::Network::MainNetwork,
+            #[cfg(all(test, feature = "zcash-testutils"))]
+            Self::Synthetic => zcash_protocol::consensus::Network::TestNetwork,
+        };
+        ensure!(
+            matches!(
+                zcash_keys::address::Address::decode(&network, address),
+                Some(zcash_keys::address::Address::Transparent(_))
+            ),
+            "requires mainnet transparent address"
+        );
+        Ok(())
+    }
 }
 impl NearClient {
+    #[cfg(all(test, feature = "zcash-testutils"))]
+    pub(crate) fn synthetic_at(origin: &str) -> Result<Self> {
+        let mut client = Self::test_at(origin)?;
+        client.address_network = AddressNetwork::Synthetic;
+        Ok(client)
+    }
+    pub(crate) fn validate_quote(
+        &self,
+        request: Value,
+        response: Value,
+        limits: &Limits,
+        now: u64,
+    ) -> Result<Quote> {
+        validate_quote_on(self.address_network, request, response, limits, now)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn request(
+        &self,
+        assets: &Assets,
+        recipient: &str,
+        refund: &str,
+        amount: &str,
+        confidentiality: &str,
+        slippage: u32,
+        deadline: u64,
+        dry: bool,
+    ) -> Result<Value> {
+        request_on(
+            self.address_network,
+            assets,
+            recipient,
+            refund,
+            amount,
+            confidentiality,
+            slippage,
+            deadline,
+            dry,
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn test_at(origin: &str) -> Result<Self> {
         Self::at(origin, None, None)
@@ -94,6 +160,7 @@ impl NearClient {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
         Ok(Self {
+            address_network: AddressNetwork::Mainnet,
             origin: origin.into(),
             headers,
         })
@@ -180,7 +247,7 @@ impl NearClient {
                     .json(&request),
             )
             .await?;
-        validate_quote(
+        self.validate_quote(
             request,
             response,
             limits,
@@ -320,6 +387,30 @@ pub fn request(
     deadline: u64,
     dry: bool,
 ) -> Result<Value> {
+    request_on(
+        AddressNetwork::Mainnet,
+        assets,
+        recipient,
+        refund,
+        amount,
+        confidentiality,
+        slippage,
+        deadline,
+        dry,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn request_on(
+    network: AddressNetwork,
+    assets: &Assets,
+    recipient: &str,
+    refund: &str,
+    amount: &str,
+    confidentiality: &str,
+    slippage: u32,
+    deadline: u64,
+    dry: bool,
+) -> Result<Value> {
     ensure!(
         assets.origin == ZEC && assets.destination == USDC,
         "unsupported assets"
@@ -327,7 +418,7 @@ pub fn request(
     recipient
         .parse::<alloy_primitives::Address>()
         .context("invalid EVM recipient")?;
-    transparent(refund)?;
+    network.transparent(refund)?;
     ensure!(
         atomic(amount)? > 0
             && matches!(confidentiality, "public" | "basic" | "advanced")
@@ -340,16 +431,6 @@ pub fn request(
     Ok(
         json!({"dry":dry,"swapType":"EXACT_OUTPUT","originAsset":assets.origin,"destinationAsset":assets.destination,"depositType":"ORIGIN_CHAIN","recipientType":"DESTINATION_CHAIN","refundType":"ORIGIN_CHAIN","depositMode":"SIMPLE","amount":amount,"recipient":recipient,"refundTo":refund,"confidentiality":confidentiality,"slippageTolerance":slippage,"deadline":deadline}),
     )
-}
-fn transparent(address: &str) -> Result<()> {
-    ensure!(
-        matches!(
-            zcash_keys::address::Address::decode(&zcash_protocol::consensus::MAIN_NETWORK, address),
-            Some(zcash_keys::address::Address::Transparent(_))
-        ),
-        "requires mainnet transparent address"
-    );
-    Ok(())
 }
 fn atomic(s: &str) -> Result<u64> {
     ensure!(
@@ -402,13 +483,23 @@ fn check_echo(request: &Value, echo: &Value) -> Result<()> {
     Ok(())
 }
 pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64) -> Result<Quote> {
+    validate_quote_on(AddressNetwork::Mainnet, request, response, limits, now)
+}
+fn validate_quote_on(
+    network: AddressNetwork,
+    request: Value,
+    response: Value,
+    limits: &Limits,
+    now: u64,
+) -> Result<Quote> {
     // Rebuild policy even when validating persisted data, not just fresh requests.
     let assets = Assets {
         origin: ZEC.into(),
         destination: USDC.into(),
     };
     let text = |k| request[k].as_str().context("missing quote binding");
-    let rebuilt = self::request(
+    let rebuilt = request_on(
+        network,
         &assets,
         text("recipient")?,
         text("refundTo")?,
@@ -506,7 +597,7 @@ pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64
         None
     } else {
         let address = q["depositAddress"].as_str().context("missing deposit")?;
-        transparent(address)?;
+        network.transparent(address)?;
         Some(address.into())
     };
     Ok(Quote {
@@ -522,6 +613,74 @@ pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64
 mod tests {
     use super::*;
     use crate::test_socks as socks;
+
+    #[cfg(feature = "zcash-testutils")]
+    #[test]
+    fn synthetic_address_codec_is_scoped_to_its_test_client() {
+        let assets = Assets {
+            origin: ZEC.into(),
+            destination: USDC.into(),
+        };
+        let synthetic = NearClient::synthetic_at("http://127.0.0.1:1").unwrap();
+        let ordinary = NearClient::test_at("http://127.0.0.1:1").unwrap();
+        let recipient = "0x0000000000000000000000000000000000000003";
+        let refund = "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8";
+        let request = synthetic
+            .request(
+                &assets,
+                recipient,
+                refund,
+                "5000000",
+                "public",
+                100,
+                2_000_007_200,
+                false,
+            )
+            .unwrap();
+        assert!(
+            ordinary
+                .request(
+                    &assets,
+                    recipient,
+                    refund,
+                    "5000000",
+                    "public",
+                    100,
+                    2_000_007_200,
+                    false
+                )
+                .is_err()
+        );
+        assert!(
+            super::request(
+                &assets,
+                recipient,
+                refund,
+                "5000000",
+                "public",
+                100,
+                2_000_007_200,
+                false
+            )
+            .is_err()
+        );
+        let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":"5000000","amountInUsd":"5","depositAddress":refund,"deadline":request["deadline"]}});
+        let limits = Limits {
+            max_input: 100_000,
+            max_fee: 30_000,
+            max_output: 5_000_000,
+            max_fee_bps: 500,
+        };
+        synthetic
+            .validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000)
+            .unwrap();
+        assert!(
+            ordinary
+                .validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000)
+                .is_err()
+        );
+        assert!(validate_quote(request, response, &limits, 2_000_000_000).is_err());
+    }
 
     #[test]
     fn near_requests_use_recipient_and_discovery_isolation() {

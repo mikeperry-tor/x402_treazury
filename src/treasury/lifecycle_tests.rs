@@ -1,12 +1,14 @@
 //! Local synthetic-chain coverage of the real treasury owner and signed journal.
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
+mod worker;
 use super::*;
 use crate::rotation::{
     near::Quote,
     store::{AllocationKind, funding::FundingJob},
     transaction::{
         BroadcastTransaction, ManagedFundingAuthority, PreparationDeferred, PrepareRequest,
-        PreparedTransaction, SubmissionOutcome, TransactionPresence, TransactionSubmission,
+        PreparedTransaction, SubmissionOutcome, TransactionPreparer, TransactionPresence,
+        TransactionSubmission,
     },
 };
 use zingolib::testutils::mock_indexer::{LostSendDestination, MockNet, faucet_funding_transaction};
@@ -107,8 +109,7 @@ impl TransactionSubmission for GatedSubmission {
     }
 }
 
-#[tokio::test]
-async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_after_restart() {
+async fn funded_fixture(confirmations: u64) -> (tempfile::TempDir, MockNet, Treasury, String) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -142,9 +143,18 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         chain.mine_block(vec![funding]);
         chain.mine_empty_blocks(2);
     }
-    let settings = SyncSettings::new(endpoint.clone(), 2, 300).unwrap();
+    let settings = SyncSettings::new(endpoint.clone(), confirmations, 300).unwrap();
     owner.configure_sync(settings.clone());
     owner.sync_once(&CancellationToken::new()).await.unwrap();
+    (dir, net, owner, endpoint)
+}
+
+#[tokio::test]
+async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_after_restart() {
+    let (dir, net, owner, endpoint) = funded_fixture(2).await;
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let settings = SyncSettings::new(endpoint.clone(), 2, 300).unwrap();
     assert!(
         owner
             .status()
@@ -380,7 +390,198 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         .await
         .unwrap();
     accounting(&state, &second_prepared, true);
+    let pending_job = store
+        .call(|s| {
+            let pool = s.ensure_capacity_group(
+                "pending",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )?;
+            let job = s
+                .allocate_capacity_kind(&pool, AllocationKind::Small, true)?
+                .unwrap();
+            Ok(s.funding_job(&job)?.unwrap())
+        })
+        .await
+        .unwrap();
+    save_quotes(&store, vec![pending_job.clone()], deadline).await;
+    let pending_prepared = handle
+        .prepare(request(&pending_job, deadline))
+        .await
+        .unwrap();
+    // Preparation invalidates reuse; establish an unchanged, fresh scan before
+    // the fork so submission must detect it through the reuse probe itself.
+    handle.sync().await.unwrap();
+    accounting(&state, &pending_prepared, false);
+    // A same-height fork removes both confirmed source payments. The reuse
+    // probe must notice the changed hash even though height and age still match.
+    let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
+    {
+        let mut chain = net.chain.write().await;
+        let tip = chain.tip();
+        assert_eq!(chain.reorg_to(23).len(), 2);
+        chain.mine_empty_blocks(tip - 23);
+        assert_eq!(chain.tip(), tip);
+    }
+    let error = handle
+        .submit(pending_job.operation_id.clone(), false)
+        .await
+        .unwrap_err();
+    let after = store.call(|s| s.treasury_sync_state()).await.unwrap();
+    assert!(
+        after.snapshot_revision > before.snapshot_revision,
+        "reorg must force a scan: {error:#}"
+    );
+    assert!(
+        format!("{error:#}").contains("treasury_confirmed_spend_reorg"),
+        "scan result: {error:#}; phase={:?}",
+        after.sync.as_ref().unwrap().phase
+    );
+    assert_eq!(after.sync.unwrap().phase, SyncPhase::Failed);
+    // New work cannot consume the resurrected source notes while historical
+    // confirmed expenses lack canonical support. No new proposal or send intent.
+    let third = store
+        .call(|s| {
+            let pool = s.ensure_capacity_group(
+                "gamma",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )?;
+            let job = s
+                .allocate_capacity_kind(&pool, AllocationKind::Small, true)?
+                .unwrap();
+            Ok(s.funding_job(&job)?.unwrap())
+        })
+        .await
+        .unwrap();
+    save_quotes(&store, vec![third.clone()], deadline).await;
+    let error = handle
+        .prepare(request(&third, deadline))
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is::<PreparationDeferred>(), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("treasury_confirmed_spend_reorg"),
+        "{error:#}"
+    );
+    let unstarted = third.operation_id;
+    let originals = [first.operation_id.clone(), second.operation_id.clone()];
+    store
+        .call(move |s| {
+            s.require_unstarted_preparation(&unstarted)?;
+            for id in originals {
+                let operation = s.operation(&id)?;
+                assert_eq!(operation.submission, "CONFIRMED");
+                assert_eq!(operation.attempts, 1, "reorg detection cannot rebroadcast");
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    accounting(&state, &prepared, true);
+    accounting(&state, &second_prepared, true);
+    accounting(&state, &pending_prepared, false);
+    pending(&store, &pending_job, pending_prepared.bytes()).await;
+    let operation = pending_job.operation_id;
+    store
+        .call(move |s| {
+            assert_eq!(
+                s.operation(&operation)?.attempts,
+                0,
+                "fork must block submission intent"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     stop.cancel();
     drop(store);
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_canonical_return() {
+    let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "tip".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let stop = CancellationToken::new();
+    let mut sender = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    assert_eq!(
+        owner
+            .submit_prepared(job.operation_id.clone(), &mut sender, false, &stop)
+            .await
+            .unwrap(),
+        SubmissionOutcome::Accepted
+    );
+    net.chain.write().await.mine_mempool();
+    assert_eq!(
+        owner
+            .reconcile_prepared(job.operation_id.clone(), &mut sender, &stop)
+            .await
+            .unwrap(),
+        TransactionPresence::Confirmed { height: 24 }
+    );
+    accounting(&dir.path().join("state"), &prepared, true);
+    {
+        let mut chain = net.chain.write().await;
+        assert_eq!(chain.reorg_to(23), vec![prepared.bytes().to_vec()]);
+        chain.mine_empty_blocks(1);
+    }
+    let error = owner.sync_for_command(&stop).await.unwrap_err();
+    assert!(
+        error.to_string().contains("treasury_confirmed_spend_reorg"),
+        "{error:#}"
+    );
+    let id = job.operation_id.clone();
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&id)?.attempts, 1);
+            assert!(s.require_spend_ready(now()?, 1).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    accounting(&dir.path().join("state"), &prepared, true);
+    // Canonical reappearance can restore readiness without rebroadcasting or
+    // charging the already-consumed source cost again.
+    {
+        let mut chain = net.chain.write().await;
+        chain.reorg_to(23);
+        chain.mine_block(vec![prepared.bytes().to_vec()]);
+    }
+    owner.sync_for_command(&stop).await.unwrap();
+    assert_eq!(
+        owner.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Ready
+    );
+    accounting(&dir.path().join("state"), &prepared, true);
+    drop(store);
+    owner.close().await.unwrap();
 }
