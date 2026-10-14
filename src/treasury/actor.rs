@@ -85,6 +85,8 @@ impl Treasury {
             .clamp(1, 60);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(delay));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut scheduled_sync = None;
+        schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
         loop {
             tokio::select! {
                 biased;
@@ -116,6 +118,9 @@ impl Treasury {
                     }
                 }
             }
+            // Only an actual successfully persisted scan moves maintenance.
+            // Reused evidence, failed scans and unrelated commands do not.
+            schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
             if !self.healthy {
                 stop.cancel();
                 commands.receiver.close();
@@ -128,6 +133,21 @@ impl Treasury {
         commands.receiver.close();
         drop(commands);
         self.close().await
+    }
+}
+
+fn schedule_after_sync(
+    interval: &mut tokio::time::Interval,
+    scheduled: &mut Option<tokio::time::Instant>,
+    completed: Option<tokio::time::Instant>,
+) {
+    if let Some(completed) = completed
+        && Some(completed) != *scheduled
+    {
+        // Anchor to scan completion, not the end of the enclosing command.
+        // Long subsequent work can leave this deadline due already.
+        interval.reset_at(completed + interval.period());
+        *scheduled = Some(completed);
     }
 }
 
@@ -175,6 +195,47 @@ impl TreasuryCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn maintenance_cadence_tracks_only_actual_scan_completion() {
+        use futures_util::FutureExt;
+        use std::time::Duration;
+        let period = Duration::from_secs(10);
+        let mut interval = tokio::time::interval(period);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut scheduled = None;
+        schedule_after_sync(&mut interval, &mut scheduled, None);
+        assert!(
+            interval.tick().now_or_never().is_some(),
+            "unsynced startup remains immediate"
+        );
+        tokio::time::advance(period).await;
+        let completed = tokio::time::Instant::now();
+        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
+        assert!(
+            interval.tick().now_or_never().is_none(),
+            "command scan replaces an overdue background tick"
+        );
+        tokio::time::advance(Duration::from_secs(9)).await;
+        // Failed/cancelled scans, cache hits and unrelated commands leave the
+        // last-success timestamp unchanged; none grants another ten seconds.
+        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
+        assert!(interval.tick().now_or_never().is_none());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(interval.tick().now_or_never().is_some());
+        // Work after a scan may itself take longer than the cadence. Scheduling
+        // at command completion would incorrectly postpone already-due work.
+        let completed = tokio::time::Instant::now();
+        tokio::time::advance(period + Duration::from_secs(2)).await;
+        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
+        assert!(interval.tick().now_or_never().is_some());
+        // A genuinely new successful scan earns the next ordinary interval.
+        let completed = tokio::time::Instant::now();
+        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
+        assert!(interval.tick().now_or_never().is_none());
+        tokio::time::advance(period).await;
+        assert!(interval.tick().now_or_never().is_some());
+    }
+
     struct NoSubmission;
     impl TransactionSubmission for NoSubmission {
         async fn submit(

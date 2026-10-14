@@ -51,6 +51,8 @@ pub struct Treasury {
     healthy: bool,
     sync_settings: Option<SyncSettings>,
     reusable_sync_revision: Option<i64>,
+    // Scheduling only; never used to date or authorize spending evidence.
+    last_completed_sync: Option<tokio::time::Instant>,
 }
 /// Endpoint is intentionally excluded from Debug/serialization and status output.
 #[derive(Clone)]
@@ -160,6 +162,7 @@ impl Treasury {
             healthy: true,
             sync_settings: None,
             reusable_sync_revision: None,
+            last_completed_sync: None,
         })
     }
     pub async fn open(dir: PathBuf, key: PathBuf, id: String) -> Result<Self> {
@@ -202,6 +205,7 @@ impl Treasury {
             healthy: true,
             sync_settings: None,
             reusable_sync_revision: None,
+            last_completed_sync: None,
         })
     }
     pub(crate) fn store_handle(&self) -> StoreHandle {
@@ -333,6 +337,7 @@ impl Treasury {
     }
     pub fn configure_sync(&mut self, settings: SyncSettings) {
         self.reusable_sync_revision = None;
+        self.last_completed_sync = None;
         self.sync_settings = Some(settings);
     }
     async fn checkpoint(&mut self, observation: SyncObservation) -> Result<()> {
@@ -434,6 +439,7 @@ impl Treasury {
         self.healthy = true;
         if outcome.is_ok() && !stop.is_cancelled() {
             self.reusable_sync_revision = Some(self.revision);
+            self.last_completed_sync = Some(tokio::time::Instant::now());
             tracing::info!(
                 height,
                 observed_tip_height,

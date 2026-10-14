@@ -117,20 +117,20 @@ struct ReuseProbe {
 async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse {
     let method = uri.path().rsplit('/').next().unwrap().to_owned();
     mock.calls.lock().unwrap().push(method.clone());
-    if let Some(probe) = &mock.reuse_probe {
-        if method == "GetLightdInfo" {
-            if probe.delay_once.swap(false, Ordering::SeqCst) {
-                tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-            }
-            if probe.stall.load(Ordering::SeqCst) {
-                std::future::pending::<()>().await;
-            }
-            if probe.fail.load(Ordering::SeqCst) {
-                let mut headers = HeaderMap::new();
-                headers.insert("content-type", "application/grpc".parse().unwrap());
-                headers.insert("grpc-status", "14".parse().unwrap());
-                return (headers, vec![]);
-            }
+    if let Some(probe) = &mock.reuse_probe
+        && method == "GetLightdInfo"
+    {
+        if probe.delay_once.swap(false, Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        }
+        if probe.stall.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        if probe.fail.load(Ordering::SeqCst) {
+            let mut headers = HeaderMap::new();
+            headers.insert("content-type", "application/grpc".parse().unwrap());
+            headers.insert("grpc-status", "14".parse().unwrap());
+            return (headers, vec![]);
         }
     }
     let request = if body.len() >= 5 { &body[5..] } else { &[] };
@@ -1304,5 +1304,35 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
     );
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     treasury.close().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn command_scan_defers_the_immediate_background_tick_without_extra_network_work() {
+    use x402_treazury::treasury::{actor, submission::GrpcSubmission};
+    let dir = tempfile::tempdir().unwrap();
+    let (endpoint, calls, server, _) = mock("main").await;
+    let mut treasury = wallet(dir.path()).await;
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 300).unwrap());
+    let submission = GrpcSubmission::new(endpoint.clone(), endpoint).unwrap();
+    let (handle, commands) = actor::channel();
+    let stop = CancellationToken::new();
+    // Queue the command before starting the owner: it must take priority over
+    // the initial immediate maintenance tick, and replace that tick on success.
+    let requested = handle.clone();
+    let first = tokio::spawn(async move { requested.sync().await });
+    tokio::task::yield_now().await;
+    let owner = tokio::spawn(treasury.run_commands(commands, submission, stop.clone()));
+    first.await.unwrap().unwrap();
+    let count = calls.lock().unwrap().len();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        count,
+        "a just-completed scan must not be immediately repeated"
+    );
+    stop.cancel();
+    owner.await.unwrap().unwrap();
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     server.abort();
 }

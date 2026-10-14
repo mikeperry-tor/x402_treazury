@@ -432,6 +432,7 @@ financial or qualification authority.
 | Optional cover episodes and three-second task cleanup | Bound optional unsigned work; cannot cut off the real paid call. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
+| Treasury background sync cadence | Existing half-max-age cadence (1–60 seconds) is scheduled from the last successfully persisted scan completion, including command-triggered scans. Reuse, failed/cancelled scans and unrelated commands do not reset it. Long post-scan command work cannot postpone an already-due tick. This scheduling clock never renews the original sync observation or financial authority. |
 | Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
 
 Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
