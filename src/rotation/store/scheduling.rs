@@ -148,6 +148,9 @@ impl Store {
         }
         tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs WHERE id=?1 AND state='COMPLETE')",[job])?;
         tx.commit()?;
+        if changed == 1 {
+            self.observe_funding_shortage(job, operation, error);
+        }
         Ok(())
     }
 }

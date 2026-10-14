@@ -38,6 +38,7 @@ pub(crate) struct StartupPath {
     pub destination_ready: bool,
     pub recovery_count: u64,
     pub readiness_dispute: Option<String>,
+    pub shortage_observed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,7 +115,9 @@ impl StartupPath {
             "funding_allocation_evidence_invalid" | "funding_integrity_conflict" => {
                 "funding_evidence_requires_review"
             }
-            "treasury_insufficient_spendable_funds" if !source_pending => {
+            "treasury_insufficient_spendable_funds"
+                if !source_pending && self.shortage_observed =>
+            {
                 "treasury_insufficient_spendable_funds"
             }
             _ => {
@@ -130,6 +133,21 @@ impl StartupPath {
 }
 
 impl Store {
+    pub(super) fn observe_funding_shortage(
+        &mut self,
+        job: &str,
+        operation: &str,
+        error: Option<&str>,
+    ) {
+        if error.and_then(|e| e.split(';').next()) == Some("treasury_insufficient_spendable_funds")
+        {
+            self.funding_shortages
+                .insert(job.to_owned(), operation.to_owned());
+        } else {
+            self.funding_shortages.remove(job);
+        }
+    }
+
     /// Caller pages its immutable configured name set, at most GROUP_PAGE per turn.
     /// Each group has at most one ACTIVE and two enabled reserve claims.
     pub(crate) fn startup_groups(&self, names: &[String]) -> Result<Vec<StartupGroup>> {
@@ -277,6 +295,7 @@ impl Store {
         let facts = self.funding_facts(id, &job.operation_id)?;
         let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
         Ok(StartupPath {
+            shortage_observed: self.funding_shortages.get(id) == Some(&job.operation_id),
             wallet_type: self.funding_wallet_type(id)?,
             job,
             facts,

@@ -398,3 +398,114 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
     drop(store);
     worker.await.unwrap();
 }
+
+#[tokio::test]
+async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
+    let (dir, mut state) = allocated_readiness_fixture();
+    let jobs = state.funding_jobs().unwrap();
+    let identity = state.id().to_owned();
+    let shortage = "treasury_insufficient_spendable_funds; previous owner";
+    for job in &jobs {
+        state
+            .defer_funding(&job.id, u64::MAX / 2, Some(shortage), false)
+            .unwrap();
+    }
+    drop(state);
+    let state = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &identity,
+    )
+    .unwrap();
+    assert!(
+        state
+            .funding_jobs()
+            .unwrap()
+            .iter()
+            .all(|job| job.last_error.as_deref() == Some(shortage))
+    );
+    let (store, worker) = StoreHandle::spawn(state);
+    let names = BTreeSet::from(["web".to_owned()]);
+    let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+    let captured = capture_startup(&store, &names).await.unwrap();
+    // Neither the initial CLI check nor the serving monitor may stop the worker
+    // on a historical diagnostic, even with an old persisted backoff.
+    for scope in [None, Some(&captured)] {
+        assert!(
+            !check_startup(&store, &names, &attempts, scope, false)
+                .await
+                .unwrap()
+        );
+    }
+    for (index, job) in jobs.iter().enumerate() {
+        let job = job.clone();
+        store
+            .call(move |s| {
+                // Archived callbacks cannot certify a current shortage.
+                s.record_funding_observation_health(
+                    &job.id,
+                    "archived-operation",
+                    0,
+                    1,
+                    Some(shortage),
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        for scope in [None, Some(&captured)] {
+            assert!(
+                !check_startup(&store, &names, &attempts, scope, false)
+                    .await
+                    .unwrap()
+            );
+        }
+        let job = jobs[index].clone();
+        store
+            .call(move |s| {
+                s.record_funding_observation_health(
+                    &job.id,
+                    &job.operation_id,
+                    0,
+                    1,
+                    Some(shortage),
+                )
+            })
+            .await
+            .unwrap();
+    }
+    for scope in [None, Some(&captured)] {
+        let error = check_startup(&store, &names, &attempts, scope, false)
+            .await
+            .unwrap_err();
+        assert!(
+            error.is::<StartupObstructed>(),
+            "a newly reproduced shortage still stops startup"
+        );
+    }
+    store
+        .call(move |s| {
+            for job in jobs {
+                let current = s.funding_job(&job.id)?.unwrap();
+                assert_eq!(current.operation_id, job.operation_id);
+                assert_eq!(current.attempts, job.attempts);
+                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                s.record_funding_observation_health(&job.id, &job.operation_id, 0, 0, None)?;
+                s.record_credit(&job.wallet_id, &job.target, "fixture", 100)?;
+            }
+            assert!(s.status()?.treasury_operations.is_empty());
+            assert!(!s.status()?.outgoing_pending);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for scope in [None, Some(&captured)] {
+        assert!(
+            check_startup(&store, &names, &attempts, scope, false)
+                .await
+                .unwrap()
+        );
+    }
+    drop(store);
+    worker.await.unwrap();
+}

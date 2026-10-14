@@ -212,6 +212,9 @@ pub struct Store {
     evidence_namespace: Uuid,
     evidence_cache: std::collections::BTreeMap<String, (u64, super::base::BalanceCertificate)>,
     evidence_order: u64,
+    // Diagnostic freshness only: never spending authority. Historical shortages
+    // must be retried by this owner before they can obstruct startup.
+    funding_shortages: std::collections::BTreeMap<String, String>,
     group_gates: GroupGates,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
@@ -400,6 +403,7 @@ impl Store {
             evidence_namespace: Uuid::new_v4(),
             evidence_cache: Default::default(),
             evidence_order: 0,
+            funding_shortages: Default::default(),
             group_gates: Default::default(),
             db,
             _lock: owner,
@@ -462,6 +466,7 @@ impl Store {
             evidence_namespace: Uuid::new_v4(),
             evidence_cache: Default::default(),
             evidence_order: 0,
+            funding_shortages: Default::default(),
             group_gates: Default::default(),
             db,
             _lock: owner,

@@ -489,6 +489,17 @@ impl FundingBackend for Backend {
         // The exact fee is checked and reserved by the serialized owner before signing.
         let reserve = quote.input;
         ensure!(reserve < limits.max_input, "funding_cost_limit_exceeded");
+        let state = self.store.call(|s| s.treasury_sync_state()).await?;
+        // A still-fresh low balance can predate an operator's deposit. Scan
+        // before reporting insufficient capital again; pending bytes instead
+        // retain their ordinary reconciliation owner.
+        if !state.outgoing_pending
+            && state
+                .sync
+                .is_some_and(|sync| sync.spendable_shielded_zatoshis < reserve)
+        {
+            self.treasury.sync().await?;
+        }
         self.store
             .call(move |s| {
                 s.check_job_permit(&job_id, reserve)?;

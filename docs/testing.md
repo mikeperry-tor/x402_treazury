@@ -105,6 +105,10 @@ restart, cancellation after submission intent and funded same-height reorgs.
 The production funding worker also runs against local bridge/Base fixtures through
 concurrent quote acquisition, refund derivation, bootstrap completion and signed
 payment-triggered replacement funding, with scan-reuse and no-replay assertions.
+Reopened insufficient-funds diagnostics cannot block bootstrap or serving before
+the current worker rechecks them. A synthetic deposit regression verifies that
+preparation readiness scans a newly confirmed deposit even when the saved low
+balance is still fresh, without creating a transaction or reservation.
 Default fixtures cover concurrent
 replacement allocation/credit with retained old payment liabilities and paged,
 scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).

@@ -110,6 +110,13 @@ impl TransactionSubmission for GatedSubmission {
 }
 
 async fn funded_fixture(confirmations: u64) -> (tempfile::TempDir, MockNet, Treasury, String) {
+    funded_fixture_amount(confirmations, 1_000_000).await
+}
+
+async fn funded_fixture_amount(
+    confirmations: u64,
+    amount: u64,
+) -> (tempfile::TempDir, MockNet, Treasury, String) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -136,7 +143,7 @@ async fn funded_fixture(confirmations: u64) -> (tempfile::TempDir, MockNet, Trea
         .as_str()
         .unwrap()
         .to_owned();
-    let funding = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let funding = faucet_funding_transaction(vec![(&address, amount, None)]).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_empty_blocks(20);

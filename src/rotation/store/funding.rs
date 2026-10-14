@@ -597,6 +597,9 @@ impl Store {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let completed = finish_if_proven(&tx, job, operation)?;
         tx.commit()?;
+        if completed {
+            self.funding_shortages.remove(job);
+        }
         Ok(completed)
     }
 
@@ -1363,7 +1366,13 @@ impl Store {
         ensure!(tx.execute("UPDATE funding_progress SET next_poll=?2,last_error=CASE WHEN last_error LIKE 'funding_integrity_conflict;%' THEN last_error WHEN phase='\"RECOVERY_REQUIRED\"' THEN COALESCE(?3,last_error) ELSE ?3 END,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
         tx.execute("INSERT INTO funding_health(job_id,error_streak) VALUES (?1,?2) ON CONFLICT(job_id) DO UPDATE SET error_streak=CASE WHEN excluded.error_streak=0 THEN 0 ELSE MIN(error_streak+1,32) END",params![id,u32::from(error.is_some())])?;
         tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND f.state='COMPLETE' AND o.submission='CONFIRMED')",[id])?;
+        let current_operation: String = tx.query_row(
+            "SELECT operation_id FROM funding_progress WHERE job_id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
         tx.commit()?;
+        self.observe_funding_shortage(id, &current_operation, error);
         Ok(())
     }
 }

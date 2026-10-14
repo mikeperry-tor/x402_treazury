@@ -234,7 +234,53 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
             .await
             .unwrap();
     }
+    // Reopen after historical shortages with funded, spendable treasury state.
+    // Both groups must reach the real worker without repair or an attempt reset.
+    let identity = owner.status().await.unwrap().treasury_id;
+    owner
+        .store_handle()
+        .call(|s| {
+            for name in ["alpha", "beta"] {
+                s.fill_funding_vacancies(name)?;
+            }
+            let jobs = s.funding_jobs()?;
+            assert_eq!(jobs.len(), 2);
+            for job in jobs {
+                s.defer_funding(
+                    &job.id,
+                    0,
+                    Some("treasury_insufficient_spendable_funds; previous owner"),
+                    false,
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    owner.close().await.unwrap();
+    let mut owner = Treasury::open_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        identity,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    owner.configure_sync(SyncSettings::new(endpoint.clone(), 2, 300).unwrap());
     let store = owner.store_handle();
+    store
+        .call(|s| {
+            for name in ["alpha", "beta"] {
+                let group = s.startup_groups(&[name.into()])?.remove(0);
+                for claims in [None, Some(group.claims.as_slice())] {
+                    assert!(s.startup_obstruction(name, 3, claims)?.is_none());
+                }
+            }
+            assert!(s.status()?.sync.unwrap().spendable_shielded_zatoshis > 100_000);
+            Ok(())
+        })
+        .await
+        .unwrap();
     let f = Bridge {
         store: store.clone(),
         deposits: Arc::new(deposits),
@@ -421,4 +467,97 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     drop(store);
     stop.cancel();
     actor.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn production_readiness_scans_new_deposit_before_repeating_shortage() {
+    use crate::rotation::funding::FundingBackend;
+    let (_dir, net, owner, endpoint) = funded_fixture_amount(2, 10_000).await;
+    let address = owner
+        .client
+        .as_ref()
+        .unwrap()
+        .unified_addresses_json()
+        .await[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    owner
+        .ensure_capacity_group(
+            "alpha".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| {
+            s.fill_funding_vacancies("alpha")?;
+            Ok(s.funding_jobs()?.remove(0))
+        })
+        .await
+        .unwrap();
+    let saved = owner.status().await.unwrap().sync.unwrap();
+    assert_eq!(saved.spendable_shielded_zatoshis, 10_000);
+    let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![deposit]);
+        chain.mine_empty_blocks(2);
+    }
+    let (handle, commands) = actor::channel();
+    let mut backend = Backend {
+        treasury: handle.clone(), store: store.clone(),
+        near: NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
+        base: BaseRpc::new("http://127.0.0.1:1", 2, 120).unwrap(),
+        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())]),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
+        max_network_fee: 30_000,
+    };
+    let quote = Quote {
+        request: json!({}),
+        response: json!({}),
+        input: 50_000,
+        deadline: now().unwrap() + 7200,
+        deposit: None,
+    };
+    let stop = CancellationToken::new();
+    let sender = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    // Queue readiness before starting the actor so its initial maintenance tick
+    // cannot hide a missing explicit refresh.
+    let ready = tokio::spawn(async move { backend.ready(&job, &quote).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while commands.test_is_empty() {
+            assert!(
+                !ready.is_finished(),
+                "readiness must request a scan before rejecting a deposit"
+            );
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
+    ready.await.unwrap().unwrap();
+    store
+        .call(|s| {
+            let status = s.status()?;
+            assert_eq!(status.sync.unwrap().spendable_shielded_zatoshis, 1_010_000);
+            assert!(status.treasury_operations.is_empty());
+            assert!(!status.outgoing_pending);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    stop.cancel();
+    drop(store);
+    drop(handle);
+    task.await.unwrap().unwrap();
 }
