@@ -3,6 +3,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+mod output;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -29,6 +30,9 @@ enum Action {
     Bootstrap,
     /// Create a new treasury; discovers its birthday unless supplied.
     Init {
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
         #[arg(long)]
         birthday: Option<u32>,
         #[arg(long, conflicts_with = "birthday")]
@@ -41,7 +45,11 @@ enum Action {
     /// Derive and save a new shielded receive address.
     Address,
     /// Read persisted status without unlocking or network access.
-    Status,
+    Status {
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Make an offline backup, including the encryption key.
     Backup {
         #[arg(long)]
@@ -57,6 +65,9 @@ enum Action {
     },
     /// Sync the configured treasury; never starts automatic funding.
     Sync {
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
         #[arg(long, hide = true)]
         qualification_parent_stdin: bool,
     },
@@ -118,6 +129,7 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
         birthday,
         indexer_url_env,
         mnemonic_file,
+        ..
     } = args.command
     {
         let indexer_url = resolve_init_endpoint(
@@ -137,7 +149,7 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
     let treasury_id = resolve_administrative_identity(&args.command, &state_dir, expected)?;
     Ok(match args.command {
         Action::Pool { .. } => unreachable!("removed command rejected before state access"),
-        Action::Status => Command::Status { state_dir },
+        Action::Status { .. } => Command::Status { state_dir },
         Action::Addresses => Command::Addresses {
             state_dir,
             key_file,
@@ -202,6 +214,7 @@ fn configured_command(action: &Action, config: Option<&PathBuf>) -> Result<Optio
         }
         Action::Sync {
             qualification_parent_stdin,
+            ..
         } => {
             return Ok(Some(Command::Sync {
                 meta_config: configured_path()?,
@@ -283,7 +296,7 @@ fn resolve_administrative_identity(
             "treasury ID does not match state (state identity mismatch); use the treasury_id from `wallet status` (it is a UUID, not an account number)"
         );
         expected
-    } else if matches!(action, Action::Status | Action::Addresses) {
+    } else if matches!(action, Action::Status { .. } | Action::Addresses) {
         String::new()
     } else {
         crate::rotation::store::status(state_dir)?.treasury_id
@@ -380,10 +393,14 @@ async fn run_args(
     anyhow::ensure!(
         matches!(
             &args.command,
-            Action::Status | Action::Backup { .. } | Action::RecoverUnprepared { .. }
+            Action::Status { .. } | Action::Backup { .. } | Action::RecoverUnprepared { .. }
         ),
         "treasury commands require a build with --features zcash"
     );
+    let json = match &args.command {
+        Action::Init { json, .. } | Action::Sync { json, .. } | Action::Status { json } => *json,
+        _ => true,
+    };
     let command = resolve_args(args)?;
     #[cfg(feature = "zcash")]
     if let Command::Bootstrap { meta_config } = command {
@@ -399,7 +416,11 @@ async fn run_args(
         let status =
             tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
                 .await??;
-        println!("{}", serde_json::to_string_pretty(&status)?);
+        if json {
+            println!("{}", serde_json::to_string_pretty(&status)?);
+        } else {
+            print!("{}", output::status(&status));
+        }
         return Ok(());
     }
     #[cfg(feature = "zcash")]
@@ -452,8 +473,9 @@ async fn run_args(
     #[cfg(feature = "zcash")]
     {
         let initializing = matches!(&command, Command::Init { .. });
+        let syncing = matches!(&command, Command::Sync { .. });
         let treasury = execute_wallet_command(command, network).await?;
-        if initializing {
+        if initializing && !json {
             let addresses = treasury.addresses().await?;
             let address = addresses[0]["encoded_address"]
                 .as_str()
@@ -461,6 +483,19 @@ async fn run_args(
             treasury.close().await?;
             println!(
                 "Zcash wallet initialized.\n\nPrimary ZEC address:\n{address}\n\nSend ZEC to this address to fund your wallet."
+            );
+            return Ok(());
+        }
+        if syncing && !json {
+            let status = treasury.status().await?;
+            let addresses = treasury.addresses().await?;
+            let address = addresses[0]["encoded_address"]
+                .as_str()
+                .context("wallet has no primary receive address")?;
+            let summary = output::status(&status);
+            treasury.close().await?;
+            println!(
+                "Wallet synchronization completed.\n\n{summary}\nPrimary ZEC address:\n{address}"
             );
             return Ok(());
         }

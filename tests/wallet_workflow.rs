@@ -53,7 +53,13 @@ spec="https://unreachable.invalid/openapi.json"
     assert!(output.status.success());
     let initialized = String::from_utf8(output.stdout).unwrap();
     assert!(dir.path().join("nested/wallet/wallet.key").is_file());
-    let before = success(wallet(&config, &["status"]));
+    let text_status = wallet(&config, &["status"]);
+    assert!(text_status.status.success());
+    let text_status = String::from_utf8(text_status.stdout).unwrap();
+    assert!(text_status.contains("Zcash wallet status"));
+    assert!(text_status.contains("Shielded balances: unknown"));
+    assert!(text_status.contains("Managed wallet pools: 0"));
+    let before = success(wallet(&config, &["status", "--json"]));
     assert!(before["pools"].as_array().unwrap().is_empty());
     let addresses = success(wallet(&config, &["addresses"]));
     assert_eq!(
@@ -65,7 +71,7 @@ spec="https://unreachable.invalid/openapi.json"
                 .unwrap()
         )
     );
-    assert_eq!(before, success(wallet(&config, &["status"])));
+    assert_eq!(before, success(wallet(&config, &["status", "--json"])));
     assert!(
         !wallet(&config, &["init", "--birthday", "1"])
             .status
@@ -213,7 +219,7 @@ async fn wallet_rejections_and_saved_inspection_never_request_catalogs() {
     let initialized = wallet(&config, &["init", "--birthday", "1"]);
     assert!(initialized.status.success());
     let initialized = String::from_utf8(initialized.stdout).unwrap();
-    let before = success(wallet(&config, &["status"]));
+    let before = success(wallet(&config, &["status", "--json"]));
     let addresses = success(wallet(&config, &["addresses"]));
     assert!(
         initialized.contains(
@@ -227,7 +233,7 @@ async fn wallet_rejections_and_saved_inspection_never_request_catalogs() {
             .status
             .success()
     );
-    assert_eq!(success(wallet(&config, &["status"])), before);
+    assert_eq!(success(wallet(&config, &["status", "--json"])), before);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(before["pools"].as_array().unwrap().is_empty());
     server.abort();
@@ -264,4 +270,23 @@ fn birthday_connection_failure_is_actionable_and_creates_no_state() {
     assert!(!logs.contains("initialization completed"), "{logs}");
     assert!(!dir.path().join("wallet").exists());
     assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn init_json_preserves_state_and_address_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("deployment.toml");
+    std::fs::write(
+        &config,
+        "version=1\nservers={}\n[treasury]\nstate_dir='wallet'\n",
+    )
+    .unwrap();
+    let initial = success(wallet(&config, &["init", "--birthday", "1", "--json"]));
+    assert_eq!(initial["state"]["birthday"], 1);
+    let addresses = success(wallet(&config, &["addresses"]));
+    assert_eq!(initial["receive_addresses"], addresses["receive_addresses"]);
+    assert_eq!(
+        initial["state"]["treasury_id"],
+        success(wallet(&config, &["status", "--json"]))["treasury_id"]
+    );
 }

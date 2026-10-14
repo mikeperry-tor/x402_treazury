@@ -164,6 +164,7 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     let output = run(vec![
         "wallet",
         "status",
+        "--json",
         "--state-dir",
         state.to_str().unwrap(),
     ]);

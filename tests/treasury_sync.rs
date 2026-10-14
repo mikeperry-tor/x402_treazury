@@ -429,17 +429,34 @@ spec="nonexistent.json"
     )
     .unwrap();
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
-            .env_clear()
-            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
-            .env("INDEXER", endpoint)
-            .args(["wallet", "sync", "--config"])
-            .arg(config)
-            .output()
-            .unwrap()
+        let run = |json: bool| {
+            let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
+            command
+                .env_clear()
+                .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+                .env("INDEXER", &endpoint)
+                .args(["wallet", "sync", "--config"])
+                .arg(&config);
+            if json {
+                command.arg("--json");
+            }
+            command.output().unwrap()
+        };
+        (run(false), run(true))
     })
     .await
     .unwrap();
+    let (human, output) = output;
+    assert!(
+        human.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let human = String::from_utf8(human.stdout).unwrap();
+    assert!(human.contains("Wallet synchronization completed."));
+    assert!(human.contains("Scanned height: 2000000"));
+    assert!(human.contains("Saved spendable shielded balance: 0.00000000 ZEC"));
+    assert!(human.contains("Primary ZEC address:"));
     assert!(
         output.status.success(),
         "{}",

@@ -150,7 +150,14 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     );
     drop(store);
     assert_eq!(
-        good(run(dir, &["wallet", "status", "--state-dir", "state"], &[]).await)["treasury_id"],
+        good(
+            run(
+                dir,
+                &["wallet", "status", "--json", "--state-dir", "state"],
+                &[]
+            )
+            .await
+        )["treasury_id"],
         id
     );
     bad(run(dir, &["wallet", "status", "--state-dir", "missing"], &[]).await);
