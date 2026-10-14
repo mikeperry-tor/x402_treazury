@@ -30,6 +30,7 @@ pub(crate) struct StartupClaim {
 
 #[derive(Debug)]
 pub(crate) struct StartupPath {
+    pub wallet_type: String,
     pub job: FundingJob,
     pub facts: FundingFacts,
     pub operation: Option<OperationStatus>,
@@ -276,6 +277,7 @@ impl Store {
         let facts = self.funding_facts(id, &job.operation_id)?;
         let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
         Ok(StartupPath {
+            wallet_type: self.funding_wallet_type(id)?,
             job,
             facts,
             operation,

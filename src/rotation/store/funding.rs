@@ -468,6 +468,14 @@ impl Store {
         Ok(serde_json::from_str(&observation)?)
     }
 
+    pub(crate) fn funding_wallet_type(&self, job: &str) -> Result<String> {
+        Ok(self.db.query_row(
+            "SELECT allocation_kind FROM funding_jobs WHERE id=?1",
+            [job],
+            |r| r.get(0),
+        )?)
+    }
+
     pub fn funding_source_ready(&self, now: u64) -> Result<bool> {
         let pending: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",

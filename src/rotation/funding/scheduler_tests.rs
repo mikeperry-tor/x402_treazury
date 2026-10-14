@@ -1729,3 +1729,46 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
         actor.await.unwrap();
     }
 }
+
+#[test]
+fn sibling_observations_report_current_phase_once_per_operation() {
+    let mut state = State::default();
+    let record = || Record {
+        reported_phase: None,
+        due: 0,
+        streak: 0,
+        error: None,
+    };
+    state.records.insert(
+        Key {
+            operation: "first".into(),
+            kind: Kind::Source,
+        },
+        record(),
+    );
+    assert!(state.report_phase("first", &FundingPhase::Quoted));
+    // A slower sibling starts/finishes with an old snapshot, but reports the
+    // same durable phase; adding its record must not cause a duplicate message.
+    state.records.insert(
+        Key {
+            operation: "first".into(),
+            kind: Kind::Credit,
+        },
+        record(),
+    );
+    assert!(!state.report_phase("first", &FundingPhase::Quoted));
+    assert!(state.report_phase("first", &FundingPhase::Prepared));
+    assert!(!state.report_phase("first", &FundingPhase::Prepared));
+    state.records.insert(
+        Key {
+            operation: "replacement".into(),
+            kind: Kind::Source,
+        },
+        record(),
+    );
+    assert!(state.report_phase("replacement", &FundingPhase::Quoted));
+    assert!(!state.report_phase("first", &FundingPhase::Prepared));
+    // Real durable recovery changes remain visible; we do not impose a fake
+    // monotonic ordering on the funding state machine just to tidy the logs.
+    assert!(state.report_phase("first", &FundingPhase::RecoveryRequired));
+}

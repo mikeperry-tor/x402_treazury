@@ -27,6 +27,7 @@ struct Key {
     kind: Kind,
 }
 struct Record {
+    reported_phase: Option<FundingPhase>,
     due: u64,
     streak: u32,
     error: Option<String>,
@@ -642,7 +643,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             .filter(|_| wait.is_none())
             .map(|error| safe_error(&error, &phase));
         if let Some(category) = &error {
-            tracing::warn!(job_id=%job.id,pool_id=%job.pool_id,phase=?phase,category,"funding observation failed; retaining owned work and backing off this observation");
+            let id = job.id.clone();
+            let wallet_type = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
+            tracing::warn!(wallet=%job.pool_name,size=%wallet_type,phase=?phase,category,"Funding observation failed; existing work retained and observation will retry");
+            tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,category,"Funding observation failure correlation");
         }
         let (next, streak, health) = {
             let mut state = lease.state.lock().expect("funding schedule lock");
@@ -666,19 +670,40 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     streak,
                     health.as_deref(),
                 )?;
-                Ok(s.funding_job(&id)?.map(|job| job.phase))
+                let current = s.funding_job(&id)?.context("funding job missing")?;
+                Ok(Some((current.phase, s.funding_wallet_type(&id)?)))
             })
             .await?;
-        if let Some(phase) = phase
-            && phase != job.phase
-        {
-            tracing::info!(job_id=%job.id,pool_id=%job.pool_id,from=?job.phase,to=?phase,"funding phase changed");
+        if let Some((phase, wallet_type)) = phase {
+            let changed = lease
+                .state
+                .lock()
+                .expect("funding schedule lock")
+                .report_phase(&job.operation_id, &phase);
+            if changed {
+                // This is a current-state observation, not a database transition.
+                // Sibling reads may have started with older job snapshots.
+                tracing::info!(wallet=%job.pool_name,size=%wallet_type,status=?phase,"Funding progress");
+                tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,observed_phase=?phase,"Funding progress correlation");
+            }
         }
         Ok(prerequisite)
     }
 }
 
 impl State {
+    fn report_phase(&mut self, operation: &str, phase: &FundingPhase) -> bool {
+        let changed = !self.records.iter().any(|(key, record)| {
+            key.operation == operation && record.reported_phase.as_ref() == Some(phase)
+        });
+        for (key, record) in &mut self.records {
+            if key.operation == operation {
+                record.reported_phase = Some(phase.clone());
+            }
+        }
+        changed
+    }
+
     fn admit(
         &mut self,
         key: &Key,
@@ -724,6 +749,7 @@ impl State {
         self.records.insert(
             key.clone(),
             Record {
+                reported_phase: None,
                 due,
                 streak: 0,
                 error: None,

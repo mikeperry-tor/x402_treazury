@@ -250,6 +250,14 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
     );
 }
 
+pub(crate) fn sync_detail(error: &anyhow::Error) -> Option<String> {
+    if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
+        return Some(diagnostic.to_string());
+    }
+    let category = sync_failure(error);
+    (category != "sync_internal_or_storage_failure").then(|| category.to_owned())
+}
+
 pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return diagnostic.category;
@@ -260,6 +268,10 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
     for cause in error.chain() {
         let message = cause.to_string();
         let category = match message.as_str() {
+            "transaction not seen by wallet sync" => "transaction_not_yet_scanned",
+            "confirmation disagrees with wallet sync" => "confirmation_height_mismatch",
+            "confirmed transaction bytes mismatch" => "confirmed_transaction_mismatch",
+            "treasury_sync_stale" => "sync_observation_expired",
             "indexer connection failed" => "indexer_connection_failed",
             "indexer connection timed out" => "indexer_connection_timeout",
             "indexer tip check timed out" => "indexer_tip_timeout",

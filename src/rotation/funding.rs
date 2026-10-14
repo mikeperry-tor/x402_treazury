@@ -884,9 +884,8 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
     if let Some(stage) = error.downcast_ref::<NearStage>() {
         return format!("{category}; NEAR {}: {}", stage.0, near_diagnostic(error));
     }
-    let sync_category = crate::treasury::diagnostics::sync_failure(error);
-    if sync_category != "sync_internal_or_storage_failure" {
-        return format!("{category}; treasury: {sync_category}");
+    if let Some(detail) = crate::treasury::diagnostics::sync_detail(error) {
+        return format!("{category}; treasury: {detail}");
     }
     category.into()
 }

@@ -526,7 +526,16 @@ fn assess_startup_paths(
         actionable |= !matches!(disposition, StartupDisposition::Obstructed(_));
         if progress && logged < 8 {
             logged += 1;
-            tracing::info!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap awaiting destination inventory; original operation remains owned");
+            let waiting_for = if path.job.phase
+                == crate::rotation::store::funding::FundingPhase::Quoted
+                && group.source_pending
+            {
+                "another treasury transaction to confirm"
+            } else {
+                "confirmed USDC funding"
+            };
+            tracing::info!(wallet=%group.name,size=%path.wallet_type,status=?path.job.phase,waiting_for,"Bootstrap funding in progress");
+            tracing::debug!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap funding observation details");
         }
     }
     PathAssessment {
@@ -649,6 +658,52 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(serde_json::to_value(summary).unwrap(), expected);
+    }
+
+    #[test]
+    fn info_progress_uses_wallet_name_and_size_without_internal_identifiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = crate::rotation::store::Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "web",
+            crate::rotation::test_capacity::two_reserves("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
+        let group = state.startup_groups(&["web".into()]).unwrap().remove(0);
+        let paths = state
+            .startup_claim_paths(&group.pool, &group.claims)
+            .unwrap();
+        let ids: Vec<_> = paths.iter().map(|p| p.job.id.clone()).collect();
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            assess_startup_paths(paths, 3, &group, true);
+        }
+        let text = std::fs::read_to_string(log.path()).unwrap();
+        assert!(text.contains("wallet=web"), "{text}");
+        assert!(
+            text.contains("size=small") && text.contains("size=large"),
+            "{text}"
+        );
+        for id in ids {
+            assert!(!text.contains(&id));
+        }
+        assert!(!text.contains("job_id") && !text.contains(&group.pool));
     }
 
     #[tokio::test]

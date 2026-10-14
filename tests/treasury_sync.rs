@@ -466,15 +466,7 @@ spec="nonexistent.json"
     for stage in [
         "loading configuration and opening encrypted wallet",
         "wallet opened; starting synchronization",
-        "saving starting checkpoint",
-        "connecting to indexer",
-        "checking network and chain tip",
-        "checking indexer capabilities",
-        "scanning wallet history",
-        "verifying final chain tip and observation freshness",
-        "reconciling prior spending and balances",
-        "reconciling refunds",
-        "saving final wallet checkpoint",
+        "synchronizing wallet with indexer",
         "synchronization completed; wallet checkpoint saved",
     ] {
         assert!(logs.contains(stage), "missing {stage}: {logs}");
@@ -1111,12 +1103,9 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let logs = String::from_utf8_lossy(&output.stderr);
-    assert!(logs.contains("checking network and chain tip"), "{logs}");
+    assert!(logs.contains("synchronizing wallet with indexer"), "{logs}");
     assert!(logs.contains("indexer_network_mismatch"), "{logs}");
-    assert!(
-        logs.contains("wallet checkpoint saved after interruption or failure"),
-        "{logs}"
-    );
+    assert!(!logs.contains("saving final wallet checkpoint"), "{logs}");
     assert!(!logs.contains("synchronization completed"), "{logs}");
     assert!(!logs.contains("scanning wallet history"), "{logs}");
     assert!(!logs.contains(SEED));
