@@ -75,7 +75,12 @@ excluded and need external funding. No catalogs, pricing, listener tokens, stati
 signing keys or MCP listeners are needed. Network traffic follows the deployment
 policy, including Tor.
 
-The versioned JSON result separates current serving/inventory readiness from
+By default, successful bootstrap prints each captured wallet name, its small/large
+type, and its saved confirmed balance in USDC. These are confirmed balance
+observations, not funding targets. Errors are reported on stderr with a nonzero
+exit status. Add `--json` for the versioned machine-readable result, including
+`confirmed_balances` with `wallet_name`, `wallet_type`, and decimal
+`confirmed_balance_usdc` fields. The JSON result separates current serving/inventory readiness from
 completion of captured work (see [capacity output](#versioned-capacity-output)).
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
 transactions are replaced only after the existing canonical expiry and unspent-input

@@ -12,11 +12,20 @@ pub struct BootstrapSummary {
     pub inventory_ready_groups: Vec<String>,
     pub captured_completed_groups: Vec<String>,
     pub incomplete_captured_jobs: Vec<String>,
+    pub confirmed_balances: Vec<BootstrapBalance>,
+}
+
+#[derive(Serialize)]
+pub struct BootstrapBalance {
+    pub wallet_name: String,
+    pub wallet_type: String,
+    pub confirmed_balance_usdc: String,
 }
 
 async fn bootstrap_summary(
     store: &StoreHandle,
     names: &BTreeSet<String>,
+    captured: &BTreeMap<String, Vec<StartupClaim>>,
 ) -> Result<BootstrapSummary> {
     let mut summary = BootstrapSummary {
         schema_version: 2,
@@ -24,11 +33,27 @@ async fn bootstrap_summary(
         inventory_ready_groups: Vec::new(),
         captured_completed_groups: names.iter().cloned().collect(),
         incomplete_captured_jobs: Vec::new(),
+        confirmed_balances: Vec::new(),
     };
     let names: Vec<_> = names.iter().cloned().collect();
     for page in names.chunks(GROUP_PAGE) {
         let page = page.to_vec();
         for group in store.call(move |s| s.startup_groups(&page)).await? {
+            let claims = captured
+                .get(&group.name)
+                .context("bootstrap captured claims missing")?
+                .clone();
+            let pool = group.pool.clone();
+            for (wallet_type, confirmed_balance_usdc) in store
+                .call(move |s| s.startup_claim_balances(&pool, &claims))
+                .await?
+            {
+                summary.confirmed_balances.push(BootstrapBalance {
+                    wallet_name: group.name.clone(),
+                    wallet_type,
+                    confirmed_balance_usdc,
+                });
+            }
             if group.serving_ready {
                 summary.serving_ready_groups.push(group.name.clone());
             }
@@ -332,16 +357,18 @@ async fn supervise(
     let initial = check_startup(&store, &names, &attempts, Some(&captured), true).await;
     if !matches!(initial, Ok(false)) {
         let summary = match initial {
-            Ok(_) => bootstrap_summary(&store, &names).await,
+            Ok(_) => bootstrap_summary(&store, &names, &captured).await,
             Err(error) => Err(error),
         };
         drop(funding_runtime);
         drop(store);
         owner.close().await?;
-        tracing::info!(
-            wallets = names.len(),
-            "Initial managed capacity bootstrap already complete"
-        );
+        if summary.is_ok() {
+            tracing::info!(
+                wallets = names.len(),
+                "Initial managed capacity bootstrap already complete"
+            );
+        }
         return summary;
     }
     let (commands, sender, worker) =
@@ -364,7 +391,7 @@ async fn supervise(
             )
             .await?
             {
-                return bootstrap_summary(&store, &monitored_names).await;
+                return bootstrap_summary(&store, &monitored_names, &captured).await;
             }
             if progress {
                 next_progress = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -518,7 +545,34 @@ impl std::fmt::Display for StartupObstructed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "wallet {}: startup incomplete;", self.group)?;
         for (job, reason) in &self.obstructions {
-            write!(f, " job={job} reason={reason};")?;
+            let explanation = match *reason {
+                "treasury_insufficient_spendable_funds" => {
+                    "the treasury has insufficient spendable ZEC; fund it and allow confirmations before retrying"
+                }
+                "funding_disabled" | "funding_group_disabled" => {
+                    "funding is disabled; check the deployment funding and wallet settings"
+                }
+                "qualification_funding_denied" => {
+                    "this qualification run does not authorize funding"
+                }
+                "funding_policy_requires_review" => {
+                    "funding was blocked by cost, amount or authentication policy; review the configured funding limits and credentials"
+                }
+                "funding_evidence_requires_review" | "destination_support_requires_review" => {
+                    "saved funding evidence is inconsistent and requires operator review"
+                }
+                "recovery_attempt_limit_reached" => {
+                    "automatic recovery attempts are exhausted; operator review is required"
+                }
+                "funding_outcome_requires_review" => {
+                    "the swap failed, was refunded or has an uncertain outcome; operator review is required"
+                }
+                "preparation_or_swap_requires_review" => {
+                    "transaction preparation or swap completion is unresolved; operator review is required"
+                }
+                _ => "funding cannot proceed; inspect the saved funding state",
+            };
+            write!(f, " {explanation} (job={job}, reason={reason});")?;
         }
         write!(
             f,
@@ -588,6 +642,7 @@ mod tests {
             inventory_ready_groups: vec![],
             captured_completed_groups: vec!["web".into()],
             incomplete_captured_jobs: vec![],
+            confirmed_balances: vec![],
         };
         let expected: serde_json::Value = serde_json::from_str(include_str!(
             "../../tests/fixtures/capacity/bootstrap-output-v2.json"
@@ -653,6 +708,8 @@ mod tests {
             assert!(!message.contains(&job.recipient));
         }
         assert!(!message.contains("private fixture prose"));
+        assert!(message.contains("insufficient spendable ZEC"));
+        assert!(message.contains("cost, amount or authentication policy"));
         let captured = capture_startup(&store, &names).await.unwrap();
         store
             .call(move |s| {

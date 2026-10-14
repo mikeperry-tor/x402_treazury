@@ -467,7 +467,7 @@ base_rpc_fallback_url_envs=[]
 [wallets.web]
 mode="zcash_rotation"
 max_api_payment_usdc="1"
-reserves={small={funding_amount_usdc="1"}}
+reserves={small={funding_amount_usdc="1"},large={funding_amount_usdc="2"}}
 max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.static_unused]
@@ -569,7 +569,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     );
     for job in store.funding_jobs().unwrap() {
         // Synthetic confirmed credit, never a real transfer or live RPC.
-        rpc_evidence::credit(&mut store, &job.wallet_id, &job.target, 13).unwrap();
+        rpc_evidence::credit(&mut store, &job.wallet_id, "2123456", 13).unwrap();
     }
     let jobs = store.status().unwrap().funding_jobs.len();
     drop(store);
@@ -578,9 +578,34 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         config.replace("auto_fund=false", "auto_fund=true"),
     )
     .unwrap();
-    for _ in 0..2 {
-        let summary = good(run(dir, &args, &[("BASE", "https://127.0.0.1:1")]).await);
-        assert_eq!(summary["captured_completed_groups"], json!(["web"]));
+    for json_output in [false, true] {
+        let mut args = args.to_vec();
+        if json_output {
+            args.push("--json");
+        }
+        let output = run(dir, &args, &[("BASE", "https://127.0.0.1:1")]).await;
+        if json_output {
+            let summary = good(output);
+            assert_eq!(summary["captured_completed_groups"], json!(["web"]));
+            assert_eq!(
+                summary["confirmed_balances"],
+                json!([
+                    {"wallet_name":"web", "wallet_type":"large", "confirmed_balance_usdc":"2.123456"},
+                    {"wallet_name":"web", "wallet_type":"small", "confirmed_balance_usdc":"2.123456"}
+                ])
+            );
+        } else {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(
+                text,
+                "Wallet bootstrap completed.\n\nConfirmed wallet balances (USDC):\n  web (large): 2.123456 USDC\n  web (small): 2.123456 USDC\n"
+            );
+        }
         // Closed ownership is immediately available and no new jobs were queued.
         let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
         assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);

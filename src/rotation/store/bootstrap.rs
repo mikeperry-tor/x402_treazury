@@ -229,6 +229,25 @@ impl Store {
         Ok((!blocked.is_empty()).then_some(blocked))
     }
 
+    /// Read the saved confirmed balance of each captured claim, never its target.
+    pub(crate) fn startup_claim_balances(
+        &self,
+        pool: &str,
+        claims: &[StartupClaim],
+    ) -> Result<Vec<(String, String)>> {
+        ensure!(claims.len() <= 2, "startup claim inventory too large");
+        claims.iter().map(|claim| {
+            let (balance, height, hash): (String, Option<i64>, Option<String>) = self.db.query_row(
+                "SELECT w.balance,w.block_height,w.block_hash FROM funding_jobs j JOIN wallets w ON w.id=j.wallet_id AND w.pool_id=j.pool_id WHERE j.pool_id=?1 AND j.allocation_kind=?2 AND j.claim_generation=?3",
+                params![pool, claim.slot, claim.generation],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).context("bootstrap confirmed wallet balance unavailable")?;
+            ensure!(height.is_some() && hash.is_some(), "bootstrap confirmed wallet balance has no saved block evidence");
+            let amount = balance.parse::<U256>().context("invalid saved bootstrap wallet balance")?;
+            Ok((claim.slot.clone(), alloy_primitives::utils::format_units(amount, 6)?))
+        }).collect()
+    }
+
     pub(crate) fn startup_claim_paths(
         &self,
         pool: &str,

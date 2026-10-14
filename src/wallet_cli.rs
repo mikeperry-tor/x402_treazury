@@ -27,7 +27,11 @@ pub struct WalletArgs {
 #[derive(Subcommand)]
 enum Action {
     /// Fund captured enabled reserve claims; wait for confirmed USDC without discovery.
-    Bootstrap,
+    Bootstrap {
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a new treasury; discovers its birthday unless supplied.
     Init {
         /// Print machine-readable JSON.
@@ -207,7 +211,7 @@ fn configured_command(action: &Action, config: Option<&PathBuf>) -> Result<Optio
             .context("this wallet command requires --config FILE")
     };
     match action {
-        Action::Bootstrap => {
+        Action::Bootstrap { .. } => {
             return Ok(Some(Command::Bootstrap {
                 meta_config: configured_path()?,
             }));
@@ -398,14 +402,21 @@ async fn run_args(
         "treasury commands require a build with --features zcash"
     );
     let json = match &args.command {
-        Action::Init { json, .. } | Action::Sync { json, .. } | Action::Status { json } => *json,
+        Action::Init { json, .. }
+        | Action::Sync { json, .. }
+        | Action::Status { json }
+        | Action::Bootstrap { json } => *json,
         _ => true,
     };
     let command = resolve_args(args)?;
     #[cfg(feature = "zcash")]
     if let Command::Bootstrap { meta_config } = command {
         let summary = crate::deployment::bootstrap_wallets(&meta_config).await?;
-        println!("{}", serde_json::to_string_pretty(&summary)?);
+        if json {
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+        } else {
+            print!("{}", output::bootstrap(&summary));
+        }
         return Ok(());
     }
     #[cfg(feature = "zcash")]
