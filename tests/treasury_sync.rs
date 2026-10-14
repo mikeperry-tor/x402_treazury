@@ -635,8 +635,9 @@ async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["state"]["birthday"], TIP - 100);
+    let value =
+        serde_json::to_value(x402_treazury::rotation::store::status(&state).unwrap()).unwrap();
+    assert_eq!(value["birthday"], TIP - 100);
     assert_eq!(calls.lock().unwrap().len(), 2);
     let rejected = run(vec![]).output().await.unwrap();
     assert!(!rejected.status.success());
@@ -686,8 +687,11 @@ spec="nonexistent.json"
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["state"]["birthday"], TIP - 100);
+    let value = serde_json::to_value(
+        x402_treazury::rotation::store::status(&dir.path().join("wallet")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value["birthday"], TIP - 100);
     assert!(dir.path().join("wallet/wallet.key").is_file());
     assert_eq!(calls.lock().unwrap().len(), 2);
     let records = proxy.records.lock().unwrap();

@@ -105,7 +105,24 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     );
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(!text.contains(SEED));
-    let initial: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(text.contains("Send ZEC to this address to fund your wallet."));
+    let inspected = run(vec![
+        "wallet",
+        "addresses",
+        "--state-dir",
+        state.to_str().unwrap(),
+        "--key-file",
+        key.to_str().unwrap(),
+    ]);
+    assert!(inspected.status.success());
+    let initial: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert!(
+        text.contains(
+            initial["receive_addresses"][0]["encoded_address"]
+                .as_str()
+                .unwrap()
+        )
+    );
     let id = initial["state"]["treasury_id"].as_str().unwrap();
     let before_removed_command = std::fs::read(state.join("state.sqlite")).unwrap();
     let output = run(vec![

@@ -50,14 +50,20 @@ spec="https://unreachable.invalid/openapi.json"
         assert!(logs.contains(stage), "missing {stage}: {logs}");
     }
     assert!(!logs.contains("connecting to birthday indexer"));
-    let initialized = success(output);
+    assert!(output.status.success());
+    let initialized = String::from_utf8(output.stdout).unwrap();
     assert!(dir.path().join("nested/wallet/wallet.key").is_file());
     let before = success(wallet(&config, &["status"]));
     assert!(before["pools"].as_array().unwrap().is_empty());
     let addresses = success(wallet(&config, &["addresses"]));
     assert_eq!(
-        initialized["receive_addresses"],
-        addresses["receive_addresses"]
+        initialized,
+        format!(
+            "Zcash wallet initialized.\n\nPrimary ZEC address:\n{}\n\nSend ZEC to this address to fund your wallet.\n",
+            addresses["receive_addresses"][0]["encoded_address"]
+                .as_str()
+                .unwrap()
+        )
     );
     assert_eq!(before, success(wallet(&config, &["status"])));
     assert!(
@@ -204,11 +210,17 @@ async fn wallet_rejections_and_saved_inspection_never_request_catalogs() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("deployment.toml");
     std::fs::write(&config,format!("version=1\nservers={{}}\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[sources.unused]\nspec='{endpoint}'\n")).unwrap();
-    let initialized = success(wallet(&config, &["init", "--birthday", "1"]));
+    let initialized = wallet(&config, &["init", "--birthday", "1"]);
+    assert!(initialized.status.success());
+    let initialized = String::from_utf8(initialized.stdout).unwrap();
     let before = success(wallet(&config, &["status"]));
-    assert_eq!(
-        success(wallet(&config, &["addresses"]))["receive_addresses"],
-        initialized["receive_addresses"]
+    let addresses = success(wallet(&config, &["addresses"]));
+    assert!(
+        initialized.contains(
+            addresses["receive_addresses"][0]["encoded_address"]
+                .as_str()
+                .unwrap()
+        )
     );
     assert!(
         !wallet(&config, &["init", "--birthday", "1"])

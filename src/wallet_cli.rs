@@ -451,7 +451,19 @@ async fn run_args(
     }
     #[cfg(feature = "zcash")]
     {
+        let initializing = matches!(&command, Command::Init { .. });
         let treasury = execute_wallet_command(command, network).await?;
+        if initializing {
+            let addresses = treasury.addresses().await?;
+            let address = addresses[0]["encoded_address"]
+                .as_str()
+                .context("initialized wallet has no primary receive address")?;
+            treasury.close().await?;
+            println!(
+                "Zcash wallet initialized.\n\nPrimary ZEC address:\n{address}\n\nSend ZEC to this address to fund your wallet."
+            );
+            return Ok(());
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(

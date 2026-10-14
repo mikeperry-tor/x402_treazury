@@ -20,6 +20,9 @@ x402_treazury wallet backup --config examples/deployments/privacy.local.toml --d
 x402_treazury wallet sync --config examples/deployments/privacy.local.toml
 ```
 
+`wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
+it. Use `wallet addresses` or `wallet status` for JSON inspection.
+
 Only `treasury.state_dir` is required in the treasury table.
 Actual spendable funds after reservations, confirmations and fees govern enabled funding;
 `max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` each default to
