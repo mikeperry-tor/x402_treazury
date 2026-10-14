@@ -1177,8 +1177,26 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
         delay_first: Arc::new(AtomicBool::new(false)),
         reuse_probe: Some(probe.clone()),
     });
+    let peers = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let observed_peers = peers.clone();
+    let app = app.layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            let peer = request
+                .extensions()
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .unwrap()
+                .0;
+            observed_peers.lock().unwrap().insert(peer);
+            next.run(request)
+        },
+    ));
     let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
@@ -1190,11 +1208,19 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
     // A nonexistent operation stops after synchronization, before lookup/submission.
     let before = treasury.status().await.unwrap();
     let count = calls.lock().unwrap().len();
-    assert!(
-        treasury
-            .reconcile_prepared("absent".into(), &mut sender, &stop)
-            .await
-            .is_err()
+    peers.lock().unwrap().clear();
+    for _ in 0..3 {
+        assert!(
+            treasury
+                .reconcile_prepared("absent".into(), &mut sender, &stop)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(
+        peers.lock().unwrap().len(),
+        1,
+        "repeated reuse probes must share the owner runtime's pooled connection"
     );
     let after = treasury.status().await.unwrap();
     assert_eq!(before.snapshot_revision, after.snapshot_revision);
@@ -1204,7 +1230,7 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
     );
     assert_eq!(
         &calls.lock().unwrap()[count..],
-        &["GetLightdInfo", "GetLatestBlock"]
+        &["GetLightdInfo", "GetLatestBlock"].repeat(3)
     );
     for change in ["mutation", "restart", "tip", "hash", "missing_hash"] {
         match change {

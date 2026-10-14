@@ -77,12 +77,13 @@ impl Treasury {
                 && sync.observed_tip_height == Some(u64::from(height))
                 && sync.fresh(now()?, self.revision))
         };
-        let result = tokio::select! {
+        // This probe runs on the long-lived owner runtime. Keep its bounded,
+        // identity-scoped channel cached for later probes and preparation.
+        // Only full scans tear down a private runtime and release its channels.
+        tokio::select! {
             biased;
             _ = stop.cancelled() => Err(anyhow::anyhow!("treasury sync cancelled")),
             result = observation => result,
-        };
-        crate::network::global().release_grpc(&identity).await;
-        result
+        }
     }
 }
