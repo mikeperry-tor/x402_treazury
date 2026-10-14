@@ -706,7 +706,9 @@ async fn sync(
     supervised: bool,
 ) -> Result<crate::treasury::Treasury> {
     let mut parent = crate::supervision::Parent::from_stdin(supervised)?;
+    tracing::info!("wallet sync: loading configuration and opening encrypted wallet");
     let (mut treasury, _) = configured(&meta_config, network).await?;
+    tracing::info!("wallet sync: wallet opened; starting synchronization");
     let stop = tokio_util::sync::CancellationToken::new();
     let result = {
         let work = treasury.sync_once(&stop);
@@ -737,6 +739,7 @@ async fn sync(
         if error.is::<crate::server::ForcedShutdown>() {
             return Err(error);
         }
+        crate::treasury::diagnostics::warn_sync_failure(&error);
         treasury.close().await?;
         return Err(error);
     }

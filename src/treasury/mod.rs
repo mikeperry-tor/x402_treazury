@@ -388,6 +388,7 @@ impl Treasury {
         observation.phase = SyncPhase::Syncing;
         observation.confirmations = settings.confirmations.get();
         observation.max_age_seconds = settings.max_age_seconds;
+        tracing::info!("treasury sync: saving starting checkpoint");
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
             identity: crate::network::IsolationId::treasury(
@@ -419,8 +420,22 @@ impl Treasury {
             SyncPhase::Failed
         };
         observation.last_error = outcome.as_ref().err().map(|e| e.to_string());
+        tracing::info!("treasury sync: saving final wallet checkpoint");
+        let height = observation.height;
+        let observed_tip_height = observation.observed_tip_height;
+        let scanned_blocks = observation.scanned_blocks;
         self.checkpoint(observation).await?;
         self.healthy = true;
+        if outcome.is_ok() && !stop.is_cancelled() {
+            tracing::info!(
+                height,
+                observed_tip_height,
+                scanned_blocks,
+                "treasury sync: synchronization completed; wallet checkpoint saved"
+            );
+        } else {
+            tracing::info!("treasury sync: wallet checkpoint saved after interruption or failure");
+        }
         outcome
     }
     /// One owner periodically syncs while Base payment admission remains independent.
@@ -542,10 +557,12 @@ impl SyncSession {
         settings: &SyncSettings,
         observation: &mut SyncObservation,
     ) -> Result<()> {
+        tracing::info!("treasury sync: connecting to indexer");
         let mut indexer = crate::network::global()
             .grpc(&self.identity, &settings.endpoint)
             .await
             .context("indexer connection failed")?;
+        tracing::info!("treasury sync: indexer connected; checking network and chain tip");
         self.client.set_indexer(indexer.clone());
         let info = indexer
             .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
@@ -558,6 +575,10 @@ impl SyncSession {
         let target_height = info.block_height;
         let checked_at = now()?;
         let started = std::time::Instant::now();
+        tracing::info!(
+            target_height,
+            "treasury sync: network and chain tip verified; checking indexer capabilities"
+        );
         observation.target_height = Some(target_height);
         observation.observed_tip_height = None;
         server::check_endpoint(
@@ -567,6 +588,10 @@ impl SyncSession {
             info.block_height,
         )
         .await?;
+        tracing::info!(
+            target_height,
+            "treasury sync: indexer checks completed; scanning wallet history"
+        );
         self.client
             .sync()
             .await
@@ -586,6 +611,12 @@ impl SyncSession {
                         observation.scanned_blocks = progress.total_blocks_scanned;
                     }
                     self.checkpoint(observation.clone()).await?;
+                    tracing::info!(
+                        target_height,
+                        scanned_blocks = observation.scanned_blocks,
+                        elapsed_seconds = started.elapsed().as_secs(),
+                        "treasury sync: scan in progress; wallet checkpoint saved"
+                    );
                 }
             }
         };
@@ -595,6 +626,10 @@ impl SyncSession {
             .map_or(result.blocks_scanned, |progress| {
                 progress.total_blocks_scanned
             });
+        tracing::info!(
+            scanned_blocks = observation.scanned_blocks,
+            "treasury sync: scan completed; verifying final chain tip and observation freshness"
+        );
         let info = indexer
             .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
             .await
@@ -623,6 +658,9 @@ impl SyncSession {
         // accounted. Keep that cost consumed and fail closed until the same
         // transaction regains the required depth; never make it spendable again
         // merely because its outgoing journal entry was resolved earlier.
+        tracing::info!(
+            "treasury sync: chain checks completed; reconciling prior spending and balances"
+        );
         let boundary = self.store.call(|s| s.source_recheck_boundary()).await?;
         let wallet = self.client.wallet();
         let wallet = wallet.read().await;
@@ -686,6 +724,7 @@ impl SyncSession {
             .map_err(|_| anyhow::anyhow!("treasury spendable balance unavailable"))?
             .into_u64();
         drop(wallet);
+        tracing::info!("treasury sync: spending and balances checked; reconciling refunds");
         self.reconcile_refunds(height, settings.confirmations.get())
             .await?;
         freshness::validate(
