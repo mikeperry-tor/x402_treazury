@@ -26,6 +26,7 @@ python3 vendor/verify_zingo.py
 if [ "$with_zcash" = true ]; then
     scripts/zcash.sh test --all-targets -- --test-threads=1
     scripts/zcash.sh test --features zcash-testutils --lib treasury::refunds::tests -- --test-threads=1
+    scripts/zcash.sh test --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=1
     scripts/zcash.sh clippy --all-targets --features zcash-regtest -- -D warnings
     python3 scripts/check_compat.py
 else

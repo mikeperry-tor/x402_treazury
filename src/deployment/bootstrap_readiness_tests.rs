@@ -271,3 +271,130 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
     drop(store);
     worker.await.unwrap();
 }
+
+#[tokio::test]
+async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let state_path = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut state = Store::create(&state_path, &key, 1, b"fixture").unwrap();
+    let id = state.id().to_owned();
+    let names: BTreeSet<_> = (0..GROUP_PAGE + 1)
+        .map(|i| format!("group_{i:02}"))
+        .collect();
+    for name in names.iter().map(String::as_str).chain(["unselected"]) {
+        crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            name,
+            crate::rotation::test_capacity::two_reserves("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0
+        )
+        .unwrap();
+    }
+    let selected_pools: BTreeSet<_> = state
+        .status()
+        .unwrap()
+        .pools
+        .into_iter()
+        .filter(|pool| names.contains(&pool.name))
+        .map(|pool| pool.id)
+        .collect();
+    let mut jobs: Vec<_> = state
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .filter(|j| selected_pools.contains(&j.pool_id))
+        .collect();
+    assert_eq!(jobs.len(), names.len() * 2);
+    // Keep a claim in the final page unfinished while all its siblings complete.
+    let last_pool = state
+        .startup_groups(&[names.last().unwrap().clone()])
+        .unwrap()
+        .remove(0)
+        .pool;
+    let last_index = jobs.iter().position(|j| j.pool_id == last_pool).unwrap();
+    let last = jobs.remove(last_index);
+    let (store, worker) = StoreHandle::spawn(state);
+    let attempts = names.iter().map(|n| (n.clone(), 3)).collect();
+    let captured = capture_startup(&store, &names).await.unwrap();
+    let mut completions = Vec::new();
+    for job in jobs.into_iter().rev() {
+        let store = store.clone();
+        completions.push(tokio::spawn(async move {
+            store
+                .call(move |s| s.record_credit(&job.wallet_id, &job.target, "fixture", 100))
+                .await
+                .unwrap();
+        }));
+    }
+    for task in completions {
+        task.await.unwrap();
+    }
+    assert!(
+        !check_startup(&store, &names, &attempts, Some(&captured), false)
+            .await
+            .unwrap(),
+        "a complete first page cannot hide an unfinished final-page claim"
+    );
+    store
+        .call(move |s| s.record_credit(&last.wallet_id, &last.target, "fixture", 100))
+        .await
+        .unwrap();
+    assert!(
+        check_startup(&store, &names, &attempts, Some(&captured), true)
+            .await
+            .unwrap()
+    );
+    let summary = bootstrap_summary(&store, &names, &captured).await.unwrap();
+    assert_eq!(
+        summary.captured_completed_groups,
+        names.iter().cloned().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        summary.inventory_ready_groups,
+        summary.captured_completed_groups
+    );
+    assert_eq!(summary.confirmed_balances.len(), names.len() * 2);
+    assert!(
+        summary
+            .confirmed_balances
+            .iter()
+            .all(|b| b.confirmed_balance_usdc == "5.000000")
+    );
+    let expected = serde_json::to_value(summary).unwrap();
+    let before = store.call(|s| Ok(s.funding_jobs()?.len())).await.unwrap();
+    drop(store);
+    worker.await.unwrap();
+    let state = Store::open(&state_path, &key, &id).unwrap();
+    assert_eq!(state.funding_jobs().unwrap().len(), before);
+    let (store, worker) = StoreHandle::spawn(state);
+    assert!(
+        check_startup(&store, &names, &attempts, Some(&captured), false)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(bootstrap_summary(&store, &names, &captured).await.unwrap()).unwrap(),
+        expected
+    );
+    let other = BTreeSet::from(["unselected".to_owned()]);
+    assert!(
+        !check_startup(
+            &store,
+            &other,
+            &BTreeMap::from([("unselected".into(), 3)]),
+            None,
+            false
+        )
+        .await
+        .unwrap(),
+        "completion of selected groups must not complete unrelated claims"
+    );
+    assert_eq!(
+        store.call(|s| Ok(s.funding_jobs()?.len())).await.unwrap(),
+        before
+    );
+    drop(store);
+    worker.await.unwrap();
+}

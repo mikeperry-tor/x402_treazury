@@ -1320,6 +1320,21 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
     .unwrap_err();
     assert!(error.to_string().contains("cancelled"));
     assert_eq!(treasury.status().await.unwrap().snapshot_revision, before);
+    // Cancelling an unsigned probe must leave the owner/channel usable. A new
+    // caller still verifies the chain without renewing the saved observation.
+    probe.stall.store(false, Ordering::SeqCst);
+    let count = calls.lock().unwrap().len();
+    assert!(
+        treasury
+            .reconcile_prepared("absent".into(), &mut sender, &CancellationToken::new())
+            .await
+            .is_err()
+    );
+    assert_eq!(treasury.status().await.unwrap().snapshot_revision, before);
+    assert_eq!(
+        &calls.lock().unwrap()[count..],
+        &["GetLightdInfo", "GetLatestBlock"]
+    );
     assert!(
         treasury
             .status()

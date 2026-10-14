@@ -4,6 +4,8 @@ pub mod birthday;
 pub(crate) mod diagnostics;
 mod expiry;
 mod freshness;
+#[cfg(all(test, feature = "zcash-testutils"))]
+mod lifecycle_tests;
 pub mod recovery;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
@@ -16,6 +18,8 @@ impl TreasuryNetwork {
     fn chain(self) -> zingolib::config::ChainType {
         match self {
             Self::Mainnet => zingolib::config::ChainType::Mainnet,
+            #[cfg(all(test, feature = "zcash-testutils"))]
+            Self::Synthetic => zingolib::config::ChainType::Regtest(Default::default()),
             #[cfg(all(test, feature = "zcash-regtest"))]
             Self::Regtest => zingolib::config::ChainType::Regtest(regtest::heights()),
         }

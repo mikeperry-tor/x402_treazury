@@ -9,6 +9,9 @@ chains. None spends mainnet funds or contacts NEAR's production API.
 | Refund status and pool isolation | `managed::lifecycle::failed_swap_keeps_source_expense_while_another_pool_serves` | API refund status cannot manufacture treasury credit; another funded pool keeps paying. |
 | Quote refresh, empty treasury, timeouts and backoff | `tests/funding.rs` | Unprepared-only bounded refresh, independent persisted status-error streaks, sanitized diagnostics, degraded timeout with continued reconciliation and no repeated send. |
 | Payment ambiguity and admission | `tests/managed.rs` | One signed attempt, durable liabilities across restart/cancellation, canonical balance checks, nonce reconciliation, pool isolation and atomic promotion. |
+| Concurrent source funding and scan reuse | `treasury::lifecycle_tests` | Two managed recipients share the real treasury actor; real proving, submission and scans on a synthetic local chain. Covers deferred competing preparation, exact quote/pool and auto-funding checks, unchanged observation age/revision, confirmation depth, pending-byte restart, dropped submission waiter and lost send response without replay. Bridge quotes are fixture inputs; the chain does not validate consensus. |
+| Replacement credit with unresolved old payments | `managed::replacement_credit_survives_restart_without_releasing_old_authorizations` | Concurrent refill allocates one generation; local Base credit survives restart and promotes the replacement while all older signed liabilities remain. |
+| Multi-group bootstrap completion | `deployment::bootstrap::readiness_tests` | Concurrent destination credits across a group-page boundary, incomplete final-page claims, selected-group scope, stable summaries after reopen and captured claims across generation advancement. |
 | Refund accounting and expiry journal | Store unit tests and `tests/rotation.rs` | Idempotent capped refund credit, fees retained, snapshot revision guards, operation replacement, backup/restore and crash recovery. |
 | Deposit settlement and reorgs | `treasury::regtest::deposit_settlement_and_reorg_recovery` | Actual proofs, configured confirmation depth, same-byte rebroadcast and fail-closed reorg handling against pinned Zebra/Zaino. |
 | High-index refunds and shielding | `treasury::regtest::high_index_refunds_and_separate_shielding` | Derives 32 distinct refund addresses, restores the encrypted wallet, discovers the two high-index funded addresses and shields each independently. |
@@ -40,6 +43,17 @@ Synthetic proving also checks a calculated transaction whose journal commit fail
 no outgoing transaction becomes durable, further preparation requires reopen, and
 the pre-calculation input state is recovered. See [COVERAGE.md](COVERAGE.md) for
 the exact proving command and recorded qualification results.
+
+`scripts/check.sh` includes the synthetic-chain source lifecycle. Run it separately
+without Docker or external services:
+
+```sh
+scripts/zcash.sh test --offline --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=1
+```
+
+This opt-in test uses public deterministic keys and a test-only network namespace
+that production wallet opening rejects. It complements the default bootstrap and
+replacement-credit fixtures; it does not establish end-to-end bridge settlement.
 
 Run consensus qualification separately; [REGTEST.md](REGTEST.md) describes the
 pinned images and isolated networking:

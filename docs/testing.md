@@ -99,7 +99,12 @@ selectors. Birthday fixtures advance the tip between observations. Nonce-outage
 fixtures retain full liabilities, commit independent valid proofs, reject
 insufficient remaining capacity, and preserve those decisions across restart.
 Synthetic proving checks actual-fee affordability and exact saved bytes through
-failed persistence/reopen. These are unfunded/local tests, not evidence of live
+failed persistence/reopen. The optional synthetic-chain lifecycle exercises two
+managed recipients through the real treasury actor, scan reuse, confirmation depth,
+restart and cancellation after submission intent. Default fixtures cover concurrent
+replacement allocation/credit with retained old payment liabilities and paged,
+scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).
+These are unfunded/local tests, not evidence of live
 1Click delivery or a resolution of its Zcash quote-deadline contract.
 
 Managed-capacity fixtures exercise actual local HTTP signing and canonical Base

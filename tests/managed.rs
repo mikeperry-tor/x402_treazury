@@ -2235,3 +2235,114 @@ mod consumption;
 
 #[path = "support/draining.rs"]
 mod draining;
+
+#[tokio::test]
+async fn replacement_credit_survives_restart_without_releasing_old_authorizations() {
+    let h = Harness::new().await;
+    let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
+    a.unwrap();
+    b.unwrap();
+    let original = h.f.signed.lock().unwrap().clone();
+    assert_eq!(original.len(), 2);
+    let mut allocations = Vec::new();
+    for _ in 0..4 {
+        let store = h.store.clone();
+        let pool = h.pool.clone();
+        allocations.push(tokio::spawn(async move {
+            store
+                .call(move |s| {
+                    s.allocate_capacity_kind(
+                        &pool,
+                        x402_treazury::rotation::store::AllocationKind::Small,
+                        true,
+                    )
+                })
+                .await
+                .unwrap()
+        }));
+    }
+    let mut allocated = Vec::new();
+    for task in allocations {
+        if let Some(job) = task.await.unwrap() {
+            allocated.push(job);
+        }
+    }
+    assert_eq!(
+        allocated.len(),
+        1,
+        "concurrent refill must allocate one reserve generation"
+    );
+    let job = allocated.pop().unwrap();
+    let replacement = h
+        .store
+        .call(move |s| Ok(s.funding_job(&job)?.unwrap()))
+        .await
+        .unwrap();
+    assert!(
+        h.client.execute(h.route()).await.is_err(),
+        "unfunded replacement must not sign"
+    );
+    h.f.balances
+        .lock()
+        .unwrap()
+        .insert(replacement.recipient.clone(), 5_000_000);
+    make_pool(h.store.clone(), h.pool.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
+    let h = restart(h).await;
+    let pool = h.pool.clone();
+    assert!(
+        h.store
+            .call(move |s| s.allocate_capacity_kind(
+                &pool,
+                x402_treazury::rotation::store::AllocationKind::Small,
+                true,
+            ))
+            .await
+            .unwrap()
+            .is_none(),
+        "restart must not duplicate a funded replacement"
+    );
+    h.client.execute(h.route()).await.unwrap();
+    let signed = h.f.signed.lock().unwrap().clone();
+    assert_eq!(signed.len(), 3);
+    assert_eq!(
+        &signed[..2],
+        original.as_slice(),
+        "old authorizations must not be replayed or replaced"
+    );
+    assert_eq!(
+        signed[2]["payload"]["authorization"]["from"]
+            .as_str()
+            .unwrap()
+            .parse::<Address>()
+            .unwrap(),
+        replacement.recipient.parse::<Address>().unwrap()
+    );
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let unresolved: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        unresolved, 3,
+        "replacement credit must retain all unresolved payment liabilities"
+    );
+    let state = h.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(state.pools[0].addresses.len(), 3);
+    assert_eq!(
+        state.pools[0]
+            .addresses
+            .iter()
+            .find(|w| w.id == replacement.wallet_id)
+            .unwrap()
+            .role,
+        "ACTIVE"
+    );
+    drop(db);
+    h.close().await;
+}

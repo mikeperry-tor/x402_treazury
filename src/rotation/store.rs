@@ -174,11 +174,13 @@ pub struct AddressStatus {
     /// None means this reader has no current-process evidence, not zero capacity.
     pub runtime_balance_evidence: Option<RuntimeBalanceEvidence>,
 }
-/// Production builds have exactly one treasury network. Regtest is available
-/// only inside this crate's explicitly opted-in test binary.
+/// Production builds have exactly one treasury network. Synthetic and consensus
+/// test chains are available only inside explicitly opted-in test binaries.
 #[derive(Clone, Copy)]
 pub(crate) enum TreasuryNetwork {
     Mainnet,
+    #[cfg(all(test, feature = "zcash-testutils"))]
+    Synthetic,
     #[cfg(all(test, feature = "zcash-regtest"))]
     Regtest,
 }
@@ -186,6 +188,8 @@ impl TreasuryNetwork {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Mainnet => "mainnet",
+            #[cfg(all(test, feature = "zcash-testutils"))]
+            Self::Synthetic => "synthetic",
             #[cfg(all(test, feature = "zcash-regtest"))]
             Self::Regtest => "regtest",
         }
@@ -194,6 +198,8 @@ impl TreasuryNetwork {
     pub(crate) fn rpc_name(self) -> &'static str {
         match self {
             Self::Mainnet => "main",
+            #[cfg(all(test, feature = "zcash-testutils"))]
+            Self::Synthetic => "regtest",
             #[cfg(all(test, feature = "zcash-regtest"))]
             Self::Regtest => "test",
         }

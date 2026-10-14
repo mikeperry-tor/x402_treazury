@@ -224,7 +224,8 @@ are bounded per listener/category, with explicit suppression notice/counts; HTTP
 qualification must reject unauthenticated listeners.
 
 `scripts/check.sh` validates only the default Zcash build, including all-feature
-Clippy and dependency compatibility. It also runs source complexity qualification
+Clippy, dependency compatibility and the local synthetic-chain treasury lifecycle
+with `zcash-testutils`. It also runs source complexity qualification
 and advisory regression warnings (CogC > 20 or CycC > 40) against the merge base
 with `main`; use `COMPLEXITY_BASE_REF` for another review target. Scores never fail
 the check, but incomplete analysis does. See `scripts/README.md` for optional vector
