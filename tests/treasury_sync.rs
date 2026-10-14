@@ -104,10 +104,35 @@ struct Mock {
     calls: Arc<Mutex<Vec<String>>>,
     stall_blocks: Arc<AtomicBool>,
     delay_first: Arc<AtomicBool>,
+    reuse_probe: Option<Arc<ReuseProbe>>,
+}
+#[derive(Default)]
+struct ReuseProbe {
+    tip: std::sync::atomic::AtomicU64,
+    hash: Mutex<Vec<u8>>,
+    fail: AtomicBool,
+    stall: AtomicBool,
+    delay_once: AtomicBool,
 }
 async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse {
     let method = uri.path().rsplit('/').next().unwrap().to_owned();
     mock.calls.lock().unwrap().push(method.clone());
+    if let Some(probe) = &mock.reuse_probe {
+        if method == "GetLightdInfo" {
+            if probe.delay_once.swap(false, Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+            }
+            if probe.stall.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            if probe.fail.load(Ordering::SeqCst) {
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", "application/grpc".parse().unwrap());
+                headers.insert("grpc-status", "14".parse().unwrap());
+                return (headers, vec![]);
+            }
+        }
+    }
     let request = if body.len() >= 5 { &body[5..] } else { &[] };
     let messages = match method.as_str() {
         "GetLightdInfo" => vec![
@@ -116,7 +141,9 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
                 number(5, 419_200),
                 number(
                     7,
-                    if mock
+                    if let Some(probe) = &mock.reuse_probe {
+                        probe.tip.load(Ordering::SeqCst)
+                    } else if mock
                         .calls
                         .lock()
                         .unwrap()
@@ -133,7 +160,13 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             ]
             .concat(),
         ],
-        "GetLatestBlock" => vec![number(1, mock.tip)],
+        "GetLatestBlock" => {
+            let (tip, hash) = mock.reuse_probe.as_ref().map_or_else(
+                || (mock.tip, hash(mock.tip)),
+                |p| (p.tip.load(Ordering::SeqCst), p.hash.lock().unwrap().clone()),
+            );
+            vec![[number(1, tip), bytes(2, &hash)].concat()]
+        }
         "GetBlock" => vec![block(height(request))],
         "GetBlockRange" => {
             if mock.delay_first.swap(false, Ordering::SeqCst) {
@@ -261,6 +294,7 @@ async fn mock_with_delay(
         calls: calls.clone(),
         stall_blocks: stall_blocks.clone(),
         delay_first: Arc::new(AtomicBool::new(delay)),
+        reuse_probe: None,
     });
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -1120,5 +1154,155 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
         Some("indexer is not on mainnet")
     );
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    server.abort();
+}
+
+#[tokio::test]
+async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_chain_change() {
+    use x402_treazury::treasury::submission::GrpcSubmission;
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(Mutex::new(vec![]));
+    let probe = Arc::new(ReuseProbe::default());
+    probe.tip.store(TIP, Ordering::SeqCst);
+    *probe.hash.lock().unwrap() = hash(TIP);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let app = axum::Router::new().fallback(rpc).with_state(Mock {
+        chain: "main",
+        tip: TIP,
+        final_tip: None,
+        ironwood: b"000000",
+        calls: calls.clone(),
+        stall_blocks: Arc::new(AtomicBool::new(false)),
+        delay_first: Arc::new(AtomicBool::new(false)),
+        reuse_probe: Some(probe.clone()),
+    });
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let mut treasury = wallet(dir.path()).await;
+    let id = treasury.status().await.unwrap().treasury_id;
+    let settings = SyncSettings::new(endpoint.clone(), 3, 300).unwrap();
+    treasury.configure_sync(settings.clone());
+    let stop = CancellationToken::new();
+    treasury.sync_once(&stop).await.unwrap();
+    let mut sender = GrpcSubmission::new(endpoint.clone(), endpoint.clone()).unwrap();
+    // A nonexistent operation stops after synchronization, before lookup/submission.
+    let before = treasury.status().await.unwrap();
+    let count = calls.lock().unwrap().len();
+    assert!(
+        treasury
+            .reconcile_prepared("absent".into(), &mut sender, &stop)
+            .await
+            .is_err()
+    );
+    let after = treasury.status().await.unwrap();
+    assert_eq!(before.snapshot_revision, after.snapshot_revision);
+    assert_eq!(
+        before.sync.unwrap().checked_at,
+        after.sync.unwrap().checked_at
+    );
+    assert_eq!(
+        &calls.lock().unwrap()[count..],
+        &["GetLightdInfo", "GetLatestBlock"]
+    );
+    for change in ["mutation", "restart", "tip", "hash", "missing_hash"] {
+        match change {
+            "mutation" => {
+                treasury.derive_address().await.unwrap();
+            }
+            "restart" => {
+                treasury.close().await.unwrap();
+                treasury =
+                    Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
+                        .await
+                        .unwrap();
+                treasury.configure_sync(settings.clone());
+            }
+            "tip" => {
+                probe.tip.store(TIP + 1, Ordering::SeqCst);
+                *probe.hash.lock().unwrap() = hash(TIP + 1);
+            }
+            "hash" => {
+                *probe.hash.lock().unwrap() = vec![7; 32];
+            }
+            "missing_hash" => {
+                probe.hash.lock().unwrap().clear();
+            }
+            _ => unreachable!(),
+        }
+        let before = treasury.status().await.unwrap().snapshot_revision;
+        assert!(
+            treasury
+                .submit_prepared("absent".into(), &mut sender, false, &stop)
+                .await
+                .is_err()
+        );
+        assert!(
+            treasury.status().await.unwrap().snapshot_revision > before,
+            "{change} must scan"
+        );
+        assert_eq!(
+            treasury.status().await.unwrap().sync.unwrap().phase,
+            SyncPhase::Ready,
+            "{change}"
+        );
+    }
+    // A slow, progressing tip read cannot renew the starting observation.
+    *probe.hash.lock().unwrap() = hash(TIP + 1);
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 5).unwrap());
+    treasury.sync_once(&stop).await.unwrap();
+    let before = treasury.status().await.unwrap();
+    probe.delay_once.store(true, Ordering::SeqCst);
+    assert!(
+        treasury
+            .reconcile_prepared("absent".into(), &mut sender, &stop)
+            .await
+            .is_err()
+    );
+    let after = treasury.status().await.unwrap();
+    assert!(after.snapshot_revision > before.snapshot_revision);
+    assert!(after.sync.unwrap().checked_at > before.sync.unwrap().checked_at);
+    treasury.configure_sync(settings);
+    treasury.sync_once(&stop).await.unwrap();
+    // A failed unsigned preflight must not publish a new observation or start a send.
+    let before = treasury.status().await.unwrap().snapshot_revision;
+    probe.fail.store(true, Ordering::SeqCst);
+    let error = treasury
+        .reconcile_prepared("absent".into(), &mut sender, &stop)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("grpc_code=14"));
+    assert_eq!(treasury.status().await.unwrap().snapshot_revision, before);
+    probe.fail.store(false, Ordering::SeqCst);
+    probe.stall.store(true, Ordering::SeqCst);
+    let count = calls.lock().unwrap().len();
+    let cancel = stop.clone();
+    let observed = calls.clone();
+    tokio::spawn(async move {
+        while observed.lock().unwrap().len() == count {
+            tokio::task::yield_now().await;
+        }
+        cancel.cancel();
+    });
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        treasury.reconcile_prepared("absent".into(), &mut sender, &stop),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(error.to_string().contains("cancelled"));
+    assert_eq!(treasury.status().await.unwrap().snapshot_revision, before);
+    assert!(
+        treasury
+            .status()
+            .await
+            .unwrap()
+            .treasury_operations
+            .is_empty()
+    );
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    treasury.close().await.unwrap();
     server.abort();
 }

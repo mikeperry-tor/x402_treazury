@@ -260,9 +260,9 @@ impl Treasury {
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<SubmissionOutcome> {
         ensure!(self.healthy, "treasury requires reopen");
-        // Refresh the chain view even after restart. Sync is permitted while a send
-        // is pending; spend admission is not.
-        self.sync_once(stop).await?;
+        // Reuse only an unchanged in-process scan after rechecking the chain.
+        // Restart/mutation still requires scanning; a pending send stays owned.
+        self.sync_for_command(stop).await?;
         let (_, revision, observation) =
             self.store.call(|s| s.funding_preparation_context()).await?;
         ensure!(observation.fresh(now()?, revision), "treasury_sync_stale");
@@ -308,7 +308,7 @@ impl Treasury {
         sender: &mut impl TransactionSubmission,
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<TransactionPresence> {
-        self.sync_once(stop).await?;
+        self.sync_for_command(stop).await?;
         let operation = id.clone();
         let prepared = self
             .store

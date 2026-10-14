@@ -97,7 +97,7 @@ impl Treasury {
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
                         Command::Prepare(request, reply) => {
-                            let result = match self.sync_once(&stop).await {
+                            let result = match self.sync_for_command(&stop).await {
                                 Ok(()) if !stop.is_cancelled() => self.prepare(request).await,
                                 Ok(()) => Err(anyhow::anyhow!("treasury stopping")),
                                 Err(error) if self.healthy => Err(error.context(crate::rotation::transaction::PreparationDeferred)),

@@ -10,6 +10,7 @@ mod refunds;
 mod regtest;
 mod send;
 mod server;
+mod sync_reuse;
 use crate::rotation::store::TreasuryNetwork;
 impl TreasuryNetwork {
     fn chain(self) -> zingolib::config::ChainType {
@@ -49,6 +50,7 @@ pub struct Treasury {
     revision: i64,
     healthy: bool,
     sync_settings: Option<SyncSettings>,
+    reusable_sync_revision: Option<i64>,
 }
 /// Endpoint is intentionally excluded from Debug/serialization and status output.
 #[derive(Clone)]
@@ -157,6 +159,7 @@ impl Treasury {
             revision: 1,
             healthy: true,
             sync_settings: None,
+            reusable_sync_revision: None,
         })
     }
     pub async fn open(dir: PathBuf, key: PathBuf, id: String) -> Result<Self> {
@@ -198,6 +201,7 @@ impl Treasury {
             revision,
             healthy: true,
             sync_settings: None,
+            reusable_sync_revision: None,
         })
     }
     pub(crate) fn store_handle(&self) -> StoreHandle {
@@ -328,6 +332,7 @@ impl Treasury {
             .await
     }
     pub fn configure_sync(&mut self, settings: SyncSettings) {
+        self.reusable_sync_revision = None;
         self.sync_settings = Some(settings);
     }
     async fn checkpoint(&mut self, observation: SyncObservation) -> Result<()> {
@@ -347,6 +352,7 @@ impl Treasury {
     /// Cancellation must be requested through `stop`, then this future awaited.
     /// Adapter errors are sanitized; endpoints are not persisted in status.
     pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
+        self.reusable_sync_revision = None;
         ensure!(
             self.healthy,
             "treasury requires reopen after failed persistence"
@@ -427,6 +433,7 @@ impl Treasury {
         self.checkpoint(observation).await?;
         self.healthy = true;
         if outcome.is_ok() && !stop.is_cancelled() {
+            self.reusable_sync_revision = Some(self.revision);
             tracing::info!(
                 height,
                 observed_tip_height,
