@@ -7,7 +7,8 @@ provide supporting context.
 
 ## Reboot checkpoint — 2026-10-16
 
-Paused at the user's request for a laptop reboot after the C10 review fixup.
+Checkpoint saved at the user's request for a laptop reboot after the C10 review
+fixup. Work resumed on 2026-10-16 with independent commit-gate review.
 There is no implementation blocker. Branch: `improved_recovery_robustness_impl`.
 Resume from the committed checkout; do not restart or replay completed work.
 
@@ -769,6 +770,19 @@ accounting. Same-anchor contradictions and disputed resolution repair restrictio
 remain enforced in this slice; their decision-specific separation is subsequent
 work. ALLOCATED eligibility awaits C11's separate contract; RETIRED wallets remain
 excluded from serving capacity.
+
+**C10 resolution-only observation contract (reviewed):** Namespace and wallet/endpoint
+generation validity remain universal certificate checks. The wallet repair halt
+belongs to current balance/capacity decisions, not an independently bound canonical
+nonce result. Resolution-only maintenance may commit USED or EXPIRED_UNUSED under
+the original exact authorization, expiry and checkpoint compatibility checks while
+leaving repair flags and previous resolution support intact. Mixed balance/resolution
+views still fail atomically when capacity is blocked. Historical funding restoration
+explicitly retains the repair halt because it can publish roles/close accounting.
+This slice neither reopens admission nor repairs disputed resolved membership; those
+remaining C09/C12 obligations still prevent blanket repair-gate deletion.
+Validation: all 28 evidence/repair tests and all-target Clippy passed; independent
+review found no actionable findings.
 
 ### Stage 1 — Minimal authority and dependency specification
 

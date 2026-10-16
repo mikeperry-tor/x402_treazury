@@ -874,9 +874,15 @@ pub(super) fn check_capture(
             && endpoint_generation == generation(db, "endpoint", endpoint)?,
         EvidenceFailure::Invalidated
     );
+    Ok(())
+}
+
+// A capacity/role decision still needs repair clearance. Independently bound
+// nonce observations do not grant that clearance or depend on it.
+fn check_capacity_repair(db: &Connection, wallet: &str) -> Result<()> {
     let repair: Option<String> = db.query_row(
         "SELECT evidence_repair FROM wallets WHERE id=?1",
-        [&capture.wallet],
+        [wallet],
         |row| row.get(0),
     )?;
     if let Some(reason) = repair {
@@ -925,6 +931,7 @@ pub(super) fn check_balance(
     certificate: &crate::rotation::base::BalanceCertificate,
 ) -> Result<BalanceSupport> {
     check_balance_integrity(db, namespace, certificate)?;
+    check_capacity_repair(db, &certificate.capture().wallet)?;
     let observation = certificate.observation();
     let current = checkpoint(db, &observation.wallet)?;
     let debit: Option<i64> = db.query_row(
@@ -1549,6 +1556,7 @@ impl Store {
     ) -> Result<()> {
         let request = certificate.request();
         let tx = self.db.transaction()?;
+        check_capacity_repair(&tx, &request.capture.wallet)?;
         check_capture(
             &tx,
             self.evidence_namespace,

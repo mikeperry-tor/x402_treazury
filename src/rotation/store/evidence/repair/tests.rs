@@ -513,3 +513,137 @@ async fn serving_maintenance_automatically_revalidates_chain_block() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn independent_nonce_resolution_progresses_without_clearing_capacity_repair() {
+    for expired in [false, true] {
+        for reason in ["chain_repair_required", "evidence_repair_required"] {
+            let f = Fixture::with_outcome(expired).await;
+            let wallet = f.wallet.clone();
+            let pool = f.pool.clone();
+            let (mixed_query, history_query, original) = f
+                .store
+                .call(move |s| {
+                    s.db.execute(
+                        "UPDATE wallets SET evidence_repair=?2 WHERE id=?1",
+                        params![wallet, reason],
+                    )?;
+                    let original: String = s.db.query_row(
+                        "SELECT support FROM payment_resolutions WHERE attempt_id='resolved'",
+                        [],
+                        |r| r.get(0),
+                    )?;
+                    let boundary = s.history_boundary(&pool)?;
+                    let pending = s
+                        .history_page(&pool, -1, boundary, 64)?
+                        .into_iter()
+                        .map(|(_, auth)| auth.map_err(anyhow::Error::new))
+                        .collect::<Result<Vec<_>>>()?;
+                    assert_eq!(pending.len(), 1);
+                    Ok((
+                        s.scoped_chain_query(&pool, vec![wallet], pending.clone())?,
+                        s.scoped_chain_query(&pool, vec![], pending)?,
+                        original,
+                    ))
+                })
+                .await
+                .unwrap();
+            // Mixed publication must not partially release a liability when its
+            // accompanying current balance cannot pass the capacity gate.
+            let mixed = f.base.view(mixed_query).await.unwrap();
+            let pool = f.pool.clone();
+            let wallet = f.wallet.clone();
+            f.store
+                .call(move |s| {
+                    assert!(s.publish_scoped_evidence(&pool, mixed).is_err());
+                    assert_eq!(exposure(&s.db, &wallet)?, U256::from(7));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let history = f.base.view(history_query).await.unwrap();
+            let endpoint = history.resolution_certificates["pending"]
+                .endpoint()
+                .to_owned();
+            let stale = history.clone();
+            let pool = f.pool.clone();
+            let wallet = f.wallet.clone();
+            f.store
+                .call(move |s| {
+                    bump_generation(&s.db, "wallet", &wallet)?;
+                    assert_eq!(
+                        s.publish_scoped_evidence(&pool, stale)
+                            .unwrap_err()
+                            .downcast_ref::<EvidenceFailure>(),
+                        Some(&EvidenceFailure::Invalidated)
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let pool = f.pool.clone();
+            let query = f
+                .store
+                .call(move |s| {
+                    let pending = s
+                        .history_page(&pool, -1, s.history_boundary(&pool)?, 64)?
+                        .into_iter()
+                        .map(|(_, auth)| auth.map_err(anyhow::Error::new))
+                        .collect::<Result<Vec<_>>>()?;
+                    s.scoped_chain_query(&pool, vec![], pending)
+                })
+                .await
+                .unwrap();
+            let history = f.base.view(query).await.unwrap();
+            let pool = f.pool.clone();
+            let wallet = f.wallet.clone();
+            f.store
+                .call(move |s| {
+                    s.publish_scoped_evidence(&pool, history)?;
+                    assert_eq!(exposure(&s.db, &wallet)?, U256::ZERO);
+                    let saved: String = s.db.query_row(
+                        "SELECT support FROM payment_resolutions WHERE attempt_id='resolved'",
+                        [],
+                        |r| r.get(0),
+                    )?;
+                    assert_eq!(saved, original);
+                    let flag: String = s.db.query_row(
+                        "SELECT evidence_repair FROM wallets WHERE id=?1",
+                        [&wallet],
+                        |r| r.get(0),
+                    )?;
+                    assert_eq!(flag, reason);
+                    assert!(check_capacity_repair(&s.db, &wallet).is_err());
+                    assert_eq!(
+                        s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                            .get::<_, i64>(0))?,
+                        2
+                    );
+                    assert_eq!(
+                        s.db.query_row("SELECT COUNT(*) FROM wallet_evidence_repairs", [], |r| {
+                            r.get::<_, i64>(0)
+                        })?,
+                        0
+                    );
+                    let stale = s.capture_evidence(&wallet)?;
+                    let generation_before = generation(&s.db, "endpoint", &endpoint)?;
+                    s.invalidate_endpoint_evidence(&endpoint)?;
+                    assert_eq!(
+                        check_capture(
+                            &s.db,
+                            s.evidence_namespace,
+                            &stale,
+                            &endpoint,
+                            generation_before
+                        )
+                        .unwrap_err()
+                        .downcast_ref::<EvidenceFailure>(),
+                        Some(&EvidenceFailure::Invalidated)
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+    }
+}

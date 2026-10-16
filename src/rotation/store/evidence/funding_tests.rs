@@ -117,6 +117,41 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
         .funding_readiness_reverification(&job.id, &job.operation_id)
         .unwrap()
         .unwrap();
+    for reason in ["chain_repair_required", "evidence_repair_required"] {
+        let blocked = rpc
+            .verify_historical_balance(request.clone())
+            .await
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET evidence_repair=?2 WHERE id=?1",
+                params![job.wallet_id, reason],
+            )
+            .unwrap();
+        assert!(
+            store
+                .restore_funding_readiness_support(&job.id, &job.operation_id, blocked)
+                .is_err()
+        );
+        let dispute: String = store
+            .db
+            .query_row(
+                "SELECT readiness_disputed FROM funding_jobs WHERE id=?1",
+                [&job.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(dispute, "endpoint_reverification_required");
+    }
+    // Restore only this fixture's injected gate before testing ordinary repair.
+    store
+        .db
+        .execute(
+            "UPDATE wallets SET evidence_repair=NULL WHERE id=?1",
+            [&job.wallet_id],
+        )
+        .unwrap();
     let verified = rpc.verify_historical_balance(request).await.unwrap();
     let changes = store.capacity_changes(&pool);
     let unrelated = store.capacity_changes("unrelated");
