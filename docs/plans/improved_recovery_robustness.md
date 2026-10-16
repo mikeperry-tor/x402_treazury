@@ -452,8 +452,9 @@ the same audited-read restriction; treasury generation replacement remains C17.
 Validation: 19 inventory-focused tests and library Clippy pass, including injected
 Busy/Locked at all five Base boundaries, independent observations, retained owner,
 no duplicate active nonce, cancellation, incomplete one-pass and corruption controls.
-Review found no implementation defect; a separate test fixup will strengthen proof
-that a failed wallet page resumes beyond priority wallets.
+Implementation: 753d25a. Review found no implementation defect; its test fixup
+records actual balance RPC payer addresses and requires observation of an added
+non-priority retained wallet after the failed page resumes. The expanded test passes.
 
 ### Stage 1 — Minimal authority and dependency specification
 

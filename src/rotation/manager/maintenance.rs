@@ -637,6 +637,7 @@ mod tests {
         release: Arc<tokio::sync::Notify>,
         slow_started: Arc<tokio::sync::Notify>,
         balance_reads: Arc<AtomicUsize>,
+        balance_payers: Arc<std::sync::Mutex<BTreeSet<String>>>,
         nonce_reads: Arc<AtomicUsize>,
         fail_nonces: Arc<AtomicBool>,
         treasury: String,
@@ -682,12 +683,13 @@ mod tests {
         let release = Arc::new(tokio::sync::Notify::new());
         let slow_started = Arc::new(tokio::sync::Notify::new());
         let balance_reads = Arc::new(AtomicUsize::new(0));
+        let balance_payers = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
         let nonce_reads = Arc::new(AtomicUsize::new(0));
         let fail_nonces = Arc::new(AtomicBool::new(false));
         let app=Router::new().route("/",post({
-            let release=release.clone();let started=slow_started.clone();let balances=balance_reads.clone();let nonces=nonce_reads.clone();let fail=fail_nonces.clone();
+            let release=release.clone();let started=slow_started.clone();let balances=balance_reads.clone();let payers=balance_payers.clone();let nonces=nonce_reads.clone();let fail=fail_nonces.clone();
             move |Json(request):Json<Value>| {
-                let release=release.clone();let started=started.clone();let balances=balances.clone();let nonces=nonces.clone();let fail=fail.clone();
+                let release=release.clone();let started=started.clone();let balances=balances.clone();let payers=payers.clone();let nonces=nonces.clone();let fail=fail.clone();
                 async move {
                     let result=match request["method"].as_str().unwrap() {
                         "eth_chainId"=>json!("0x2105"),
@@ -698,7 +700,7 @@ mod tests {
                         },
                         "eth_call"=>{
                             let data=request["params"][0]["data"].as_str().unwrap();
-                            let value=if data.starts_with("0x70a08231") {balances.fetch_add(1,Ordering::SeqCst);5_000_000}else{
+                            let value=if data.starts_with("0x70a08231") {balances.fetch_add(1,Ordering::SeqCst);payers.lock().unwrap().insert(format!("0x{}",&data[data.len()-40..]));5_000_000}else{
                                 nonces.fetch_add(1,Ordering::SeqCst);
                                 let nonce=u64::from_str_radix(&data[data.len()-64..],16).unwrap();
                                 if nonce==1 {started.notify_one();}
@@ -735,6 +737,7 @@ mod tests {
             release,
             slow_started,
             balance_reads,
+            balance_payers,
             nonce_reads,
             fail_nonces,
             treasury,
@@ -774,6 +777,12 @@ mod tests {
         .enumerate()
         {
             let f = fixture(2).await;
+            let retained = "0x000000000000000000000000000000000000aaaa";
+            if read == Read::WalletPage {
+                let db =
+                    rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+                db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES('retained-observer',?1,99,?2,X'00','1','RETAINED')",rusqlite::params![f.pool.pool,retained]).unwrap();
+            }
             let code = if index % 2 == 0 {
                 rusqlite::ffi::SQLITE_BUSY
             } else {
@@ -804,6 +813,15 @@ mod tests {
                 .await
                 .unwrap();
             wait_for(&f, 1).await;
+            if read == Read::WalletPage {
+                tokio::time::timeout(Duration::from_secs(8), async {
+                    while !f.balance_payers.lock().unwrap().contains(retained) {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
             assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
             assert!(
                 f.pool
