@@ -964,6 +964,19 @@ All four synthetic refund-observation tests and all-target/all-feature Clippy pa
 independent review cleared the fixup. This closes this narrow scoped slice; the
 unidentifiable-ownership stop and broader C13 work remain outstanding.
 
+**C13 unidentifiable refund attribution followup:** The consumer audit found that
+refund accounting does not authorize source retries, source reservation release or
+current SDK spendability. Unidentifiable historical refund identity/ownership now
+returns explicit `Unidentifiable` attribution with a fixed warning, suppressing all
+new refund credits and all explicit refund shielding while synchronization can
+finish. Original credits and costs remain unchanged. Store failures and unusable
+owner records still propagate. `SyncObservation::Ready` describes current SDK
+freshness/spendability, never completed refund accounting; future C18 closure must
+acquire complete fresh accounting independently. All five synthetic refund tests
+passed, including the actual asynchronous reconciliation stage preserving exact
+old rows and suppressing an independent fresh credit. Independent review found no
+blocking issues. Full synthetic-chain spendability acceptance remains outstanding.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

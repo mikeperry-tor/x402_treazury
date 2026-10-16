@@ -17,16 +17,25 @@ use zcash_client_backend::{
 };
 use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
-/// Operation-scoped unresolved accounting from the actual sync stage. Original
-/// bindings/credits stay durable in their existing journals; this is a read result.
+/// Scope of refund accounting only; never treasury spending authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReturnAttribution {
+    Scoped,
+    Unidentifiable,
+}
+
+/// Unresolved accounting from the actual sync stage, with explicit attribution scope.
+/// Original bindings/credits stay durable; this transient result never grants closure.
 #[derive(Debug)]
 pub(crate) struct ReturnReconciliation {
     pub observed_outputs: usize,
+    pub attribution: ReturnAttribution,
     pub issues: Vec<ReturnAccountingIssue>,
 }
 #[derive(Debug)]
 struct ReturnObservation {
     observed_outputs: usize,
+    attribution: ReturnAttribution,
     credits: Vec<RefundStatus>,
     issues: Vec<ReturnAccountingIssue>,
 }
@@ -42,8 +51,16 @@ impl SyncSession {
         drop(wallet);
         let report = ReturnReconciliation {
             observed_outputs: observation.observed_outputs,
+            attribution: observation.attribution,
             issues: observation.issues,
         };
+        if report.attribution == ReturnAttribution::Unidentifiable {
+            tracing::warn!(
+                reason = "unidentifiable_return_attribution",
+                observed_outputs = report.observed_outputs,
+                "Refund attribution incomplete; new credits and refund shielding remain blocked"
+            );
+        }
         if !observation.credits.is_empty() {
             self.store
                 .call(move |s| {
@@ -128,6 +145,7 @@ fn collect_refunds(
     // Deduplication precedes revalidation: disputed historical credits never
     // become discoveries or receive another credit when they reappear.
     let mut known = std::collections::HashSet::with_capacity(accounting.credited.len());
+    let mut attribution = ReturnAttribution::Scoped;
     for credited in &accounting.credited {
         let operation_id = credited.operation_id.clone();
         ensure!(
@@ -139,20 +157,20 @@ fn collect_refunds(
             None => {
                 // Without either an outpoint or one unambiguous original address,
                 // we cannot identify which other discovery might duplicate this credit.
-                ensure!(
-                    accounting
+                let scoped = accounting
+                    .bindings
+                    .values()
+                    .filter(|owners| owners.contains(&operation_id))
+                    .count()
+                    == 1
+                    && accounting
                         .bindings
                         .values()
-                        .filter(|owners| owners.contains(&operation_id))
-                        .count()
-                        == 1
-                        && accounting
-                            .bindings
-                            .values()
-                            .any(|owners| owners.len() == 1 && owners.contains(&operation_id))
-                        && !accounting.ambiguous_operations.contains(&operation_id),
-                    "credited return identity and ownership unidentifiable"
-                );
+                        .any(|owners| owners.len() == 1 && owners.contains(&operation_id))
+                    && !accounting.ambiguous_operations.contains(&operation_id);
+                if !scoped {
+                    attribution = ReturnAttribution::Unidentifiable;
+                }
                 issues.insert(ReturnAccountingIssue::InvalidCreditedIdentity { operation_id });
                 continue;
             }
@@ -228,7 +246,8 @@ fn collect_refunds(
             observed_outputs += 1;
             // Known outputs retain their original accounting even when disputed.
             // Only previously uncredited discoveries may be published.
-            if affected_operations.contains(operation)
+            if attribution == ReturnAttribution::Unidentifiable
+                || affected_operations.contains(operation)
                 || known.contains(&(coin.output_id().txid(), coin.output_id().output_index()))
             {
                 continue;
@@ -244,6 +263,7 @@ fn collect_refunds(
     }
     Ok(ReturnObservation {
         observed_outputs,
+        attribution,
         credits: refunds,
         issues: issues.into_iter().collect(),
     })
@@ -256,6 +276,10 @@ fn require_refund_shielding_evidence(
     operation: &str,
 ) -> Result<()> {
     let observation = collect_refunds(wallet, accounting, height, confirmations)?;
+    ensure!(
+        observation.attribution == ReturnAttribution::Scoped,
+        "unidentifiable_return_attribution: shielding requires accounting review"
+    );
     ensure!(
         !observation
             .issues

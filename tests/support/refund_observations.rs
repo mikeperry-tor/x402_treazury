@@ -308,6 +308,49 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
             .unwrap(),
         1
     );
+    let affected = first.issues[0].operation_id().to_owned();
+    let before = session
+        .store
+        .call(move |s| {
+            s.record_refund(RefundStatus {
+                txid: "unidentifiable".into(),
+                output_index: 0,
+                operation_id: affected,
+                amount: 1,
+                height: 2,
+            })?;
+            Ok(serde_json::to_value(s.status()?.refunds)?)
+        })
+        .await
+        .unwrap();
+    let mut fresh = SyntheticWalletBuilder::new(
+        "legal winner thank year wave sausage worth useful legal winner thank yellow",
+    )
+    .transparent_coin(1)
+    .transparent_coin(70)
+    .transparent_coin(55)
+    .build();
+    let new_txid = zcash_primitives::transaction::TxId::from_bytes([0xC2; 32]);
+    let fresh_record = fresh.wallet_transactions.remove(&new_txid).unwrap();
+    session
+        .client
+        .wallet()
+        .write()
+        .await
+        .wallet_transactions
+        .insert(new_txid, fresh_record);
+    let incomplete = session.reconcile_refunds(20, 2).await.unwrap();
+    assert_eq!(incomplete.attribution, ReturnAttribution::Unidentifiable);
+    assert!(incomplete.observed_outputs > 0);
+    let after = session
+        .store
+        .call(|s| Ok(serde_json::to_value(s.status()?.refunds)?))
+        .await
+        .unwrap();
+    assert_eq!(
+        after, before,
+        "incomplete attribution cannot publish new credits or rewrite old rows"
+    );
 }
 
 #[test]
@@ -440,4 +483,47 @@ fn conflicting_credit_suppresses_both_owners_but_independent_discoveries_continu
         assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, owner).is_err());
     }
     assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, "C").is_ok());
+}
+
+#[test]
+fn unidentified_historical_credit_stops_attribution_and_shielding_without_failing_observation() {
+    let wallet = SyntheticWalletBuilder::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").transparent_coin(100).build();
+    let coin = wallet.wallet_outputs::<pepper_sync::wallet::TransparentCoin>()[0];
+    let mut accounting = crate::rotation::store::refunds::ReturnAccounting::default();
+    accounting.bindings.insert(
+        coin.address().to_owned(),
+        std::collections::BTreeSet::from(["healthy".into()]),
+    );
+    accounting.confirmed.insert("healthy".into());
+    let original = RefundStatus {
+        txid: "not-a-txid".into(),
+        output_index: 0,
+        operation_id: "missing-owner".into(),
+        amount: 99,
+        height: 1,
+    };
+    accounting.credited.push(original.clone());
+    let observed = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert_eq!(observed.attribution, ReturnAttribution::Unidentifiable);
+    assert_eq!(observed.observed_outputs, 1);
+    assert!(observed.credits.is_empty());
+    assert!(
+        observed
+            .issues
+            .contains(&ReturnAccountingIssue::InvalidCreditedIdentity {
+                operation_id: "missing-owner".into()
+            })
+    );
+    for operation in ["healthy", "missing-owner"] {
+        assert!(
+            require_refund_shielding_evidence(&wallet, &accounting, 20, 2, operation)
+                .unwrap_err()
+                .to_string()
+                .contains("unidentifiable_return_attribution")
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(&accounting.credited[0]).unwrap(),
+        serde_json::to_value(original).unwrap()
+    );
 }
