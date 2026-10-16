@@ -181,3 +181,57 @@ fn changed_echoed_quote_terms_or_route_do_not_supply_candidates() {
     assert_eq!(result.issues(), &[SettlementIssue::UnsupportedRoute]);
     assert!(result.settlement().is_none());
 }
+
+#[test]
+fn delivery_expectation_binds_original_source_quote_and_actual_output() {
+    use crate::rotation::base::FundingDeliveryExpectation;
+    let (quote, value) = fixture();
+    let source = B256::from(U256::from(170).to_be_bytes::<32>());
+    let operation = uuid::Uuid::new_v4();
+    let observation = parse(&quote, &value).unwrap();
+    assert!(
+        FundingDeliveryExpectation::from_observation(operation, &quote, &observation, source)
+            .is_ok()
+    );
+    assert!(
+        FundingDeliveryExpectation::from_observation(operation, &quote, &observation, B256::ZERO)
+            .is_err()
+    );
+    assert!(
+        FundingDeliveryExpectation::from_observation(
+            uuid::Uuid::nil(),
+            &quote,
+            &observation,
+            source
+        )
+        .is_err()
+    );
+    let mut other = quote.clone();
+    other.input += 1;
+    assert!(
+        FundingDeliveryExpectation::from_observation(operation, &other, &observation, source)
+            .is_err()
+    );
+    for (path, replacement) in [
+        ("/swapDetails/amountOut", json!("6999")),
+        (
+            "/swapDetails/destinationChainTxHashes",
+            json!([
+            {"hash":format!("0x{:064x}",187)}, {"hash":format!("0x{:064x}",188)}]),
+        ),
+        (
+            "/swapDetails/originChainTxHashes",
+            json!([
+            {"hash":format!("{:064x}",170)}, {"hash":format!("{:064x}",171)}]),
+        ),
+    ] {
+        let mut changed = value.clone();
+        *changed.pointer_mut(path).unwrap() = replacement;
+        let observation = parse(&quote, &changed).unwrap();
+        assert!(
+            FundingDeliveryExpectation::from_observation(operation, &quote, &observation, source)
+                .is_err(),
+            "{path}"
+        );
+    }
+}

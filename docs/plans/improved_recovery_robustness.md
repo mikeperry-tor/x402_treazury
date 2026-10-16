@@ -1292,6 +1292,24 @@ cleared the slice; all 17 near-adapter tests passed with one intentional child h
 ignored. The official live `/v0/status` documentation linked above supplied field
 shapes; it declares no standalone schema revision.
 
+**C18 canonical transfer prerequisite (implemented and reviewed):** An opaque
+expectation joins the exact saved quote digest, original source-transaction hint,
+recipient and accepted amount to one destination candidate. The Base verifier checks
+successful receipt, pinned USDC contract, unique exact recipient transfer/log index,
+configured confirmations and canonical block rechecks. The proof carries original
+capture, endpoint generation and the pre-request monotonic freshness lease. Provider
+amounts can contradict a candidate but cannot prove delivery. Wrong chain is typed;
+only a changed anchor already bound by the capture becomes a durable evidence
+conflict. Unknown candidate changes remain local verification failures. The payment
+receipt's payer/nonce validator is unchanged.
+
+Root and independent review cleared this destination-proof-only slice. Three focused
+tests passed, including a receipt mutation matrix, 13 local RPC scenarios and original
+quote/source/amount binding. Durable publication still must CAS wallet/address and
+original operation/source/quote, enforce unique event ownership and discharge source
+and return accounting separately. Multiple source/destination candidates remain
+unsupported/incomplete. No financial closure is enabled by this prerequisite alone.
+
 **C18 canonical delivery implementation contract (reviewed design; pending):**
 Retain validated original quote/deposit and source-transaction correlation from the
 provider observation independently of its status label. That mapping supplies
@@ -1354,6 +1372,20 @@ mutation, cancellation/lost acknowledgement/restart with no duplicate selection,
 and canonical confirmation/expiry with fee consumed once. Existing CLI shielding
 lacks this durable input correlation and automatic command path; no implementation
 or acceptance completion is claimed by this design.
+
+Independent C20 review identified additional required boundaries: attach automatic
+work only to explicitly authorized serving/funding maintenance, never ordinary wallet
+sync; observe standalone shielding operation IDs independently of funding-job phase.
+Reject all qualification permits that lack explicit shielding authority before even
+creating a preparation marker, including positive source-funding permits. Internal
+shielding submission follows transaction expiry, not the existing invented one-day
+external-style deadline; source funding retains its accepted quote deadline/margin.
+Expiry must prove the exact selected input set, not merely inputs sufficient to cover
+the fee-only accounting amount. A confirmed shielding transaction reorg must not
+free its original inputs for reselection while its old signed bytes could still be
+valid: immutable input ownership survives outgoing RESOLVED until canonical closure
+or expiry proves reassignment safe. These are implementation requirements, not new
+spending ceilings or reasons to require completed provider attribution.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a

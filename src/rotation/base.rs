@@ -8,9 +8,11 @@ use std::{
     collections::BTreeMap,
     time::{SystemTime, UNIX_EPOCH},
 };
+mod delivery;
 pub mod evidence;
 pub(crate) mod historical;
 mod receipt;
+pub use delivery::{FundingDeliveryExpectation, FundingDeliveryProof};
 pub(crate) mod replacement;
 mod resources;
 #[cfg(test)]
