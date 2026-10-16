@@ -423,8 +423,9 @@ restart, cancellation, saturation and fatal store-error ownership controls. Five
 initial scheduling tests and the added all-malformed-page/reopen/ownership regression
 pass. Completion's provider decoder uses the same typed conversion as inventory;
 its SQL and transactional writes remain shared failures. Sub-agent review found no
-blocking defect and requested exact-operation diagnostic attribution as a separate
-fixup. Health-field conversions remain a following C04 scope extension; source
+blocking defect. Implementation c27987c plus a separate review fixup binds late
+completion diagnostics to their captured operation; the rollover/reopen regression
+passes and the reviewer confirmed the correction. Health-field conversions remain a following C04 scope extension; source
 facts/attempts with unknown liabilities are intentionally shared failures.
 
 ### Stage 1 — Minimal authority and dependency specification

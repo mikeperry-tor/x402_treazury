@@ -123,6 +123,37 @@ fn captured_phase_and_facts_survive_rollover_and_reopen() {
     assert!(!replacement.facts.accepted_quote);
     assert!(!replacement.facts.archived);
     assert!(replacement.facts.source_submission.is_none());
+    assert!(
+        store
+            .scope_funding_completion_failure(
+                &old.id,
+                &old.operation_id,
+                FundingDecodeFailure.into()
+            )
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .scope_funding_completion_failure(
+                &old.id,
+                &old.operation_id,
+                anyhow::anyhow!("shared storage failure")
+            )
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .scope_funding_completion_failure(
+                &old.id,
+                &replacement.job.operation_id,
+                FundingDecodeFailure.into()
+            )
+            .unwrap()
+            .unwrap()
+            .operation,
+        replacement.job.operation_id
+    );
     assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 1);
     assert!(store.status().unwrap().treasury_operations.is_empty());
 }

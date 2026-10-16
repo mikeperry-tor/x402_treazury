@@ -312,6 +312,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             if let Some(completion) = completion {
                 flight.release(&completion);
                 let id = completion.job.id.clone();
+                let operation = completion.job.operation_id.clone();
                 match self
                     .publish_observation(&lease, completion, clock.now())
                     .await
@@ -319,12 +320,16 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     Ok(Some(ready)) => flight.quote_pending = Some(ready),
                     Ok(None) => {}
                     Err(error) => {
-                        let fault = self
+                        if let Some(fault) = self
                             .store
-                            .call(move |s| s.scope_funding_decode_failure(&id, error))
-                            .await?;
-                        report_decode_failure(&fault);
-                        first_decode_failure.get_or_insert(fault);
+                            .call(move |s| {
+                                s.scope_funding_completion_failure(&id, &operation, error)
+                            })
+                            .await?
+                        {
+                            report_decode_failure(&fault);
+                            first_decode_failure.get_or_insert(fault);
+                        }
                     }
                 }
             }

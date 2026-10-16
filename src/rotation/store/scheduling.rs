@@ -70,6 +70,28 @@ impl Store {
         Ok(jobs)
     }
 
+    /// A completion belongs to its captured operation even if inventory has
+    /// rolled over since publication failed. Never relabel its diagnostic.
+    pub(crate) fn scope_funding_completion_failure(
+        &self,
+        id: &str,
+        expected: &str,
+        error: anyhow::Error,
+    ) -> Result<Option<MalformedFunding>> {
+        if error.downcast_ref::<FundingDecodeFailure>().is_none() {
+            return Err(error);
+        }
+        let current: String = self.db.query_row(
+            "SELECT operation_id FROM funding_progress WHERE job_id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        if current != expected {
+            return Ok(None);
+        }
+        self.scope_funding_decode_failure(id, error).map(Some)
+    }
+
     /// Decode faults are local only after ownership and source correspondence
     /// are established. This read never repairs or releases financial records.
     pub(crate) fn scope_funding_decode_failure(
