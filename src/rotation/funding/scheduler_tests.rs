@@ -480,7 +480,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
         }
     }
 }
-fn submitted(store: &mut Store, job: &FundingJob) {
+fn prepared(store: &mut Store, job: &FundingJob) {
     store
         .save_funding_quote(&job.id, &serde_json::to_vec(&quote(job)).unwrap())
         .unwrap();
@@ -513,6 +513,10 @@ fn submitted(store: &mut Store, job: &FundingJob) {
             }),
         )
         .unwrap();
+}
+
+fn submitted(store: &mut Store, job: &FundingJob) {
+    prepared(store, job);
     store
         .request_broadcast(&job.operation_id, now().unwrap(), 1, false)
         .unwrap();
@@ -2228,5 +2232,176 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
                 .as_slice(),
             b"signed"
         );
+    }
+}
+
+#[tokio::test]
+async fn hidden_prepared_bytes_remain_observable_without_new_work_after_reopen() {
+    struct ObserveOnly {
+        reads: Reads,
+        calls: Arc<AtomicUsize>,
+    }
+    impl FundingBackend for ObserveOnly {
+        type Observations = Reads;
+        fn observations(&self) -> Reads {
+            self.reads.clone()
+        }
+        fn max_attempts(&self, _: &FundingJob) -> u32 {
+            3
+        }
+        async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
+            panic!("saved bytes cannot authorize a new quote")
+        }
+        async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
+            panic!("saved bytes cannot authorize new preparation")
+        }
+        async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+            panic!("observer-only inventory cannot submit")
+        }
+        async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(false)
+        }
+    }
+    for phase in [
+        FundingPhase::Complete,
+        FundingPhase::Quoted,
+        FundingPhase::Allocated,
+    ] {
+        for enabled in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = dir.path().join("state");
+            let key = dir.path().join("key");
+            let mut raw = Store::create(&state, &key, 1, b"fixture").unwrap();
+            let pool = raw
+                .ensure_capacity_group(
+                    "pool",
+                    &crate::rotation::store::test_support::reserves("5"),
+                    Some(alloy_primitives::U256::from(1_000_000)),
+                    0,
+                )
+                .unwrap();
+            raw.allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Small, true)
+                .unwrap();
+            let jobs = raw.funding_jobs().unwrap();
+            for job in &jobs {
+                prepared(&mut raw, job);
+                // Ordinary PREPARED uses the submission adapter's own
+                // lookup, not an additional scheduler reconciliation RPC.
+                let facts = raw.funding_facts(&job.id, &job.operation_id).unwrap();
+                assert!(!facts.source_reconciliation_needed());
+                assert_eq!(
+                    raw.funding_job(&job.id).unwrap().unwrap().phase,
+                    FundingPhase::Prepared
+                );
+            }
+            let treasury = raw.id().to_owned();
+            drop(raw);
+            let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+            db.execute(
+                "UPDATE funding_progress SET phase=?1",
+                [serde_json::to_string(&phase).unwrap()],
+            )
+            .unwrap();
+            db.execute("UPDATE funding_jobs SET state='COMPLETE'", [])
+                .unwrap();
+            db.execute("UPDATE pools SET enabled=?1", [enabled])
+                .unwrap();
+            let reserved: i64 = db
+                .query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r.get(0))
+                .unwrap();
+            assert!(reserved > 0);
+            drop(db);
+            let raw = Store::open(&state, &key, &treasury).unwrap();
+            for job in &jobs {
+                let facts = raw.funding_facts(&job.id, &job.operation_id).unwrap();
+                assert!(facts.hidden_prepared);
+                assert!(facts.source_reconciliation_needed());
+                assert_eq!(facts.enabled, enabled);
+            }
+            let (store, actor) = StoreHandle::spawn(raw);
+            let (statuses, mut status_events) = mpsc::unbounded_channel();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let worker = FundingWorker::new(
+                store.clone(),
+                ObserveOnly {
+                    reads: Reads {
+                        credits: Arc::new(Semaphore::new(64)),
+                        credit_calls: Arc::new(AtomicUsize::new(0)),
+                        statuses,
+                        status_gates: Default::default(),
+                        failed_job: Arc::new(std::sync::Mutex::new(None)),
+                        processing: true,
+                        quotes: None,
+                    },
+                    calls: calls.clone(),
+                },
+                60,
+            );
+            // The actual inventory must route signed obligations to the source
+            // lane, which remains independent of saturated quote-read slots.
+            let boundary = store.call(|s| s.funding_work_boundary()).await.unwrap();
+            let clock = TickClock {
+                epoch: now().unwrap(),
+                started: std::time::Instant::now(),
+            };
+            let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
+                .map(|kind| LaneInventory::new(kind, boundary, clock.schedule_now()));
+            let mut pending = VecDeque::new();
+            worker
+                .collect_inventory(&mut inventory, &mut pending, &clock, 1800, true)
+                .await
+                .unwrap();
+            assert_eq!(
+                pending
+                    .iter()
+                    .filter(|item| item.lane == Kind::Source)
+                    .count(),
+                jobs.len()
+            );
+            assert!(!pending.iter().any(|item| item.lane == Kind::Quote));
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                worker.tick(now().unwrap()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), jobs.len());
+            assert!(
+                status_events.try_recv().is_err(),
+                "unsubmitted bytes do not start provider polling"
+            );
+            drop(worker);
+            drop(store);
+            actor.await.unwrap();
+            let reopened = Store::open(&state, &key, &treasury).unwrap();
+            assert_eq!(reopened.funding_jobs().unwrap().len(), jobs.len());
+            for job in &jobs {
+                let saved = reopened.funding_job(&job.id).unwrap().unwrap();
+                assert_eq!(saved.operation_id, job.operation_id);
+                assert_eq!(saved.phase, phase);
+                let operation = reopened.operation(&job.operation_id).unwrap();
+                assert_eq!(operation.submission, "PREPARED");
+                assert_eq!(operation.attempts, 0);
+                assert_eq!(
+                    reopened
+                        .prepared_bytes(&job.operation_id)
+                        .unwrap()
+                        .as_slice(),
+                    b"signed"
+                );
+                assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
+                assert!(reopened.operation_pending(&job.operation_id).unwrap());
+            }
+            drop(reopened);
+            let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+            assert_eq!(
+                db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                reserved
+            );
+        }
     }
 }

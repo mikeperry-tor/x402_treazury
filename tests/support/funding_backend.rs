@@ -307,12 +307,16 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         observed,
         ObservedCommand::RecoverFunding(_, _, false)
     ));
+    // Retained signed obligations remain observable after their current funding
+    // profile is removed, even while automatic funding is disabled.
+    let profiles = std::mem::take(&mut backend.wallets);
     let (result, observed) = tokio::join!(backend.reconcile(&job), commands.test_observe());
     assert!(result.is_err());
     let ObservedCommand::Reconcile(id) = observed else {
         panic!("wrong command")
     };
     assert_eq!(id, job.operation_id);
+    backend.wallets = profiles;
     // Count actual commands crossing the production backend/treasury boundary.
     // The fixture rejects ordinary reconciliation; recovery reports an owned
     // observation. A duplicate command either violates the match or times out.

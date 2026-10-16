@@ -109,6 +109,8 @@ pub struct FundingFacts {
     pub provider_incomplete: bool,
     pub source_submission: Option<String>,
     pub source_attempts: u32,
+    /// Exact unsubmitted bytes outside their ordinary preparation workflow.
+    pub hidden_prepared: bool,
 }
 impl FundingFacts {
     pub fn provider_review_required(&self) -> bool {
@@ -132,11 +134,12 @@ impl FundingFacts {
                 && self.source_submission.is_none())
     }
     pub fn source_reconciliation_needed(&self) -> bool {
-        self.source_attempts > 0
-            && self
-                .source_submission
-                .as_deref()
-                .is_some_and(|state| !matches!(state, "CONFIRMED" | "EXPIRED"))
+        self.hidden_prepared
+            || self.source_attempts > 0
+                && self
+                    .source_submission
+                    .as_deref()
+                    .is_some_and(|state| !matches!(state, "CONFIRMED" | "EXPIRED"))
     }
 }
 
@@ -901,13 +904,13 @@ pub(super) fn read_funding_facts(
     job: &str,
     operation: &str,
 ) -> Result<FundingFacts> {
-    let (mut facts, flags) = db.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
+    let (mut facts, flags, phase) = db.query_row(
+            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1),j.phase FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((FundingFacts {
                 readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false, preparation_started: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
-            }, provider_flags(r, 4))),
+                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,hidden_prepared:false,
+            }, provider_flags(r, 4), r.get::<_,String>(11)?)),
         ).context("funding operation binding changed")?;
     (
         facts.provider_success,
@@ -915,6 +918,14 @@ pub(super) fn read_funding_facts(
         facts.provider_refunded,
         facts.provider_incomplete,
     ) = flags.context(super::scheduling::FundingDecodeFailure)?;
+    let phase: FundingPhase =
+        serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
+    facts.hidden_prepared = facts.source_submission.as_deref() == Some("PREPARED")
+        && facts.source_attempts == 0
+        && matches!(
+            phase,
+            FundingPhase::Allocated | FundingPhase::Quoted | FundingPhase::Complete
+        );
     facts.preparation_started = super::preparation::source_state(db, operation)?.0;
     facts.source_closed = facts.archived && source_attempt_closed(db, operation)?;
     Ok(facts)

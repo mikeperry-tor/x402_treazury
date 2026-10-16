@@ -208,6 +208,12 @@ impl<B: FundingBackend> FundingWorker<B> {
         if self.finish_if_proven(job).await? {
             return Ok(None);
         }
+        // Unexpected workflow labels cannot turn saved signed bytes into new
+        // preparation/submission authority. This pass only observes that exact
+        // liability, even when canonical observation changes its phase.
+        if facts.hidden_prepared {
+            return observation_error.map_or(Ok(None), Err);
+        }
         let id = job.id.clone();
         let current = self
             .store

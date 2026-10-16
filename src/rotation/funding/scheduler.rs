@@ -81,6 +81,7 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
             || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
                 && (facts.enabled || (facts.readiness_recorded && !facts.readiness_disputed))),
         job.phase == FundingPhase::Allocated
+            && !facts.hidden_prepared
             && facts.enabled
             && !facts.readiness_recorded
             && !facts.accepted_quote,
@@ -450,11 +451,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     job.timed_out = true;
                 }
                 let [credit, status, source, _] = applicable_work(&job, &facts);
+                let prerequisite = job.phase == FundingPhase::Allocated && !facts.hidden_prepared;
                 let wanted = match kind {
                     Kind::Credit => credit,
                     Kind::Status => status,
-                    Kind::Source => job.phase != FundingPhase::Allocated && source,
-                    Kind::Quote => job.phase == FundingPhase::Allocated && source,
+                    Kind::Source => !prerequisite && source,
+                    Kind::Quote => prerequisite && source,
                 };
                 if wanted {
                     pending.push_back(Pending { job, lane: kind });

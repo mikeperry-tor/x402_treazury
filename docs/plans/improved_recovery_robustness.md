@@ -58,7 +58,7 @@ fairness work remains explicit below. C21's Base freshness lease landed in
 `7c4f0ae` after focused tests, independent review and all-feature Clippy.
 C21 funding authority time is separated from scheduling in `06af797`; C10
 malformed ownership isolation is committed as `e559f28`. C16 preparation
-provenance has passed its focused tests and independent review.
+provenance is committed as `d4d5407` after focused tests and independent review.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
@@ -1129,6 +1129,23 @@ helper exercised three process-death boundaries. Independent review cleared the
 qualification-retirement and generic-abandonment guards. All-target/all-feature
 Clippy, formatting and diff checks passed. Fresh schema20 adds the
 provenance boundary; there is no automatic state conversion.
+
+**C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
+PREPARED treasury bytes with zero submission attempts remain observable when a
+stale derived phase says ALLOCATED, QUOTED or COMPLETE. Inventory and health use
+that durable obligation, and route it through the source lane independently of
+quote slots. A captured observer-only fact fences the entire pass against new
+quote, preparation or submission even if canonical observation changes the phase.
+Ordinary PREPARING/PREPARED work keeps its existing path without an extra lookup;
+explicit recovery dispositions retain their separate authority.
+
+The restart regression passed all three phases with enabled and disabled pools,
+preserving exact bytes, operation, reservation, zero attempts and recovery count.
+It verifies actual inventory routing and forbids quote/preparation/submission or
+provider polling. All 27 funding tests passed, including the concrete backend
+reconciliation check with the current wallet profile removed and auto-funding
+disabled. Independent review cleared the core behavior; root review cleared the
+lane-routing followup. Removed-pool Base observation ownership remains C19 work.
 
 ### Stage 1 — Minimal authority and dependency specification
 
