@@ -221,7 +221,11 @@ impl Treasury {
     /// inability to reconstruct authenticated bytes yields the retained store.
     pub(crate) async fn reconstruct(store: Store) -> Result<OpenedTreasury> {
         let network = store.network();
-        let (revision, bytes) = store.snapshot()?;
+        let (store, revision, bytes) = tokio::task::spawn_blocking(move || {
+            let (revision, bytes) = store.snapshot()?;
+            Ok::<_, anyhow::Error>((store, revision, bytes))
+        })
+        .await??;
         let scratch = tempfile::tempdir()?;
         // Borrow a zeroizing buffer instead of handing an unzeroized Vec to upstream.
         let client = match LightClient::from_reader(
