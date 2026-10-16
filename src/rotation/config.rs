@@ -371,7 +371,7 @@ impl TreasuryConfig {
         }
         super::store::treasury_id(&self.state_dir)
     }
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate_shared(&self) -> Result<()> {
         if !self.id.is_empty() {
             uuid::Uuid::parse_str(&self.id)?;
         }
@@ -379,6 +379,10 @@ impl TreasuryConfig {
             !self.state_dir.as_os_str().is_empty() && self.state_dir != self.key_file,
             "invalid state/key paths"
         );
+        Ok(())
+    }
+    pub fn validate(&self) -> Result<()> {
+        self.validate_shared()?;
         for (url, env) in [
             (&self.indexer_url, &self.indexer_url_env),
             (&self.submission_url, &self.submission_url_env),
@@ -454,7 +458,7 @@ impl FundingConfig {
         &self,
         mut lookup: impl FnMut(&str) -> Option<String>,
     ) -> Result<Vec<String>> {
-        self.validate()?;
+        self.validate_base()?;
         let required = |name: &str, lookup: &mut dyn FnMut(&str) -> Option<String>| {
             lookup(name)
                 .filter(|v| !v.trim().is_empty())
@@ -497,7 +501,7 @@ impl FundingConfig {
             "fallback_envs":self.base_rpc_fallback_url_envs,
         })
     }
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate_base(&self) -> Result<()> {
         env_name(&self.base_rpc_url_env)?;
         ensure!(
             self.base_rpc_fallback_url_envs
@@ -510,6 +514,14 @@ impl FundingConfig {
             env_name(name)?;
             ensure!(names.insert(name), "duplicate Base RPC environment name");
         }
+        ensure!(
+            self.base_confirmations > 0 && self.base_max_block_age_seconds > 0,
+            "invalid funding limits"
+        );
+        Ok(())
+    }
+    pub fn validate(&self) -> Result<()> {
+        self.validate_base()?;
         if let Some(s) = &self.near_user_session_env {
             env_name(s)?;
         }
@@ -524,9 +536,7 @@ impl FundingConfig {
             "confidentiality must be public, basic or advanced"
         );
         ensure!(
-            self.base_confirmations > 0
-                && self.base_max_block_age_seconds > 0
-                && self.slippage_bps <= 1000
+            self.slippage_bps <= 1000
                 && self.poll_seconds > 0
                 && self.poll_seconds <= 60
                 && self.swap_timeout_seconds > 0

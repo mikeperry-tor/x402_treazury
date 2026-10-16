@@ -148,6 +148,9 @@ pub(crate) fn pattern(text: &str) -> Result<Regex> {
 }
 impl MetaConfig {
     pub(crate) fn validate(&self) -> Result<Resolution> {
+        self.validate_capabilities(false)
+    }
+    fn validate_capabilities(&self, base_only: bool) -> Result<Resolution> {
         self.startup.validate()?;
         self.network.validate()?;
         crate::discovery::policy::validate(self)?;
@@ -163,7 +166,7 @@ impl MetaConfig {
         self.validate_declarations()?;
         self.validate_listeners()?;
         let resolution = assignment::resolve(self)?;
-        self.validate_resolved_funding(&resolution)?;
+        self.validate_resolved_funding(&resolution, base_only)?;
         Ok(resolution)
     }
 
@@ -254,24 +257,40 @@ impl MetaConfig {
         Ok(())
     }
 
-    fn validate_resolved_funding(&self, resolution: &Resolution) -> Result<()> {
+    fn validate_resolved_funding(&self, resolution: &Resolution, base_only: bool) -> Result<()> {
         if resolution.wallets.values().any(WalletConfig::managed) {
             let treasury = self
                 .treasury
                 .as_ref()
                 .context("managed profiles require [treasury]")?;
-            treasury.validate()?;
+            if base_only {
+                treasury.validate_shared()?;
+            } else {
+                treasury.validate()?;
+            }
             let funding = self
                 .funding
                 .as_ref()
                 .context("managed profiles require [funding]")?;
-            funding.validate()?;
+            if base_only {
+                funding.validate_base()?;
+            } else {
+                funding.validate()?;
+            }
         } else {
             if let Some(t) = &self.treasury {
-                t.validate()?;
+                if base_only {
+                    t.validate_shared()?;
+                } else {
+                    t.validate()?;
+                }
             }
             if let Some(f) = &self.funding {
-                f.validate()?;
+                if base_only {
+                    f.validate_base()?;
+                } else {
+                    f.validate()?;
+                }
             }
         }
         Ok(())
@@ -496,7 +515,11 @@ impl Deployment {
         if let Some(p) = &mut config.source_management {
             p.resolve(path);
         }
-        let wallet_resolution = config.validate()?;
+        let scoped_funding = relay_env.is_some()
+            && !crate::qualification::active()
+            && !catalog_evidence::collecting()
+            && !config.discovery_relay.as_ref().is_some_and(|p| p.serve);
+        let wallet_resolution = config.validate_capabilities(scoped_funding)?;
         crate::network::install(config.network.clone())?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
@@ -685,15 +708,23 @@ impl Deployment {
     fn managed_connection_preflight(
         &self,
         env: &BTreeMap<String, String>,
-    ) -> Result<(
-        crate::treasury::SyncSettings,
-        crate::rotation::base::BaseRpc,
-        crate::rotation::near::NearClient,
-    )> {
-        use crate::rotation::base::{BaseRpc, secure_endpoint};
+    ) -> Result<(FundingConnections, crate::rotation::base::BaseRpc)> {
+        Ok((
+            self.funding_connection_preflight(env)?,
+            self.base_connection_preflight(env)?,
+        ))
+    }
+    #[cfg(feature = "zcash")]
+    fn funding_connection_preflight(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<FundingConnections> {
+        use crate::rotation::base::secure_endpoint;
         let t = self.config.treasury.as_ref().unwrap();
         let f = self.config.funding.as_ref().unwrap();
-        // Resolve endpoints before starting supervised bootstrap or serving workers.
+        t.validate()?;
+        f.validate()?;
+        // Resolve source dependencies before any funding worker starts.
         let sync_settings = crate::treasury::SyncSettings::new(
             t.indexer_endpoint(|name| env.get(name).cloned())?,
             t.confirmations,
@@ -710,9 +741,27 @@ impl Deployment {
             .as_deref()
             .map(|name| required_secret(env, name))
             .transpose()?;
-        // Construct once before opening state: both presence and header syntax are preflight.
+        // Presence and header syntax are source-capability prerequisites.
         let near =
             crate::rotation::near::NearClient::with_session(key.as_deref(), session.as_deref())?;
+        let sender = crate::treasury::submission::GrpcSubmission::new(
+            t.submission_endpoint(|name| env.get(name).cloned())?,
+            t.indexer_endpoint(|name| env.get(name).cloned())?,
+        )?;
+        Ok(FundingConnections {
+            sync_settings,
+            near,
+            sender,
+        })
+    }
+    #[cfg(feature = "zcash")]
+    fn base_connection_preflight(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<crate::rotation::base::BaseRpc> {
+        use crate::rotation::base::BaseRpc;
+        let f = self.config.funding.as_ref().unwrap();
+        f.validate_base()?;
         let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
         if self.config.network.mode == crate::network::Mode::Direct {
             tracing::warn!(
@@ -723,7 +772,7 @@ impl Deployment {
         }
         let base =
             BaseRpc::with_fallbacks(&urls, f.base_confirmations, f.base_max_block_age_seconds)?;
-        Ok((sync_settings, base, near))
+        Ok(base)
     }
 
     async fn initialize_wallets(
@@ -767,8 +816,7 @@ impl Deployment {
                 use crate::rotation::manager::ManagedPool;
                 let t = self.config.treasury.as_ref().unwrap();
                 let f = self.config.funding.as_ref().unwrap();
-                let (sync_settings, base, near) = self.managed_connection_preflight(env)?;
-                let mut owner = if allow_store_only {
+                let (mut owner, base, mut source) = if allow_store_only {
                     let shared = crate::treasury::Treasury::open_shared_state(
                         t.state_dir.clone(),
                         t.key_file.clone(),
@@ -776,29 +824,42 @@ impl Deployment {
                         crate::rotation::store::TreasuryNetwork::Mainnet,
                     )
                     .await?;
-                    match crate::treasury::Treasury::reconstruct(shared).await? {
-                        crate::treasury::OpenedTreasury::Ready(owner) => Some(*owner),
-                        crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
+                    let base = self.base_connection_preflight(env)?;
+                    match self.funding_connection_preflight(env) {
+                        Ok(source) => match crate::treasury::Treasury::reconstruct(shared).await? {
+                            crate::treasury::OpenedTreasury::Ready(owner) => {
+                                (Some(*owner), base, Some(source))
+                            }
+                            crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
+                                tracing::warn!(
+                                    category = "treasury_snapshot_unavailable",
+                                    "Treasury SDK unavailable; Base service retains shared ownership; funding unavailable"
+                                );
+                                store_only = Some(StoreOnlyOwner::new(*shared));
+                                (None, base, None)
+                            }
+                        },
+                        Err(_) => {
                             tracing::warn!(
-                                category = "treasury_snapshot_unavailable",
-                                "Treasury SDK unavailable; Base admission and reconciliation retain shared ownership; funding unavailable"
+                                category = "funding_configuration_unavailable",
+                                "Funding configuration unavailable; Base service retains shared ownership; correct funding configuration and restart"
                             );
-                            store_only = Some(StoreOnlyOwner::new(*shared));
-                            None
+                            store_only = Some(StoreOnlyOwner::new(shared));
+                            (None, base, None)
                         }
                     }
                 } else {
-                    Some(
-                        crate::treasury::Treasury::open(
-                            t.state_dir.clone(),
-                            t.key_file.clone(),
-                            t.runtime_id()?,
-                        )
-                        .await?,
+                    let (source, base) = self.managed_connection_preflight(env)?;
+                    let owner = crate::treasury::Treasury::open(
+                        t.state_dir.clone(),
+                        t.key_file.clone(),
+                        t.runtime_id()?,
                     )
+                    .await?;
+                    (Some(owner), base, Some(source))
                 };
-                if let Some(owner) = &mut owner {
-                    owner.configure_sync(sync_settings);
+                if let (Some(owner), Some(source)) = (&mut owner, &source) {
+                    owner.configure_sync(source.sync_settings.clone());
                 }
                 let store = match &owner {
                     Some(owner) => owner.store_handle(),
@@ -858,13 +919,14 @@ impl Deployment {
                     }
                 }
                 if owner.is_some() {
+                    let source = source.take().expect("validated funding connections");
                     tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
                     "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to actual spendable treasury funds, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
                     let (handle, commands) = crate::treasury::actor::channel();
                     let backend = crate::rotation::funding::Backend {
                         treasury: handle,
                         store: store.clone(),
-                        near,
+                        near: source.near,
                         base,
                         wallets: self.wallet_resolution.wallets.clone(),
                         funding: f.clone(),
@@ -872,13 +934,9 @@ impl Deployment {
                             &t.max_funding_transaction_fee_zec,
                         )? as u64,
                     };
-                    let sender = crate::treasury::submission::GrpcSubmission::new(
-                        t.submission_endpoint(|name| env.get(name).cloned())?,
-                        t.indexer_endpoint(|name| env.get(name).cloned())?,
-                    )?;
                     funding_runtime = Some((
                         commands,
-                        sender,
+                        source.sender,
                         crate::rotation::funding::FundingWorker::new(
                             store.clone(),
                             backend,
@@ -1450,6 +1508,13 @@ struct BoundListeners {
 }
 
 #[cfg(feature = "zcash")]
+struct FundingConnections {
+    sync_settings: crate::treasury::SyncSettings,
+    near: crate::rotation::near::NearClient,
+    sender: crate::treasury::submission::GrpcSubmission,
+}
+
+#[cfg(feature = "zcash")]
 struct StoreOnlyOwner {
     store: crate::rotation::store::StoreHandle,
     worker: tokio::task::JoinHandle<()>,
@@ -1679,7 +1744,7 @@ mod lifecycle_tests {
     use super::*;
     #[cfg(feature = "zcash")]
     #[tokio::test]
-    async fn near_credentials_fail_before_treasury_state_is_opened() {
+    async fn strict_near_preflight_fails_before_treasury_state_is_opened() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("spec.json"),
@@ -1734,7 +1799,10 @@ bearer_token_env="TOKEN"
                 }
             }
             let deployment = Deployment::load(&path).await.unwrap();
-            let error = match deployment.bind(&env).await {
+            let error = match deployment
+                .initialize_wallets(&env, Default::default(), None, &BTreeSet::new())
+                .await
+            {
                 Ok(_) => panic!("invalid credentials accepted"),
                 Err(error) => format!("{error:#}"),
             };

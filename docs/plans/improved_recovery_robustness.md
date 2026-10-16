@@ -513,6 +513,24 @@ discovery, unchanged snapshot/funding inventory, strict/shared-failure controls,
 rollback and cancelled/dropped deployment cleanup. These do not constitute live
 funded qualification.
 
+**C06 funding-only configuration contract (reviewed serving slice):** Ordinary
+no-relay serving validates shared treasury identity/paths and Base environment,
+fallback, confirmation/freshness policy before publishing service. All wallet,
+payment-cap, assignment, registry, listener and network validation remains strict.
+Strict config inspection/check, explicit bootstrap, relay and qualification compose
+all validators. Missing treasury/funding sections and Base initialization failures
+remain fatal in this slice; independent static service for those unavailable managed
+capabilities remains pending C06. After authenticating the single shared Store,
+source-only validation/construction can select the store-only runtime: treasury
+sync/confirmation/fee/endpoints and NEAR credentials/quote/slippage/poll policy.
+No alternate values are substituted. Only this source constructor is caught, never
+shared opening, Base setup or profile reconciliation. Funding remains paused with
+no source observer or preparation worker; liabilities and exact committed snapshots
+remain durable. Corrections take effect on restart. Entry-point tests exercise valid
+SDK snapshots with malformed credentials, invalid quote window and fee, successful
+Base signing and static MCP calls, retained exposure, and a declaration matrix with
+shared-key failure controls. This is local synthetic evidence, not live settlement.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
