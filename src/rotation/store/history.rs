@@ -32,6 +32,16 @@ impl std::error::Error for MalformedHistory {}
 pub(crate) type HistoryPayload = std::result::Result<PendingAuthorization, MalformedHistory>;
 
 impl Store {
+    /// Durable observation inventory, independent of current profile enablement.
+    /// Do not decode payment policy or mutable wallet reports to find its owners.
+    pub(crate) fn reconciliation_pools(&self) -> Result<Vec<String>> {
+        Ok(self
+            .db
+            .prepare("SELECT id FROM pools ORDER BY id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Buffered pages are snapshots, not authority to acquire another nonce proof.
     /// Revalidate identity and state in the serialized store immediately before I/O.
     pub(super) fn pending_history(

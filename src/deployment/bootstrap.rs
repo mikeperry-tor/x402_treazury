@@ -159,6 +159,7 @@ async fn supervise(
         treasury,
         funding_runtime,
         managed_pools,
+        reconciliation_owners,
         store_only,
     } = initialized;
     ensure!(
@@ -171,6 +172,7 @@ async fn supervise(
     // closing the owner, whose close waits for the store worker to drain.
     drop(wallets);
     drop(managed_pools);
+    drop(reconciliation_owners);
     let captured = match capture_startup(&store, &names).await {
         Ok(captured) => captured,
         Err(error) => {

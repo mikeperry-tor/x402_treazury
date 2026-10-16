@@ -78,6 +78,30 @@ pub struct ManagedPool {
     #[cfg(test)]
     test_admission_hook: Option<AdmissionTestHook>,
 }
+/// Observation ownership survives removal of the profile that could spend.
+/// Contains no signer, payment policy, allocation configuration or paid client.
+#[derive(Clone)]
+pub(crate) struct ReconciliationOwner {
+    store: StoreHandle,
+    pool: String,
+    base: BaseRpc,
+    gate: Arc<Mutex<()>>,
+    reconciliation: Arc<Mutex<()>>,
+}
+impl ReconciliationOwner {
+    pub(crate) fn pool_id(&self) -> &str {
+        &self.pool
+    }
+    pub(crate) fn new(store: StoreHandle, pool: String, base: BaseRpc) -> Result<Self> {
+        Ok(Self {
+            gate: store.group_gate(&pool)?,
+            reconciliation: store.reconciliation_gate(&pool)?,
+            store,
+            pool,
+            base,
+        })
+    }
+}
 #[derive(Default)]
 pub(crate) struct RecoveryAllowance {
     evidence_used: bool,
@@ -138,31 +162,33 @@ impl ManagedPool {
     pub(crate) fn hint_group_scope(&self) -> (uuid::Uuid, &str) {
         (self.store.runtime_namespace(), &self.pool)
     }
+    pub(crate) fn observation_owner(&self) -> ReconciliationOwner {
+        ReconciliationOwner {
+            store: self.store.clone(),
+            pool: self.pool.clone(),
+            base: self.base.clone(),
+            gate: self.gate.clone(),
+            reconciliation: self.reconciliation.clone(),
+        }
+    }
+    #[cfg(test)]
+    pub(crate) async fn run_reconciliation(
+        &self,
+        stop: tokio_util::sync::CancellationToken,
+    ) -> Result<()> {
+        self.observation_owner().run_reconciliation(stop).await
+    }
+    pub async fn reconcile(&self) -> Result<()> {
+        self.observation_owner().reconcile().await
+    }
     async fn acquire_view(
         &self,
         query: super::base::ChainQuery,
         foreground: bool,
     ) -> Result<super::base::ChainView> {
-        // Foreground reads belong to this call; background reads can share an owner.
-        let result = if foreground {
-            self.base.view(query).await
-        } else {
-            self.base
-                .shared_balance_view(query, self.store.clone())
-                .await
-        };
-        match result {
-            Ok(view) => Ok(view),
-            Err(error) => {
-                let guard = Arc::new(self.gate.clone().lock_owned().await);
-                self.store
-                    .call_with_guard(guard, move |store| {
-                        store.record_base_failure(&error)?;
-                        Err(error)
-                    })
-                    .await
-            }
-        }
+        self.observation_owner()
+            .acquire_view(query, foreground)
+            .await
     }
     pub(crate) async fn documentation_address(&self) -> Result<String> {
         let pool = self.pool.clone();
@@ -1005,5 +1031,34 @@ mod recovery_allowance_tests {
         assert!(recovery.take_evidence());
         assert!(!recovery.take_signature_replacement());
         assert!(!recovery.take_evidence());
+    }
+}
+
+impl ReconciliationOwner {
+    async fn acquire_view(
+        &self,
+        query: super::base::ChainQuery,
+        foreground: bool,
+    ) -> Result<super::base::ChainView> {
+        // Foreground reads belong to this call; background reads can share an owner.
+        let result = if foreground {
+            self.base.view(query).await
+        } else {
+            self.base
+                .shared_balance_view(query, self.store.clone())
+                .await
+        };
+        match result {
+            Ok(view) => Ok(view),
+            Err(error) => {
+                let guard = Arc::new(self.gate.clone().lock_owned().await);
+                self.store
+                    .call_with_guard(guard, move |store| {
+                        store.record_base_failure(&error)?;
+                        Err(error)
+                    })
+                    .await
+            }
+        }
     }
 }

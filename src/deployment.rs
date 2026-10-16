@@ -833,10 +833,26 @@ impl Deployment {
         #[cfg(feature = "zcash")]
         let mut funding_runtime = None;
         #[cfg(feature = "zcash")]
+        let mut reconciliation_owners = Vec::new();
+        #[cfg(feature = "zcash")]
         let mut managed_pools = Vec::new();
+        // Only ordinary serving expands observation ownership to durable pools.
+        // Scoped inspection/qualification never inherits unrelated journals.
+        let observe_durable = allow_store_only
+            && only_wallets.is_none()
+            && !crate::qualification::active()
+            && !catalog_evidence::collecting();
+        let durable_state = observe_durable
+            && self.config.funding.is_some()
+            && self
+                .config
+                .treasury
+                .as_ref()
+                .is_some_and(|t| t.state_dir.join("state.sqlite").is_file());
         if self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
             only_wallets.is_none_or(|selected| selected.contains(name)) && wallet.managed()
-        }) {
+        }) || durable_state
+        {
             #[cfg(not(feature = "zcash"))]
             bail!("managed serving requires a build with --features zcash");
             #[cfg(feature = "zcash")]
@@ -954,6 +970,7 @@ impl Deployment {
                             .await?;
                         let client = if let Some(base) = &base {
                             let manager = std::sync::Arc::new(ManagedPool::new(store.clone(), pool, base.clone(), policy)?);
+                            reconciliation_owners.push(manager.observation_owner());
                             managed_pools.push(manager.clone());
                             PaidClient::managed(manager)
                         } else {
@@ -961,6 +978,17 @@ impl Deployment {
                                 "managed Base configuration unavailable; correct configuration and restart"))
                         };
                         wallets.insert(name.clone(), client);
+                    }
+                }
+                if observe_durable && let Some(base) = &base {
+                    let existing: BTreeSet<_> = reconciliation_owners.iter()
+                        .map(|owner| owner.pool_id().to_owned()).collect();
+                    for pool in store.call(|s| s.reconciliation_pools()).await? {
+                        if !existing.contains(&pool) {
+                            reconciliation_owners.push(crate::rotation::manager::ReconciliationOwner::new(
+                                store.clone(), pool, base.clone(),
+                            )?);
+                        }
                     }
                 }
                 if owner.is_some() {
@@ -994,6 +1022,7 @@ impl Deployment {
                 }.await;
                 if let Err(error) = setup {
                     drop(funding_runtime);
+                    drop(reconciliation_owners);
                     drop(managed_pools);
                     drop(wallets);
                     drop(store);
@@ -1015,6 +1044,8 @@ impl Deployment {
             store_only,
             #[cfg(feature = "zcash")]
             funding_runtime,
+            #[cfg(feature = "zcash")]
+            reconciliation_owners,
             #[cfg(feature = "zcash")]
             managed_pools,
         })
@@ -1225,6 +1256,8 @@ impl Deployment {
             #[cfg(feature = "zcash")]
             funding_runtime: None,
             #[cfg(feature = "zcash")]
+            reconciliation_owners: Vec::new(),
+            #[cfg(feature = "zcash")]
             managed_pools: Vec::new(),
         })
     }
@@ -1411,6 +1444,8 @@ impl Deployment {
         #[cfg(feature = "zcash")]
         let funding_runtime = initialized.funding_runtime;
         #[cfg(feature = "zcash")]
+        let reconciliation_owners = initialized.reconciliation_owners;
+        #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
         let deferred_wallets = wallets.clone();
         let bound = self.bind_catalog_listeners(wallets, tokens).await;
@@ -1426,6 +1461,7 @@ impl Deployment {
                 #[cfg(feature = "zcash")]
                 {
                     drop(funding_runtime);
+                    drop(reconciliation_owners);
                     drop(managed_pools);
                     drop(self);
                     if let Some(treasury) = treasury {
@@ -1461,6 +1497,8 @@ impl Deployment {
             store_only,
             #[cfg(feature = "zcash")]
             funding_runtime,
+            #[cfg(feature = "zcash")]
+            reconciliation_owners,
             #[cfg(feature = "zcash")]
             managed_pools,
         })
@@ -1612,6 +1650,8 @@ struct InitializedWallets {
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
+    reconciliation_owners: Vec<crate::rotation::manager::ReconciliationOwner>,
+    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
 }
 #[cfg(feature = "zcash")]
@@ -1629,6 +1669,8 @@ pub struct RunningDeployment {
     funding_failure: Option<tokio::sync::oneshot::Receiver<()>>,
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
+    #[cfg(feature = "zcash")]
+    reconciliation_owners: Vec<crate::rotation::manager::ReconciliationOwner>,
     #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
     #[cfg(feature = "zcash")]
@@ -1691,7 +1733,9 @@ impl RunningDeployment {
         #[cfg(feature = "zcash")]
         let mut reconciliation = JoinSet::new();
         #[cfg(feature = "zcash")]
-        for pool in self.managed_pools {
+        drop(self.managed_pools);
+        #[cfg(feature = "zcash")]
+        for pool in self.reconciliation_owners {
             let stopped = reconciliation_stop.clone();
             reconciliation.spawn(async move {
                 if let Err(error) = pool.run_reconciliation(stopped).await {
@@ -1988,15 +2032,14 @@ bearer_token_env="TOKEN"
         )
         .unwrap();
         let (store, store_task) = crate::rotation::store::StoreHandle::spawn(store);
-        running.managed_pools.push(Arc::new(
-            crate::rotation::manager::ManagedPool::new(
+        running.reconciliation_owners.push(
+            crate::rotation::manager::ReconciliationOwner::new(
                 store.clone(),
                 pool,
                 crate::rotation::base::BaseRpc::new(&rpc_url, 12, 120).unwrap(),
-                crate::payment::SpendPolicy::dollars("5").unwrap(),
             )
             .unwrap(),
-        ));
+        );
         let (failure, signal) = tokio::sync::oneshot::channel();
         running.funding_failure = Some(signal);
         let stop = CancellationToken::new();
@@ -2146,3 +2189,7 @@ mod store_only_tests;
 mod prebind_tests;
 
 mod deferred;
+
+#[cfg(all(test, feature = "zcash"))]
+#[path = "deployment/observation_tests.rs"]
+mod observation_tests;

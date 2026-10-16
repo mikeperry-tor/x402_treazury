@@ -60,8 +60,9 @@ C21 funding authority time is separated from scheduling in `06af797`; C10
 malformed ownership isolation is committed as `e559f28`. C16 preparation
 provenance is committed as `d4d5407` after focused tests and independent review.
 C09 hidden prepared-obligation observation is committed as `1ef6616` with 27
-funding tests passing. C21 treasury freshness, C17 live SDK reconstruction and
-C19 durable observation ownership are now in implementation/review.
+funding tests passing. C21 treasury freshness is committed as `d8b4dbc` and C17
+live SDK reconstruction as `929b6ca`. C19 durable observation ownership has passed
+independent review and the complete 55-test deployment suite.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
@@ -1171,6 +1172,16 @@ retained Base handles, shutdown, reopen and physical paging. Independent review
 cleared the implementation. Actual deployment task-exit cancellation and funding
 scheduler restart handling remain a separate C17 followup; this slice recovers
 poisoned SDK state without exiting those owners.
+
+**C19 durable Base observation ownership (implemented and reviewed):** Ordinary
+serving retains policy-free reconciliation owners for durable pool identities,
+including removed and disabled profiles. Existing explicit treasury/funding
+configuration and state are required; scoped inspection and qualification do not
+inherit unrelated journals. Observation owners cannot sign, allocate or fund, and
+retired wallets remain excluded from payment capacity. Shutdown drops observer
+handles before joining the shared store. Independent review cleared this slice;
+all 55 deployment tests and 17 maintenance tests passed. Repair scheduling for
+already-disputed retired liabilities remains a separate followup.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a

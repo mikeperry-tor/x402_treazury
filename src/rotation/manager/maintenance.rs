@@ -141,7 +141,7 @@ impl HistoryRetries {
     }
 }
 
-impl ManagedPool {
+impl ReconciliationOwner {
     /// A direct caller is a response waiter, not the owner of accepted read work.
     /// Dropping this waiter leaves its bounded pass running and publishing proofs.
     pub async fn reconcile(&self) -> Result<()> {
@@ -754,7 +754,7 @@ mod tests {
 
     struct Fixture {
         dir: tempfile::TempDir,
-        pool: Arc<ManagedPool>,
+        pool: Arc<ReconciliationOwner>,
         store: StoreHandle,
         worker: tokio::task::JoinHandle<()>,
         server: tokio::task::JoinHandle<()>,
@@ -850,9 +850,7 @@ mod tests {
         .unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let (store, worker) = StoreHandle::spawn(state);
-        let pool = Arc::new(
-            ManagedPool::new(store.clone(), id, base, SpendPolicy::dollars("5").unwrap()).unwrap(),
-        );
+        let pool = Arc::new(ReconciliationOwner::new(store.clone(), id, base).unwrap());
         Fixture {
             dir,
             pool,
