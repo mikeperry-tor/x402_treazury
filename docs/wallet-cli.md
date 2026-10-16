@@ -662,12 +662,11 @@ USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
 settings and all risk limits are validated by `config check`/`config show` without
 unlocking state. Endpoint credentials remain environment references. Serving
 requires those references; endpoints require HTTPS, with HTTP allowed only for
-loopback fixtures. Zcash/NEAR endpoint settings are reserved for the funding
-worker and are not contacted by this implementation.
+loopback fixtures. The funding worker uses the configured Zcash/NEAR endpoints.
 
 Managed payments accept only v2 `exact` EIP-3009 on Base with canonical USDC,
-the `USD Coin`/`2` signing domain, and an amount within both the cap and current
-deposit target. Selection preserves the first compatible offer, even if earlier
+the `USD Coin`/`2` signing domain, and an amount within the payment cap and
+current unreserved capacity. Selection preserves the first compatible offer, even if earlier
 offers are unsupported. Permit2, `upto`, v1, non-authorization flows, nested
 extensions and unknown extra/offer fields are rejected. Top-level extension maps
 are removed before signing, with DEBUG diagnostics for `bazaar` discovery metadata
@@ -680,15 +679,16 @@ payment. Malformed extension maps are rejected before admission. A seller or
 facilitator may still add its own on-chain attribution. Static payment support
 is unchanged. An ordinary non-402 response never enters admission.
 
-The per-pool deadline includes waiting for its gate and chain verification;
-Tor applies the network request-timeout floor to this deadline. The gate is
-released after the signed authorization is durably journaled, before sending it
+Admission waits for the pool gate and chain verification without a whole-work
+deadline. Network connection and response-inactivity limits still apply. The gate
+is released after the signed authorization is durably journaled, before sending it
 to the provider. A slow signed response therefore does not block another call
 with sufficient unreserved balance in the same pool, or background reconciliation.
 Chain verification still holds the pool gate; unrelated pools remain independent.
 Readiness failures return immediately; funding runs asynchronously when enabled.
-Both bootstrap addresses must hold their original targets before the first paid
-call. RPC verification checks chain 8453, block freshness, and EIP-1898 canonical
+A payer with enough independently verified unreserved capacity can serve before
+its funding target or the other bootstrap claim is satisfied. Pending funding keeps
+its original ownership. RPC verification checks chain 8453, block freshness, and EIP-1898 canonical
 block-hash queries for USDC balances and `authorizationState`. The RPC must support
 these queries. Admission uses the lower of confirmed and latest balances minus
 unresolved authorizations. The default confirmation depth is 12 and maximum
@@ -696,15 +696,15 @@ latest-block age is 120 seconds. Typed contradiction handling distinguishes a ba
 new acquisition from disputed historical readiness and invalidated financial-accounting
 support; an ordinary balance refresh cannot repair the latter.
 
-During `serve`, maintenance can clear `chain_repair_required` for ACTIVE or
-RETAINED wallets only after reverifying every original admission balance, readiness
-balance and authorization resolution against its original configured RPC endpoint.
-It then acquires fresh balances and atomically checks that the journal is unchanged.
-The repair preserves original proofs and pending exposure, records a
-`wallet_evidence_repairs` audit row, and logs `wallet_evidence_revalidated`.
-Missing or contradictory support, disputed readiness, retirement records and
-incomplete/refunded funding remain blocked. This does not reset uncertain swaps,
-submit transactions or grant additional funding authority.
+During `serve`, maintenance independently repairs disputed payment resolutions,
+including liabilities belonging to retired wallets. It verifies exact original
+authorizations against canonical used/expired-unused evidence, retains full disputed
+exposure, and publishes bounded inactive proof pages before atomic activation.
+Fresh balances and unchanged wallet/endpoint revisions are required at activation;
+original proofs and pending liabilities remain intact. Historical funding readiness
+and terminal provider flags do not veto payment repair. Retired wallets remain
+unavailable for payments, and missing authoritative support remains incomplete.
+This does not reset uncertain swaps, submit transactions or grant funding authority.
 
 Admission journals the exact payer's authorization and consumes a READY claim in
 one transaction. ACTIVE and RETAINED payers retain their roles, and selection creates

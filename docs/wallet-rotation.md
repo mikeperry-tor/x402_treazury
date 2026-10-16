@@ -303,7 +303,7 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema20
+outcome or a missing acknowledgement grants no favorable retry. The supported fresh schema
 preserves original payer role, consumed slot/generation and exact balance support;
 it also binds calculate-only treasury preparation to its operation and snapshot.
 Older state requires separately reviewed stopped-service conversion and is never
@@ -397,15 +397,21 @@ disputes remain durable. Current payment
 admission still subtracts all unresolved liabilities and verifies every actual
 financial checkpoint, including one at the same disputed historical anchor.
 
-Maintenance may clear a wallet-level `chain_repair_required` block after complete
-canonical revalidation of original readiness, admission and resolution evidence,
-followed by fresh balance acquisition. Only ACTIVE/RETAINED wallets with completed,
-undisputed funding and no retirement records qualify. Keyset pages bound memory
-without limiting total historical work. A journal fingerprint and evidence
-generations reject concurrent changes; flag removal and its audit row commit
-together. Historical proof bytes, anchors and pending liabilities remain unchanged.
-Cancellation before commit leaves the block intact; accepted store jobs retain
-commit ownership. Genuine contradictions and uncertain funding still need review.
+Maintenance repairs disputed payment resolutions using exact original authorization
+bindings and current canonical used/expired-unused proofs. It retains every disputed
+amount as exposure until a complete replacement set is activated. Historical RPC
+work and database validation yield between bounded pages; fresh balance expiry or
+new pending admissions repeat current validation without discarding historical work.
+Inactive replacement pages grant no authority. Activation checks the exact wallet,
+endpoint, revisions and original freshness lease in one short transaction, preserving
+original proofs and pending liabilities.
+
+Retired wallets remain eligible for liability observation and repair, without
+restoring payment eligibility or funding claims. Historical funding status and
+readiness balances do not gate this payment repair. Missing authoritative payment
+support remains a scoped failure. Cancellation retains accepted work ownership;
+abandoned inactive pages are deleted in bounded turns. This repair does not resolve
+uncertain swaps or authorize new funding.
 
 Chain-view publication applies canonical resolutions, exposure release and balance,
 readiness and retirement updates in the caller's single transaction. A late failure
