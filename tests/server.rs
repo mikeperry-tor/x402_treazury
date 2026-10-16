@@ -184,6 +184,7 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     );
     let server = Server::new(tools, client, vendor, cfg.instructions_text, None);
+    let catalog = server.catalog.clone();
     let (base, task) = serve(http_app(server, "test-token".into())).await;
     let endpoint = format!("{base}/mcp");
     for token in [None, Some("wrong")] {
@@ -237,6 +238,32 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
         .await
         .unwrap();
     assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        listed["result"]["_meta"]["x402_treazury/catalog"]["instructions"],
+        "Read help first"
+    );
+    let mut updated = (*catalog.read()).clone();
+    updated.generation += 1;
+    updated
+        .instructions
+        .insert("default".into(), Some("Source late: PENDING".into()));
+    updated
+        .instructions
+        .insert("other".into(), Some("Private other listener".into()));
+    catalog.publish(updated);
+    let refreshed: Value = request(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}))
+        .send()
+        .await
+        .unwrap()
+        .mcp_json()
+        .await
+        .unwrap();
+    let status = &refreshed["result"]["_meta"]["x402_treazury/catalog"];
+    assert_eq!(status["instructions"], "Source late: PENDING");
+    assert_eq!(status["generation"], 1);
+    assert_eq!(status["publication_stopped"], false);
+    assert!(!refreshed.to_string().contains("Private other listener"));
+    assert_eq!(refreshed["result"]["tools"], listed["result"]["tools"]);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     for (name, expected) in [
         ("test_hello", "hello"),

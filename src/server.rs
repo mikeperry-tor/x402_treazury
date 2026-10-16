@@ -271,7 +271,14 @@ impl ServerHandler for Server {
         } else {
             tools.len()
         };
+        let mut meta = MetaObject::new();
+        meta.insert("x402_treazury/catalog".into(), serde_json::json!({
+            "generation": snapshot.generation,
+            "instructions": snapshot.instructions.get(&self.catalog_server).unwrap_or(&self.instructions),
+            "publication_stopped": self.catalog.publication_failed(),
+        }));
         Ok(ListToolsResult {
+            meta: Some(meta),
             next_cursor: (end < tools.len()).then(|| format!("{prefix}{end}")),
             tools: tools[offset..end].to_vec(),
             ..Default::default()
