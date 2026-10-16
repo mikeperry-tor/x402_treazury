@@ -11,6 +11,42 @@ use zeroize::Zeroizing;
 // All pre-preparation and first-submission gates use this one policy constant.
 pub const MIN_QUOTE_VALIDITY_SECONDS: u64 = 300;
 
+/// Local canonical proof failures. Display text is diagnostic only; recovery
+/// consumers downcast this type rather than interpreting upstream prose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryEvidenceError {
+    ExpiryNotBuried,
+    ExpiryNotInvalidated,
+    TipLag,
+    StaleSync,
+    ChainChanged,
+    InputMissing,
+    InputMismatch,
+    InputSpent,
+    IndexerInclusion,
+    TransactionMismatch,
+    ConfirmationMismatch,
+}
+
+impl std::fmt::Display for RecoveryEvidenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::ExpiryNotBuried => "transaction expiry not buried",
+            Self::ExpiryNotInvalidated => "sync has not invalidated expired transaction",
+            Self::TipLag => "expiry recovery requires zero observed tip lag; synchronize again before releasing reservations",
+            Self::StaleSync => "expiry recovery sync stale",
+            Self::ChainChanged => "expiry recovery chain changed",
+            Self::InputMissing => "expiry recovery input missing",
+            Self::InputMismatch => "expiry recovery input mismatch",
+            Self::InputSpent => "expiry recovery input remains spent or ambiguous",
+            Self::IndexerInclusion => "expiry recovery contradicts indexer inclusion",
+            Self::TransactionMismatch => "confirmed transaction bytes mismatch",
+            Self::ConfirmationMismatch => "confirmation disagrees with wallet sync",
+        })
+    }
+}
+impl std::error::Error for RecoveryEvidenceError {}
+
 /// Issued only through a proven read-only path before proposal/preparation starts.
 /// It is not evidence that an interrupted calculation is safe to repeat.
 #[derive(Debug)]

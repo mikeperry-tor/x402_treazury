@@ -35,13 +35,13 @@ impl Store {
         );
         ensure!(
             sync.at_observed_tip(),
-            "expiry recovery requires zero observed tip lag"
+            crate::rotation::transaction::RecoveryEvidenceError::TipLag
         );
         let op = self.operation(id)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
             height >= u64::from(op.facts.expiry_height) + u64::from(sync.confirmations),
-            "transaction expiry not buried"
+            crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         let tx = self.db.transaction()?;
         ensure!(
@@ -152,7 +152,10 @@ mod tests {
             let error = s
                 .resolve_expired(&job.operation_id, revision, 100)
                 .unwrap_err();
-            assert!(error.to_string().contains("zero observed tip lag"));
+            assert_eq!(
+                error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>(),
+                Some(&crate::rotation::transaction::RecoveryEvidenceError::TipLag)
+            );
             assert!(s.operation_pending(&job.operation_id)?);
         }
         revision = s.save_sync_snapshot(revision, b"synced", Some(observation))?;

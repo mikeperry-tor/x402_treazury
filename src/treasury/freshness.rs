@@ -82,7 +82,7 @@ pub(super) fn spending_ready(
 pub(super) fn require_current_tip(sync: &SyncObservation) -> Result<()> {
     ensure!(
         sync.at_observed_tip(),
-        "expiry recovery requires zero observed tip lag; synchronize again before releasing reservations"
+        crate::rotation::transaction::RecoveryEvidenceError::TipLag
     );
     Ok(())
 }
