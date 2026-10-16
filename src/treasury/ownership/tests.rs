@@ -385,3 +385,47 @@ async fn retired_handoff_pages_physical_unknown_prefix_before_eligible_owner() {
     );
     treasury.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn reconstruction_retries_only_snapshot_read_contention() {
+    let (_dir, mut treasury, _job) = fixture().await;
+    let base = treasury.store_handle();
+    let revision = treasury.revision;
+    let before = base.call(|s| s.snapshot()).await.unwrap();
+    for final_read in [false, true] {
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let error = treasury
+                .reconstruct_live_inner(&CancellationToken::new(), Some((final_read, code)))
+                .await
+                .unwrap_err();
+            assert!(retryable_reconstruction(&error));
+            assert!(!treasury.healthy);
+            assert!(treasury.client.is_none());
+            assert_eq!(base.call(|s| s.snapshot()).await.unwrap(), before);
+            treasury
+                .reconstruct_live(&CancellationToken::new())
+                .await
+                .unwrap();
+            assert!(treasury.healthy);
+            assert_eq!(treasury.revision, revision);
+        }
+        let error = treasury
+            .reconstruct_live_inner(
+                &CancellationToken::new(),
+                Some((final_read, rusqlite::ffi::SQLITE_CORRUPT)),
+            )
+            .await
+            .unwrap_err();
+        assert!(!retryable_reconstruction(&error));
+        assert!(!treasury.healthy);
+        assert!(treasury.client.is_none());
+    }
+    // Identical errors outside the two audited reads are not retry authority.
+    for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+        let raw: anyhow::Error =
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None).into();
+        assert!(!retryable_reconstruction(&raw));
+    }
+    drop(base);
+    treasury.close().await.unwrap();
+}

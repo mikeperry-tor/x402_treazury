@@ -12,8 +12,27 @@ impl std::fmt::Display for SnapshotChanged {
 }
 impl std::error::Error for SnapshotChanged {}
 
+#[derive(Debug)]
+struct SnapshotReadBusy;
+impl std::fmt::Display for SnapshotReadBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("treasury reconstruction snapshot read busy")
+    }
+}
+impl std::error::Error for SnapshotReadBusy {}
+
+fn reconstruction_read_error(error: anyhow::Error) -> anyhow::Error {
+    if crate::rotation::store::inventory::transient_read(&error) {
+        error.context(SnapshotReadBusy)
+    } else {
+        error
+    }
+}
+
 pub(super) fn retryable_reconstruction(error: &anyhow::Error) -> bool {
-    error.is::<SnapshotUnavailable>() || error.is::<SnapshotChanged>()
+    error.is::<SnapshotUnavailable>()
+        || error.is::<SnapshotChanged>()
+        || error.is::<SnapshotReadBusy>()
 }
 
 pub(super) struct SyncOwner {
@@ -130,10 +149,34 @@ impl Treasury {
     }
 
     pub(super) async fn reconstruct_live(&mut self, stop: &CancellationToken) -> Result<()> {
+        self.reconstruct_live_inner(
+            stop,
+            #[cfg(test)]
+            None,
+        )
+        .await
+    }
+
+    async fn reconstruct_live_inner(
+        &mut self,
+        stop: &CancellationToken,
+        #[cfg(test)] read_fault: Option<(bool, i32)>,
+    ) -> Result<()> {
         let retired = self.retire_sdk().await?;
         ensure!(!stop.is_cancelled(), "treasury stopping");
         self.settle_retired_preparations(retired, stop).await?;
-        let (revision, bytes) = self.store.call(|s| s.snapshot()).await?;
+        // Only these read-only snapshot boundaries may turn SQLite contention
+        // into retry authority. Retirement fences and handoff mutations retain
+        // their original failure classification.
+        let (revision, bytes) = self
+            .store
+            .call(move |s| {
+                #[cfg(test)]
+                inject_snapshot_read_fault(read_fault, false)?;
+                s.snapshot()
+            })
+            .await
+            .map_err(reconstruction_read_error)?;
         let scratch = tempfile::tempdir()?;
         let client = LightClient::from_reader(
             bytes.as_slice(),
@@ -148,10 +191,13 @@ impl Treasury {
         ensure!(!stop.is_cancelled(), "treasury stopping");
         self.store
             .call(move |s| {
+                #[cfg(test)]
+                inject_snapshot_read_fault(read_fault, true)?;
                 ensure!(s.snapshot()?.0 == revision, SnapshotChanged);
                 Ok(())
             })
-            .await?;
+            .await
+            .map_err(reconstruction_read_error)?;
         ensure!(!stop.is_cancelled(), "treasury stopping");
         self._scratch = scratch;
         self.client = Some(client);
@@ -159,6 +205,16 @@ impl Treasury {
         self.healthy = true;
         Ok(())
     }
+}
+
+#[cfg(test)]
+fn inject_snapshot_read_fault(fault: Option<(bool, i32)>, final_read: bool) -> Result<()> {
+    if let Some((selected, code)) = fault
+        && selected == final_read
+    {
+        return Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None).into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

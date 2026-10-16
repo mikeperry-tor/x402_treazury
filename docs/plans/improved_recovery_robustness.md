@@ -1173,6 +1173,15 @@ cleared the implementation. Actual deployment task-exit cancellation and funding
 scheduler restart handling remain a separate C17 followup; this slice recovers
 poisoned SDK state without exiting those owners.
 
+**C17 reconstruction read-contention fixup (implemented and reviewed):** Only
+Busy/Locked errors from the two read-only snapshot/revision checks receive a
+retryable reconstruction marker. The retired SDK, shared store and queued commands
+retain ownership under the existing maintenance cadence. Retirement fences and
+preparation handoff mutations remain outside this retry classification. Root review
+and the focused regression passed for both boundaries, with corruption and untagged
+SQLite errors remaining fatal; successful retry preserves exact snapshot bytes and
+revision. All-target, all-feature Clippy passed before this narrow followup.
+
 **C19 durable Base observation ownership (implemented and reviewed):** Ordinary
 serving retains policy-free reconciliation owners for durable pool identities,
 including removed and disabled profiles. Existing explicit treasury/funding
