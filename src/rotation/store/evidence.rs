@@ -1568,7 +1568,15 @@ impl Store {
         // qualification capability; this restores only the trust annotation.
         tx.execute("UPDATE funding_jobs SET readiness_disputed=NULL WHERE id=?1 AND readiness_disputed='endpoint_reverification_required'",[job])?;
         super::funding::publish_destination_readiness(&tx, &wallet)?;
+        let pool: String = tx.query_row(
+            "SELECT pool_id FROM wallets WHERE id=?1",
+            [&wallet],
+            |row| row.get(0),
+        )?;
         tx.commit()?;
+        // Restoration can make an existing destination usable. Wake only its
+        // pool after commit; waiters must still acquire fresh admission evidence.
+        self.notify_capacity_changed(&pool);
         Ok(())
     }
 }

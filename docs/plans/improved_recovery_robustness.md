@@ -605,6 +605,9 @@ and qualification behavior. The HTTP-status/parse-failure fixture matrix verifie
 relay calls during preparation, concurrent resumptions sharing one payment, no repeat
 origin requests, immutable caller configuration and relay-only cache provenance.
 Deferred startup scheduling and dependency notifications remain pending.
+A follow-up review found historical readiness restoration omitted the existing pool
+notification. It now notifies that pool after commit; canonical restoration fixtures
+assert the wakeup, unrelated-pool isolation and unchanged balance/provenance.
 
 ### Stage 1 — Minimal authority and dependency specification
 
