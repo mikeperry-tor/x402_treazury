@@ -1033,6 +1033,94 @@ async fn inactive_publication_reopens_without_authority_and_cleans_one_page_per_
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn cleanup_busy_retains_owner_and_retries_but_fatal_failure_keeps_the_fence() {
+    for fatal in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        store.db.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let pool = crate::rotation::store::test_support::declare_two_reserves(
+            &mut store, "cleanup", "1", None, 0,
+        )
+        .unwrap();
+        let wallet = store.status().unwrap().pools[0].addresses[0].id.clone();
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET evidence_repair='chain_repair_required' WHERE id=?1",
+                [&wallet],
+            )
+            .unwrap();
+        let snapshot = store
+            .begin_replacement_staging(&pool, &wallet, Uuid::new_v4().to_string())
+            .unwrap()
+            .unwrap();
+        let external = Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        if fatal {
+            store.db.execute_batch("DROP VIEW effective_payment_resolutions; DROP TABLE payment_resolution_replacements;").unwrap();
+        } else {
+            external.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            assert!(
+                matches!(store.clear_replacement_staging(&snapshot.id).unwrap_err().downcast_ref::<rusqlite::Error>(),Some(rusqlite::Error::SqliteFailure(code,_)) if code.code==rusqlite::ErrorCode::DatabaseBusy)
+            );
+        }
+        let (handle, worker) = StoreHandle::spawn(store);
+        let cleanup = tokio::spawn(cleanup_staging(handle.clone(), snapshot.id.clone()));
+        tokio::task::yield_now().await;
+        let pool_check = pool.clone();
+        let wallet_check = wallet.clone();
+        assert!(
+            handle
+                .call(move |s| s.begin_replacement_staging(
+                    &pool_check,
+                    &wallet_check,
+                    Uuid::new_v4().to_string()
+                ))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        if fatal {
+            assert!(cleanup.await.unwrap().is_err());
+            assert_eq!(
+                handle
+                    .call(|s| Ok(s.db.query_row(
+                        "SELECT COUNT(*) FROM resolution_replacement_passes",
+                        [],
+                        |r| r.get::<_, i64>(0).map(|n| n as usize)
+                    )?))
+                    .await
+                    .unwrap(),
+                1
+            );
+        } else {
+            assert!(!cleanup.is_finished());
+            external.execute_batch("ROLLBACK;").unwrap();
+            tokio::time::advance(crate::rotation::manager::MAINTENANCE_CADENCE).await;
+            cleanup.await.unwrap().unwrap();
+            assert!(
+                handle
+                    .call(move |s| s.begin_replacement_staging(
+                        &pool,
+                        &wallet,
+                        Uuid::new_v4().to_string()
+                    ))
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        drop(handle);
+        worker.await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn same_hash_support_validation_pages_and_rejects_changes_behind_cursor() {
     let mut f = Fixture::new(PAGE + 1, true).await;

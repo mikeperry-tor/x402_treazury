@@ -48,6 +48,7 @@ pub(crate) struct AdmissionObservation<'a> {
 }
 #[cfg(test)]
 mod admission_tests;
+pub(crate) const MAINTENANCE_CADENCE: std::time::Duration = std::time::Duration::from_secs(5);
 mod maintenance;
 mod selection;
 

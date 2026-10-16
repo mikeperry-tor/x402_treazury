@@ -17,7 +17,7 @@ const BALANCE_READS: usize = 4;
 const HISTORY_READS: usize = 4;
 // Bounds active repair passes and retained SQLite staging, independently of RPC sockets.
 const REPAIR_READS: usize = 1;
-const CADENCE: Duration = Duration::from_secs(5);
+const CADENCE: Duration = super::MAINTENANCE_CADENCE;
 
 #[derive(Debug)]
 pub(crate) struct ReconciliationInProgress;

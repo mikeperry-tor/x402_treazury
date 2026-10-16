@@ -670,6 +670,12 @@ async fn cleanup_staging(store: StoreHandle, id: String) -> Result<()> {
         match store.call(move |s| s.clear_replacement_staging(&key)).await {
             Ok(true) => return Ok(()),
             Ok(false) => tokio::task::yield_now().await,
+            Err(error) if matches!(error.downcast_ref::<rusqlite::Error>(),Some(rusqlite::Error::SqliteFailure(code,_)) if matches!(code.code,rusqlite::ErrorCode::DatabaseBusy|rusqlite::ErrorCode::DatabaseLocked)) =>
+            {
+                // Deletion is an idempotent transaction; this is not a retry of
+                // financial publication, and the per-wallet owner remains held.
+                tokio::time::sleep(crate::rotation::manager::MAINTENANCE_CADENCE).await;
+            }
             Err(error) => return Err(error),
         }
     }
