@@ -525,6 +525,18 @@ Implementation: 753d25a. Review found no implementation defect; its test fixup
 records actual balance RPC payer addresses and requires observation of an added
 non-priority retained wallet after the failed page resumes. The expanded test passes.
 
+**C05 completion admission-read continuation (implemented and reviewed):**
+Completed source/status/quote observations retain their exact payload and original
+lane permit while the initial operation-identity read returns Busy/Locked. Only that
+read retries on existing poll cadence; sibling work continues, and neither I/O nor
+publication repeats. Operation rollover discards stale observations. Source-owned
+completion drains through cancellation; unsigned work retains its prior shutdown
+behavior. Corruption, mutation and later diagnostic errors keep their original
+classification. All 21 scheduler tests passed. Independent review cleared production
+and requested preserving both cancellation-during-I/O and retained-completion tests;
+the parameterized fixup passed separately. One-pass work retains accepted completion
+through read contention rather than abandoning it or imposing a new deadline.
+
 **C05 funding inventory resumption contract (reviewed):** Share Base's typed
 Busy/Locked read classifier, restricted to initial/rolling funding boundaries and
 page reads. Preserve the funding lease, lane cursor, active source/read futures and
@@ -1256,6 +1268,69 @@ remain separate. Persisted provider observations remain audit facts; closure may
 ignore a historical status veto only after every relevant obligation is actually
 proved discharged. Missing hashes, ambiguous attribution and unavailable proofs
 remain scoped incomplete outcomes, without replay or replacement authority.
+
+**C18 canonical delivery implementation contract (reviewed design; pending):**
+Retain validated original quote/deposit and source-transaction correlation from the
+provider observation independently of its status label. That mapping supplies
+attribution; a canonical transfer alone cannot identify a swap. Validate a unique
+Base USDC transfer event for the exact accepted recipient/output amount, with
+successful canonical receipt/header, configured confirmations and opaque runtime
+freshness/generation binding. Preserve the stricter payer/nonce validation in the
+existing payment receipt path. Do not invent a bridge sender/nonce contract. Missing,
+multiple or split candidates remain incomplete until separately supported.
+
+Publish immutable delivery support under exact operation/quote/source CAS and
+unique chain/token/transaction/log identity, preventing one event from closing two
+operations. No present-balance threshold is needed to prove historical delivery.
+Provider outage after retained correlation need not block canonical verification;
+conflicting correlations do not supersede one another. Delivery discharges only the
+destination obligation. Complete financial closure separately requires original
+source debit/reservation/outgoing accounting and explicit return obligations; status
+flags remain audit and never erase ambiguous refunds. Typed endpoint/hash conflicts
+reopen only dependent support; unsigned outages grant no replay or replacement.
+
+Independent audit identified the status adapter/scheduler's discarded correlation,
+the payment-only receipt validator, and destination/completion consumers as the
+implementation seams. Required tests include zero-current-balance delivery, wrong
+correlation/amount/token/recipient, receipt/reorg negatives, unique-event ownership,
+operation rollover, retained correlation through outage, and unresolved source or
+return obligations despite valid destination proof.
+
+**C20 shielding implementation contract (reviewed design; implementation pending):**
+Automatic shielding uses the serialized treasury owner and existing maintenance
+cadence. Bind each accepted calculation to C16 preparation provenance, one original
+transparent address, exact selected outpoints/amounts, snapshot revision and actual
+fee cap. Commit immutable input correlation with the outgoing bytes, transaction
+facts, snapshot and fee-only reservation. Principal is internal wallet movement;
+never charge it again or require shielded funds to pay a transparent-input fee.
+Use checked amounts, exact raw-input equality, no transparent outputs, and verified
+internal shielded output/value balance. Preserve the demonstrated pending-outgoing
+SDK guard. Precommit cleanup requires drained owner provenance; uncertain committed
+work resumes its exact bytes, never fresh selection. Canonical expiry may release
+only the original operation under existing recovery proof rules.
+
+New automatic work requires enabled auto-funding, effective configured profile
+policy and the existing refund-shielding fee safeguard. Removed/disabled profiles
+wait; existing signed work still receives observation. Qualification permits cannot
+be borrowed from source funding: the current permit contract does not authorize a
+new shielding operation. Deny it before mutation unless explicit run authority is
+implemented separately. No new cumulative budget or whole-work deadline is added.
+
+Current confirmed, unspent SDK-owned transparent inputs may be shielded despite
+partial or unresolved return attribution when exact input ownership, script and
+reservation exclusion are proved. Keep one original address per transaction. An
+attribution warning alone is not an input-ownership veto; unknown selected inputs
+or reservations are. Preserve unresolved source/refund accounting and immutable
+outpoint-to-shielding correlation across reorg, spending and restart; shielding is
+never provider settlement, refund credit or new funding authority.
+
+Acceptance requires restored confirmed spendability from zero shielded capital,
+partial/unattributed owned inputs with unresolved accounting preserved, exact fee
+and single-address bounds, disabled-policy resumption, qualification denial before
+mutation, cancellation/lost acknowledgement/restart with no duplicate selection,
+and canonical confirmation/expiry with fee consumed once. Existing CLI shielding
+lacks this durable input correlation and automatic command path; no implementation
+or acceptance completion is claimed by this design.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a

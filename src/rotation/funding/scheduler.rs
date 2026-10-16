@@ -46,6 +46,8 @@ struct State {
 #[derive(Default)]
 pub(crate) struct Owner {
     state: Mutex<State>,
+    #[cfg(test)]
+    completion_fault: Arc<Mutex<Option<(Kind, i32, usize)>>>,
 }
 type Lease = Arc<tokio::sync::OwnedMutexGuard<Owner>>;
 
@@ -130,6 +132,9 @@ impl LaneInventory {
 /// The source task itself retains the lease independently of these read waiters.
 struct InFlight<Q> {
     reads: FuturesUnordered<BoxFuture<'static, Completion<Q>>>,
+    // Completed I/O retains its original lane permit while the admission read
+    // is unavailable. Only that read retries; publication remains one-shot.
+    completions: VecDeque<(u64, Completion<Q>)>,
     active: BTreeSet<Key>,
     source_active: bool,
     credit_active: usize,
@@ -141,6 +146,7 @@ impl<Q> InFlight<Q> {
     fn new() -> Self {
         Self {
             reads: FuturesUnordered::new(),
+            completions: VecDeque::new(),
             active: BTreeSet::new(),
             source_active: false,
             credit_active: 0,
@@ -318,6 +324,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 && pending.is_empty()
                 && once
                 && flight.reads.is_empty()
+                && flight.completions.is_empty()
                 && flight.quote_pending.is_none()
             {
                 return first_error.map_or(Ok(()), Err);
@@ -327,7 +334,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     && clock.schedule_now() >= lane.pass_due
                     && !pending.iter().any(|item| item.lane == lane.kind)
             });
-            let completion = if needs_page && !stopping {
+            let ready = flight
+                .completions
+                .iter()
+                .position(|(due, _)| clock.schedule_now() >= *due);
+            let completion = if let Some(index) = ready {
+                Some(flight.completions.remove(index).unwrap().1)
+            } else if needs_page && !stopping {
                 flight.reads.next().now_or_never().flatten()
             } else {
                 tokio::select! {
@@ -336,17 +349,41 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         stopping = true;
                         None
                     },
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if !stopping => None,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if !stopping || !flight.completions.is_empty() => None,
                 }
             };
             if let Some(completion) = completion {
+                let current = self.completion_current(&lease, &completion).await;
+                if let Err(error) = &current
+                    && crate::rotation::store::inventory::transient_read(error)
+                {
+                    tracing::warn!(
+                        category = "funding_completion_read_busy",
+                        "funding observation retained while its admission read is unavailable"
+                    );
+                    // A one-pass caller also retains accepted completion work
+                    // until this read succeeds; no observation is reacquired
+                    // and no whole-pass deadline is introduced.
+                    flight.completions.push_back((
+                        clock
+                            .schedule_now()
+                            .saturating_add(self.poll_seconds.max(1)),
+                        completion,
+                    ));
+                    continue;
+                }
                 flight.release(&completion);
                 let id = completion.job.id.clone();
                 let operation = completion.job.operation_id.clone();
-                match self
-                    .publish_observation(&lease, completion, clock.schedule_now())
-                    .await
-                {
+                let publication = match current {
+                    Ok(true) => {
+                        self.publish_current_observation(&lease, completion, clock.schedule_now())
+                            .await
+                    }
+                    Ok(false) => Ok(None),
+                    Err(error) => Err(error),
+                };
+                match publication {
                     Ok(Some(ready)) => flight.quote_pending = Some(ready),
                     Ok(None) => {}
                     Err(error) => {
@@ -628,6 +665,41 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         }
     }
 
+    async fn completion_current(
+        &self,
+        _lease: &Lease,
+        completion: &Completion<<B::Observations as FundingObservations>::QuoteRequest>,
+    ) -> Result<bool> {
+        let id = completion.job.id.clone();
+        #[cfg(test)]
+        let fault = _lease.completion_fault.clone();
+        #[cfg(test)]
+        let kind = completion.kind;
+        let current = self
+            .store
+            .call(move |s| {
+                #[cfg(test)]
+                {
+                    let mut fault = fault.lock().unwrap();
+                    if let Some((selected, code, remaining)) = fault.as_mut()
+                        && *selected == kind
+                        && *remaining > 0
+                    {
+                        *remaining -= 1;
+                        return Err(rusqlite::Error::SqliteFailure(
+                            rusqlite::ffi::Error::new(*code),
+                            None,
+                        )
+                        .into());
+                    }
+                }
+                s.funding_job(&id)
+            })
+            .await?;
+        Ok(current.is_some_and(|current| current.operation_id == completion.job.operation_id))
+    }
+
+    #[cfg(test)]
     async fn publish_observation(
         &self,
         lease: &Lease,
@@ -639,13 +711,25 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             <B::Observations as FundingObservations>::QuoteRequest,
         )>,
     > {
-        let Completion { job, kind, result } = completion;
-        let id = job.id.clone();
-        let current = self.store.call(move |s| s.funding_job(&id)).await?;
-        if current.is_none_or(|current| current.operation_id != job.operation_id) {
+        if !self.completion_current(lease, &completion).await? {
             return Ok(None);
         }
+        self.publish_current_observation(lease, completion, instant)
+            .await
+    }
 
+    async fn publish_current_observation(
+        &self,
+        lease: &Lease,
+        completion: Completion<<B::Observations as FundingObservations>::QuoteRequest>,
+        instant: u64,
+    ) -> Result<
+        Option<(
+            FundingJob,
+            <B::Observations as FundingObservations>::QuoteRequest,
+        )>,
+    > {
+        let Completion { job, kind, result } = completion;
         let mut prerequisite = None;
         let result = match result {
             Ok(Observation::Status(status)) => {

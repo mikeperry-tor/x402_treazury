@@ -1394,8 +1394,15 @@ async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_s
             gate: source_gate.clone(),
             started,
         },
-        60,
+        1,
     );
+    let fault = store
+        .funding_owner()
+        .lock_owned()
+        .await
+        .completion_fault
+        .clone();
+    *fault.lock().unwrap() = Some((Kind::Source, rusqlite::ffi::SQLITE_BUSY, 1));
     let stop = CancellationToken::new();
     let waiter = tokio::spawn({
         let worker = worker.clone();
@@ -1403,12 +1410,15 @@ async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_s
         async move { worker.schedule(1000, stop, true).await }
     });
     let accepted = event(&mut source_events).await;
+    source_gate.add_permits(1);
+    // Cancel after the source has completed and its exact prerequisite is
+    // retained behind the failed admission read, not while source I/O runs.
+    wait_until(|| fault.lock().unwrap().as_ref().unwrap().2 == 0).await;
     stop.cancel();
     waiter.abort();
     assert!(waiter.await.unwrap_err().is_cancelled());
     assert!(worker.tick(1000).await.unwrap_err().is::<AlreadyOwned>());
     assert!(quote_events.try_recv().is_err());
-    source_gate.add_permits(1);
     // Acquiring the actual owner gate proves the detached scheduler and source
     // have drained. Keep it held while inspecting forbidden follow-up effects.
     let lease = tokio::time::timeout(
@@ -1417,6 +1427,7 @@ async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_s
     )
     .await
     .unwrap();
+    assert_eq!(fault.lock().unwrap().as_ref().unwrap().2, 0);
     assert!(source_events.try_recv().is_err());
     assert!(quote_events.try_recv().is_err());
     assert!(status_events.try_recv().is_err());
@@ -2404,4 +2415,224 @@ async fn hidden_prepared_bytes_remain_observable_without_new_work_after_reopen()
             );
         }
     }
+}
+
+#[tokio::test]
+async fn completion_read_contention_retains_exact_observations_without_replay() {
+    for kind in [Kind::Source, Kind::Status, Kind::Quote] {
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut raw = Store::create(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                1,
+                b"fixture",
+            )
+            .unwrap();
+            crate::rotation::store::test_support::declare_two_reserves(
+                &mut raw,
+                "pool",
+                "5",
+                Some(alloy_primitives::U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+            let jobs = raw.funding_jobs().unwrap();
+            if kind != Kind::Quote {
+                submitted(&mut raw, &jobs[0]);
+                raw.confirm_spend(&jobs[0].operation_id, 60, 1).unwrap();
+                submitted(&mut raw, &jobs[1]);
+            }
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            db.execute_batch("CREATE TABLE fixture_publications(kind TEXT); CREATE TRIGGER count_status AFTER UPDATE OF provider_success ON funding_progress BEGIN INSERT INTO fixture_publications VALUES('status'); END; CREATE TRIGGER count_quote AFTER UPDATE OF quote ON funding_progress WHEN NEW.quote IS NOT NULL BEGIN INSERT INTO fixture_publications VALUES('quote'); END;").unwrap();
+            let before: (i64, i64) = db
+                .query_row(
+                    "SELECT COUNT(*),COALESCE(SUM(reserved),0) FROM budget_entries",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let (store, actor) = StoreHandle::spawn(raw);
+            let (statuses, mut status_events) = mpsc::unbounded_channel();
+            let (started, mut source_events) = mpsc::unbounded_channel();
+            let (quotes, mut quote_events) = mpsc::unbounded_channel();
+            let credits = Arc::new(AtomicUsize::new(0));
+            let worker = FundingWorker::new(
+                store.clone(),
+                Source {
+                    store: store.clone(),
+                    reads: Reads {
+                        credits: Arc::new(Semaphore::new(64)),
+                        credit_calls: credits.clone(),
+                        statuses,
+                        status_gates: Default::default(),
+                        failed_job: Default::default(),
+                        processing: false,
+                        quotes: Some(quotes),
+                    },
+                    gate: Arc::new(Semaphore::new(2)),
+                    started,
+                },
+                1,
+            );
+            let fault = store
+                .funding_owner()
+                .lock_owned()
+                .await
+                .completion_fault
+                .clone();
+            *fault.lock().unwrap() = Some((kind, code, 1));
+            let task = tokio::spawn({
+                let worker = worker.clone();
+                async move { worker.tick(1000).await }
+            });
+            if kind == Kind::Quote {
+                for _ in 0..2 {
+                    event(&mut source_events).await;
+                    event(&mut quote_events).await.finish.send(Ok(())).unwrap();
+                }
+            } else {
+                assert_eq!(event(&mut source_events).await, jobs[1].id);
+                // Both provider reads and credit lanes progress while the source
+                // or one status completion keeps its original permit.
+                for _ in 0..2 {
+                    event(&mut status_events).await;
+                }
+            }
+            wait_until(|| fault.lock().unwrap().as_ref().unwrap().2 == 0).await;
+            assert!(worker.tick(1001).await.unwrap_err().is::<AlreadyOwned>());
+            tokio::time::timeout(std::time::Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(
+                source_events.try_recv().is_err(),
+                "source work was replayed"
+            );
+            assert!(
+                status_events.try_recv().is_err(),
+                "provider status was reacquired"
+            );
+            assert!(quote_events.try_recv().is_err(), "quote was reacquired");
+            assert!(credits.load(Ordering::SeqCst) >= 2);
+            let statuses: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM fixture_publications WHERE kind='status'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let quotes: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM fixture_publications WHERE kind='quote'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                (statuses, quotes),
+                if kind == Kind::Quote { (0, 2) } else { (2, 0) }
+            );
+            let after: (i64, i64) = db
+                .query_row(
+                    "SELECT COUNT(*),COALESCE(SUM(reserved),0) FROM budget_entries",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                before, after,
+                "observation retry changed financial liabilities"
+            );
+            drop(worker);
+            drop(store);
+            actor.await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn completion_read_corruption_stops_without_retry_or_financial_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let jobs = raw.funding_jobs().unwrap();
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(2)),
+                credit_calls: Arc::new(AtomicUsize::new(0)),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: None,
+            },
+            gate: gate.clone(),
+            started,
+        },
+        1,
+    );
+    let fault = store
+        .funding_owner()
+        .lock_owned()
+        .await
+        .completion_fault
+        .clone();
+    *fault.lock().unwrap() = Some((Kind::Credit, rusqlite::ffi::SQLITE_CORRUPT, 2));
+    let error = tokio::time::timeout(std::time::Duration::from_secs(5), worker.tick(1000))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(!crate::rotation::store::inventory::transient_read(&error));
+    assert!(
+        matches!(error.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::DatabaseCorrupt)
+    );
+    assert_eq!(
+        fault.lock().unwrap().as_ref().unwrap().2,
+        1,
+        "corruption was retried"
+    );
+    gate.add_permits(1);
+    let lease = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        store.funding_owner().lock_owned(),
+    )
+    .await
+    .unwrap();
+    for job in jobs {
+        store
+            .call(move |s| {
+                let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                assert!(!facts.accepted_quote);
+                assert_eq!(facts.source_attempts, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    drop(lease);
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
 }
