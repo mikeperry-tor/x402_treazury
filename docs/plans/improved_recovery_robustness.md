@@ -1279,6 +1279,19 @@ ignore a historical status veto only after every relevant obligation is actually
 proved discharged. Missing hashes, ambiguous attribution and unavailable proofs
 remain scoped incomplete outcomes, without replay or replacement authority.
 
+**C18 provider observation prerequisite (implemented and reviewed):** The adapter
+now exposes a private-constructor, exact-quote-digest-bound status observation with
+explicitly unverified origin/destination transaction candidates and optional atomic
+amounts. Missing values remain unknown. Malformed known fields, duplicate/invalid
+hashes or financial quote-echo mismatch suppress the complete candidate set without
+losing the ordinary provider status. Original deposit/request mismatch still fails.
+No explorer URLs, provider prose or tracing correlation IDs are retained. Existing
+status polling delegates to this parser and retains its behavior; persistence,
+canonical verification and closure are still pending. Root and independent review
+cleared the slice; all 17 near-adapter tests passed with one intentional child helper
+ignored. The official live `/v0/status` documentation linked above supplied field
+shapes; it declares no standalone schema revision.
+
 **C18 canonical delivery implementation contract (reviewed design; pending):**
 Retain validated original quote/deposit and source-transaction correlation from the
 provider observation independently of its status label. That mapping supplies

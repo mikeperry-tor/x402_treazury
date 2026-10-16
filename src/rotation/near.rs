@@ -13,6 +13,8 @@ impl std::error::Error for HttpStatus {}
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+mod settlement;
+pub use settlement::{SettlementIssue, StatusObservation, UnverifiedSettlement};
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
 #[derive(Debug)]
 pub(crate) struct QuoteWindowExpired;
@@ -325,6 +327,10 @@ impl NearClient {
         unreachable!()
     }
     pub async fn status(&self, quote: &Quote) -> Result<SwapStatus> {
+        Ok(self.status_observation(quote).await?.into_status())
+    }
+
+    pub async fn status_observation(&self, quote: &Quote) -> Result<StatusObservation> {
         let deposit = quote
             .deposit
             .as_deref()
@@ -337,21 +343,7 @@ impl NearClient {
                     .query(&[("depositAddress", deposit)]),
             )
             .await?;
-        ensure!(
-            v["quoteResponse"]["quote"]["depositAddress"].as_str() == Some(deposit),
-            "status deposit mismatch"
-        );
-        check_echo(&quote.request, &v["quoteResponse"]["quoteRequest"])?;
-        Ok(match v["status"].as_str() {
-            Some("PENDING_DEPOSIT") => SwapStatus::PendingDeposit,
-            Some("KNOWN_DEPOSIT_TX") => SwapStatus::KnownDeposit,
-            Some("INCOMPLETE_DEPOSIT") => SwapStatus::IncompleteDeposit,
-            Some("PROCESSING") => SwapStatus::Processing,
-            Some("SUCCESS") => SwapStatus::Success,
-            Some("REFUNDED") => SwapStatus::Refunded,
-            Some("FAILED") => SwapStatus::Failed,
-            _ => SwapStatus::Unknown,
-        })
+        settlement::parse(quote, &v)
     }
 }
 pub fn validate_assets(v: &Value) -> Result<Assets> {
