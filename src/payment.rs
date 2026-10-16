@@ -289,6 +289,16 @@ impl PaidClient {
         }
         Ok(())
     }
+    pub(crate) async fn discovery_ready(&self) -> Result<bool> {
+        self.require_available()?;
+        match &self.managed {
+            Some(pool) => pool.discovery_ready().await,
+            None => {
+                ensure!(self.payer.is_some(), "discovery relay requires a payer");
+                Ok(true)
+            }
+        }
+    }
     pub fn with_cover(
         mut self,
         config: Option<crate::cover::Config>,

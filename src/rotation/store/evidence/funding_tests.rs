@@ -1,6 +1,7 @@
 use super::*;
 use crate::rotation::base::{BaseRpc, now};
 use axum::{Json, Router, routing::post};
+use futures_util::FutureExt;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
@@ -117,9 +118,18 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
         .unwrap()
         .unwrap();
     let verified = rpc.verify_historical_balance(request).await.unwrap();
+    let changes = store.capacity_changes(&pool);
+    let unrelated = store.capacity_changes("unrelated");
+    let changed = changes.notified();
+    let other_changed = unrelated.notified();
+    tokio::pin!(changed, other_changed);
+    changed.as_mut().enable();
+    other_changed.as_mut().enable();
     store
         .restore_funding_readiness_support(&job.id, &job.operation_id, verified)
         .unwrap();
+    assert!(changed.as_mut().now_or_never().is_some());
+    assert!(other_changed.as_mut().now_or_never().is_none());
     let (saved, dispute): (String, Option<String>) = store
         .db
         .query_row(

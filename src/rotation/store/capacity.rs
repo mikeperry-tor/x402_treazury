@@ -248,6 +248,12 @@ impl Store {
         documentation_address(&self.db, pool)
     }
 
+    /// Current unsigned identity availability, without publishing a retained role.
+    /// The eventual payment must resolve identity and validate admission again.
+    pub(crate) fn payment_identity_available(&self, pool: &str) -> Result<bool> {
+        Ok(default_identity(&self.db, pool)?.is_some())
+    }
+
     /// Resolve unsigned identity under the group gate, reconstructing an absent
     /// active role only from eligible retained capacity.
     /// Balance freshness and liabilities belong to later payment admission.

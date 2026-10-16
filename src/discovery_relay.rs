@@ -205,6 +205,35 @@ impl std::fmt::Display for RelayFailure {
 }
 impl std::error::Error for RelayFailure {}
 
+/// Scheduling information only; a retry still passes the original relay breaker,
+/// target attempt bound and ordinary payment admission. Unknown failures are terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetryDisposition {
+    DependencyWait,
+    Backoff(std::time::Duration),
+    Terminal,
+}
+impl RetryDisposition {
+    pub fn from_error(error: &anyhow::Error) -> Self {
+        error
+            .downcast_ref::<Self>()
+            .copied()
+            .unwrap_or(Self::Terminal)
+    }
+}
+impl std::fmt::Display for RetryDisposition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::DependencyWait => {
+                "discovery relay payment identity unavailable; waiting for capacity"
+            }
+            Self::Backoff(_) => "discovery relay target retry backoff before paid intent",
+            Self::Terminal => "discovery relay retry unavailable",
+        })
+    }
+}
+impl std::error::Error for RetryDisposition {}
+
 #[derive(Clone)]
 pub struct Relay {
     client: PaidClient,
@@ -306,6 +335,11 @@ impl Relay {
     pub fn allows(&self, source: &str) -> bool {
         self.sources.is_empty() || self.sources.iter().any(|s| s == source)
     }
+    /// Deployment shutdown closes all new scheduling first, then drains every
+    /// shared client before closing treasury/store ownership.
+    pub async fn drain(&self) {
+        self.client.drain().await;
+    }
     pub async fn fetch(
         &self,
         url: &str,
@@ -351,20 +385,30 @@ impl Relay {
             }
             return Ok(response.clone());
         }
+        ensure!(
+            !state.stopped,
+            "discovery relay disabled after error or cancellation; no paid retry"
+        );
         if let Some((attempts, last)) = state.attempts.get(&key) {
             ensure!(
                 *attempts < 3,
                 "discovery relay unsigned attempt limit reached for target"
             );
-            ensure!(
-                last.elapsed() >= std::time::Duration::from_secs(1),
-                "discovery relay target retry backoff"
-            );
+            let remaining = std::time::Duration::from_secs(1).saturating_sub(last.elapsed());
+            if !remaining.is_zero() {
+                return Err(RetryDisposition::Backoff(remaining).into());
+            }
         }
-        ensure!(
-            !state.stopped,
-            "discovery relay disabled after error or cancellation; no paid retry"
-        );
+        // This read does not allocate or publish a role. The actual request still
+        // resolves its identity and performs ordinary challenge-time admission.
+        if !self
+            .client
+            .discovery_ready()
+            .await
+            .map_err(|error| RelayFailure::from_error(&error))?
+        {
+            return Err(RetryDisposition::DependencyWait.into());
+        }
         // The accepted owner retains this lock through payment, decoding and
         // publication. Cancelling its waiter cannot admit another paid fetch.
         // Leave the breaker closed if the owner fails before publishing an outcome.
@@ -448,7 +492,14 @@ impl Relay {
                     scope = "pre_submission",
                     "Discovery relay failed before paid intent; target retries bounded, unrelated targets remain enabled"
                 );
-                Err(error.context("discovery relay failed before paid intent"))
+                let (attempts, last) = state.attempts.get(&key).expect("recorded relay attempt");
+                if *attempts < 3 {
+                    Err(error.context(RetryDisposition::Backoff(
+                        std::time::Duration::from_secs(1).saturating_sub(last.elapsed()),
+                    )))
+                } else {
+                    Err(error.context("discovery relay unsigned attempt limit reached for target"))
+                }
             }
             Err(error) => {
                 tracing::warn!("Discovery relay failed; disabled for this run, no paid retry");
@@ -613,18 +664,18 @@ pub(crate) mod tests {
     use base64::{Engine, engine::general_purpose::STANDARD};
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    const TARGET: &str = "https://example.com/openapi.json";
-    fn envelope(url: &str) -> Value {
+    pub(super) const TARGET: &str = "https://example.com/openapi.json";
+    pub(super) fn envelope(url: &str) -> Value {
         json!({"url":url,"method":"GET","statusCode":200,"headers":{"cache-control":"max-age=600"},"body":"{\"openapi\":\"3.0.0\",\"paths\":{}}","redirectChain":[],"error":null})
     }
     #[derive(Clone)]
     pub(crate) struct Fixture {
-        calls: Arc<AtomicUsize>,
+        pub(super) calls: Arc<AtomicUsize>,
         pub(crate) signed: Arc<AtomicUsize>,
         payers: Arc<std::sync::Mutex<Vec<String>>>,
         body: Value,
         reject: bool,
-        arrived: Arc<tokio::sync::Notify>,
+        pub(super) arrived: Arc<tokio::sync::Notify>,
         stall: bool,
     }
     async fn handler(
@@ -1261,3 +1312,7 @@ pub(crate) mod tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "zcash"))]
+#[path = "discovery_relay/readiness_tests.rs"]
+mod readiness_tests;
