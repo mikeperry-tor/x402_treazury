@@ -524,8 +524,15 @@ impl Deployment {
                 .any(WalletConfig::managed)
         {
             deployment.validate_bootstrap_inputs(path, env).await?;
-            deployment.initialized =
-                Some(deployment.bootstrap_for_serving(env, restriction).await?);
+            if deployment
+                .config
+                .discovery_relay
+                .as_ref()
+                .is_some_and(|p| p.serve)
+            {
+                deployment.initialized =
+                    Some(deployment.bootstrap_for_serving(env, restriction).await?);
+            }
         }
         let loaded: Result<()> = async {
             let relay = deployment
@@ -1211,10 +1218,14 @@ impl Deployment {
             Err(error) => {
                 #[cfg(feature = "zcash")]
                 {
+                    drop(funding_runtime);
                     drop(managed_pools);
                     drop(self);
                     if let Some(supervisor) = supervisor {
                         supervisor.shutdown().await?;
+                    }
+                    if let Some(treasury) = treasury {
+                        treasury.close().await?;
                     }
                 }
                 return Err(error);

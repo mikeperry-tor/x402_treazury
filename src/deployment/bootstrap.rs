@@ -314,9 +314,13 @@ impl Deployment {
 impl InitializedWallets {
     pub(super) async fn shutdown(mut self) -> Result<()> {
         let supervisor = self.supervisor.take();
+        let treasury = self.treasury.take();
         drop(self);
         if let Some(supervisor) = supervisor {
             supervisor.shutdown().await?;
+        }
+        if let Some(treasury) = treasury {
+            treasury.close().await?;
         }
         Ok(())
     }
