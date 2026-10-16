@@ -392,6 +392,7 @@ impl Store {
             &format!("network='{}'", network.name()),
         ))?;
         tx.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
+        tx.execute_batch(include_str!("store/evidence/replacement_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
             params![id, birthday, network.name()],
@@ -442,7 +443,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 18,
+                version == 19,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -1076,7 +1077,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 18,
+        schema == 19,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1284,7 +1285,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 18,
+        version == 19,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
@@ -2089,7 +2090,7 @@ fn apply_chain_resolutions(
                 evidence::check_resolution(tx, namespace, certificate)
             })
             .transpose()?;
-        let existing: Option<(String,i64,String,u64)> = tx.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
+        let existing: Option<(String,i64,String,u64)> = tx.query_row("SELECT outcome,height,hash,block_time FROM effective_payment_resolutions WHERE attempt_id=?1",[id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
         if let Some(existing) = existing {
             ensure!(
                 existing

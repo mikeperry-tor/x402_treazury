@@ -303,18 +303,24 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema18
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema19
 preserves original payer role, consumed slot/generation and exact balance support;
 older state requires separately reviewed stopped-service conversion and is never
 upgraded on open. Canonical checkpoint conflicts restore conservative exposure for
 previously resolved authorizations in the affected wallet without rewriting their
-original proofs. Exact historical revalidation may clear that disputed membership;
-ordinary duplicate nonce observations cannot. Under chain repair, a separate
+original proofs. A complete canonical replacement pass reads bounded nonce pages
+at one confirmed anchor, then acquires a fresh balance that covers that anchor and
+the retained numeric debit floor. Atomic adoption appends replacement proofs and
+retains original resolutions and checkpoint provenance. It clears only the payment
+chain dispute, leaving funding and retirement disputes independent. Changed
+membership or generations reject adoption; ordinary duplicate nonce observations
+cannot replace a disputed proof. Under chain repair, a separate
 payment-only proof can use remaining current capacity when every resolved
 authorization is reserved at its full amount and the debit-height floor is met.
 It cannot establish funding readiness, retire a wallet or release a liability.
-Amount contradictions and incomplete exposure still block affected admission;
-endpoint-dispute membership and canonical replacement remain separate work.
+Amount contradictions and incomplete exposure still block affected admission.
+Typed endpoint distrust reserves liabilities that depend on effective payment
+proofs or the adopted checkpoint, even after restart; ordinary outages do not.
 
 All handles for a store/group share one gate. Accepted store jobs keep that gate
 after waiter cancellation, and funding-credit publication uses the same owner.

@@ -343,6 +343,22 @@ pub(crate) async fn repair_wallet(
     pool: String,
     wallet: String,
 ) -> Result<bool> {
+    let candidate = wallet.clone();
+    let canonical = store
+        .call(move |s| {
+            let reason: Option<String> = s.db.query_row(
+                "SELECT evidence_repair FROM wallets WHERE id=?1",
+                [&candidate],
+                |row| row.get(0),
+            )?;
+            let undisputed: bool =
+                s.db.query_row(super::UNDISPUTED_SQL, [&candidate], |row| row.get(0))?;
+            Ok(reason.as_deref() == Some("chain_repair_required") && !undisputed)
+        })
+        .await?;
+    if canonical {
+        return super::replacement::replace_wallet(store, base, pool, wallet).await;
+    }
     let snapshot = store
         .call(move |s| s.repair_snapshot(&pool, &wallet))
         .await?;

@@ -2,6 +2,166 @@
 use super::*;
 
 #[test]
+fn adopted_balance_support_detects_same_hash_amount_conflict_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
+    let treasury = store.id().to_owned();
+    crate::rotation::store::test_support::declare_two_reserves(&mut store, "support", "1", None, 0)
+        .unwrap();
+    let wallet = store.status().unwrap().pools.remove(0).addresses.remove(0);
+    let observation = BalanceObservation {
+        wallet: wallet.id.clone(),
+        address: wallet.address,
+        network: "eip155:8453".into(),
+        asset: crate::payment::USDC.into(),
+        endpoint: "a".repeat(64),
+        confirmations: 12,
+        confirmed: crate::rotation::base::evidence::BalancePoint {
+            anchor: Anchor {
+                height: 100,
+                hash: format!("0x{:064x}", 100),
+            },
+            amount: U256::from(20),
+        },
+        latest: crate::rotation::base::evidence::BalancePoint {
+            anchor: Anchor {
+                height: 112,
+                hash: format!("0x{:064x}", 112),
+            },
+            amount: U256::from(20),
+        },
+        valid_until: 1,
+    };
+    let support = serde_json::to_string(&BalanceSupport {
+        observation: observation.clone(),
+        checkpoint: Some(observation.confirmed.anchor.clone()),
+    })
+    .unwrap();
+    store.db.execute("INSERT INTO payment_resolution_repairs(id,wallet_id,verified_at,evidence_digest,resolution_count,confirmed_height,confirmed_hash,latest_height,latest_hash,endpoint,balance_support) VALUES('balance',?1,1,'fixture',1,100,?2,112,?3,?4,?5)",params![wallet.id,observation.confirmed.anchor.hash,observation.latest.anchor.hash,observation.endpoint,support]).unwrap();
+    drop(store);
+    let mut store = Store::open(&state, &key, &treasury).unwrap();
+    // Age never removes an exact same-hash integrity dependency.
+    store
+        .check_journal_support_or_invalidate(&wallet.id, &observation)
+        .unwrap();
+    for latest in [false, true] {
+        let mut changed = observation.clone();
+        if latest {
+            changed.latest.amount += U256::from(1);
+        } else {
+            changed.confirmed.amount += U256::from(1);
+        }
+        assert_eq!(
+            store
+                .check_journal_support_or_invalidate(&wallet.id, &changed)
+                .unwrap_err()
+                .downcast_ref::<EvidenceFailure>(),
+            Some(&EvidenceFailure::AmountContradiction)
+        );
+        let flag: Option<String> = store
+            .db
+            .query_row(
+                "SELECT evidence_repair FROM wallets WHERE id=?1",
+                [&wallet.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            flag.is_none(),
+            "an archival amount conflict cannot invent a financial checkpoint dependency"
+        );
+    }
+    let saved: String = store
+        .db
+        .query_row(
+            "SELECT balance_support FROM payment_resolution_repairs WHERE id='balance'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(saved, support);
+}
+
+#[test]
+fn replacement_proofs_and_checkpoint_supply_effective_endpoint_dependencies() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
+    let treasury = store.id().to_owned();
+    let pool = crate::rotation::store::test_support::declare_two_reserves(
+        &mut store,
+        "replacement",
+        "1",
+        None,
+        0,
+    )
+    .unwrap();
+    let wallet = store.funding_jobs().unwrap()[0].wallet_id.clone();
+    let original_endpoint = "a".repeat(64);
+    let proof_endpoint = "b".repeat(64);
+    let balance_endpoint = "c".repeat(64);
+    let original = serde_json::json!({"endpoint":original_endpoint}).to_string();
+    store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('replaced',?1,?2,0,'7','fixture','RESOLVED')", params![pool,wallet]).unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO payment_resolutions VALUES('replaced','USED',80,'original',1,?1)",
+            [&original],
+        )
+        .unwrap();
+    store.db.execute("INSERT INTO payment_resolution_repairs(id,wallet_id,verified_at,original_financial_height,original_financial_hash,original_debit_height,original_debit_hash,evidence_digest,resolution_count,confirmed_height,confirmed_hash,latest_height,latest_hash,endpoint,balance_support) VALUES('repair',?1,1,80,'original',80,'original','fixture',1,100,'current',112,'latest',?2,'fixture')",params![wallet,balance_endpoint]).unwrap();
+    store.db.execute("INSERT INTO payment_resolution_replacements(repair_id,attempt_id,outcome,height,hash,block_time,support,endpoint) VALUES('repair','replaced','EXPIRED_UNUSED',90,'canonical',2,?1,?2)",params![serde_json::json!({"endpoint":proof_endpoint}).to_string(),proof_endpoint]).unwrap();
+    assert_eq!(
+        store.qualification_state().unwrap()["payment_resolutions"][0]["outcome"],
+        "EXPIRED_UNUSED"
+    );
+    assert!(
+        !payment_endpoint_dependents(&store.db, &original_endpoint)
+            .unwrap()
+            .contains_key(&wallet)
+    );
+    for endpoint in [&proof_endpoint, &balance_endpoint] {
+        assert_eq!(
+            payment_endpoint_dependents(&store.db, endpoint)
+                .unwrap()
+                .get(&wallet),
+            Some(&false)
+        );
+    }
+    store
+        .invalidate_endpoint_evidence(&original_endpoint)
+        .unwrap();
+    assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
+    store
+        .invalidate_endpoint_evidence(&balance_endpoint)
+        .unwrap();
+    assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
+    assert_eq!(
+        store.qualification_state().unwrap()["payment_resolutions"],
+        serde_json::json!([])
+    );
+    drop(store);
+    let store = Store::open(&state, &key, &treasury).unwrap();
+    assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
+    let saved: (String, String) = store
+        .db
+        .query_row(
+            "SELECT outcome,support FROM payment_resolutions WHERE attempt_id='replaced'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(saved, ("USED".into(), original));
+    assert_eq!(
+        store.qualification_state().unwrap()["payment_resolutions"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn typed_endpoint_conflict_restores_only_owned_release_liabilities_after_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
@@ -132,7 +292,7 @@ fn typed_endpoint_conflict_restores_only_owned_release_liabilities_after_reopen(
     for (index, expected) in [
         Some("chain_repair_required"),
         None,
-        Some("evidence_repair_required"),
+        Some("chain_repair_required"),
         Some("evidence_repair_required"),
     ]
     .into_iter()
@@ -162,7 +322,7 @@ fn typed_endpoint_conflict_restores_only_owned_release_liabilities_after_reopen(
             .capture_payment_evidence(&wallets[2].id)
             .unwrap()
             .capacity_snapshot
-            .is_none()
+            .is_some()
     );
     let original: String = store
         .db

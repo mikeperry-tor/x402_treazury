@@ -48,6 +48,11 @@ C12's narrow all-releases-reserved capacity contract is implemented in `f7ec2b0`
 with the reviewed additive-index reopen fixup recorded below.
 C11 initial-capacity eligibility is implemented in `8760345` with its reviewed
 readiness-publication ownership fixup recorded below.
+C13 source-expiry isolation landed in `de6d93e`; scoped refund observations and
+their attribution fixup landed in `46489cf` and `c172c62`. Unidentifiable refund
+accounting is separated from SDK synchronization in `2ea6762`. Durable payment
+endpoint membership landed in `2f43075`. The C14 canonical replacement gate below
+records the reviewed schema19 implementation and passing validation.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
@@ -976,6 +981,48 @@ acquire complete fresh accounting independently. All five synthetic refund tests
 passed, including the actual asynchronous reconciliation stage preserving exact
 old rows and suppressing an independent fresh credit. Independent review found no
 blocking issues. Full synthetic-chain spendability acceptance remains outstanding.
+
+**C14 complete-wallet canonical replacement contract (implementation gate):**
+For an exact payment chain dispute with all resolved liabilities reserved, acquire
+current nonce facts in bounded pages at one pinned confirmed anchor. A pass uses
+one configured endpoint; only initial selection may use ordinary configured
+failover. No original admission, readiness or resolution hash is fetched. Original
+proof bytes remain in the audit/digest, not a historical truth prerequisite. A
+fresh balance is acquired last, covering the pinned anchor and retained numeric
+debit floor. Temporary SQLite staging is owned by the invocation and grants no
+release; cancellation and restart discard it.
+
+Atomic adoption verifies the complete resolved set, original/effective raw proofs,
+authorization ownership/amounts, endpoint/wallet generations and original
+financial/debit tuple. New pending liabilities remain reserved; changed resolved
+membership rejects adoption. New immutable replacement rows become effective proof
+authority, while original rows remain unchanged. The adopted checkpoint carries
+its final endpoint provenance and the audit retains the previous anchors. An
+existing or newly proven debit is reanchored without inventing a debit for an
+all-unused history. Only the payment chain flag/membership clears; funding and
+retirement disputes remain independent. Effective proofs and the adopted
+checkpoint participate in later conflict invalidation and qualification export.
+Fresh schema19 rejects older runtime state before mutation; no automatic or private
+state conversion is performed. Original historical read-only reports remain valid.
+
+Independent review corrected initial-anchor fallback, unnecessary old-support
+validation, creation of a nonexistent debit, an empty-inventory/retained-anchor
+case and missing indexed conflict checks for the adopted balance support after
+restart. Malformed historical endpoint provenance alone now restores conservative
+liabilities and requests canonical repair; it does not invent an unknown amount.
+Same-hash amount conflicts still reject the affected observation without adding a
+blanket historical stop. Four real RPC tests and all 42 integrated evidence tests
+passed with localhost permission, including the production repair owner after
+restart, both outcome reversals, paging, duplicate/new conflicting provenance,
+rollback and immutable audit checks. Another 108 store tests passed (two ignored
+subprocess helpers), including historical reports and qualification exports.
+The deployment identity/schema test and all-target/all-feature Clippy passed.
+The deployment fixture now disables irrelevant external pricing probes; its
+first external-dependent run was stopped and the local-only rerun passed after
+firewall permission. Formatting and diff checks passed. The older exact-revalidation path for
+unmatched legacy/manual flags remains; selected canonical repair never falls back
+to it after failure or an unresolved nonce. C15 fairness and final production
+acceptance remain separate work.
 
 ### Stage 1 — Minimal authority and dependency specification
 

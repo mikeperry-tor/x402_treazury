@@ -731,7 +731,15 @@ async fn exact_repair_clears_disputed_membership_only_with_its_verified_commit()
         s.db.execute_batch("DROP TRIGGER fail_repair_membership")?;
         Ok(())
     }).await.unwrap();
-    assert!(f.repair().await.unwrap());
+    // Exercise the retained exact-original commit directly; production dispatch
+    // now chooses canonical replacement when every resolved liability is disputed.
+    let verified = verify_snapshot(&f.store, &f.base, f.snapshot().await)
+        .await
+        .unwrap();
+    f.store
+        .call(move |s| s.commit_repair(verified))
+        .await
+        .unwrap();
     let wallet = f.wallet.clone();
     f.store
         .call(move |s| {

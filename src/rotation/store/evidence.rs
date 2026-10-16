@@ -1,5 +1,6 @@
 //! Exact supporting values live with the journal; runtime credentials never survive reopen.
 pub(crate) mod repair;
+pub(crate) mod replacement;
 use super::*;
 use crate::rotation::base::{
     Anchor,
@@ -186,6 +187,7 @@ mod tests {
             }
         }
         tx.commit().unwrap();
+        store.db.execute_batch("DROP VIEW effective_payment_resolutions; DROP TABLE payment_resolution_replacements; DROP TABLE payment_resolution_repairs;").unwrap();
         store
             .db
             .execute_batch(include_str!(
@@ -201,6 +203,8 @@ mod tests {
         store.db.execute_batch("PRAGMA user_version=13;").unwrap();
         let tx = store.db.transaction().unwrap();
         initialize_in_transaction(&tx).unwrap();
+        tx.execute_batch(include_str!("evidence/replacement_schema.sql"))
+            .unwrap();
         tx.pragma_update(None, "user_version", version).unwrap();
         tx.commit().unwrap();
         drop(store);
@@ -629,10 +633,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            repair, None,
-            "independently intact nonce proof does not depend on its admission balance"
+            repair.as_deref(),
+            Some("chain_repair_required"),
+            "endpoint distrust preserves released exposure independently of admission balances"
         );
-        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
         assert_eq!(checkpoint(&store.db, &wallet).unwrap(), Some(anchor(128)));
         *state.lock().unwrap() = (140, 80);
         let mut wrong_height = durable_support.clone();
@@ -675,7 +680,7 @@ mod tests {
                     .downcast_ref::<EvidenceFailure>(),
                 Some(&failure)
             );
-            assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
+            assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
             assert_eq!(checkpoint(&store.db, &wallet).unwrap(), Some(anchor(128)));
         }
         server.abort();
@@ -1357,10 +1362,10 @@ pub(super) fn advance_checkpoint(
     Ok(())
 }
 
-/// Six fixed indexed lookups shared by every publication. Building their JSON
+/// Fixed indexed lookups shared by every publication. Building their JSON
 /// predicates once keeps statement construction out of the serialized hot path.
-fn balance_support_queries() -> &'static [String; 6] {
-    static QUERIES: std::sync::LazyLock<[String; 6]> = std::sync::LazyLock::new(|| {
+fn balance_support_queries() -> &'static [String; 8] {
+    static QUERIES: std::sync::LazyLock<[String; 8]> = std::sync::LazyLock::new(|| {
         let required = [
             ("observation.wallet", "text"),
             ("observation.address", "text"),
@@ -1399,11 +1404,16 @@ fn balance_support_queries() -> &'static [String; 6] {
                 "e.wallet_id",
                 1,
             ),
+            (
+                "(SELECT wallet_id,balance_support AS support,confirmed_hash AS block_hash,latest_hash FROM payment_resolution_repairs) e",
+                "e.wallet_id",
+                1,
+            ),
         ];
         std::array::from_fn(|index| {
             let (column, path) =
-                [("block_hash", "confirmed"), ("latest_hash", "latest")][index / 3];
-            let (source, owner, missing) = sources[index % 3];
+                [("block_hash", "confirmed"), ("latest_hash", "latest")][index / sources.len()];
+            let (source, owner, missing) = sources[index % sources.len()];
             format!(
                 "SELECT COALESCE(e.support,''),CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM {source} WHERE {owner}=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN {missing} WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
             )
@@ -1420,7 +1430,7 @@ impl Store {
         certificate: &crate::rotation::base::ResolutionCertificate,
     ) -> Result<bool> {
         check_resolution(&self.db, self.evidence_namespace, certificate)?;
-        let existing:Option<(String,i64,String,u64)> = self.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
+        let existing:Option<(String,i64,String,u64)> = self.db.query_row("SELECT outcome,height,hash,block_time FROM effective_payment_resolutions WHERE attempt_id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
         if let Some((outcome, height, hash, block_time)) = existing {
             let expected =
                 if *certificate.outcome() == crate::rotation::base::AuthorizationOutcome::Used {
@@ -1674,14 +1684,14 @@ impl Store {
     }
 }
 
-/// Endpoint identity is an authority field inside original resolution support.
+/// Endpoint identity belongs to effective resolution and adopted checkpoint support.
 /// Guard extraction in the expression itself: SQLite may reorder predicates.
 /// Unknown provenance is contained to its owner, never treated as an absent debt.
 fn payment_endpoint_dependents(
     db: &Connection,
     endpoint: &str,
 ) -> Result<std::collections::BTreeMap<String, bool>> {
-    let mut query = db.prepare("WITH supports AS (SELECT a.wallet_id,CASE WHEN json_valid(r.support) THEN CASE WHEN json_type(r.support,'$.endpoint')='text' THEN json_extract(r.support,'$.endpoint') END END AS endpoint FROM payment_attempts a LEFT JOIN payment_resolutions r ON r.attempt_id=a.id WHERE a.state='RESOLVED') SELECT wallet_id,endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*' AS malformed FROM supports WHERE endpoint=?1 OR endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*'")?;
+    let mut query = db.prepare("WITH supports AS (SELECT a.wallet_id,r.endpoint FROM payment_attempts a LEFT JOIN effective_payment_resolutions r ON r.attempt_id=a.id WHERE a.state='RESOLVED' UNION ALL SELECT r.wallet_id,r.endpoint FROM payment_resolution_repairs r WHERE r.sequence=(SELECT n.sequence FROM payment_resolution_repairs n WHERE n.wallet_id=r.wallet_id ORDER BY n.sequence DESC LIMIT 1)) SELECT wallet_id,endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*' AS malformed FROM supports WHERE endpoint=?1 OR endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*'")?;
     let mut wallets = std::collections::BTreeMap::new();
     for row in query.query_map([endpoint], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
@@ -1713,7 +1723,7 @@ impl Store {
         let dependent: bool = if amount_conflict {
             false
         } else {
-            tx.query_row("SELECT EXISTS(SELECT 1 FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.wallet_id=?1 AND r.hash=?2)",params![wallet,anchor.hash],|row|row.get(0))?
+            tx.query_row("SELECT EXISTS(SELECT 1 FROM effective_payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.wallet_id=?1 AND r.hash=?2)",params![wallet,anchor.hash],|row|row.get(0))?
         };
         if financial_checkpoint || dependent {
             if !amount_conflict {
@@ -1723,7 +1733,7 @@ impl Store {
                 tx.execute("UPDATE payment_attempts SET resolution_disputed=1 WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0", [wallet])?;
             }
             tx.execute(
-                "UPDATE wallets SET evidence_repair=?2 WHERE id=?1",
+                "UPDATE wallets SET evidence_repair=CASE WHEN evidence_repair='evidence_repair_required' THEN evidence_repair ELSE ?2 END WHERE id=?1",
                 params![
                     wallet,
                     if amount_conflict {
@@ -1768,12 +1778,15 @@ impl Store {
         );
         let tx = self.db.transaction()?;
         let payment_wallets = payment_endpoint_dependents(&tx, endpoint)?;
-        for (wallet, malformed) in &payment_wallets {
-            // Checkpoints advance only from released payment proofs. Losing
-            // their endpoint invalidates every release for this wallet; the
+        for wallet in payment_wallets.keys() {
+            // Losing effective resolution or adopted checkpoint provenance
+            // invalidates every release for this wallet; the
             // original proof, financial/debit anchors and attempt stay intact.
             tx.execute("UPDATE payment_attempts SET resolution_disputed=1 WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0", [wallet])?;
-            let changed = tx.execute("UPDATE wallets SET evidence_repair=CASE WHEN evidence_repair='evidence_repair_required' OR ?2 THEN 'evidence_repair_required' ELSE 'chain_repair_required' END WHERE id=?1", params![wallet,malformed])?;
+            // Unknown historical endpoint provenance does not make the exact
+            // authorization amount unknown. Reserve it and reacquire proof;
+            // independent amount contradictions retain their stronger stop.
+            let changed = tx.execute("UPDATE wallets SET evidence_repair=CASE WHEN evidence_repair='evidence_repair_required' THEN evidence_repair ELSE 'chain_repair_required' END WHERE id=?1", [wallet])?;
             ensure!(changed == 1, EvidenceFailure::ScopeMismatch);
             bump_generation(&tx, "wallet", wallet)?;
         }

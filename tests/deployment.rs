@@ -1227,7 +1227,8 @@ async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity
         )
         .unwrap();
     }
-    let config = configuration() + &format!("\n[treasury]\nstate_dir={state:?}\n");
+    let config = configuration().replace("spec = ", "probe_pricing = false\nspec = ")
+        + &format!("\n[treasury]\nstate_dir={state:?}\n");
     let path = write_config(dir.path(), &config);
     let deployment = Deployment::load(&path).await.unwrap();
     let running = deployment.bind(&env()).await.unwrap();
@@ -1264,7 +1265,7 @@ async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity
             .contains("state identity mismatch")
     );
     let path = write_config(dir.path(), &config);
-    for version in [15, 16, 17, 19] {
+    for version in [15, 16, 17, 18, 20] {
         db.pragma_update(None, "user_version", version).unwrap();
         assert!(treasury.runtime_id().is_err());
         let deployment = Deployment::load(&path).await.unwrap();

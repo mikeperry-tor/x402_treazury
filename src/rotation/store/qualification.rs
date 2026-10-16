@@ -168,7 +168,16 @@ fn read(db: &Connection) -> Result<Value> {
     let resolutions = if version < 11 {
         Vec::new()
     } else {
-        db.prepare("SELECT attempt_id,outcome,height,hash,block_time FROM payment_resolutions ORDER BY attempt_id")?
+        // Export currently supported dispositions. Original proofs remain in
+        // their audit table; a disputed or superseded proof is not settlement.
+        let sql = if version >= 19 {
+            "SELECT r.attempt_id,r.outcome,r.height,r.hash,r.block_time FROM effective_payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.state='RESOLVED' AND a.resolution_disputed=0 ORDER BY r.attempt_id"
+        } else if version >= 17 {
+            "SELECT r.attempt_id,r.outcome,r.height,r.hash,r.block_time FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.state='RESOLVED' AND a.resolution_disputed=0 ORDER BY r.attempt_id"
+        } else {
+            "SELECT attempt_id,outcome,height,hash,block_time FROM payment_resolutions ORDER BY attempt_id"
+        };
+        db.prepare(sql)?
         .query_map([], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"outcome":r.get::<_,String>(1)?,
             "height":r.get::<_,i64>(2)?,"hash":r.get::<_,String>(3)?,"block_time":r.get::<_,i64>(4)?})))?
         .collect::<rusqlite::Result<Vec<_>>>()?

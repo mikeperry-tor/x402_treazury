@@ -11,6 +11,7 @@ use std::{
 pub mod evidence;
 pub(crate) mod historical;
 mod receipt;
+pub(crate) mod replacement;
 mod resources;
 #[cfg(test)]
 pub(crate) use resources::available_queries;
