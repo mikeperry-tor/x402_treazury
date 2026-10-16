@@ -149,7 +149,7 @@ impl TransactionPreparer for Treasury {
                 transfer_limit_zatoshis = request.max_input_zatoshis,
                 "funding proposal exceeds max_funding_transaction_fee_zec or max_funding_spend_zec; standard network fee was not overridden"
             );
-            anyhow::bail!("funding_cost_limit_exceeded");
+            anyhow::bail!(crate::rotation::error::FundingCondition::CostLimit);
         }
         ensure!(
             zingolib::data::proposal::total_payment_amount(&proposal)? == amount,

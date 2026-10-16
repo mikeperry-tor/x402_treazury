@@ -54,10 +54,6 @@ impl Store {
         instant: u64,
         diagnostic: &str,
     ) -> Result<()> {
-        ensure!(
-            diagnostic.starts_with("prepared_quote_window_exhausted;"),
-            "invalid source disposition"
-        );
         let facts = self.funding_facts(job, operation)?;
         ensure!(
             facts.source_attempts == 0,
@@ -71,63 +67,22 @@ impl Store {
                 < super::super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
             "prepared quote window remains usable"
         );
-        let changed=self.db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error=CASE WHEN last_error LIKE 'funding_integrity_conflict;%' THEN last_error ELSE ?3 END WHERE job_id=?1 AND operation_id=?2 AND phase='\"PREPARED\"'",params![job,operation,diagnostic])?;
+        let changed=self.db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error=?3 WHERE job_id=?1 AND operation_id=?2 AND phase='\"PREPARED\"'",params![job,operation,diagnostic])?;
         ensure!(changed == 1, "funding phase conflict");
         Ok(())
     }
-    /// An actual serialized recovery owner returned an operator disposition.
-    /// Successful unrelated reads cannot erase that disposition.
+    /// Publish the serialized recovery owner's diagnostic. Canonical obligations
+    /// and current policy, never this text, determine subsequent disposition.
     pub(crate) fn record_source_operator_requirement(
         &mut self,
         job: &str,
         operation: &str,
         diagnostic: &str,
     ) -> Result<()> {
-        ensure!(
-            diagnostic.starts_with("funding_recovery_requires_operator;"),
-            "invalid source disposition"
-        );
-        let tx = self.db.transaction()?;
-        let previous:Option<Option<String>>=tx.query_row("SELECT last_error FROM funding_progress WHERE job_id=?1 AND operation_id=?2 AND phase!='\"COMPLETE\"'",params![job,operation],|row|row.get(0)).optional()?;
-        let Some(previous) = previous else {
-            return Ok(());
-        };
-        let conflict = diagnostic
-            == "funding_recovery_requires_operator; conflicting_transaction_or_input_evidence";
-        let retained = previous.as_deref().is_some_and(|value| {
-            [
-                "funding_attempt_closed;",
-                "funding_quote_failed;",
-                "quote_refresh_exhausted;",
-                "prepared_quote_window_exhausted;",
-            ]
-            .iter()
-            .any(|prefix| value.starts_with(prefix))
-        });
-        let diagnostic = if previous
-            .as_deref()
-            .is_some_and(|value| value.starts_with("funding_integrity_conflict;"))
-        {
-            previous.unwrap()
-        } else if retained && !conflict {
-            let base = previous
-                .as_deref()
-                .unwrap()
-                .split("; source_operator: ")
-                .next()
-                .unwrap();
-            let reason = diagnostic
-                .strip_prefix("funding_recovery_requires_operator; ")
-                .context("invalid source disposition")?;
-            format!("{base}; source_operator: {reason}")
-        } else {
-            diagnostic.to_owned()
-        };
-        tx.execute(
-            "UPDATE funding_progress SET last_error=?3 WHERE job_id=?1 AND operation_id=?2",
+        self.db.execute(
+            "UPDATE funding_progress SET last_error=?3 WHERE job_id=?1 AND operation_id=?2 AND phase!='\"COMPLETE\"'",
             params![job, operation, diagnostic],
         )?;
-        tx.commit()?;
         Ok(())
     }
 
@@ -142,15 +97,12 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN last_error LIKE 'funding_integrity_conflict;%' THEN last_error WHEN ?4 LIKE 'funding_integrity_conflict;%' THEN ?4 WHEN phase='\"COMPLETE\"' THEN NULL WHEN last_error LIKE 'funding_recovery_requires_operator;%' THEN last_error WHEN phase IN ('\"RECOVERY_REQUIRED\"','\"PREPARING\"') THEN last_error ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
+        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN 'funding_integrity_conflict; contradictory provider outcome' WHEN phase='\"COMPLETE\"' THEN NULL ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
         if changed == 1 {
             tx.execute("INSERT INTO funding_health(job_id,error_streak) SELECT ?1,CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?2 END FROM funding_progress WHERE job_id=?1 ON CONFLICT(job_id) DO UPDATE SET error_streak=excluded.error_streak",params![job,streak])?;
         }
         tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs WHERE id=?1 AND state='COMPLETE')",[job])?;
         tx.commit()?;
-        if changed == 1 {
-            self.observe_funding_shortage(job, operation, error);
-        }
         Ok(())
     }
 }
@@ -201,10 +153,7 @@ mod tests {
                 .record_funding_observation_health(&job.id, &job.operation_id, 100, 1, error)
                 .unwrap();
             let saved = store.funding_job(&job.id).unwrap().unwrap();
-            assert_eq!(
-                saved.last_error.as_deref(),
-                Some("quote_refresh_exhausted; no preparation started")
-            );
+            assert_eq!(saved.last_error.as_deref(), error);
             assert!(!crate::rotation::store::funding::can_recover_facts(
                 &saved,
                 None,
@@ -228,7 +177,10 @@ mod tests {
             )
             .unwrap();
         let unknown = store.funding_job(&job.id).unwrap().unwrap();
-        assert!(unknown.last_error.is_none());
+        assert_eq!(
+            unknown.last_error.as_deref(),
+            Some("funding_quote_failed; no preparation started")
+        );
         assert!(!crate::rotation::store::funding::can_recover_facts(
             &unknown,
             None,
@@ -249,10 +201,7 @@ mod tests {
                 .record_funding_observation_health(&job.id, &job.operation_id, 200, 1, error)
                 .unwrap();
             let blocked = store.funding_job(&job.id).unwrap().unwrap();
-            assert_eq!(
-                blocked.last_error.as_deref(),
-                Some("funding_recovery_requires_operator; unresolved preparation")
-            );
+            assert_eq!(blocked.last_error.as_deref(), error);
             assert!(!crate::rotation::store::funding::can_recover_facts(
                 &blocked,
                 None,
@@ -313,9 +262,8 @@ mod source_disposition_tests {
                 .unwrap();
             let current = store.funding_job(&job.id).unwrap().unwrap();
             assert_eq!(current.operation_id, job.operation_id);
-            let diagnostic = current.last_error.as_deref().unwrap();
-            assert!(diagnostic.starts_with("funding_attempt_closed;"));
-            assert_eq!(diagnostic.matches("; source_operator: ").count(), 1);
+            assert!(current.last_error.is_none());
+            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
             assert!(crate::rotation::store::funding::can_recover_facts(
                 &current,
                 None,

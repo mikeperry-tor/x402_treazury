@@ -449,6 +449,11 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
                     1,
                     Some(shortage),
                 )?;
+                s.observe_funding_condition(
+                    &job.id,
+                    "archived-operation",
+                    Some(crate::rotation::error::FundingCondition::InsufficientFunds),
+                )?;
                 Ok(())
             })
             .await
@@ -469,6 +474,11 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
                     0,
                     1,
                     Some(shortage),
+                )?;
+                s.observe_funding_condition(
+                    &job.id,
+                    &job.operation_id,
+                    Some(crate::rotation::error::FundingCondition::InsufficientFunds),
                 )
             })
             .await

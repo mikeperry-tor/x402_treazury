@@ -954,7 +954,7 @@ async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_sen
 }
 
 #[tokio::test]
-async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() {
+async fn uncertain_preparation_stays_quarantined_after_observation_clears_diagnostic() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
@@ -971,12 +971,19 @@ async fn uncertain_preparation_stays_quarantined_and_retains_failure_evidence() 
     worker.tick(now + 10).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(status.funding_jobs[0].phase, FundingPhase::RecoveryRequired);
+    assert_eq!(status.funding_jobs[0].last_error, None);
+    let operation = status.funding_jobs[0].operation_id.clone();
+    worker.tick(now + 400).await.unwrap();
+    let later = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(later.funding_jobs[0].operation_id, operation);
+    assert_eq!(later.funding_jobs[0].phase, FundingPhase::RecoveryRequired);
     assert_eq!(
-        status.funding_jobs[0].last_error.as_deref(),
-        Some("preparation_fixture_failure")
+        later.funding_jobs[0].attempts,
+        status.funding_jobs[0].attempts
     );
     assert_eq!(worker.backend.lock().await.sends, 0);
     assert!(status.treasury_operations.is_empty());
+    assert!(later.treasury_operations.is_empty());
     drop(worker);
     task.await.unwrap();
 }
