@@ -495,6 +495,24 @@ C06/C07 capability-local initialization failures. Entry-point fixtures cover ena
 auto-funding with an empty treasury, no bootstrap wait, typed no-payer failure,
 zero provider requests/allocations/jobs and second-listener rollback.
 
+**C07 authenticated SDK failure contract (reviewed narrow serving slice):** Ordinary
+non-qualification binding can retain the exact authenticated Store when SDK decoding
+alone fails. Shared schema, key, ciphertext authentication, identity and owner errors
+remain fatal; explicit bootstrap, relay setup and qualification remain strict. Pause
+new funding before configured profile/claim transitions. Existing Base keys,
+journals, admission and reconciliation use the same serialized StoreHandle; no SDK,
+funding actor, source submission or recovery reset is started. Configuring claims
+can apply ordinary cap/target/removal transitions but allocates no wallets. Setup
+errors, binding rollback and normal shutdown drop dependent handles and await the
+owner. Cancellation/drop preserves accepted store work and releases ownership when
+that queue drains. SDK restoration in this slice needs restart; supervised SDK
+reconstruction remains C17. Funding-only configuration/preflight isolation remains
+C06, and enabled relay deferred publication remains C08. Synthetic entry-point
+fixtures cover signed Base payment, unresolved-liability rejection, mixed static
+discovery, unchanged snapshot/funding inventory, strict/shared-failure controls,
+rollback and cancelled/dropped deployment cleanup. These do not constitute live
+funded qualification.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

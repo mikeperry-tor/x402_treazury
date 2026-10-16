@@ -589,3 +589,14 @@ pages. Only the affected inventory lane waits for its normal poll cadence; accep
 source work and independent credit/status observations retain their owners. Initial
 inventory acquisition also retains its lease while retrying. Financial publication
 and source mutations are never replayed by this mechanism.
+
+For ordinary serving without an enabled discovery relay, catalogs and listeners
+can start before managed wallets are funded. All listener sockets bind before new
+funding starts; an empty pool returns `wallet_not_ready` before provider I/O.
+Explicit `wallet bootstrap` still waits for its captured enabled reserve claims.
+If shared state authenticates but the Zcash SDK cannot decode its snapshot, ordinary
+serving retains that same store for existing Base payments and reconciliation and
+pauses new funding. Schema, key, identity, authentication and owner failures still
+stop initialization. Funding configuration/preflight remains required in this
+implementation slice; fixing SDK snapshot availability requires restart. Paid relay
+startup and qualification remain strict.

@@ -4,7 +4,7 @@ use crate::rotation::restriction::FundingRestriction;
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-fn managed_config() -> String {
+pub(super) fn managed_config() -> String {
     r#"version=1
 [treasury]
 state_dir='state'
@@ -40,7 +40,7 @@ sources=['api']
 "#
     .into()
 }
-fn env() -> BTreeMap<String, String> {
+pub(super) fn env() -> BTreeMap<String, String> {
     [
         ("TOKEN", "fixture-token"),
         ("INDEXER", "http://127.0.0.1:1"),
@@ -51,7 +51,7 @@ fn env() -> BTreeMap<String, String> {
     .map(|(k, v)| (k.into(), v.into()))
     .collect()
 }
-fn write_spec(dir: &Path) {
+pub(super) fn write_spec(dir: &Path) {
     std::fs::write(
         dir.join("spec.json"),
         r#"{"operations":[{"method":"GET","path":"/read"}]}"#,

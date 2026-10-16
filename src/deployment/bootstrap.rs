@@ -315,12 +315,16 @@ impl InitializedWallets {
     pub(super) async fn shutdown(mut self) -> Result<()> {
         let supervisor = self.supervisor.take();
         let treasury = self.treasury.take();
+        let store_only = self.store_only.take();
         drop(self);
         if let Some(supervisor) = supervisor {
             supervisor.shutdown().await?;
         }
         if let Some(treasury) = treasury {
             treasury.close().await?;
+        }
+        if let Some(owner) = store_only {
+            owner.close().await?;
         }
         Ok(())
     }
@@ -338,7 +342,12 @@ async fn supervise(
         funding_runtime,
         supervisor,
         managed_pools,
+        store_only,
     } = initialized;
+    ensure!(
+        store_only.is_none(),
+        "explicit bootstrap requires treasury SDK"
+    );
     ensure!(
         supervisor.is_none(),
         "explicit bootstrap received a running supervisor"
