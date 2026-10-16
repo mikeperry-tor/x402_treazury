@@ -370,13 +370,13 @@ async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
         let gate = gate.clone();
         waiters.push(tokio::spawn(async move {
             relay
-                .fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate))
+                .fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate), None)
                 .await
         }));
     }
     tokio::time::timeout(
         Duration::from_secs(5),
-        ready.fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate)),
+        ready.fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate), None),
     )
     .await
     .unwrap()

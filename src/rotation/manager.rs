@@ -180,6 +180,12 @@ impl ManagedPool {
             .call(move |s| Ok(s.capacity_changes(&pool)))
             .await
     }
+    pub(crate) async fn discovery_requires_creation(&self) -> Result<bool> {
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| s.payment_identity_requires_creation(&pool))
+            .await
+    }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
         let pool = self.pool.clone();
         self.store

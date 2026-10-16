@@ -254,6 +254,17 @@ impl Store {
         Ok(default_identity(&self.db, pool)?.is_some())
     }
 
+    /// Diagnostic fact only: no wallet exists that observation could restore.
+    /// A false identity lookup alone cannot establish this fact.
+    pub(crate) fn payment_identity_requires_creation(&self, pool: &str) -> Result<bool> {
+        let (pools, wallets): (i64, i64) = self.db.query_row(
+            "SELECT (SELECT count(*) FROM pools WHERE id=?1), (SELECT count(*) FROM wallets WHERE pool_id=?1)",
+            [pool], |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        ensure!(pools == 1, "missing capacity group");
+        Ok(wallets == 0)
+    }
+
     /// Resolve unsigned identity under the group gate, reconstructing an absent
     /// active role only from eligible retained capacity.
     /// Balance freshness and liabilities belong to later payment admission.
@@ -352,6 +363,7 @@ impl Store {
         )?;
         ensure!(tx.execute("UPDATE reserve_claims SET wallet_id=?4 WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND wallet_id IS NULL AND enabled=1",params![pool,slot,generation,wallet])?==1,"reserve_claim_conflict");
         tx.commit()?;
+        self.notify_capacity_changed(pool);
         Ok(Some(job))
     }
 }

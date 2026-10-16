@@ -39,7 +39,12 @@ enum PreparedDocument {
     Relay(Box<catalog::RelayContinuation>),
 }
 impl DeferredDocument {
-    async fn resume(&self, gate: Arc<tokio::sync::Semaphore>) -> Result<Document> {
+    async fn resume(
+        &self,
+        gate: Arc<tokio::sync::Semaphore>,
+        can_allocate: bool,
+        operator_status: Option<tokio::sync::watch::Sender<bool>>,
+    ) -> Result<Document> {
         let prepared = self
             .0
             .prepared
@@ -60,9 +65,11 @@ impl DeferredDocument {
             .await;
         match prepared {
             Ok(PreparedDocument::Ready(document)) => Ok(document.clone()),
-            Ok(PreparedDocument::Relay(pending)) => {
-                Ok(Arc::new(pending.resume_when_ready(gate).await?))
-            }
+            Ok(PreparedDocument::Relay(pending)) => Ok(Arc::new(
+                pending
+                    .resume_when_ready(gate, if can_allocate { None } else { operator_status })
+                    .await?,
+            )),
             Err(error) => Err(anyhow::Error::new(error.clone())),
         }
     }
@@ -81,6 +88,7 @@ impl std::error::Error for DeferredDocument {}
 #[derive(Clone, Debug)]
 pub(super) struct PendingSource {
     pub config: catalog::Config,
+    pub operator_required: bool,
     document: DeferredDocument,
 }
 impl std::fmt::Display for PendingSource {
@@ -90,8 +98,17 @@ impl std::fmt::Display for PendingSource {
 }
 impl std::error::Error for PendingSource {}
 impl PendingSource {
-    pub async fn resume(&self, id: &str, gate: Arc<tokio::sync::Semaphore>) -> Result<Source> {
-        let document = self.document.resume(gate).await?;
+    pub async fn resume(
+        &self,
+        id: &str,
+        gate: Arc<tokio::sync::Semaphore>,
+        can_allocate: bool,
+        status: tokio::sync::watch::Sender<bool>,
+    ) -> Result<Source> {
+        let document = self
+            .document
+            .resume(gate, can_allocate, Some(status))
+            .await?;
         Source::from_document(id, self.config.clone(), document)
     }
 }
@@ -419,6 +436,7 @@ impl Source {
         {
             return Err(PendingSource {
                 config: cfg,
+                operator_required: false,
                 document: pending.clone(),
             }
             .into());
@@ -737,7 +755,10 @@ mod deferred_tests {
         let gate = Arc::new(tokio::sync::Semaphore::new(1));
         let task_gate = gate.clone();
         let resumes = tokio::spawn(async move {
-            tokio::join!(first.resume(task_gate.clone()), second.resume(task_gate))
+            tokio::join!(
+                first.resume(task_gate.clone(), true, None),
+                second.resume(task_gate, true, None)
+            )
         });
         observed.await.unwrap();
         assert_eq!(gate.available_permits(), 0);
