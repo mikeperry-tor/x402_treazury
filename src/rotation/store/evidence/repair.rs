@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 // Keyset pages bound memory, not how much historical work may finish.
 const ROWS: &str = "SELECT a.reconciliation_sequence,json_object(
  'authorization',json_object('id',a.id,'wallet',a.wallet_id,'payer',a.payer,'nonce',a.nonce,'valid_before',a.valid_before),
- 'amount',a.amount,'state',a.state,'resolution_disputed',a.resolution_disputed,'payee',a.payee,'valid_after',a.valid_after,'requirements_hash',a.requirements_hash,'pool',a.pool_id,'generation',a.generation,
+ 'amount',a.amount,'state',a.state,'resolution_disputed',(a.state='RESOLVED' AND (SELECT payment_resolutions_disputed FROM wallets WHERE id=a.wallet_id)),'payee',a.payee,'valid_after',a.valid_after,'requirements_hash',a.requirements_hash,'pool',a.pool_id,'generation',a.generation,
  'admission',json_object('height',e.block_height,'hash',e.block_hash,'balance',e.balance,'valid_until',e.valid_until,'support',e.support,'latest_height',e.latest_height,'latest_hash',e.latest_hash,'endpoint',e.endpoint,'reserved_before',e.reserved_before,'payer_role',e.payer_role,'reserve_slot',e.reserve_slot,'claim_generation',e.claim_generation),
  'resolution',CASE WHEN r.attempt_id IS NULL THEN NULL ELSE json_object('outcome',r.outcome,'height',r.height,'hash',r.hash,'block_time',r.block_time,'support',r.support) END)
  FROM payment_attempts a LEFT JOIN payment_admission_evidence e ON e.attempt_id=a.id
@@ -321,7 +321,10 @@ impl Store {
         let tx = self.db.transaction()?;
         let changed = tx.execute("UPDATE wallets SET evidence_repair=NULL WHERE id=?1 AND evidence_repair='chain_repair_required'",[&saved.wallet])?;
         ensure!(changed == 1, EvidenceFailure::Invalidated);
-        tx.execute("UPDATE payment_attempts SET resolution_disputed=0 WHERE wallet_id=?1 AND resolution_disputed=1", [&saved.wallet])?;
+        tx.execute(
+            "UPDATE wallets SET payment_resolutions_disputed=0 WHERE id=?1",
+            [&saved.wallet],
+        )?;
         check_balance(&tx, self.evidence_namespace, certificate)?;
         tx.execute("INSERT INTO wallet_evidence_repairs(wallet_id,verified_at,evidence_digest,resolution_count,balance_count,confirmed_height,confirmed_hash,latest_height,latest_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![saved.wallet,i64::try_from(crate::rotation::base::now()?)?,saved.digest,i64::try_from(saved.resolutions)?,i64::try_from(verified.balances)?,i64::try_from(o.confirmed.anchor.height)?,o.confirmed.anchor.hash,i64::try_from(o.latest.anchor.height)?,o.latest.anchor.hash])?;

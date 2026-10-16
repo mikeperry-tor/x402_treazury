@@ -1,4 +1,43 @@
 use super::*;
+
+impl Store {
+    fn finish_replacement_fixture(
+        &mut self,
+        snapshot: Snapshot,
+        pass: Arc<ReplacementPass>,
+        fresh: ReplacementBalance,
+        digest: String,
+        count: usize,
+    ) -> Result<()> {
+        self.seal_replacement(&snapshot, &digest, count)?;
+        let mut pending = self.replacement_liability_start(&snapshot)?;
+        while !pending.complete {
+            ensure!(
+                self.replacement_liability_page(&snapshot, &mut pending)?,
+                EvidenceFailure::Invalidated
+            );
+        }
+        let mut cursor = SupportCursor::default();
+        while !cursor.complete {
+            ensure!(
+                self.replacement_support_page(&snapshot, &fresh, &pending, &mut cursor)?,
+                EvidenceFailure::Invalidated
+            );
+        }
+        let validated = Validated {
+            pending,
+            observation: fresh.view().balance_certificates[&snapshot.wallet]
+                .observation()
+                .clone(),
+        };
+        ensure!(
+            self.commit_replacement(&snapshot, &pass, &fresh, &validated)?,
+            EvidenceFailure::Expired
+        );
+        Ok(())
+    }
+}
+
 use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 use std::sync::Mutex;
@@ -199,7 +238,7 @@ async fn canonical_replacement_preserves_originals_releases_only_complete_set_an
         f.store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('new-pending',?1,?2,0,'7','fixture','POSSIBLY_SUBMITTED')",params![f.pool,f.wallet]).unwrap();
         let fresh = f.base.finish_replacement(&pass).await.unwrap();
         f.store
-            .commit_replacement(snapshot, pass, fresh, digest, count)
+            .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
             .unwrap();
         assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::from(7));
         let after: Vec<String> = f
@@ -266,7 +305,7 @@ async fn canonical_replacement_preserves_originals_releases_only_complete_set_an
             .store
             .db
             .query_row(
-                "SELECT COUNT(*) FROM resolution_replacement_stage",
+                "SELECT COUNT(*) FROM payment_resolution_repairs WHERE activated=0",
                 [],
                 |row| row.get(0),
             )
@@ -310,7 +349,7 @@ async fn canonical_replacement_rejects_changed_membership_and_checkpoint_without
                     .unwrap();
             }
             2 => {
-                f.store.db.execute("UPDATE payment_attempts SET resolution_disputed=0 WHERE id='resolved-0000'",[]).unwrap();
+                f.store.db.execute("UPDATE wallets SET payment_resolutions_disputed=0 WHERE id=(SELECT wallet_id FROM payment_attempts WHERE id='resolved-0000')",[]).unwrap();
             }
             3 => {
                 f.store
@@ -323,14 +362,14 @@ async fn canonical_replacement_rejects_changed_membership_and_checkpoint_without
         }
         assert!(
             f.store
-                .commit_replacement(snapshot, pass, fresh, digest, count)
+                .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
                 .is_err()
         );
         let replacements: i64 = f
             .store
             .db
             .query_row(
-                "SELECT COUNT(*) FROM payment_resolution_replacements",
+                "SELECT COUNT(*) FROM payment_resolution_replacements r JOIN payment_resolution_repairs p ON p.id=r.repair_id WHERE p.activated=1",
                 [],
                 |row| row.get(0),
             )
@@ -340,7 +379,7 @@ async fn canonical_replacement_rejects_changed_membership_and_checkpoint_without
             .store
             .db
             .query_row(
-                "SELECT COUNT(*) FROM payment_resolution_repairs",
+                "SELECT COUNT(*) FROM payment_resolution_repairs WHERE activated=1",
                 [],
                 |row| row.get(0),
             )
@@ -427,7 +466,7 @@ async fn replacement_does_not_require_obsolete_proof_payloads_but_preserves_them
         let (snapshot, pass, digest, count) = f.stage().await;
         let fresh = f.base.finish_replacement(&pass).await.unwrap();
         f.store
-            .commit_replacement(snapshot, pass, fresh, digest, count)
+            .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
             .unwrap();
         let saved: Option<String> = f
             .store
@@ -450,9 +489,16 @@ async fn replacement_rejects_missing_authoritative_rows_and_ambiguous_amounts() 
     ] {
         let mut f = Fixture::new(1, true).await;
         f.store.db.execute(sql, []).unwrap();
+        let snapshot = f
+            .store
+            .begin_replacement_staging(&f.pool, &f.wallet, Uuid::new_v4().to_string())
+            .unwrap()
+            .unwrap();
+        let page = rows(&f.store.db, &f.wallet, "").unwrap();
         assert!(
-            f.store
-                .begin_replacement_staging(&f.pool, &f.wallet, Uuid::new_v4().to_string())
+            serde_json::from_str::<Row>(&page[0].1)
+                .unwrap()
+                .authorization(&snapshot)
                 .is_err()
         );
     }
@@ -470,7 +516,7 @@ async fn replacement_rejects_missing_authoritative_rows_and_ambiguous_amounts() 
     let fresh = f.base.finish_replacement(&pass).await.unwrap();
     assert_eq!(
         f.store
-            .commit_replacement(snapshot, pass, fresh, digest, count)
+            .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
             .unwrap_err()
             .downcast_ref::<EvidenceFailure>(),
         Some(&EvidenceFailure::MalformedSupport)
@@ -571,7 +617,7 @@ async fn adoption_rejects_same_hash_amount_contradiction_before_releasing_liabil
     f.store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES('resolved-0000',?1,?2,'999','0',?3,?4,?5,?6,?7,'ACTIVE')",params![i64::try_from(observation.confirmed.anchor.height).unwrap(),observation.confirmed.anchor.hash,observation.valid_until.to_string(),serde_json::to_string(&support).unwrap(),i64::try_from(observation.latest.anchor.height).unwrap(),observation.latest.anchor.hash,observation.endpoint]).unwrap();
     assert_eq!(
         f.store
-            .commit_replacement(snapshot, pass, fresh, digest, count)
+            .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
             .unwrap_err()
             .downcast_ref::<EvidenceFailure>(),
         Some(&EvidenceFailure::AmountContradiction)
@@ -591,7 +637,7 @@ async fn adoption_rejects_same_hash_amount_contradiction_before_releasing_liabil
         .store
         .db
         .query_row(
-            "SELECT COUNT(*) FROM payment_resolution_repairs",
+            "SELECT COUNT(*) FROM payment_resolution_repairs WHERE activated=1",
             [],
             |row| row.get(0),
         )
@@ -606,7 +652,7 @@ async fn unused_replacement_preserves_absent_debit_and_unexpired_nonce_cannot_re
     let (snapshot, pass, digest, count) = f.stage().await;
     let fresh = f.base.finish_replacement(&pass).await.unwrap();
     f.store
-        .commit_replacement(snapshot, pass, fresh, digest, count)
+        .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
         .unwrap();
     assert!(debit_checkpoint(&f.store.db, &f.wallet).unwrap().is_none());
 
@@ -735,4 +781,394 @@ async fn retired_repair_releases_disputed_liability_without_restoring_payment_au
         .unwrap();
     drop(store);
     worker.await.unwrap();
+}
+
+#[tokio::test]
+async fn publication_pages_are_inactive_and_activation_never_rewrites_attempts() {
+    let mut f = Fixture::new(PAGE + 1, true).await;
+    let snapshot = f
+        .store
+        .begin_replacement_staging(&f.pool, &f.wallet, Uuid::new_v4().to_string())
+        .unwrap()
+        .unwrap();
+    let pass = Arc::new(
+        f.base
+            .begin_replacement(
+                snapshot.capture.clone(),
+                snapshot.address.clone(),
+                snapshot.debit.as_ref().map(|a| a.height),
+            )
+            .await
+            .unwrap(),
+    );
+    let revision_before = f.store.liability_revision(&f.wallet).unwrap();
+    let mut digest = Sha256::new();
+    let mut after = String::new();
+    let mut count = 0;
+    loop {
+        let originals = rows(&f.store.db, &f.wallet, &after).unwrap();
+        if originals.is_empty() {
+            break;
+        }
+        let auth = originals
+            .iter()
+            .map(|(_, raw)| {
+                serde_json::from_str::<Row>(raw)
+                    .unwrap()
+                    .authorization(&snapshot)
+                    .unwrap()
+            })
+            .collect();
+        let page = f.base.replacement_page(&pass, auth).await.unwrap();
+        for (id, raw) in &originals {
+            after = id.clone();
+            count += 1;
+            digest_row(&mut digest, raw);
+        }
+        f.store
+            .stage_replacement_page(&snapshot, &pass, originals, page)
+            .unwrap();
+        assert_eq!(
+            f.store
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM payment_resolution_replacements",
+                    [],
+                    |r| r.get::<_, i64>(0).map(|n| n as usize)
+                )
+                .unwrap(),
+            count
+        );
+        assert_eq!(
+            f.store
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM effective_payment_resolutions WHERE outcome='USED'",
+                    [],
+                    |r| r.get::<_, i64>(0).map(|n| n as usize)
+                )
+                .unwrap(),
+            PAGE + 1
+        );
+        assert!(
+            f.store.qualification_state().unwrap()["payment_resolutions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            exposure(&f.store.db, &f.wallet).unwrap(),
+            U256::from(PAGE + 1)
+        );
+        assert_eq!(
+            f.store.liability_revision(&f.wallet).unwrap(),
+            revision_before
+        );
+        if count == PAGE {
+            assert!(f.store.clear_abandoned_replacement_page(&snapshot).unwrap());
+            // A competing owner cannot adopt or clean this live pass.
+            assert!(
+                f.store
+                    .begin_replacement_staging(&f.pool, &f.wallet, Uuid::new_v4().to_string())
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+    f.store.db.execute_batch("CREATE TEMP TRIGGER forbid_attempt_rewrite BEFORE UPDATE ON payment_attempts BEGIN SELECT RAISE(ABORT,'activation must not rewrite history'); END;").unwrap();
+    let fresh = f.base.finish_replacement(&pass).await.unwrap();
+    f.store
+        .finish_replacement_fixture(
+            snapshot,
+            pass,
+            fresh,
+            format!("{:x}", digest.finalize()),
+            count,
+        )
+        .unwrap();
+    assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::ZERO);
+}
+
+#[tokio::test]
+async fn resolved_input_mutations_invalidate_completed_pages() {
+    for sql in [
+        "UPDATE payment_attempts SET amount='2'",
+        "UPDATE payment_attempts SET requirements_hash='changed'",
+        "UPDATE payment_attempts SET payer='changed'",
+        "UPDATE payment_resolutions SET support='changed'",
+        "UPDATE payment_resolutions SET outcome='EXPIRED_UNUSED'",
+        "DELETE FROM payment_resolutions",
+    ] {
+        let mut f = Fixture::new(1, true).await;
+        let (snapshot, pass, digest, count) = f.stage().await;
+        f.store.db.execute(sql, []).unwrap();
+        let fresh = f.base.finish_replacement(&pass).await.unwrap();
+        assert!(
+            f.store
+                .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
+                .is_err()
+        );
+        assert_eq!(
+            f.store
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM payment_resolution_repairs WHERE activated=1",
+                    [],
+                    |r| r.get::<_, i64>(0).map(|n| n as usize)
+                )
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn pending_admission_race_revalidates_without_repeating_historical_rpc() {
+    let mut f = Fixture::new(2, true).await;
+    let (snapshot, pass, digest, count) = f.stage().await;
+    f.store.seal_replacement(&snapshot, &digest, count).unwrap();
+    let fresh = f.base.finish_replacement(&pass).await.unwrap();
+    let mut pending = f.store.replacement_liability_start(&snapshot).unwrap();
+    assert!(
+        f.store
+            .replacement_liability_page(&snapshot, &mut pending)
+            .unwrap()
+    );
+    assert!(pending.complete);
+    let mut cursor = SupportCursor::default();
+    while !cursor.complete {
+        assert!(
+            f.store
+                .replacement_support_page(&snapshot, &fresh, &pending, &mut cursor)
+                .unwrap()
+        );
+    }
+    let validated = Validated {
+        pending,
+        observation: fresh.view().observations[&f.wallet].clone(),
+    };
+    f.store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('new-pending',?1,?2,0,'7','fixture','POSSIBLY_SUBMITTED')",params![f.pool,f.wallet]).unwrap();
+    assert!(
+        !f.store
+            .commit_replacement(&snapshot, &pass, &fresh, &validated)
+            .unwrap()
+    );
+    assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::from(9));
+    let requests = f.chain.lock().unwrap().requests.len();
+    f.store
+        .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
+        .unwrap();
+    assert_eq!(f.chain.lock().unwrap().requests.len(), requests);
+    assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::from(7));
+}
+
+#[tokio::test]
+async fn inactive_publication_reopens_without_authority_and_cleans_one_page_per_turn() {
+    let mut f = Fixture::new(PAGE + 1, true).await;
+    let (snapshot, _, _, _) = f.stage().await;
+    let identity = f.store.id().to_owned();
+    let scratch = tempfile::tempdir().unwrap();
+    let dummy = Store::create(
+        &scratch.path().join("state"),
+        &scratch.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    drop(std::mem::replace(&mut f.store, dummy));
+    f.store = Store::open(
+        &f._dir.path().join("state"),
+        &f._dir.path().join("key"),
+        &identity,
+    )
+    .unwrap();
+    assert_eq!(
+        exposure(&f.store.db, &f.wallet).unwrap(),
+        U256::from(PAGE + 1)
+    );
+    assert!(
+        f.store.qualification_state().unwrap()["payment_resolutions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        f.store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM effective_payment_resolutions WHERE outcome='USED'",
+                [],
+                |r| r.get::<_, i64>(0).map(|n| n as usize)
+            )
+            .unwrap(),
+        PAGE + 1
+    );
+    let next = f
+        .store
+        .begin_replacement_staging(&f.pool, &f.wallet, Uuid::new_v4().to_string())
+        .unwrap()
+        .unwrap();
+    assert!(!f.store.clear_abandoned_replacement_page(&next).unwrap());
+    assert_eq!(
+        f.store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM payment_resolution_replacements WHERE repair_id=?1",
+                [&snapshot.id],
+                |r| r.get::<_, i64>(0).map(|n| n as usize)
+            )
+            .unwrap(),
+        1
+    );
+    assert!(!f.store.clear_abandoned_replacement_page(&next).unwrap());
+    assert!(f.store.clear_abandoned_replacement_page(&next).unwrap());
+    assert_eq!(
+        f.store
+            .db
+            .query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| r
+                .get::<_, i64>(0)
+                .map(|n| n as usize))
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn same_hash_support_validation_pages_and_rejects_changes_behind_cursor() {
+    let mut f = Fixture::new(PAGE + 1, true).await;
+    let (snapshot, pass, digest, count) = f.stage().await;
+    f.store.seal_replacement(&snapshot, &digest, count).unwrap();
+    let fresh = f.base.finish_replacement(&pass).await.unwrap();
+    let observation = fresh.view().observations[&f.wallet].clone();
+    let support = serde_json::to_string(&BalanceSupport {
+        observation: observation.clone(),
+        checkpoint: None,
+    })
+    .unwrap();
+    for index in 0..=PAGE {
+        f.store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES(?1,?2,?3,'1000','0',?4,?5,?6,?7,?8,'ACTIVE')",params![format!("resolved-{index:04}"),i64::try_from(observation.confirmed.anchor.height).unwrap(),observation.confirmed.anchor.hash,observation.valid_until.to_string(),support,i64::try_from(observation.latest.anchor.height).unwrap(),observation.latest.anchor.hash,observation.endpoint]).unwrap();
+    }
+    let mut pending = f.store.replacement_liability_start(&snapshot).unwrap();
+    assert!(
+        f.store
+            .replacement_liability_page(&snapshot, &mut pending)
+            .unwrap()
+    );
+    let mut cursor = SupportCursor::default();
+    assert!(
+        f.store
+            .replacement_support_page(&snapshot, &fresh, &pending, &mut cursor)
+            .unwrap()
+    );
+    assert_eq!(cursor.source, 0);
+    assert_eq!(cursor.after, format!("resolved-{:04}", PAGE - 1));
+    assert!(!cursor.complete);
+    f.store.db.execute("UPDATE payment_admission_evidence SET support='{broken' WHERE attempt_id='resolved-0000'",[]).unwrap();
+    assert!(
+        !f.store
+            .replacement_support_page(&snapshot, &fresh, &pending, &mut cursor)
+            .unwrap()
+    );
+    let pending = f.store.replacement_liability_start(&snapshot).unwrap();
+    let mut cursor = SupportCursor::default();
+    assert_eq!(
+        f.store
+            .replacement_support_page(&snapshot, &fresh, &pending, &mut cursor)
+            .unwrap_err()
+            .downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedSupport)
+    );
+    assert_eq!(
+        exposure(&f.store.db, &f.wallet).unwrap(),
+        U256::from(PAGE + 1)
+    );
+}
+
+#[tokio::test]
+async fn inventory_revision_overflow_rolls_back_authoritative_mutation() {
+    let f = Fixture::new(1, true).await;
+    f.store
+        .db
+        .execute(
+            "UPDATE wallets SET resolved_revision=?2 WHERE id=?1",
+            params![f.wallet, i64::MAX],
+        )
+        .unwrap();
+    assert!(
+        f.store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET amount='2' WHERE id='resolved-0000'",
+                []
+            )
+            .is_err()
+    );
+    assert_eq!(
+        f.store
+            .db
+            .query_row(
+                "SELECT amount FROM payment_attempts WHERE id='resolved-0000'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "1"
+    );
+}
+
+#[tokio::test]
+async fn expired_final_balance_reacquires_only_current_evidence_without_replaying_history() {
+    let mut f = Fixture::new(2, true).await;
+    let (snapshot, pass, digest, count) = f.stage().await;
+    f.store.seal_replacement(&snapshot, &digest, count).unwrap();
+    let fresh = f.base.finish_replacement(&pass).await.unwrap();
+    let mut pending = f.store.replacement_liability_start(&snapshot).unwrap();
+    assert!(
+        f.store
+            .replacement_liability_page(&snapshot, &mut pending)
+            .unwrap()
+    );
+    let mut cursor = SupportCursor::default();
+    while !cursor.complete {
+        assert!(
+            f.store
+                .replacement_support_page(&snapshot, &fresh, &pending, &mut cursor)
+                .unwrap()
+        );
+    }
+    let validated = Validated {
+        pending,
+        observation: fresh.view().observations[&f.wallet].clone(),
+    };
+    let certificate = fresh.view().balance_certificates[&f.wallet].clone();
+    certificate.advance_freshness_for_test(std::time::Duration::from_secs(121));
+    assert!(
+        !f.store
+            .commit_replacement(&snapshot, &pass, &fresh, &validated)
+            .unwrap()
+    );
+    assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::from(2));
+    let chain = f.chain.clone();
+    let nonce_reads = || {
+        chain
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .filter(|request| {
+                request["method"] == "eth_call"
+                    && !request["params"][0]["data"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("0x70a08231")
+            })
+            .count()
+    };
+    let history = nonce_reads();
+    let current = f.base.finish_replacement(&pass).await.unwrap();
+    f.store
+        .finish_replacement_fixture(snapshot, pass, current, digest, count)
+        .unwrap();
+    assert_eq!(nonce_reads(), history);
+    assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::ZERO);
 }

@@ -55,7 +55,14 @@ fn disputed_store(dir: &std::path::Path) -> (Store, String, String) {
             [&wallet],
         )
         .unwrap();
-    store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('old',?1,?2,0,'1','fixture','RESOLVED',1)", params![pool,wallet]).unwrap();
+    store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('old',?1,?2,0,'1','fixture','RESOLVED')", params![pool,wallet]).unwrap();
+    store
+        .db
+        .execute(
+            "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+            [&wallet],
+        )
+        .unwrap();
     store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES('old','USED',80,'disputed',1,'immutable')", []).unwrap();
     (store, pool, wallet)
 }
@@ -170,7 +177,7 @@ async fn disputed_capacity_admits_only_remaining_balance_after_restart() {
         evidence::exposure(&store.db, &wallet).unwrap(),
         U256::from(20)
     );
-    let original: (String, String, i64) = store.db.query_row("SELECT r.hash,r.support,a.resolution_disputed FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    let original: (String, String, i64) = store.db.query_row("SELECT r.hash,r.support,(SELECT payment_resolutions_disputed FROM wallets WHERE id=a.wallet_id) FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(original, ("disputed".into(), "immutable".into(), 1));
     let after_payment: (i64, i64, String) = store.db.query_row("SELECT (SELECT COUNT(*) FROM wallet_retirements),(SELECT COUNT(*) FROM funding_jobs WHERE readiness_requirement IS NOT NULL),role FROM wallets WHERE id=?1", [&wallet], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(
@@ -184,7 +191,7 @@ async fn disputed_capacity_admits_only_remaining_balance_after_restart() {
 async fn concurrent_resolution_or_checkpoint_change_prevents_signing() {
     let (rpc, server) = balance_rpc().await;
     for mutation in [
-        "UPDATE payment_attempts SET resolution_disputed=0 WHERE id='old'",
+        "UPDATE wallets SET payment_resolutions_disputed=0 WHERE id=(SELECT wallet_id FROM payment_attempts WHERE id='old')",
         "UPDATE wallets SET financial_hash='changed' WHERE role='ACTIVE'",
     ] {
         let dir = tempfile::tempdir().unwrap();
@@ -232,7 +239,7 @@ fn supported_reopen_adds_capacity_lookup_without_changing_liabilities() {
     let identity = store.id().to_owned();
     store
         .db
-        .execute_batch("DROP INDEX payment_undisputed_wallet;")
+        .execute_batch("DROP INDEX payment_wallet_state_id;")
         .unwrap();
     drop(store);
     let store = Store::open(
@@ -252,6 +259,6 @@ fn supported_reopen_adds_capacity_lookup_without_changing_liabilities() {
         evidence::exposure(&store.db, &wallet).unwrap(),
         U256::from(1)
     );
-    let original: (String, String, i64) = store.db.query_row("SELECT r.hash,r.support,a.resolution_disputed FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    let original: (String, String, i64) = store.db.query_row("SELECT r.hash,r.support,(SELECT payment_resolutions_disputed FROM wallets WHERE id=a.wallet_id) FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(original, ("disputed".into(), "immutable".into(), 1));
 }

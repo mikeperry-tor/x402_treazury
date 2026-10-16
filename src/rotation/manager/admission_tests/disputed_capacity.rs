@@ -58,7 +58,12 @@ async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
     let db_path = state_path.join("state.sqlite");
     let db = rusqlite::Connection::open(&db_path).unwrap();
     db.execute("UPDATE wallets SET evidence_repair='chain_repair_required',financial_height=80,financial_hash='disputed',debit_height=80,debit_hash='disputed' WHERE id=?1", [&wallet]).unwrap();
-    db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('old',?1,?2,0,'1000000','fixture','RESOLVED',1)", rusqlite::params![pool,wallet]).unwrap();
+    db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('old',?1,?2,0,'1000000','fixture','RESOLVED')", rusqlite::params![pool,wallet]).unwrap();
+    db.execute(
+        "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+        [&wallet],
+    )
+    .unwrap();
     db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES('old','USED',80,'disputed',1,'original-proof')", []).unwrap();
     drop(state);
     let state = Store::open(&state_path, &key_path, &identity).unwrap();
@@ -122,7 +127,7 @@ async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
     assert_eq!(signatures.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.sent.lock().unwrap().len(), 1);
     assert_eq!(fixture.unsigned.load(Ordering::SeqCst), 2);
-    let retained: (i64, String, String) = db.query_row("SELECT a.resolution_disputed,r.hash,r.support FROM payment_attempts a JOIN payment_resolutions r ON r.attempt_id=a.id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    let retained: (i64, String, String) = db.query_row("SELECT (SELECT payment_resolutions_disputed FROM wallets WHERE id=a.wallet_id),r.hash,r.support FROM payment_attempts a JOIN payment_resolutions r ON r.attempt_id=a.id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(retained, (1, "disputed".into(), "original-proof".into()));
     drop(client);
     drop(store);

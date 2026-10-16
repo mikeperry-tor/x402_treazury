@@ -228,7 +228,7 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G09 | `early_job_disposition`, RefundPending/operator-only classification; F7/F11 | Exact closure proof and current new-work authority | Derive temporary waits and supported closure; automatically shield eligible returns under separate current authority; decide whether unresolved attribution must restrict shielding owned outputs | 7 | T14, T16, T20, T23, T27, T30 | Pending |
 | G10 | `Deployment::load` bootstrap-before-discovery and `initialize_discovery_relay`; F12 | Listener/source binding, relay payment ownership, per-call admission and explicit bootstrap completeness | Replace ordinary global barriers with scoped readiness, including no initially usable payer and implemented deferred relay publication; establish binding-before-new-funding and rollback; retain qualification completeness | 8 | T15, T22, T41 | Pending |
 | G11 | `require_spend_ready`, outgoing commit checks and funding refresh `outgoing_pending`; F16 | SDK input/snapshot ownership and exact pending bytes | Decide required scope; remove only proven redundant global waiting, retain commit race checks | 2, 3 | T29 | Retained with concrete SDK invariant: C16 real two-note preparation test shows Pepper Sync reset_spends can clear pending input markers. Exact live-input exclusion is required before relaxing this gate |
-| G12 | Repair snapshot/commit scans, maintenance balance lane, treasury wallet read guard and process-wide Base RPC resources; F3 | Coherent final commit and exclusive mutation owner | Remove avoidable actor/lock occupancy; retain CAS and ownership | 5 | T03, T04, T07, T33 | Partial: separate repair lane `07b5cad`; final database adoption still needs bounded publication and complete mutation-revision coverage |
+| G12 | Repair snapshot/commit scans, maintenance balance lane, treasury wallet read guard and process-wide Base RPC resources; F3 | Coherent final commit and exclusive mutation owner | Remove avoidable actor/lock occupancy; retain CAS and ownership | 5 | T03, T04, T07, T33 | Partial: separate repair lane `07b5cad`; schema21 canonical adoption now uses bounded inactive publication and complete mutation-revision coverage; the older exact-revalidation fallback remains to audit |
 | G13 | Disabled/removed pool and listener scheduling, retired-wallet observation selection; ownership audit | Durable unresolved obligations independent of service demand | Audit/derive observation eligibility; retain prohibitions on new funding and retired capacity | 7 | T16, T31 | Partial: durable policy-free Base owners `8bdcc3e` survive profile removal; retired disputed-liability repair passed its focused tests and root review. No new funding or retired admission authority |
 | G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Partial: journal-derived pending/disputed exposure, durable endpoint membership `2f43075`, phase-independent funding traversal and hidden PREPARED observation `1ef6616`; final schema cleanup and acceptance remain |
 | G15 | Base maintenance inventory-read error propagation and deployment log-only exit; funding-scheduler exit audit; F17 | Observation ownership and durable unresolved obligations | Resume recoverable observation work under existing ownership/backoff; justify stops for corruption or lost ownership | 6 | T37 | Pending |
@@ -1116,6 +1116,30 @@ unbounded acquisition-time exposure scan; both must change with publication. Tes
 must cover interleaved store work, membership mutation, new pending admission, stale
 final balance, cancellation/reopen, later repair supersession and immutable audit.
 This is not an implementation or acceptance completion claim.
+
+**C15 bounded canonical adoption (implemented and reviewed):** Supported schema21
+uses one wallet payment-resolution dispute field and separate resolved-inventory and
+liability/support revisions. SQL triggers cover authoritative membership/proof and
+support changes with overflow rejection. Replacement proofs publish in physical
+pages into inactive sets; effective resolutions, endpoint membership and balance
+support exclude those sets until the short activation transaction commits. Original
+proofs remain immutable. Pending admission and final-balance expiry repeat only
+current liability/support validation, retaining completed historical RPC work.
+Same-hash support validation and abandoned-set deletion also yield between pages.
+No full-history scan, bulk copy or per-attempt dispute update remains in canonical
+activation. The older exact-revalidation fallback still requires a separate
+boundedness audit; this does not claim every G12 path is complete.
+
+Independent financial review and root review cleared the implementation. All 17
+replacement tests passed, including inactive visibility, concurrent membership and
+pending changes, overflow rollback, stale final evidence, restart and bounded
+cleanup. The store suite passed 178 tests with three ignored helpers and one obsolete
+fixture reset; the corrected fixture passed its focused rerun. All-target/all-feature
+Clippy passed. Review identified two followups: transient cleanup must retain its
+owner and retry only idempotent deletion on the existing five-second cadence; archived
+schema19/20 reports must retain their read-only row-dispute decoder. Both fixes and
+their new regressions passed review and focused tests; no runtime migration or private
+state conversion is introduced.
 
 **C21 Base observation clock contract:** Measure the existing validity window
 from a clock capture before the latest-header request. The elapsed clock includes

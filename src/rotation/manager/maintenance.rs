@@ -872,7 +872,12 @@ mod tests {
             let wallet = format!("repair-{n}");
             let address = format!("0x{:040x}", 100 + n);
             db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role,evidence_repair,financial_height,financial_hash) VALUES(?1,?2,?3,?4,X'00','1','RETAINED','chain_repair_required',80,'orphan')",rusqlite::params![wallet,f.pool.pool,100+n,address]).unwrap();
-            db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence,resolution_disputed) VALUES(?1,?2,?1,0,'1','fixture','RESOLVED',?3,?3,?4,0,1,?5,1)",rusqlite::params![wallet,f.pool.pool,address,format!("0x{:064x}",1),100+n]).unwrap();
+            db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES(?1,?2,?1,0,'1','fixture','RESOLVED',?3,?3,?4,0,1,?5)",rusqlite::params![wallet,f.pool.pool,address,format!("0x{:064x}",1),100+n]).unwrap();
+            db.execute(
+                "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+                [&wallet],
+            )
+            .unwrap();
             db.execute(
                 "INSERT INTO payment_resolutions VALUES(?1,'USED',80,'orphan',1,'original')",
                 [wallet],
@@ -973,7 +978,7 @@ mod tests {
         let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
         assert_eq!(
             db.query_row(
-                "SELECT COUNT(*) FROM payment_attempts WHERE resolution_disputed=1",
+                "SELECT COUNT(*) FROM payment_attempts a JOIN wallets w ON w.id=a.wallet_id WHERE a.state='RESOLVED' AND w.payment_resolutions_disputed=1",
                 [],
                 |r| r.get::<_, i64>(0)
             )
@@ -1080,7 +1085,7 @@ mod tests {
                 [],
             )
             .unwrap();
-            db.execute("UPDATE payment_attempts SET resolution_disputed=0", [])
+            db.execute("UPDATE wallets SET payment_resolutions_disputed=0", [])
                 .unwrap();
         }
         let task = tokio::spawn({
@@ -1107,7 +1112,7 @@ mod tests {
         );
         assert_eq!(
             db.query_row(
-                "SELECT COUNT(*) FROM payment_attempts WHERE resolution_disputed=1",
+                "SELECT COUNT(*) FROM payment_attempts a JOIN wallets w ON w.id=a.wallet_id WHERE a.state='RESOLVED' AND w.payment_resolutions_disputed=1",
                 [],
                 |r| r.get::<_, i64>(0)
             )
@@ -1156,7 +1161,7 @@ mod tests {
         );
         assert_eq!(
             db.query_row(
-                "SELECT COUNT(*) FROM payment_attempts WHERE resolution_disputed=1",
+                "SELECT COUNT(*) FROM payment_attempts a JOIN wallets w ON w.id=a.wallet_id WHERE a.state='RESOLVED' AND w.payment_resolutions_disputed=1",
                 [],
                 |r| r.get::<_, i64>(0)
             )

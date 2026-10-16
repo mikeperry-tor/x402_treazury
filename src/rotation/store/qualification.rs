@@ -170,7 +170,9 @@ fn read(db: &Connection) -> Result<Value> {
     } else {
         // Export currently supported dispositions. Original proofs remain in
         // their audit table; a disputed or superseded proof is not settlement.
-        let sql = if version >= 19 {
+        let sql = if version >= 21 {
+            "SELECT r.attempt_id,r.outcome,r.height,r.hash,r.block_time FROM effective_payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id JOIN wallets w ON w.id=a.wallet_id WHERE a.state='RESOLVED' AND w.payment_resolutions_disputed=0 ORDER BY r.attempt_id"
+        } else if version >= 19 {
             "SELECT r.attempt_id,r.outcome,r.height,r.hash,r.block_time FROM effective_payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.state='RESOLVED' AND a.resolution_disputed=0 ORDER BY r.attempt_id"
         } else if version >= 17 {
             "SELECT r.attempt_id,r.outcome,r.height,r.hash,r.block_time FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.state='RESOLVED' AND a.resolution_disputed=0 ORDER BY r.attempt_id"
@@ -277,7 +279,16 @@ mod tests {
             ("disputed", &owners[0], "11", "RESOLVED", 1),
             ("sibling", &owners[1], "malformed", "POSSIBLY_SUBMITTED", 0),
         ] {
-            store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES(?1,?2,?3,0,?4,'fixture',?5,?6)",params![id,owner.0,owner.1,value,state,disputed]).unwrap();
+            store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES(?1,?2,?3,0,?4,'fixture',?5)",params![id,owner.0,owner.1,value,state]).unwrap();
+            if disputed == 1 {
+                store
+                    .db
+                    .execute(
+                        "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+                        [&owner.1],
+                    )
+                    .unwrap();
+            }
         }
         assert!(store.qualification_exposure(pool).is_err());
         store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES('disputed','USED',1,'original',1)",[]).unwrap();
@@ -289,7 +300,7 @@ mod tests {
         store
             .db
             .execute(
-                "UPDATE payment_attempts SET resolution_disputed=0 WHERE id='disputed'",
+                "UPDATE wallets SET payment_resolutions_disputed=0 WHERE id=(SELECT wallet_id FROM payment_attempts WHERE id='disputed')",
                 [],
             )
             .unwrap();

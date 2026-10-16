@@ -450,7 +450,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 20,
+                version == 21,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -1125,7 +1125,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 20,
+        schema == 21,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1334,7 +1334,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 20,
+        version == 21,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
@@ -1345,7 +1345,7 @@ fn admission_schema(db: &Connection) -> Result<()> {
          CREATE INDEX IF NOT EXISTS wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
          CREATE INDEX IF NOT EXISTS funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
          CREATE INDEX IF NOT EXISTS funding_recovery_job ON funding_recovery(job_id,operation_id);
-         CREATE INDEX IF NOT EXISTS payment_undisputed_wallet ON payment_attempts(wallet_id,id) WHERE state='RESOLVED' AND resolution_disputed=0;",
+         CREATE INDEX IF NOT EXISTS payment_wallet_state_id ON payment_attempts(wallet_id,state,id);",
     )?;
     Ok(())
 }

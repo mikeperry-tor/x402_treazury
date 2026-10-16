@@ -206,9 +206,12 @@ fn schema16_retirement_accounting_preserves_recorded_amounts_without_current_adm
         .execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])
         .unwrap();
     store.db.execute("INSERT INTO wallet_retirements(wallet_id,pool_id,confirmed_amount,latest_amount,confirmed_height,confirmed_hash,latest_height,latest_hash,accepted_maximum,observed_bound,support,endpoint,reason,recorded_at) VALUES(?1,?2,'27','30',10,'old-confirmed',12,'old-latest','100','100','historical-support','historical-endpoint','automatic',100)", params![wallet,pool]).unwrap();
-    // Remove the new field/index, reproducing the actual old layout rather
-    // than asking a fresh-schema report to pretend it lacks the field.
-    store.db.execute_batch("DROP INDEX payment_disputed_wallet; DROP INDEX payment_undisputed_wallet; ALTER TABLE payment_attempts DROP COLUMN resolution_disputed; PRAGMA user_version=16; PRAGMA query_only=ON;").unwrap();
+    // Neither this historical layout nor the current wallet-level dispute
+    // schema has the intervening per-attempt dispute field.
+    store
+        .db
+        .execute_batch("PRAGMA user_version=16; PRAGMA query_only=ON;")
+        .unwrap();
     let before = store.db.total_changes();
     let report = read_status(&store.db).unwrap();
     let pool = &report.pools[0];
@@ -227,3 +230,4 @@ fn schema16_retirement_accounting_preserves_recorded_amounts_without_current_adm
     assert!(!pool.serving_ready);
     assert_eq!(store.db.total_changes(), before);
 }
+

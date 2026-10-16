@@ -65,7 +65,7 @@ pub(super) fn check_commit(
 }
 
 /// Read-only historical reports predate this contract. Runtime admission only
-/// opens schema20; an unknown marker always retains ownership.
+/// opens the current schema; an unknown marker always retains ownership.
 pub(super) fn source_state(db: &Connection, operation: &str) -> Result<(bool, bool)> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let archive: Option<(String, String)> = db

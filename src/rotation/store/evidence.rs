@@ -71,16 +71,20 @@ pub struct BalanceSupport {
     pub checkpoint: Option<Anchor>,
 }
 
-const EXPOSURE_SQL: &str = "SELECT pool_id,amount,resolution_disputed=0 FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED' UNION ALL SELECT a.pool_id,a.amount,a.state='RESOLVED' AND EXISTS(SELECT 1 FROM payment_resolutions r WHERE r.attempt_id=a.id) FROM payment_attempts a INDEXED BY payment_disputed_wallet WHERE a.wallet_id=?1 AND a.resolution_disputed=1";
+const EXPOSURE_SQL: &str = "SELECT pool_id,amount,1 FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED' UNION ALL SELECT a.pool_id,a.amount,EXISTS(SELECT 1 FROM payment_resolutions r WHERE r.attempt_id=a.id) FROM payment_attempts a JOIN wallets w ON w.id=a.wallet_id WHERE a.wallet_id=?1 AND a.state='RESOLVED' AND w.payment_resolutions_disputed=1";
 
 pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
+    exposure_from_rows(db, wallet, EXPOSURE_SQL)
+}
+
+fn exposure_from_rows(db: &Connection, wallet: &str, sql: &str) -> Result<U256> {
     let pool: String =
         db.query_row("SELECT pool_id FROM wallets WHERE id=?1", [wallet], |row| {
             row.get(0)
         })?;
     // Disjoint, wallet-indexed subsets: pending submissions and previously
     // released authorizations whose canonical support is disputed.
-    let mut statement = db.prepare(EXPOSURE_SQL)?;
+    let mut statement = db.prepare(sql)?;
     let mut rows = statement.query([wallet])?;
     let mut total = U256::ZERO;
     while let Some(row) = rows.next()? {
@@ -303,7 +307,14 @@ mod tests {
         // Canonical current balances can cover fully reserved historical
         // releases without verifying their now-disputed block hashes.
         store.db.execute("UPDATE wallets SET evidence_repair='chain_repair_required',financial_height=80,financial_hash='disputed',debit_height=80,debit_hash='disputed' WHERE id=?1", [&wallet]).unwrap();
-        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('capacity-old',?1,?2,0,'1','fixture','RESOLVED',1)", params![pool,wallet]).unwrap();
+        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('capacity-old',?1,?2,0,'1','fixture','RESOLVED')", params![pool,wallet]).unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+                [&wallet],
+            )
+            .unwrap();
         store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES('capacity-old','USED',80,'disputed',1,'immutable')", []).unwrap();
         let mut query = store
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
@@ -338,7 +349,7 @@ mod tests {
         store
             .db
             .execute(
-                "UPDATE payment_attempts SET resolution_disputed=0 WHERE id='capacity-old'",
+                "UPDATE wallets SET payment_resolutions_disputed=0 WHERE id=(SELECT wallet_id FROM payment_attempts WHERE id='capacity-old')",
                 [],
             )
             .unwrap();
@@ -347,7 +358,7 @@ mod tests {
         store
             .db
             .execute(
-                "UPDATE payment_attempts SET resolution_disputed=1 WHERE id='capacity-old'",
+                "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=(SELECT wallet_id FROM payment_attempts WHERE id='capacity-old')",
                 [],
             )
             .unwrap();
@@ -395,7 +406,7 @@ mod tests {
             .unwrap();
         assert!(
             plan.iter()
-                .any(|line| line.contains("payment_undisputed_wallet"))
+                .any(|line| line.contains("payment_wallet_state"))
         );
         store.evidence_cache.clear();
         store
@@ -410,7 +421,7 @@ mod tests {
             .db
             .execute("DELETE FROM payment_attempts WHERE id='capacity-old'", [])
             .unwrap();
-        store.db.execute("UPDATE wallets SET evidence_repair=NULL,financial_height=NULL,financial_hash=NULL,debit_height=NULL,debit_hash=NULL WHERE id=?1", [&wallet]).unwrap();
+        store.db.execute("UPDATE wallets SET payment_resolutions_disputed=0,evidence_repair=NULL,financial_height=NULL,financial_hash=NULL,debit_height=NULL,debit_hash=NULL WHERE id=?1", [&wallet]).unwrap();
         let query = store
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
             .unwrap();
@@ -1002,7 +1013,7 @@ mod tests {
             .unwrap()
             .join("\n");
         assert!(plan.contains("payment_wallet_state"));
-        assert!(plan.contains("payment_disputed_wallet"));
+        assert!(plan.contains("payment_wallet_state"));
         assert!(plan.contains("wallet_id=?"));
     }
     #[test]
@@ -1027,7 +1038,14 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('old',?1,?2,0,?3,'fixture','RESOLVED',1)", params![pool,wallet,U256::MAX.to_string()]).unwrap();
+        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('old',?1,?2,0,?3,'fixture','RESOLVED')", params![pool,wallet,U256::MAX.to_string()]).unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+                [&wallet],
+            )
+            .unwrap();
         assert!(
             exposure(&store.db, &wallet).is_err(),
             "missing original proof never becomes a favorable release"
@@ -1160,7 +1178,7 @@ impl Store {
     }
 }
 
-const UNDISPUTED_SQL: &str = "SELECT EXISTS(SELECT 1 FROM payment_attempts INDEXED BY payment_undisputed_wallet WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0)";
+const UNDISPUTED_SQL: &str = "SELECT EXISTS(SELECT 1 FROM wallets w WHERE w.id=?1 AND w.payment_resolutions_disputed=0 AND EXISTS(SELECT 1 FROM payment_attempts a WHERE a.wallet_id=w.id AND a.state='RESOLVED'))";
 
 fn debit_checkpoint(db: &Connection, wallet: &str) -> Result<Option<Anchor>> {
     let (height, hash): (Option<i64>, Option<String>) = db.query_row(
@@ -1485,7 +1503,7 @@ fn balance_support_queries() -> &'static [String; 8] {
                 1,
             ),
             (
-                "(SELECT wallet_id,balance_support AS support,confirmed_hash AS block_hash,latest_hash FROM payment_resolution_repairs) e",
+                "(SELECT wallet_id,balance_support AS support,confirmed_hash AS block_hash,latest_hash FROM payment_resolution_repairs WHERE activated=1) e",
                 "e.wallet_id",
                 1,
             ),
@@ -1774,7 +1792,7 @@ fn payment_endpoint_dependents(
     db: &Connection,
     endpoint: &str,
 ) -> Result<std::collections::BTreeMap<String, bool>> {
-    let mut query = db.prepare("WITH supports AS (SELECT a.wallet_id,r.endpoint FROM payment_attempts a LEFT JOIN effective_payment_resolutions r ON r.attempt_id=a.id WHERE a.state='RESOLVED' UNION ALL SELECT r.wallet_id,r.endpoint FROM payment_resolution_repairs r WHERE r.sequence=(SELECT n.sequence FROM payment_resolution_repairs n WHERE n.wallet_id=r.wallet_id ORDER BY n.sequence DESC LIMIT 1)) SELECT wallet_id,endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*' AS malformed FROM supports WHERE endpoint=?1 OR endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*'")?;
+    let mut query = db.prepare("WITH supports AS (SELECT a.wallet_id,r.endpoint FROM payment_attempts a LEFT JOIN effective_payment_resolutions r ON r.attempt_id=a.id WHERE a.state='RESOLVED' UNION ALL SELECT r.wallet_id,r.endpoint FROM payment_resolution_repairs r WHERE r.activated=1 AND r.sequence=(SELECT n.sequence FROM payment_resolution_repairs n WHERE n.wallet_id=r.wallet_id AND n.activated=1 ORDER BY n.sequence DESC LIMIT 1)) SELECT wallet_id,endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*' AS malformed FROM supports WHERE endpoint=?1 OR endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*'")?;
     let mut wallets = std::collections::BTreeMap::new();
     for row in query.query_map([endpoint], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
@@ -1813,7 +1831,10 @@ impl Store {
                 // A failed checkpoint does not identify the fork's starting
                 // height. Restore every released liability for this wallet;
                 // the original proofs remain immutable audit evidence.
-                tx.execute("UPDATE payment_attempts SET resolution_disputed=1 WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0", [wallet])?;
+                tx.execute(
+                    "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+                    [wallet],
+                )?;
             }
             tx.execute(
                 "UPDATE wallets SET evidence_repair=CASE WHEN evidence_repair='evidence_repair_required' THEN evidence_repair ELSE ?2 END WHERE id=?1",
@@ -1865,7 +1886,10 @@ impl Store {
             // Losing effective resolution or adopted checkpoint provenance
             // invalidates every release for this wallet; the
             // original proof, financial/debit anchors and attempt stay intact.
-            tx.execute("UPDATE payment_attempts SET resolution_disputed=1 WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0", [wallet])?;
+            tx.execute(
+                "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
+                [wallet],
+            )?;
             // Unknown historical endpoint provenance does not make the exact
             // authorization amount unknown. Reserve it and reacquire proof;
             // independent amount contradictions retain their stronger stop.
