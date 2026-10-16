@@ -1830,3 +1830,140 @@ fn sibling_observations_report_current_phase_once_per_operation() {
     // monotonic ordering on the funding state machine just to tidy the logs.
     assert!(state.report_phase("first", &FundingPhase::RecoveryRequired));
 }
+
+#[tokio::test]
+async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drain_siblings() {
+    for field in ["phase", "provider_success"] {
+        for after_capture in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let state_path = dir.path().join("state");
+            let key_path = dir.path().join("key");
+            let mut raw = Store::create(&state_path, &key_path, 1, b"fixture").unwrap();
+            for name in ["same_pool", "other_pool"] {
+                crate::rotation::store::test_support::declare_two_reserves(
+                    &mut raw,
+                    name,
+                    "5",
+                    Some(alloy_primitives::U256::from(1_000_000)),
+                    0,
+                )
+                .unwrap();
+            }
+            let jobs = raw.funding_jobs().unwrap();
+            for (index, job) in jobs.iter().enumerate() {
+                submitted(&mut raw, job);
+                if index + 1 < jobs.len() {
+                    raw.confirm_spend(&job.operation_id, 60, 1).unwrap();
+                }
+            }
+            let bad = jobs[0].clone();
+            let treasury = raw.id().to_owned();
+            let db = rusqlite::Connection::open(state_path.join("state.sqlite")).unwrap();
+            let corrupt = || {
+                db.execute(
+                    &format!("UPDATE funding_progress SET {field}='invalid' WHERE job_id=?1"),
+                    [&bad.id],
+                )
+                .unwrap();
+            };
+            if !after_capture {
+                corrupt();
+            }
+            let (store, actor) = StoreHandle::spawn(raw);
+            let (statuses, mut status_events) = mpsc::unbounded_channel();
+            let (started, mut source_events) = mpsc::unbounded_channel();
+            let credit_calls = Arc::new(AtomicUsize::new(0));
+            let mut worker = FundingWorker::new(
+                store.clone(),
+                Source {
+                    store: store.clone(),
+                    reads: Reads {
+                        credits: Arc::new(Semaphore::new(64)),
+                        credit_calls: credit_calls.clone(),
+                        statuses,
+                        status_gates: Default::default(),
+                        failed_job: Default::default(),
+                        processing: true,
+                        quotes: None,
+                    },
+                    gate: Arc::new(Semaphore::new(64)),
+                    started,
+                },
+                1,
+            );
+            let (captured, captured_rx) = tokio::sync::oneshot::channel();
+            let (resume, resume_rx) = tokio::sync::oneshot::channel();
+            if after_capture {
+                worker.inventory_test_hook = Some(Arc::new(InventoryTestHook {
+                    lane: Kind::Credit,
+                    barrier: Mutex::new(Some((captured, resume_rx))),
+                }));
+            }
+            let waiter = tokio::spawn({
+                let worker = worker.clone();
+                async move { worker.tick(1000).await }
+            });
+            if after_capture {
+                captured_rx.await.unwrap();
+                corrupt();
+                resume.send(()).unwrap();
+            }
+            let error = tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                error.is::<MalformedFunding>(),
+                "{field} after_capture={after_capture}: {error:#}"
+            );
+            assert_eq!(
+                credit_calls.load(Ordering::SeqCst),
+                if after_capture { 4 } else { 3 }
+            );
+            let mut observed = BTreeSet::new();
+            while let Ok(id) = source_events.try_recv() {
+                assert_ne!(id, bad.id);
+                observed.insert(id);
+            }
+            assert_eq!(observed.len(), 1);
+            observed.clear();
+            while let Ok(id) = status_events.try_recv() {
+                assert_ne!(id, bad.id);
+                observed.insert(id);
+            }
+            assert_eq!(observed.len(), 3);
+            drop(db);
+            drop(worker);
+            drop(store);
+            actor.await.unwrap();
+            let reopened = Store::open(&state_path, &key_path, &treasury).unwrap();
+            for job in &jobs {
+                assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
+                assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
+                assert_eq!(
+                    reopened.operation_pending(&job.operation_id).unwrap(),
+                    job.id == jobs.last().unwrap().id
+                );
+                assert_eq!(
+                    reopened
+                        .prepared_bytes(&job.operation_id)
+                        .unwrap()
+                        .as_slice(),
+                    b"signed"
+                );
+            }
+            let page = reopened
+                .funding_work_page("", reopened.funding_work_boundary().unwrap())
+                .unwrap();
+            assert_eq!(page.len(), 4);
+            assert!(
+                page.into_iter()
+                    .find(|(id, _)| id == &bad.id)
+                    .unwrap()
+                    .1
+                    .is_err()
+            );
+        }
+    }
+}

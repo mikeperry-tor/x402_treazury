@@ -317,14 +317,20 @@ impl Store {
     }
 
     pub fn funding_facts(&self, job: &str, operation: &str) -> Result<FundingFacts> {
-        let mut facts = self.db.query_row(
+        let (mut facts, flags) = self.db.query_row(
             "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
-            params![job,operation], |r| Ok(FundingFacts {
+            params![job,operation], |r| Ok((FundingFacts {
                 readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false,
-                provider_success:r.get(4)?, provider_failed:r.get(5)?, provider_refunded:r.get(6)?, provider_incomplete:r.get(7)?,
+                provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
                 source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
-            }),
+            }, provider_flags(r, 4))),
         ).context("funding operation binding changed")?;
+        (
+            facts.provider_success,
+            facts.provider_failed,
+            facts.provider_refunded,
+            facts.provider_incomplete,
+        ) = flags.context(super::scheduling::FundingDecodeFailure)?;
         facts.source_closed = facts.archived && source_attempt_closed(&self.db, operation)?;
         Ok(facts)
     }
@@ -652,10 +658,23 @@ fn source_accounted(db: &Connection, operation: &str) -> Result<bool> {
     Ok(true)
 }
 
+type ProviderFlags = (bool, bool, bool, bool);
+
+fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<ProviderFlags> {
+    Ok((
+        row.get(start)?,
+        row.get(start + 1)?,
+        row.get(start + 2)?,
+        row.get(start + 3)?,
+    ))
+}
+
 pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> Result<bool> {
-    let (ready, correlation, quote, success, failed, refunded, incomplete, confirmed, gross):
-            (bool, Option<String>, bool, bool, bool, bool, bool, bool, bool) = tx.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?)))?;
+    let (ready, correlation, quote, flags, confirmed, gross):
+            (bool, Option<String>, bool, rusqlite::Result<ProviderFlags>, bool, bool) = tx.query_row(
+            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
+    let (success, failed, refunded, incomplete) =
+        flags.context(super::scheduling::FundingDecodeFailure)?;
     let wallet: String = tx.query_row(
         "SELECT wallet_id FROM funding_jobs WHERE id=?1",
         [job],
@@ -1383,7 +1402,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
             r.get::<_, String>(3)?,
             r.get::<_, String>(4)?,
             r.get::<_, String>(5)?,
-            r.get::<_, String>(6)?,
+            r.get::<_, String>(6),
             r.get::<_, String>(7)?,
             r.get::<_, u32>(8)?,
             r.get::<_, i64>(9)?,
@@ -1407,7 +1426,8 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         let (started_at,error_streak,timed_out): (Option<i64>,u32,bool) = if version >= 9 {
             db.query_row("SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?.unwrap_or((None,0,false))
         } else {(None,0,false)};
-        let parsed_phase: FundingPhase = serde_json::from_str(&phase)?;
+        let phase = phase.context(super::scheduling::FundingDecodeFailure)?;
+        let parsed_phase: FundingPhase = serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
         // Also normalize historical completed rows for read-only wallet status.
         let last_error = if parsed_phase == FundingPhase::Complete {
             completed_error(last_error.as_deref()).map(str::to_owned)
@@ -1425,7 +1445,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
             wallet_id,
             recipient,
             target,
-            phase: serde_json::from_str(&phase)?,
+            phase: parsed_phase,
             operation_id,
             attempts,
             next_poll: u64::try_from(next_poll)?,

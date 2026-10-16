@@ -11,6 +11,28 @@ pub(crate) struct FundingWork {
     pub facts: FundingFacts,
 }
 
+/// Created only by specific payload decoders, never by SQL execution/stepping.
+#[derive(Debug)]
+pub(super) struct FundingDecodeFailure;
+impl std::fmt::Display for FundingDecodeFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("funding_payload_decode_failed")
+    }
+}
+impl std::error::Error for FundingDecodeFailure {}
+#[derive(Debug, Clone)]
+pub(crate) struct MalformedFunding {
+    pub id: String,
+    pub operation: String,
+}
+impl std::fmt::Display for MalformedFunding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("malformed_funding_inventory")
+    }
+}
+impl std::error::Error for MalformedFunding {}
+pub(crate) type FundingEntry = (String, std::result::Result<FundingWork, MalformedFunding>);
+
 #[cfg(test)]
 #[path = "scheduling_tests.rs"]
 mod inventory_tests;
@@ -26,23 +48,91 @@ impl Store {
             })?)
     }
 
-    pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingWork>> {
+    pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingEntry>> {
         let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_actionable_inventory WHERE (state!='COMPLETE' OR readiness_disputed IS NOT NULL) AND id>?1 AND rowid<=?2 ORDER BY id LIMIT ?3")?
             .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut jobs = Vec::with_capacity(ids.len());
         for id in ids {
-            // Current allocations create their exact operation journal atomically.
-            // Missing current-schema provenance is an error, never a new attempt.
-            let job = self
-                .funding_job(&id)?
-                .context("funding inventory changed")?;
-            // Recovery cannot replace the operation between these reads. Keep
-            // phase and facts together rather than looking up facts after delivery.
-            let facts = self.funding_facts(&id, &job.operation_id)?;
-            jobs.push(FundingWork { job, facts });
+            let result = (|| {
+                let job = self
+                    .funding_job(&id)?
+                    .context("funding inventory changed")?;
+                let facts = self.funding_facts(&id, &job.operation_id)?;
+                Ok(FundingWork { job, facts })
+            })();
+            let payload = match result {
+                Ok(work) => Ok(work),
+                Err(error) => Err(self.scope_funding_decode_failure(&id, error)?),
+            };
+            jobs.push((id, payload));
         }
         Ok(jobs)
+    }
+
+    /// A completion belongs to its captured operation even if inventory has
+    /// rolled over since publication failed. Never relabel its diagnostic.
+    pub(crate) fn scope_funding_completion_failure(
+        &self,
+        id: &str,
+        expected: &str,
+        error: anyhow::Error,
+    ) -> Result<Option<MalformedFunding>> {
+        if error.downcast_ref::<FundingDecodeFailure>().is_none() {
+            return Err(error);
+        }
+        let current: String = self.db.query_row(
+            "SELECT operation_id FROM funding_progress WHERE job_id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        if current != expected {
+            return Ok(None);
+        }
+        self.scope_funding_decode_failure(id, error).map(Some)
+    }
+
+    /// Decode faults are local only after ownership and source correspondence
+    /// are established. This read never repairs or releases financial records.
+    pub(crate) fn scope_funding_decode_failure(
+        &self,
+        id: &str,
+        error: anyhow::Error,
+    ) -> Result<MalformedFunding> {
+        if error.downcast_ref::<FundingDecodeFailure>().is_none() {
+            return Err(error);
+        }
+        let (operation, pool, ownership): (String, String, bool) = self.db.query_row(
+            "SELECT j.operation_id,f.pool_id,EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND w.pool_id=f.pool_id) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1",
+            [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        ensure!(
+            !id.is_empty() && !operation.is_empty() && ownership,
+            "unknown_funding_ownership"
+        );
+        let (outgoing, source, budget_pool): (bool, bool, Option<String>) = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1),EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1),(SELECT pool_id FROM budget_entries WHERE id=?1)",
+            [&operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        ensure!(outgoing == source, "unknown_funding_source_correspondence");
+        let budget_exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
+            [&operation],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            !budget_exists || budget_pool.as_deref() == Some(&pool),
+            "funding_source_pool_mismatch"
+        );
+        ensure!(
+            !source || budget_exists,
+            "unknown_funding_source_correspondence"
+        );
+        if source {
+            self.operation(&operation)?;
+        }
+        Ok(MalformedFunding {
+            id: id.to_owned(),
+            operation,
+        })
     }
 
     /// This is a source-owner decision about retained signed bytes, not an
