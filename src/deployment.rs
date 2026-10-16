@@ -1104,7 +1104,13 @@ impl Deployment {
                 .join("\n\n");
             for id in &cfg.sources {
                 if self.unavailable_sources.contains_key(id) {
-                    if self.pending_sources.contains_key(id) {
+                    if self
+                        .pending_sources
+                        .get(id)
+                        .is_some_and(|pending| pending.operator_required)
+                    {
+                        instructions.push_str(&format!("\n\nSource {id}: OPERATOR_REQUIRED (new relay payer creation is unavailable). Observation continues; its tools will appear if discovery becomes possible."));
+                    } else if self.pending_sources.contains_key(id) {
                         instructions.push_str(&format!("\n\nSource {id}: PENDING (catalog discovery is waiting). Its tools will appear when discovery succeeds."));
                     } else {
                         instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (catalog discovery failed). Its tools are unavailable, not intentionally empty. Restart to retry."));
@@ -1432,9 +1438,15 @@ impl Deployment {
                 return Err(error);
             }
         };
-        let deferred = self
-            .defer_discovery
-            .then(|| deferred::Runtime::new(self, deferred_wallets, catalog, manager));
+        #[cfg(feature = "zcash")]
+        let can_allocate = funding_runtime.is_some()
+            && self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
+            && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
+        #[cfg(not(feature = "zcash"))]
+        let can_allocate = false;
+        let deferred = self.defer_discovery.then(|| {
+            deferred::Runtime::new(self, deferred_wallets, catalog, manager, can_allocate)
+        });
         Ok(RunningDeployment {
             deferred,
             listeners,

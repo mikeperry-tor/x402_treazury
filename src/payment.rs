@@ -296,6 +296,13 @@ impl PaidClient {
             None => Ok(None),
         }
     }
+    pub(crate) async fn discovery_requires_creation(&self) -> Result<bool> {
+        self.require_available()?;
+        match &self.managed {
+            Some(pool) => pool.discovery_requires_creation().await,
+            None => Ok(false),
+        }
+    }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
         self.require_available()?;
         match &self.managed {

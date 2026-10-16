@@ -362,6 +362,9 @@ impl Relay {
         self.fetch_when_ready_bounded(url, expected, limit, setting, None)
             .await
     }
+    pub(crate) async fn requires_payer_creation(&self) -> Result<bool> {
+        self.client.discovery_requires_creation().await
+    }
     pub(crate) async fn fetch_when_ready_bounded(
         &self,
         url: &str,
