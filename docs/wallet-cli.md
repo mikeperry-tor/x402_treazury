@@ -670,8 +670,9 @@ the `USD Coin`/`2` signing domain, and an amount within both the cap and current
 deposit target. Selection preserves the first compatible offer, even if earlier
 offers are unsupported. Permit2, `upto`, v1, non-authorization flows, nested
 extensions and unknown extra/offer fields are rejected. Top-level extension maps
-are removed before signing, with warnings naming the omitted extensions (never
-logging their values). Managed payments attempt one ordinary payment without
+are removed before signing, with DEBUG diagnostics for `bazaar` discovery metadata
+and WARN diagnostics for other extensions, naming extensions but never logging
+their values. Managed payments attempt one ordinary payment without
 extension behavior or attribution echoing. Providers requiring extension echoes
 may reject it; failed submitted requests report this omission and retain their
 reservation until chain reconciliation. Never automatically retry a signed

@@ -243,7 +243,8 @@ before full readiness remain deferred to reviewed follow-up work.
 `rotation/manager.rs` admits supported Base USDC v2 exact EIP-3009 offers. It
 validates the envelope, domain, amount and explicit API cap before acquisition or
 signing. Advertised extensions outside the managed payment contract are omitted
-with visible diagnostics; seller rejection remains possible.
+with DEBUG diagnostics for `bazaar` discovery metadata and WARN diagnostics for
+other extensions; seller rejection remains possible.
 
 Fresh compatible balances minus unresolved signed exposure govern each wallet's
 available capacity. A recent actual-price hint can select the smallest sufficient
