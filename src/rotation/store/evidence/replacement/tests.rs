@@ -44,6 +44,8 @@ use std::sync::Mutex;
 
 struct Chain {
     head: u64,
+    timestamp: u64,
+    advanced_timestamp: Option<(u64, u64)>,
     used: bool,
     requests: Vec<Value>,
     forbid_old: bool,
@@ -68,6 +70,8 @@ impl Fixture {
         let stamp = crate::rotation::base::now().unwrap();
         let chain = Arc::new(Mutex::new(Chain {
             head: 100,
+            timestamp: stamp,
+            advanced_timestamp: None,
             used: original_used,
             requests: vec![],
             forbid_old: false,
@@ -84,7 +88,8 @@ impl Fixture {
                         let tag=request["params"][0].as_str().unwrap();
                         let h=if tag=="latest" {s.head}else{u64::from_str_radix(&tag[2..],16).unwrap()};
                         assert!(!s.forbid_old || h>=108,"old original checkpoint must never be fetched");
-                        json!({"number":format!("0x{h:x}"),"hash":format!("0x{h:064x}"),"timestamp":format!("0x{stamp:x}")})
+                        let timestamp = s.advanced_timestamp.filter(|(old_head, _)| h > *old_head).map_or(s.timestamp, |(_, stamp)| stamp);
+                        json!({"number":format!("0x{h:x}"),"hash":format!("0x{h:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     },
                     "eth_call"=>{
                         assert_eq!(request["params"][1]["requireCanonical"],true);
@@ -1335,6 +1340,96 @@ async fn reopened_production_repair_uses_only_configured_alternate_without_origi
         Ok(())
     }).await.unwrap();
     assert!(!alternative.chain.lock().unwrap().requests.is_empty());
+    drop(store);
+    worker.await.unwrap();
+}
+
+#[tokio::test]
+async fn stalled_canonical_time_retains_liability_until_same_repair_owner_observes_advancement() {
+    let mut f = Fixture::new(1, true).await;
+    let expiry: u64 = f
+        .store
+        .db
+        .query_row(
+            "SELECT valid_before FROM payment_attempts WHERE id='resolved-0000'",
+            [],
+            |row| sql_u64(row, 0),
+        )
+        .unwrap();
+    assert!(crate::rotation::base::now().unwrap() > expiry);
+    f.chain.lock().unwrap().timestamp = expiry - 1;
+    let scratch = tempfile::tempdir().unwrap();
+    let dummy = Store::create(
+        &scratch.path().join("state"),
+        &scratch.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let owned = std::mem::replace(&mut f.store, dummy);
+    let (store, worker) = StoreHandle::spawn(owned);
+    for _ in 0..2 {
+        assert!(
+            !super::super::repair::repair_wallet(
+                store.clone(),
+                f.base.clone(),
+                f.pool.clone(),
+                f.wallet.clone()
+            )
+            .await
+            .unwrap()
+        );
+        let wallet = f.wallet.clone();
+        store
+            .call(move |s| {
+                assert_eq!(exposure(&s.db, &wallet)?, U256::from(1));
+                let reason: String = s.db.query_row(
+                    "SELECT evidence_repair FROM wallets WHERE id=?1",
+                    [&wallet],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(reason, "chain_repair_required");
+                let activated: i64 = s.db.query_row(
+                    "SELECT COUNT(*) FROM payment_resolution_repairs WHERE activated=1",
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(activated, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    {
+        let mut chain = f.chain.lock().unwrap();
+        // Keep every observed header immutable; only newly mined blocks carry
+        // the advanced time, including the new 12-confirmation anchor.
+        chain.advanced_timestamp = Some((chain.head, expiry + 1));
+        chain.head += 13;
+    }
+    assert!(
+        super::super::repair::repair_wallet(
+            store.clone(),
+            f.base.clone(),
+            f.pool.clone(),
+            f.wallet.clone()
+        )
+        .await
+        .unwrap()
+    );
+    let wallet = f.wallet.clone();
+    store.call(move |s| {
+        assert_eq!(exposure(&s.db, &wallet)?, U256::ZERO);
+        let reason: Option<String> = s.db.query_row("SELECT evidence_repair FROM wallets WHERE id=?1", [&wallet], |r| r.get(0))?;
+        assert!(reason.is_none());
+        let original: String = s.db.query_row("SELECT outcome FROM payment_resolutions WHERE attempt_id='resolved-0000'", [], |r| r.get(0))?;
+        assert_eq!(original, "USED");
+        let effective: String = s.db.query_row("SELECT outcome FROM effective_payment_resolutions WHERE attempt_id='resolved-0000'", [], |r| r.get(0))?;
+        assert_eq!(effective, "EXPIRED_UNUSED");
+        let attempts: i64 = s.db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))?;
+        assert_eq!(attempts, 1);
+        Ok(())
+    }).await.unwrap();
     drop(store);
     worker.await.unwrap();
 }
