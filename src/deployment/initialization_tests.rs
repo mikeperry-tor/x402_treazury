@@ -576,7 +576,9 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
                 .is_err(),
             "unready managed payer contacted provider"
         );
-        let owner = reopen(&state, &key, &id).await;
+        let owner = crate::treasury::Treasury::open(state.clone(), key.clone(), id.clone())
+            .await
+            .expect("bind rollback must release ownership before returning");
         let status = owner.status().await.unwrap();
         assert!(status.funding_jobs.is_empty());
         assert!(status.pools.iter().all(|p| p.addresses.is_empty()));
