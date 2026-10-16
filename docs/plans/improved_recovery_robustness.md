@@ -822,6 +822,14 @@ remaining C09/C12 obligations still prevent blanket repair-gate deletion.
 Validation: all 28 evidence/repair tests and all-target Clippy passed; independent
 review found no actionable findings.
 
+**C09 schema17 historical-report review fixup:** Independent review found that
+schema16 retirement totals lost their per-wallet records when current admission
+reporting moved to schema17. Historical reporting now reads exact retained
+retirement records independently of current admission fields. The regression uses
+an actual schema16 layout and query-only connection, retaining nonzero totals
+without fabricating current capacity. Focused regression and all-target Clippy
+passed; independent re-review found no remaining actionable findings.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

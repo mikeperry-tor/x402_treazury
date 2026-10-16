@@ -179,3 +179,51 @@ fn historical_completed_status_does_not_require_current_obligation_columns() {
         assert_eq!(db.total_changes(), changes);
     }
 }
+
+#[test]
+fn schema16_retirement_accounting_preserves_recorded_amounts_without_current_admission() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool =
+        test_support::declare_two_reserves(&mut store, "historical", "1", Some(U256::from(100)), 0)
+            .unwrap();
+    let wallet: String = store
+        .db
+        .query_row(
+            "SELECT id FROM wallets WHERE pool_id=?1 LIMIT 1",
+            [&pool],
+            |r| r.get(0),
+        )
+        .unwrap();
+    store
+        .db
+        .execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&wallet])
+        .unwrap();
+    store.db.execute("INSERT INTO wallet_retirements(wallet_id,pool_id,confirmed_amount,latest_amount,confirmed_height,confirmed_hash,latest_height,latest_hash,accepted_maximum,observed_bound,support,endpoint,reason,recorded_at) VALUES(?1,?2,'27','30',10,'old-confirmed',12,'old-latest','100','100','historical-support','historical-endpoint','automatic',100)", params![wallet,pool]).unwrap();
+    // Remove the new field/index, reproducing the actual old layout rather
+    // than asking a fresh-schema report to pretend it lacks the field.
+    store.db.execute_batch("DROP INDEX payment_disputed_wallet; ALTER TABLE payment_attempts DROP COLUMN resolution_disputed; PRAGMA user_version=16; PRAGMA query_only=ON;").unwrap();
+    let before = store.db.total_changes();
+    let report = read_status(&store.db).unwrap();
+    let pool = &report.pools[0];
+    assert_eq!(
+        pool.retirement_accounting
+            .automatic_recorded_confirmed_atomic
+            .as_deref(),
+        Some("27")
+    );
+    assert_eq!(pool.retirement_accounting.automatic_count, Some(1));
+    assert_eq!(pool.retirement_accounting.historical_unknown_count, 0);
+    assert_eq!(pool.retired_wallets, 1);
+    let wallet = pool.addresses.iter().find(|w| w.id == wallet).unwrap();
+    assert_eq!(wallet.retirement.as_ref().unwrap().latest_amount, "30");
+    assert!(wallet.signed_exposure_atomic.is_none());
+    assert!(!pool.serving_ready);
+    assert_eq!(store.db.total_changes(), before);
+}

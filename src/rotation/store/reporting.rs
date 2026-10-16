@@ -127,6 +127,13 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
         pool.addresses = read_addresses(db, &pool.id)?;
         if version == 17 {
             populate_current_pool(db, &mut pool)?;
+        } else if version == 16 {
+            // Historical accounting is independent of current admission fields.
+            for wallet in &mut pool.addresses {
+                wallet.retirement = read_retirement(db, &wallet.id)?;
+                pool.retained_wallets += usize::from(wallet.role == "RETAINED");
+                pool.retired_wallets += usize::from(wallet.role == "RETIRED");
+            }
         }
         pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses, version)?;
         pools.push(pool);
@@ -157,6 +164,12 @@ fn read_addresses(db: &Connection, pool: &str) -> Result<Vec<AddressStatus>> {
     .map_err(Into::into)
 }
 
+fn read_retirement(db: &Connection, wallet: &str) -> Result<Option<RetirementStatus>> {
+    Ok(db.query_row("SELECT confirmed_amount,latest_amount,accepted_maximum,observed_bound,confirmed_height,confirmed_hash,latest_height,latest_hash,disputed,recorded_at FROM wallet_retirements WHERE wallet_id=?1",[wallet],|r|Ok(RetirementStatus {
+            confirmed_amount:r.get(0)?,latest_amount:r.get(1)?,accepted_maximum:r.get(2)?,observed_bound:r.get(3)?,confirmed_height:r.get(4)?,confirmed_hash:r.get(5)?,latest_height:r.get(6)?,latest_hash:r.get(7)?,disputed:r.get(8)?,recorded_at:r.get(9)?,
+        })).optional()?)
+}
+
 fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
     (pool.payment_limit_atomic, pool.retirement_tolerance_atomic) = db.query_row(
         "SELECT payment_limit,retirement_tolerance FROM pools WHERE id=?1",
@@ -177,9 +190,7 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
             [&wallet.id],
             |r| r.get(0),
         )?;
-        wallet.retirement = db.query_row("SELECT confirmed_amount,latest_amount,accepted_maximum,observed_bound,confirmed_height,confirmed_hash,latest_height,latest_hash,disputed,recorded_at FROM wallet_retirements WHERE wallet_id=?1",[&wallet.id],|r|Ok(RetirementStatus {
-            confirmed_amount:r.get(0)?,latest_amount:r.get(1)?,accepted_maximum:r.get(2)?,observed_bound:r.get(3)?,confirmed_height:r.get(4)?,confirmed_hash:r.get(5)?,latest_height:r.get(6)?,latest_hash:r.get(7)?,disputed:r.get(8)?,recorded_at:r.get(9)?,
-        })).optional()?;
+        wallet.retirement = read_retirement(db, &wallet.id)?;
         pool.retained_wallets += usize::from(wallet.role == "RETAINED");
         pool.retired_wallets += usize::from(wallet.role == "RETIRED");
         pool.serving_ready |= capacity::payment_ownership(db, &pool.id, &wallet.id)?.is_some();
