@@ -709,6 +709,12 @@ membership and funding-obligation inventory remain subsequent work. The fault mo
 covers malformed identifiable rows and stale projections, not undetectable deletion
 or internally consistent rewriting of the authoritative journal.
 
+C09 review removed production writes to the obsolete exposure column entirely:
+a compatibility refresh must not veto a valid resolution because another liability
+is malformed. A focused canonical-proof test resolves the valid attempt while
+leaving the malformed attempt outstanding and admission-blocking. Reports derive
+from journals; the old column remains only for schema compatibility.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

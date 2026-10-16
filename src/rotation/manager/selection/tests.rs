@@ -1406,7 +1406,7 @@ async fn retirement_payment_order(payment_first: bool) {
         let db = f.db();
         let (role, exposure): (String, String) = db
             .query_row(
-                "SELECT role,unresolved_exposure FROM wallets WHERE id=?1",
+                "SELECT role,(SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE id=?1",
                 [&wallet],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

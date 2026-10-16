@@ -335,6 +335,69 @@ fn publication_rows(store: &Store) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
 }
 
 #[tokio::test]
+async fn canonical_resolution_does_not_require_other_liability_amounts() {
+    let mut fixture = Fixture::new().await;
+    let authorization = fixture.authorization();
+    let wallet = fixture.wallets[0].clone();
+    fixture.store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,nonce,valid_before,reconciliation_sequence) SELECT 'malformed',pool_id,wallet_id,0,'bad','fixture','POSSIBLY_SUBMITTED',payer,'other-nonce',valid_before,2 FROM payment_attempts WHERE id='proof'", []).unwrap();
+    let query = fixture
+        .store
+        .scoped_chain_query(&fixture.pool, vec![], vec![authorization])
+        .unwrap();
+    let view = fixture.rpc.view(query).await.unwrap();
+    fixture
+        .store
+        .publish_scoped_evidence(&fixture.pool, view)
+        .unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .db
+            .query_row(
+                "SELECT state FROM payment_attempts WHERE id='proof'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "RESOLVED"
+    );
+    assert_eq!(
+        fixture
+            .store
+            .db
+            .query_row(
+                "SELECT count(*) FROM payment_resolutions WHERE attempt_id='proof'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        fixture
+            .store
+            .db
+            .query_row(
+                "SELECT state FROM payment_attempts WHERE id='malformed'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "POSSIBLY_SUBMITTED"
+    );
+    assert_eq!(
+        exposure(&fixture.store.db, &wallet)
+            .unwrap_err()
+            .downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedExposure)
+    );
+    assert_eq!(
+        exposure(&fixture.store.db, &fixture.wallets[1]).unwrap(),
+        U256::ZERO
+    );
+}
+
+#[tokio::test]
 async fn publication_rolls_back_resolution_and_first_balance_after_late_failure() {
     let mut fixture = Fixture::new().await;
     fixture.chain.lock().unwrap().1 = 1_000_000;

@@ -93,19 +93,6 @@ pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
     Ok(total)
 }
 
-// Compatibility projection only; no read of this value grants admission.
-pub(super) fn refresh_exposure_projection(db: &Connection, wallet: &str) -> Result<()> {
-    let total = exposure(db, wallet)?;
-    ensure!(
-        db.execute(
-            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
-            params![wallet, total.to_string()]
-        )? == 1,
-        "missing liability wallet"
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 fn projected_exposure(db: &Connection, wallet: &str) -> Result<U256> {
     let value: String = db.query_row(

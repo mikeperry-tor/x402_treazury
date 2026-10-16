@@ -353,8 +353,8 @@ and reuse neither renews evidence nor skips comparison against each expected has
 
 Payment exposure is derived with exact arithmetic from the wallet's outstanding
 authorization journal, including during transactional admission and status reporting.
-The legacy stored total is a compatibility projection and cannot override that
-journal. Malformed identifiable liabilities block the affected wallet; existing
+The legacy stored total is unused and no longer maintained; it cannot override
+that journal. Malformed identifiable liabilities block the affected wallet; existing
 stops for disputed resolution evidence remain in force.
 
 Historical liability release and fresh spending capacity have separate anchors.

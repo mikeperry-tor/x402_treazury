@@ -332,7 +332,7 @@ async fn saturation_child() {
     );
     assert_eq!(
         db.query_row(
-            "SELECT SUM(CAST(unresolved_exposure AS INTEGER)) FROM wallets",
+            "SELECT SUM(CAST(amount AS INTEGER)) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
             [],
             |r| r.get::<_, i64>(0)
         )

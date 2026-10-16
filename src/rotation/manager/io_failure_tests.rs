@@ -118,7 +118,7 @@ async fn journal_io_failure_sends_no_signature_and_reopen_keeps_atomic_exposure(
         );
         assert_eq!(
             db.query_row(
-                "SELECT SUM(CAST(unresolved_exposure AS INTEGER)) FROM wallets",
+                "SELECT SUM(CAST((SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') AS INTEGER)) FROM wallets",
                 [],
                 |r| r.get::<_, i64>(0)
             )

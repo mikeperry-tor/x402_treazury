@@ -209,7 +209,7 @@ async fn process_loss_preserves_authorizations_without_replay_and_peer_can_pay()
             let db = rusqlite::Connection::open(&fixture.db).unwrap();
             assert_eq!(
                 db.query_row(
-                    "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+                    "SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE id=?1",
                     [wallet],
                     |r| r.get::<_, String>(0)
                 )

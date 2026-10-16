@@ -172,7 +172,7 @@ async fn cancel_at(cancel_at: CancelAt) {
     assert_eq!(amount, "1");
     let exposure: String = db
         .query_row(
-            "SELECT unresolved_exposure FROM wallets WHERE lower(address)=lower(?1)",
+            "SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE lower(address)=lower(?1)",
             [&expected_address],
             |row| row.get(0),
         )

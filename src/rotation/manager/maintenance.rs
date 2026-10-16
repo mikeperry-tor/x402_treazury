@@ -909,7 +909,7 @@ mod tests {
         assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 7);
         assert!(f.balance_reads.load(Ordering::SeqCst) >= 2);
         assert_eq!(unfinished(&f).await, PAGE_SIZE);
-        let exposure: String = db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get(0)).unwrap();
+        let exposure: String = db.query_row("SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get(0)).unwrap();
         assert_eq!(exposure, (PAGE_SIZE * 4).to_string());
         assert_eq!(db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE valid_before=-1 AND state='POSSIBLY_SUBMITTED'", [], |r| r.get::<_, i64>(0)).unwrap(), (PAGE_SIZE * 4) as i64);
         assert_eq!(
@@ -1255,7 +1255,7 @@ mod tests {
                     .unwrap(),
                 1
             );
-            assert_eq!(db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get::<_, String>(0)).unwrap(), HISTORY_RETRIES.to_string());
+            assert_eq!(db.query_row("SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get::<_, String>(0)).unwrap(), HISTORY_RETRIES.to_string());
             drop(db);
             drop(f.pool);
             drop(f.store);
@@ -1308,7 +1308,7 @@ mod tests {
         assert_eq!(unfinished(&f).await, 1);
         let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
         let (exposure, repairs, proofs): (String, i64, i64) = db.query_row(
-            "SELECT unresolved_exposure,(SELECT COUNT(*) FROM wallets WHERE evidence_repair IS NOT NULL),(SELECT COUNT(*) FROM payment_resolutions) FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [],
+            "SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED'),(SELECT COUNT(*) FROM wallets WHERE evidence_repair IS NOT NULL),(SELECT COUNT(*) FROM payment_resolutions) FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!((exposure.as_str(), repairs, proofs), ("1", 0, 1));
         drop(db);

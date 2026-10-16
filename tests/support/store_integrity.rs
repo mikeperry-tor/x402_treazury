@@ -802,15 +802,14 @@ fn assert_atomic_counts(store: &Store, signed: i64, evidence: i64) {
     assert_eq!(count, evidence);
     let wallets = store
         .db
-        .prepare("SELECT id,unresolved_exposure FROM wallets")
+        .prepare("SELECT id FROM wallets")
         .unwrap()
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
+        .query_map([], |row| row.get::<_, String>(0))
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
-    for (wallet, aggregate) in wallets {
+    for wallet in wallets {
+        let aggregate = evidence::exposure(&store.db, &wallet).unwrap();
         let journal = store
             .db
             .prepare("SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'")
@@ -820,7 +819,7 @@ fn assert_atomic_counts(store: &Store, signed: i64, evidence: i64) {
             .fold(U256::ZERO, |sum, value| {
                 sum.checked_add(amount(&value.unwrap()).unwrap()).unwrap()
             });
-        assert_eq!(amount(&aggregate).unwrap(), journal);
+        assert_eq!(aggregate, journal);
     }
 }
 

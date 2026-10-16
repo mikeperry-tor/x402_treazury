@@ -1722,7 +1722,6 @@ impl Store {
         );
         // Preserve legacy report metadata without using it as admission authority.
         tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,(SELECT generation FROM pools WHERE id=?2),?4,?5,'POSSIBLY_SUBMITTED',?6,?7,?8,?9,?10,?11)",params![admission.id,admission.pool,admission.wallet,admission.cost.to_string(),admission.requirements_hash,auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?,evidence::next_sequence(&tx)?])?;
-        evidence::refresh_exposure_projection(&tx, &admission.wallet)?;
         tx.execute(
             "INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role,reserve_slot,claim_generation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             params![
@@ -2041,7 +2040,6 @@ fn apply_chain_resolutions(
                 [id],
                 |row| row.get(0),
             )?;
-            evidence::refresh_exposure_projection(tx, &wallet)?;
             tx.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES(?1,?2,?3,?4,?5,?6)",
                 params![id,outcome,i64::try_from(anchor.height)?,anchor.hash,i64::try_from(resolution.block_time)?,support])?;
             if support.is_some() {

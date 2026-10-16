@@ -447,7 +447,7 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
             .unwrap();
         assert_eq!(
             db.query_row(
-                "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+                "SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE id=?1",
                 [&wallet],
                 |r| r.get::<_, String>(0)
             )
@@ -497,7 +497,7 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
             .unwrap();
         assert_eq!(
             db.query_row(
-                "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+                "SELECT (SELECT CAST(COALESCE(SUM(CAST(a.amount AS INTEGER)),0) AS TEXT) FROM payment_attempts a WHERE a.wallet_id=wallets.id AND a.state='POSSIBLY_SUBMITTED') FROM wallets WHERE id=?1",
                 [&wallet],
                 |r| r.get::<_, String>(0)
             )
