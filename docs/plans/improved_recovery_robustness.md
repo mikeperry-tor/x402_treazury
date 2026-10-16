@@ -1024,6 +1024,30 @@ unmatched legacy/manual flags remains; selected canonical repair never falls bac
 to it after failure or an unresolved nonce. C15 fairness and final production
 acceptance remain separate work.
 
+**C15 separate repair-owner contract:** A residual canonical repair owns one
+dedicated pass per pool, independently of the four current-balance readers and
+four authorization-history readers. The pass retains its staging and cursor
+while useful work continues. Existing process-wide query/RPC bounds still apply;
+the extra owner bound protects retained repair staging, not spending capacity.
+Physical wallet pages advance even through ineligible rows. Failure backoff is
+per wallet; shutdown cancels unsigned reads while accepted serialized store jobs
+and staging cleanup retain ownership.
+
+Current maintenance uses C12's all-liabilities-reserved capacity path during a
+known payment dispute. It cannot release liabilities, publish readiness or retire
+a wallet. This also avoids repeatedly invalidating a progressing repair by
+rechecking its already-disputed old checkpoint. A one-pass caller receives the
+final repair disposition rather than an intermediate balance deferral.
+
+The separate owner and capacity path passed independent review. All 15 maintenance
+tests passed, followed by two new one-pass success/unresolved-nonce tests and the
+retired/healthy physical-page regression. The final one-pass rerun also passed.
+Tests retain a repair beyond the normal cadence, verify current capacity prefetch
+and independent history progress, then require adoption; shutdown/restart retains
+liabilities and cleans staging. This slice does not close G12: complete final replacement validation and activation still occupy
+one serialized database job. Moving that work out requires complete revision
+coverage and short atomic activation, not weaker validation or a work deadline.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

@@ -1483,6 +1483,30 @@ impl Store {
         Ok(query)
     }
 
+    /// Keep payment capacity observed while a separately owned canonical repair
+    /// runs. Capacity-only evidence cannot publish readiness or retirement.
+    pub(crate) fn publish_maintenance_balance(
+        &mut self,
+        pool: &str,
+        view: super::base::ChainView,
+    ) -> Result<()> {
+        if !view
+            .balance_certificates
+            .values()
+            .any(|certificate| certificate.capture().capacity_snapshot.is_some())
+        {
+            return self.publish_scoped_evidence(pool, view);
+        }
+        let view = self.prepare_payment_evidence_view(view)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let depleted = apply_payment_view(&tx, pool, &view, self.evidence_namespace)?;
+        commit_chain_view(tx, pool, &view, &depleted)?;
+        self.notify_capacity_changed(pool);
+        Ok(())
+    }
+
     pub(crate) fn publish_scoped_evidence(
         &mut self,
         pool: &str,

@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 // Bounds owned read futures and queued acquired rows, never financial capacity.
 const BALANCE_READS: usize = 4;
 const HISTORY_READS: usize = 4;
+// Bounds active repair passes and retained SQLite staging, independently of RPC sockets.
+const REPAIR_READS: usize = 1;
 const CADENCE: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
@@ -31,6 +33,7 @@ enum Kind {
     Balance,
     History,
     Qualification,
+    Repair,
 }
 struct Completion {
     kind: Kind,
@@ -78,8 +81,9 @@ fn history_delay(failures: u32) -> Duration {
     })
 }
 
-// Bounds retained retry metadata, independently of the four active RPC readers.
-// Never evict active work or an unelapsed backoff to admit another observation.
+// Bounds retained retry metadata independently in each history/repair lane.
+// Active repair staging has its own smaller owner bound. Never evict active work
+// or an unelapsed backoff to admit another observation.
 const HISTORY_RETRIES: usize = HISTORY_READS * PAGE_SIZE;
 #[derive(Default)]
 struct HistoryRetries(BTreeMap<String, HistoryRetry>);
@@ -168,6 +172,7 @@ impl ManagedPool {
     async fn maintenance(&self, stop: CancellationToken, one_pass: bool) -> Result<()> {
         let mut balances = Pass::<String>::new(-1);
         let mut history = Pass::<HistoryPayload>::new(0);
+        let mut repairs = Pass::<Option<String>>::new(-1);
         let mut priority = VecDeque::<String>::new();
         let mut priority_ids = BTreeSet::new();
         let mut priority_due = Instant::now();
@@ -177,6 +182,8 @@ impl ManagedPool {
         let mut priority_initialized = false;
         let mut balance_active = BTreeSet::new();
         let mut history_active = BTreeSet::new();
+        let mut repair_active = BTreeSet::new();
+        let mut repair_retries = HistoryRetries::default();
         let mut history_retries = HistoryRetries::default();
         let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
         let mut first_error = None;
@@ -247,6 +254,33 @@ impl ManagedPool {
                         .boxed(),
                 );
             }
+            // Repair has independent ownership: an arbitrarily long canonical
+            // history pass cannot occupy a current-balance reader. One-pass
+            // recovery first lets its ordinary observations discover disputes.
+            while repair_active.len() < REPAIR_READS
+                && (!one_pass || (balances.completed && balance_active.is_empty()))
+            {
+                let next = match inventory_result(
+                    self.next_repair(
+                        &mut repairs,
+                        one_pass,
+                        &mut repair_retries,
+                        &repair_active,
+                        Instant::now(),
+                    )
+                    .await,
+                    &mut first_error,
+                )? {
+                    Some(next) => next,
+                    None => {
+                        repairs.defer_inventory(one_pass);
+                        None
+                    }
+                };
+                let Some(id) = next else { break };
+                repair_active.insert(id.clone());
+                reads.push(self.repair_one(id).boxed());
+            }
             if let Some(error) = history.decode_failure.take()
                 && first_error.is_none()
             {
@@ -268,16 +302,22 @@ impl ManagedPool {
                     .boxed(),
                 );
             }
-            if one_pass && balances.completed && history.completed && reads.is_empty() {
+            if one_pass
+                && balances.completed
+                && history.completed
+                && repairs.completed
+                && reads.is_empty()
+            {
                 return first_error.map_or(Ok(()), Err);
             }
             let wake = priority_due
                 .min(qualification_due)
                 .min(balances.due)
-                .min(history.due);
+                .min(history.due)
+                .min(repairs.due);
             // Active passes may have an old due time. They are driven by
             // completions; the cadence prevents an empty/all-owned busy loop.
-            let wake = if history.yielded {
+            let wake = if history.yielded || repairs.yielded {
                 Instant::now()
             } else if wake <= Instant::now() {
                 Instant::now() + CADENCE
@@ -293,10 +333,17 @@ impl ManagedPool {
                             history_active.remove(&done.id);
                             history_retries.complete(&done.id, done.result.is_err(), Instant::now());
                         },
+                        Kind::Repair=>{repair_active.remove(&done.id);repair_retries.complete(&done.id, done.result.is_err(), Instant::now());},
                         Kind::Qualification=>{qualification_active=false;qualification_completed=true;qualification_due=Instant::now()+CADENCE;},
                     }
                     if let Err(error)=done.result {
-                        let kind=match done.kind {Kind::Balance=>"balance",Kind::History=>"authorization_history",Kind::Qualification=>"qualification"};
+                        if done.kind == Kind::Balance && error.downcast_ref::<crate::rotation::base::evidence::EvidenceFailure>() == Some(&crate::rotation::base::evidence::EvidenceFailure::ChainRepairRequired) {
+                            // The separately owned repair lane reports its final
+                            // disposition; current reads must release their slot.
+                            tracing::debug!(kind="balance",category="chain_repair_pending", "Current balance awaits separately owned wallet repair; liabilities remain reserved");
+                            continue;
+                        }
+                        let kind=match done.kind {Kind::Balance=>"balance",Kind::History=>"authorization_history",Kind::Qualification=>"qualification",Kind::Repair=>"wallet_repair"};
                         tracing::warn!(kind,category=%super::super::base::safe_diagnostic(&error),"background observation unavailable; financial obligations remain owned");
                         if first_error.is_none(){first_error=Some(error);}
                     }
@@ -347,6 +394,79 @@ impl ManagedPool {
                 .map(|(sequence, id, _)| (sequence, id))
                 .collect();
         }
+    }
+    async fn repair_one(&self, id: String) -> Completion {
+        let result = async {
+            crate::rotation::store::repair_wallet(
+                self.store.clone(),
+                self.base.clone(),
+                self.pool.clone(),
+                id.clone(),
+            )
+            .await?;
+            // False can mean a changed eligibility snapshot or unresolved nonce.
+            // Report current scoped state, rather than preserving a stale error
+            // from a balance read that successful repair has already superseded.
+            let wallet = id.clone();
+            let pool = self.pool.clone();
+            self.store
+                .call(move |s| s.check_wallet_repair_finished(&pool, &wallet))
+                .await
+        }
+        .await;
+        Completion {
+            kind: Kind::Repair,
+            id,
+            result,
+        }
+    }
+
+    async fn next_repair(
+        &self,
+        pass: &mut Pass<Option<String>>,
+        one_pass: bool,
+        retries: &mut HistoryRetries,
+        active: &BTreeSet<String>,
+        now: Instant,
+    ) -> Result<Option<String>> {
+        pass.yielded = false;
+        if (one_pass && pass.completed) || now < pass.due {
+            return Ok(None);
+        }
+        // Inspect a bounded physical page even when no wallets need repair.
+        for _ in 0..PAGE_SIZE {
+            if pass.queued.is_empty() {
+                if pass.through.is_none() {
+                    let pool = self.pool.clone();
+                    pass.through = Some(self.store.call(move |s| s.wallet_boundary(&pool)).await?);
+                    pass.cursor = -1;
+                }
+                let pool = self.pool.clone();
+                let (after, through) = (pass.cursor, pass.through.unwrap());
+                let page = self
+                    .store
+                    .call(move |s| s.repair_wallet_page(&pool, after, through, PAGE_SIZE))
+                    .await?;
+                if page.is_empty() {
+                    pass.finish(CADENCE);
+                    return Ok(None);
+                }
+                pass.queued = page.into();
+            }
+            let (sequence, candidate) = pass.queued.pop_front().expect("nonempty repair page");
+            pass.cursor = sequence;
+            let Some(id) = candidate else { continue };
+            match retries.admit(&id, now, active) {
+                HistoryAdmission::Ready => return Ok(Some(id)),
+                HistoryAdmission::Skip => {}
+                HistoryAdmission::CapacityUnavailable => {
+                    pass.queued.push_front((sequence, Some(id)));
+                    return Ok(None);
+                }
+            }
+        }
+        pass.yielded = true;
+        Ok(None)
     }
     async fn next_admitted_history(
         &self,
@@ -442,7 +562,11 @@ impl ManagedPool {
             let query = self
                 .store
                 .call_with_guard(guard.clone(), move |s| {
-                    s.scoped_chain_query(&pool, wallets, auth.into_iter().collect())
+                    if kind == Kind::Balance {
+                        s.payment_balance_query(&pool, wallets)
+                    } else {
+                        s.scoped_chain_query(&pool, wallets, auth.into_iter().collect())
+                    }
                 })
                 .await?;
             drop(guard);
@@ -455,7 +579,13 @@ impl ManagedPool {
             let completed = view.clone();
             let result = self
                 .store
-                .call_with_guard(guard, move |s| s.publish_scoped_evidence(&pool, completed))
+                .call_with_guard(guard, move |s| {
+                    if kind == Kind::Balance {
+                        s.publish_maintenance_balance(&pool, completed)
+                    } else {
+                        s.publish_scoped_evidence(&pool, completed)
+                    }
+                })
                 .await;
             let Err(error) = result else { return Ok(()) };
             use crate::rotation::base::evidence::EvidenceFailure;
@@ -491,7 +621,7 @@ impl ManagedPool {
                     let wallet = id.clone();
                     let capture = self
                         .store
-                        .call(move |s| s.capture_evidence(&wallet))
+                        .call(move |s| s.capture_payment_evidence(&wallet))
                         .await?;
                     self.base
                         .recheck_balance(certificate, capture)
@@ -517,26 +647,39 @@ impl ManagedPool {
             let guard = Arc::new(self.gate.clone().lock_owned().await);
             let pool = self.pool.clone();
             self.store
-                .call_with_guard(guard, move |s| s.publish_scoped_evidence(&pool, view))
+                .call_with_guard(guard, move |s| {
+                    if kind == Kind::Balance {
+                        s.publish_maintenance_balance(&pool, view)
+                    } else {
+                        s.publish_scoped_evidence(&pool, view)
+                    }
+                })
                 .await
         }
         .await;
         let result = if kind == Kind::Balance
             && result.as_ref().err().is_some_and(|error| {
+                error
+                    .downcast_ref::<crate::rotation::base::EvidenceConflict>()
+                    .is_some_and(|conflict| conflict.wallet == id && conflict.financial_checkpoint)
+            }) {
+            // A newly discovered canonical conflict was already recorded by
+            // acquire_view. Only its exact wallet's chain-repair disposition
+            // may defer that error to the repair lane; readiness-only and
+            // independent failures remain visible.
+            let wallet = id.clone();
+            let pool = self.pool.clone();
+            let disposition = self
+                .store
+                .call(move |s| s.check_wallet_repair_finished(&pool, &wallet))
+                .await;
+            if disposition.as_ref().err().is_some_and(|error| {
                 error.downcast_ref::<crate::rotation::base::evidence::EvidenceFailure>()
                     == Some(&crate::rotation::base::evidence::EvidenceFailure::ChainRepairRequired)
             }) {
-            match crate::rotation::store::repair_wallet(
-                self.store.clone(),
-                self.base.clone(),
-                self.pool.clone(),
-                id.clone(),
-            )
-            .await
-            {
-                Ok(true) => Ok(()),
-                Ok(false) => result,
-                Err(error) => Err(error),
+                disposition
+            } else {
+                result
             }
         } else {
             result
@@ -667,6 +810,7 @@ mod tests {
         let balance_payers = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
         let nonce_reads = Arc::new(AtomicUsize::new(0));
         let fail_nonces = Arc::new(AtomicBool::new(false));
+        let stamp = now().unwrap();
         let app=Router::new().route("/",post({
             let release=release.clone();let started=slow_started.clone();let balances=balance_reads.clone();let payers=balance_payers.clone();let nonces=nonce_reads.clone();let fail=fail_nonces.clone();
             move |Json(request):Json<Value>| {
@@ -677,7 +821,7 @@ mod tests {
                         "eth_getBlockByNumber"=>{
                             let tag=request["params"][0].as_str().unwrap();
                             let height=if tag=="latest"{100}else{u64::from_str_radix(&tag[2..],16).unwrap()};
-                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{stamp:x}")})
                         },
                         "eth_call"=>{
                             let data=request["params"][0]["data"].as_str().unwrap();
@@ -724,6 +868,310 @@ mod tests {
             treasury,
         }
     }
+    fn install_repair_wallets(f: &Fixture) {
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        for n in 0..4 {
+            let wallet = format!("repair-{n}");
+            let address = format!("0x{:040x}", 100 + n);
+            db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role,evidence_repair,financial_height,financial_hash) VALUES(?1,?2,?3,?4,X'00','1','RETAINED','chain_repair_required',80,'orphan')",rusqlite::params![wallet,f.pool.pool,100+n,address]).unwrap();
+            db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence,resolution_disputed) VALUES(?1,?2,?1,0,'1','fixture','RESOLVED',?3,?3,?4,0,1,?5,1)",rusqlite::params![wallet,f.pool.pool,address,format!("0x{:064x}",1),100+n]).unwrap();
+            db.execute(
+                "INSERT INTO payment_resolutions VALUES(?1,'USED',80,'orphan',1,'original')",
+                [wallet],
+            )
+            .unwrap();
+        }
+        db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES('healthy-after-repairs',?1,200,?2,X'00','1','RETAINED')",rusqlite::params![f.pool.pool,format!("0x{:040x}",999)]).unwrap();
+    }
+
+    #[tokio::test]
+    async fn repair_inventory_yields_after_healthy_page_and_keeps_cursor() {
+        let f = fixture(0).await;
+        install_repair_wallets(&f);
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        for n in 10..90 {
+            db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES(?1,?2,?3,?4,X'00','1',?5)",rusqlite::params![format!("healthy-{n}"),f.pool.pool,n,format!("0x{:040x}",1000+n),if n<50 {"RETIRED"} else {"RETAINED"}]).unwrap();
+        }
+        let mut pass = Pass::new(-1);
+        let mut retries = HistoryRetries::default();
+        let active = BTreeSet::new();
+        assert!(
+            f.pool
+                .next_repair(&mut pass, false, &mut retries, &active, Instant::now())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(pass.yielded);
+        assert!(!pass.completed);
+        let cursor = pass.cursor;
+        assert_eq!(
+            f.pool
+                .next_repair(&mut pass, false, &mut retries, &active, Instant::now())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("repair-0")
+        );
+        assert!(pass.cursor > cursor);
+        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 0);
+        assert_eq!(f.balance_reads.load(Ordering::SeqCst), 0);
+        drop(db);
+        f.server.abort();
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn repair_lane_preserves_balance_progress_deduplicates_and_cleans_up_on_shutdown() {
+        let f = fixture(1).await;
+        {
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            db.execute(
+                "UPDATE payment_attempts SET nonce=?1 WHERE id='attempt-1'",
+                [format!("0x{:064x}", 2)],
+            )
+            .unwrap();
+        }
+        install_repair_wallets(&f);
+        let stop = CancellationToken::new();
+        let task = tokio::spawn({
+            let pool = f.pool.clone();
+            let stop = stop.clone();
+            async move { pool.run_reconciliation(stop).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), f.slow_started.notified())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !f
+                .balance_payers
+                .lock()
+                .unwrap()
+                .contains(&format!("0x{:040x}", 999))
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        wait_for(&f, 0).await;
+        // More than one normal cadence passes while the repair remains owned.
+        let before = f.balance_reads.load(Ordering::SeqCst);
+        tokio::time::sleep(CADENCE + Duration::from_millis(200)).await;
+        assert!(f.balance_reads.load(Ordering::SeqCst) > before);
+        assert_eq!(
+            f.nonce_reads.load(Ordering::SeqCst),
+            2,
+            "one retained repair pass, no duplicate nonce scan"
+        );
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM payment_attempts WHERE resolution_disputed=1",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        // A new owner can begin the same repair after the dropped owner's queued
+        // cleanup; no durable ownership or liability was abandoned.
+        f.release.notify_waiters();
+        drop(db);
+        let restarted_stop = CancellationToken::new();
+        let restarted = tokio::spawn({
+            let pool = f.pool.clone();
+            let stop = restarted_stop.clone();
+            async move { pool.run_reconciliation(stop).await }
+        });
+        tokio::time::timeout(Duration::from_secs(8), f.slow_started.notified())
+            .await
+            .unwrap();
+        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 3);
+        restarted_stop.cancel();
+        restarted.await.unwrap().unwrap();
+        f.release.notify_waiters();
+        f.server.abort();
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn repair_lane_finishes_repair_after_slow_nonce_makes_progress() {
+        let f = fixture(0).await;
+        install_repair_wallets(&f);
+        let stop = CancellationToken::new();
+        let task = tokio::spawn({
+            let pool = f.pool.clone();
+            let stop = stop.clone();
+            async move { pool.run_reconciliation(stop).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), f.slow_started.notified())
+            .await
+            .unwrap();
+        let before = f.balance_reads.load(Ordering::SeqCst);
+        tokio::time::sleep(CADENCE + Duration::from_millis(200)).await;
+        assert!(f.balance_reads.load(Ordering::SeqCst) > before);
+        // Current capacity must remain prefetched for the same disputed wallet,
+        // without re-invalidating its obsolete strict checkpoint every cadence.
+        assert!(
+            f.balance_payers
+                .lock()
+                .unwrap()
+                .contains(&format!("0x{:040x}", 100))
+        );
+        let pool = f.pool.pool.clone();
+        assert!(
+            f.store
+                .call(move |s| Ok(s.cached_payment_view(&pool, "repair-0")?.is_some()))
+                .await
+                .unwrap()
+        );
+        f.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let db =
+                    rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+                let count: i64 = db
+                    .query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| {
+                        r.get(0)
+                    })
+                    .unwrap();
+                if count == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.cancel();
+        task.await.unwrap().unwrap();
+        f.release.notify_waiters();
+        f.server.abort();
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_pass_recovery_waits_for_selected_repairs_and_reports_success() {
+        let f = fixture(0).await;
+        install_repair_wallets(&f);
+        {
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            db.execute("DELETE FROM wallets WHERE id='healthy-after-repairs'", [])
+                .unwrap();
+            db.execute(
+                "UPDATE wallets SET evidence_repair=NULL WHERE id LIKE 'repair-%'",
+                [],
+            )
+            .unwrap();
+            db.execute("UPDATE payment_attempts SET resolution_disputed=0", [])
+                .unwrap();
+        }
+        let task = tokio::spawn({
+            let pool = f.pool.clone();
+            async move { pool.reconcile().await }
+        });
+        for _ in 0..4 {
+            tokio::time::timeout(Duration::from_secs(3), f.slow_started.notified())
+                .await
+                .unwrap();
+            f.release.notify_one();
+        }
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM payment_attempts WHERE resolution_disputed=1",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        drop(db);
+        f.server.abort();
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_pass_recovery_reports_unresolved_repair_without_releasing_liabilities() {
+        let f = fixture(0).await;
+        install_repair_wallets(&f);
+        {
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            db.execute("DELETE FROM wallets WHERE id='healthy-after-repairs'", [])
+                .unwrap();
+            db.execute(
+                "UPDATE payment_attempts SET nonce=?1,valid_before=?2",
+                rusqlite::params![
+                    format!("0x{:064x}", 2),
+                    i64::try_from(now().unwrap() + 1000).unwrap()
+                ],
+            )
+            .unwrap();
+        }
+        f.fail_nonces.store(true, Ordering::SeqCst);
+        let error = tokio::time::timeout(Duration::from_secs(3), f.pool.reconcile())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::rotation::base::evidence::EvidenceFailure>(),
+            Some(&crate::rotation::base::evidence::EvidenceFailure::ChainRepairRequired)
+        );
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM payment_attempts WHERE resolution_disputed=1",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
+        drop(db);
+        f.server.abort();
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+    }
+
     async fn unfinished(f: &Fixture) -> usize {
         let pool = f.pool.pool.clone();
         f.store

@@ -141,6 +141,46 @@ impl Store {
             })?
             .collect::<rusqlite::Result<_>>()?)
     }
+    pub(crate) fn check_wallet_repair_finished(&self, pool: &str, wallet: &str) -> Result<()> {
+        use crate::rotation::base::evidence::EvidenceFailure;
+        let reason: Option<String> = self.db.query_row(
+            "SELECT evidence_repair FROM wallets WHERE pool_id=?1 AND id=?2",
+            params![pool, wallet],
+            |row| row.get(0),
+        )?;
+        match reason.as_deref() {
+            None => Ok(()),
+            Some("chain_repair_required") => Err(EvidenceFailure::ChainRepairRequired.into()),
+            _ => Err(EvidenceFailure::EvidenceRepairRequired.into()),
+        }
+    }
+
+    /// Return every scanned row so an entirely healthy page still advances.
+    /// Repair eligibility never turns LIMIT into an unbounded history filter.
+    pub(crate) fn repair_wallet_page(
+        &self,
+        pool: &str,
+        after: i64,
+        through: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, Option<String>)>> {
+        let mut statement = self.db.prepare("SELECT sequence,id,evidence_repair,role FROM wallets WHERE pool_id=?1 AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
+        Ok(statement
+            .query_map(params![pool, after, through, page_limit(limit)?], |row| {
+                let reason: Option<String> = row.get(2)?;
+                Ok((
+                    row.get(0)?,
+                    if reason.as_deref() == Some("chain_repair_required")
+                        && row.get::<_, String>(3)? != "RETIRED"
+                    {
+                        Some(row.get(1)?)
+                    } else {
+                        None
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
     /// Few preferred identities receive acquisition opportunities alongside the
     /// ordinary cursor. The runtime owner deduplicates both paths and in-flight IDs.
     pub(crate) fn priority_wallets(
