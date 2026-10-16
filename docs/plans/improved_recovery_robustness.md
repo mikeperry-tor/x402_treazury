@@ -945,8 +945,10 @@ No replacement credit, liability closure or automatic shielding is authorized.
 Three synthetic refund-observation tests passed. Independent review identified
 that missing original outpoints and contradictory owners must also suppress fresh
 credit attribution for their affected operations, not only shielding. The immediate
-review fixup adds per-pass affected-owner suppression and independent-owner controls;
-this contract is not closed until that fixup is validated.
+review fixup adds per-pass affected-owner suppression and independent-owner controls.
+All four synthetic refund-observation tests and all-target/all-feature Clippy passed;
+independent review cleared the fixup. This closes this narrow scoped slice; the
+unidentifiable-ownership stop and broader C13 work remain outstanding.
 
 ### Stage 1 — Minimal authority and dependency specification
 

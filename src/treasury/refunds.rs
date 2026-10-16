@@ -128,7 +128,6 @@ fn collect_refunds(
     // Deduplication precedes revalidation: disputed historical credits never
     // become discoveries or receive another credit when they reappear.
     let mut known = std::collections::HashSet::with_capacity(accounting.credited.len());
-    let mut unknown_outpoint_operations = std::collections::HashSet::new();
     for credited in &accounting.credited {
         let operation_id = credited.operation_id.clone();
         ensure!(
@@ -154,7 +153,6 @@ fn collect_refunds(
                         && !accounting.ambiguous_operations.contains(&operation_id),
                     "credited return identity and ownership unidentifiable"
                 );
-                unknown_outpoint_operations.insert(operation_id.clone());
                 issues.insert(ReturnAccountingIssue::InvalidCreditedIdentity { operation_id });
                 continue;
             }
@@ -199,6 +197,10 @@ fn collect_refunds(
             issues.insert(ReturnAccountingIssue::MissingOriginalBinding { operation_id });
         }
     }
+    let affected_operations: std::collections::HashSet<_> = issues
+        .iter()
+        .map(|issue| issue.operation_id().to_owned())
+        .collect();
     let mut refunds = vec![];
     let mut observed_outputs = 0;
     // The pinned dependency has no incremental unknown-output feed. Inspect its
@@ -219,7 +221,6 @@ fn collect_refunds(
             }
             let operation = owners.first().expect("one owner");
             if accounting.ambiguous_operations.contains(operation)
-                || unknown_outpoint_operations.contains(operation)
                 || !accounting.confirmed.contains(operation)
             {
                 continue;
@@ -227,7 +228,9 @@ fn collect_refunds(
             observed_outputs += 1;
             // Known outputs retain their original accounting even when disputed.
             // Only previously uncredited discoveries may be published.
-            if known.contains(&(coin.output_id().txid(), coin.output_id().output_index())) {
+            if affected_operations.contains(operation)
+                || known.contains(&(coin.output_id().txid(), coin.output_id().output_index()))
+            {
                 continue;
             }
             refunds.push(RefundStatus {

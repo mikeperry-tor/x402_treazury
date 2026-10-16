@@ -333,6 +333,10 @@ fn credited_refund_issues_preserve_dedup_and_scope_shielding_to_both_claimed_own
         accounting.credited[0].amount = amount;
         accounting.credited[0].output_index = index;
         let observed = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+        assert!(
+            observed.credits.is_empty(),
+            "disputed original must not be rediscovered"
+        );
         assert!(observed.issues.iter().any(|issue| match reason {
             "amount" => matches!(issue, ReturnAccountingIssue::CreditedAmountConflict { .. }),
             _ => matches!(issue, ReturnAccountingIssue::MissingCreditedOutput { .. }),
@@ -340,6 +344,15 @@ fn credited_refund_issues_preserve_dedup_and_scope_shielding_to_both_claimed_own
         assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, "old").is_err());
         assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, "healthy").is_ok());
     }
+    accounting.credited[0] = original.clone();
+    accounting.credited[0].txid =
+        zcash_primitives::transaction::TxId::from_bytes([0xEE; 32]).to_string();
+    let missing = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert!(missing.credits.is_empty());
+    assert!(missing.issues.iter().any(|issue| matches!(
+        issue,
+        ReturnAccountingIssue::MissingCreditedTransaction { .. }
+    )));
     accounting.credited[0] = original.clone();
     accounting.bindings.insert(
         address.clone(),
@@ -381,4 +394,50 @@ fn credited_refund_issues_preserve_dedup_and_scope_shielding_to_both_claimed_own
                 operation_id: "old".into()
             })
     );
+}
+
+#[test]
+fn conflicting_credit_suppresses_both_owners_but_independent_discoveries_continue() {
+    let mut wallet = SyntheticWalletBuilder::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").transparent_coin(100).transparent_coin(200).build();
+    let coins = wallet.wallet_outputs::<pepper_sync::wallet::TransparentCoin>();
+    let address = coins[0].address().to_owned();
+    let original = RefundStatus {
+        txid: coins[0].output_id().txid().to_string(),
+        output_index: coins[0].output_id().output_index(),
+        operation_id: "A".into(),
+        amount: i64::try_from(coins[0].value()).unwrap(),
+        height: 2,
+    };
+    let mut other = SyntheticWalletBuilder::new(
+        "legal winner thank year wave sausage worth useful legal winner thank yellow",
+    )
+    .transparent_coin(1)
+    .transparent_coin(1)
+    .transparent_coin(300)
+    .build();
+    let independent = zcash_primitives::transaction::TxId::from_bytes([0xC2; 32]);
+    let record = other.wallet_transactions.remove(&independent).unwrap();
+    let independent_address = record.transparent_coins()[0].address().to_owned();
+    wallet.wallet_transactions.insert(independent, record);
+    let mut accounting = crate::rotation::store::refunds::ReturnAccounting::default();
+    accounting.credited.push(original);
+    accounting
+        .confirmed
+        .extend(["A".into(), "B".into(), "C".into()]);
+    accounting
+        .bindings
+        .insert(address, std::collections::BTreeSet::from(["B".into()]));
+    accounting.bindings.insert(
+        independent_address,
+        std::collections::BTreeSet::from(["C".into()]),
+    );
+    let observed = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert_eq!(observed.observed_outputs, 3);
+    assert_eq!(observed.credits.len(), 1);
+    assert_eq!(observed.credits[0].operation_id, "C");
+    assert_eq!(observed.credits[0].amount, 300);
+    for owner in ["A", "B"] {
+        assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, owner).is_err());
+    }
+    assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, "C").is_ok());
 }
