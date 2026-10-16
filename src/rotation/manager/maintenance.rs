@@ -463,6 +463,26 @@ impl ManagedPool {
                 .await
         }
         .await;
+        let result = if kind == Kind::Balance
+            && result.as_ref().err().is_some_and(|error| {
+                error.downcast_ref::<crate::rotation::base::evidence::EvidenceFailure>()
+                    == Some(&crate::rotation::base::evidence::EvidenceFailure::ChainRepairRequired)
+            }) {
+            match crate::rotation::store::repair_wallet(
+                self.store.clone(),
+                self.base.clone(),
+                self.pool.clone(),
+                id.clone(),
+            )
+            .await
+            {
+                Ok(true) => Ok(()),
+                Ok(false) => result,
+                Err(error) => Err(error),
+            }
+        } else {
+            result
+        };
         Completion { kind, id, result }
     }
 

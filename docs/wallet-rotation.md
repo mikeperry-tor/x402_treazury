@@ -370,6 +370,16 @@ capacity; the original support and dispute remain durable. Current payment
 admission still subtracts all unresolved liabilities and verifies every actual
 financial checkpoint, including one at the same disputed historical anchor.
 
+Maintenance may clear a wallet-level `chain_repair_required` block after complete
+canonical revalidation of original readiness, admission and resolution evidence,
+followed by fresh balance acquisition. Only ACTIVE/RETAINED wallets with completed,
+undisputed funding and no retirement records qualify. Keyset pages bound memory
+without limiting total historical work. A journal fingerprint and evidence
+generations reject concurrent changes; flag removal and its audit row commit
+together. Historical proof bytes, anchors and pending liabilities remain unchanged.
+Cancellation before commit leaves the block intact; accepted store jobs retain
+commit ownership. Genuine contradictions and uncertain funding still need review.
+
 Chain-view publication applies canonical resolutions, exposure release and balance,
 readiness and retirement updates in the caller's single transaction. A late failure
 rolls back those updates together. Scoped publication leaves unobserved wallets

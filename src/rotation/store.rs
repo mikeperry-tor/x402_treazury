@@ -15,6 +15,7 @@ mod treasury_reads;
 pub use capacity::AllocationKind;
 mod evidence;
 pub use evidence::BalanceSupport;
+pub(crate) use evidence::repair::repair_wallet;
 pub(crate) mod bootstrap;
 #[cfg(feature = "zcash")]
 mod expiry;
@@ -386,6 +387,7 @@ impl Store {
             "network='mainnet'",
             &format!("network='{}'", network.name()),
         ))?;
+        tx.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
             params![id, birthday, network.name()],
@@ -1229,6 +1231,7 @@ fn admission_schema(db: &Connection) -> Result<()> {
         version == 16,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
+    db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
     // Additive lookup optimization for existing schema16 stores; financial
     // records and the state format are unchanged.
     db.execute_batch(

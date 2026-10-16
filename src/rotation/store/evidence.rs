@@ -1,4 +1,5 @@
 //! Exact supporting values live with the journal; runtime credentials never survive reopen.
+pub(crate) mod repair;
 use super::*;
 use crate::rotation::base::{
     Anchor,

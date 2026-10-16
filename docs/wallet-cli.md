@@ -694,7 +694,17 @@ these queries. Admission uses the lower of confirmed and latest balances minus
 unresolved authorizations. The default confirmation depth is 12 and maximum
 latest-block age is 120 seconds. Typed contradiction handling distinguishes a bad
 new acquisition from disputed historical readiness and invalidated financial-accounting
-support; an ordinary refresh cannot repair the latter.
+support; an ordinary balance refresh cannot repair the latter.
+
+During `serve`, maintenance can clear `chain_repair_required` for ACTIVE or
+RETAINED wallets only after reverifying every original admission balance, readiness
+balance and authorization resolution against its original configured RPC endpoint.
+It then acquires fresh balances and atomically checks that the journal is unchanged.
+The repair preserves original proofs and pending exposure, records a
+`wallet_evidence_repairs` audit row, and logs `wallet_evidence_revalidated`.
+Missing or contradictory support, disputed readiness, retirement records and
+incomplete/refunded funding remain blocked. This does not reset uncertain swaps,
+submit transactions or grant additional funding authority.
 
 Admission journals the exact payer's authorization and consumes a READY claim in
 one transaction. ACTIVE and RETAINED payers retain their roles, and selection creates

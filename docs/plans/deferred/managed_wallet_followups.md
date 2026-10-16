@@ -71,8 +71,9 @@ checks, and durable audit support. It must not sweep funds or infer replacement
 funding authority.
 
 Specialized abandonment, contradictory-evidence assessment and fork repair remain
-incident-specific operator work. Ordinary recovery does not clear repair blocks,
-rewrite historical anchors or adopt uncertain liabilities. A future utility needs
+incident-specific operator work. Serving maintenance can clear a wallet-level
+chain repair block only through [complete original-evidence revalidation](../../wallet-rotation.md);
+ordinary recovery never rewrites historical anchors or adopts uncertain liabilities. A future utility needs
 an exact reviewed source shape and preserved original bytes/support; the known
 schema12 privacy-local preflight currently rejects missing immutable destination
 readiness. There is no general-purpose migration or proof override.

@@ -115,7 +115,7 @@ pub struct Anchor {
     pub height: u64,
     pub hash: String,
 }
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PendingAuthorization {
     pub id: String,
     pub wallet: String,
