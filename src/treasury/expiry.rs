@@ -45,10 +45,10 @@ fn check_owned_outputs<'a, T: OutputInterface + 'a>(
             .wallet_outputs::<T>()
             .into_iter()
             .find(|o| o.output_id() == old.output_id())
-            .context("expiry recovery input missing")?;
+            .context(crate::rotation::transaction::RecoveryEvidenceError::InputMissing)?;
         ensure!(
             output.spend_link() == old.spend_link() && output.value() == old.value(),
-            "expiry recovery input mismatch"
+            crate::rotation::transaction::RecoveryEvidenceError::InputMismatch
         );
         let confirmed = current
             .output_transaction(output)
@@ -61,7 +61,7 @@ fn check_owned_outputs<'a, T: OutputInterface + 'a>(
         );
         ensure!(
             current.output_spend_status(output).is_unspent(),
-            "expiry recovery input remains spent or ambiguous"
+            crate::rotation::transaction::RecoveryEvidenceError::InputSpent
         );
         value = value
             .checked_add(output.value())
@@ -93,12 +93,12 @@ impl Treasury {
         let height = sync.height.context("missing sync height")?;
         ensure!(
             sync.fresh(now()?, status.snapshot_revision),
-            "expiry recovery sync stale"
+            crate::rotation::transaction::RecoveryEvidenceError::StaleSync
         );
         let facts = prepared.facts().context("operation facts missing")?;
         ensure!(
             height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
-            "transaction expiry not buried"
+            crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         ensure!(!stop.is_cancelled(), "expiry recovery cancelled");
         let presence = sender.lookup(&prepared).await?;
@@ -107,7 +107,7 @@ impl Treasury {
                 presence,
                 TransactionPresence::Absent | TransactionPresence::Unknown
             ),
-            "expiry recovery contradicts indexer inclusion"
+            crate::rotation::transaction::RecoveryEvidenceError::IndexerInclusion
         );
         // Some indexers return generic Internal for missing transactions. Keep
         // that result Unknown; establish non-inclusion from fresh chain-scanned
@@ -120,7 +120,7 @@ impl Treasury {
         ensure!(
             sync.fresh(now()?, status.snapshot_revision)
                 && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
-            "expiry recovery chain changed"
+            crate::rotation::transaction::RecoveryEvidenceError::ChainChanged
         );
         let original = LightClient::from_reader(
             original.as_slice(),
@@ -143,7 +143,7 @@ impl Treasury {
                 .wallet_transactions
                 .get(&txid)
                 .is_some_and(|r| r.status().is_failed()),
-            "sync has not invalidated expired transaction"
+            crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotInvalidated
         );
         let input = [
             check_inputs::<TransparentCoin>(

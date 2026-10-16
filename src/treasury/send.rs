@@ -336,13 +336,13 @@ impl Treasury {
                     .get_confirmed_height()
                     .map(|h| u64::from(u32::from(h)))
                     == Some(height),
-                "confirmation disagrees with wallet sync"
+                crate::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch
             );
             let mut bytes = zeroize::Zeroizing::new(Vec::new());
             record.transaction().write(&mut *bytes)?;
             ensure!(
                 bytes.as_slice() == prepared.bytes(),
-                "confirmed transaction bytes mismatch"
+                crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
             );
             drop(wallet);
             let instant = now()?;

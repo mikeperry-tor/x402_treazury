@@ -32,30 +32,23 @@ pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
 }
 
 fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
-    for cause in error.chain() {
-        match cause.to_string().as_str() {
-            "transaction expiry not buried" | "sync has not invalidated expired transaction" => {
-                return Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
-            }
-            "expiry recovery requires zero observed tip lag; synchronize again before releasing reservations"
-            | "expiry recovery sync stale"
-            | "expiry recovery chain changed" => {
-                return Some(RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync"));
-            }
-            "expiry recovery input missing"
-            | "expiry recovery input mismatch"
-            | "expiry recovery input remains spent or ambiguous"
-            | "expiry recovery contradicts indexer inclusion"
-            | "confirmed transaction bytes mismatch"
-            | "confirmation disagrees with wallet sync" => {
-                return Some(RecoveryOutcome::OperatorRequired(
-                    "conflicting_transaction_or_input_evidence",
-                ));
-            }
-            _ => {}
+    use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
+    Some(match error.downcast_ref::<Evidence>()? {
+        Evidence::ExpiryNotBuried | Evidence::ExpiryNotInvalidated => {
+            RecoveryOutcome::Waiting("waiting_for_transaction_expiry")
         }
-    }
-    None
+        Evidence::TipLag | Evidence::StaleSync | Evidence::ChainChanged => {
+            RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync")
+        }
+        Evidence::InputMissing
+        | Evidence::InputMismatch
+        | Evidence::InputSpent
+        | Evidence::IndexerInclusion
+        | Evidence::TransactionMismatch
+        | Evidence::ConfirmationMismatch => {
+            RecoveryOutcome::OperatorRequired("conflicting_transaction_or_input_evidence")
+        }
+    })
 }
 
 fn early_job_disposition(job: &FundingJob) -> Option<RecoveryOutcome> {
@@ -356,13 +349,20 @@ mod tests {
     #[test]
     fn conflicting_evidence_never_becomes_a_retryable_reset() {
         assert_eq!(
-            evidence_outcome(&anyhow::anyhow!("expiry recovery input mismatch")),
+            evidence_outcome(
+                &anyhow::Error::new(
+                    crate::rotation::transaction::RecoveryEvidenceError::InputMismatch
+                )
+                .context("outer diagnostic")
+            ),
             Some(RecoveryOutcome::OperatorRequired(
                 "conflicting_transaction_or_input_evidence"
             ))
         );
         assert_eq!(
-            evidence_outcome(&anyhow::anyhow!("transaction expiry not buried")),
+            evidence_outcome(&anyhow::Error::new(
+                crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
+            )),
             Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"))
         );
         assert_eq!(
@@ -370,6 +370,29 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn diagnostic_text_cannot_select_a_recovery_disposition() {
+        use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
+        for evidence in [
+            Evidence::ExpiryNotBuried,
+            Evidence::ExpiryNotInvalidated,
+            Evidence::TipLag,
+            Evidence::StaleSync,
+            Evidence::ChainChanged,
+            Evidence::InputMissing,
+            Evidence::InputMismatch,
+            Evidence::InputSpent,
+            Evidence::IndexerInclusion,
+            Evidence::TransactionMismatch,
+            Evidence::ConfirmationMismatch,
+        ] {
+            let prose = evidence.to_string();
+            assert!(evidence_outcome(&anyhow::anyhow!(prose)).is_none());
+            let typed = anyhow::Error::new(evidence).context("arbitrary diagnostic context");
+            assert!(evidence_outcome(&typed).is_some());
+        }
+    }
+
     #[tokio::test]
     async fn recovery_requires_preparation_evidence_and_bound_survives_reopen() {
         let dir = tempfile::tempdir().unwrap();

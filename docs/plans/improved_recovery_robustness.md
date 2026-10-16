@@ -154,7 +154,7 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Pending |
 | G15 | Base maintenance inventory-read error propagation and deployment log-only exit; funding-scheduler exit audit; F17 | Observation ownership and durable unresolved obligations | Resume recoverable observation work under existing ownership/backoff; justify stops for corruption or lost ownership | 6 | T37 | Pending |
 | G16 | `history_page` whole-page decoding and failure propagation; F18 | Malformed live authority and identifiable affected scope | Keep affected liability blocked; allow independent wallets in the same pool to progress when scope is provable | 2, 6 | T38 | Pending |
-| G17 | `TreasuryConfig::runtime_id`, `validate_static_identities`, full `store::status` reporting; F19 | Treasury identity, supported schema and managed/static ownership binding | Replace operational full-report reads with narrow identity/ownership queries; unrelated report decoding cannot gate opening or recovery | 2, 8 | T32, T38, T40 | C01 implemented in working tree; see implementation contracts and evidence below |
+| G17 | `TreasuryConfig::runtime_id`, `validate_static_identities`, full `store::status` reporting; F19 | Treasury identity, supported schema and managed/static ownership binding | Replace operational full-report reads with narrow identity/ownership queries; unrelated report decoding cannot gate opening or recovery | 2, 8 | T32, T38, T40 | C01 implemented in b4a3b48; see implementation contracts and evidence below |
 | G18 | `validate_resolved_funding`, `managed_connection_preflight`, `initialize_wallets`, `Treasury::open` SDK reconstruction before store-worker creation; F20 | Exclusive store/key ownership, Base journal integrity, dependency-specific connection policy and SDK mutation ownership | Isolate independent static service; decide safe Base/store initialization without a usable Zcash SDK or funding-only configuration, including declaration validation before connection setup; retain justified shared-state stops | 8 | T22, T41 | Pending |
 | G19 | `funding_work_page` whole-page job/facts decoding and `collect_inventory` propagation; F21 | Identifiable operation ownership, reservations and shared treasury liabilities | Isolate malformed jobs where dependency scope is provable; retain affected obligations and traverse later jobs; restarting an undecodable page is insufficient | 2, 6 | T42 | Pending |
 | G20 | `record_readiness`, `payment_ownership`, candidate discovery/selection, balance scheduling and `consume_reserve`; F22 | Per-payment capacity, exact claim ownership and pending funding authority | Separate payment-sized capacity from funding-target satisfaction; specify initial role/claim transition without closing or duplicating funding | 2, 4 | T26, T43 | Pending |
@@ -291,12 +291,28 @@ Delete `TreasuryConfig::runtime_id -> status` and
 exposure, readiness, funding jobs and refunds are not identity or name-ownership
 inputs. These reads neither repair malformed liabilities nor authorize spending.
 No schema mutation, migration, key access or network observation is required.
-Implementation: working tree; `static_startup_ignores_unrelated_financial_reports_but_retains_identity_guards`
+Implementation: b4a3b48; `static_startup_ignores_unrelated_financial_reports_but_retains_identity_guards`
 passes through actual `Deployment::load`, binding and MCP discovery (default Zcash
 build, localhost fixture). It also checks omitted-ID resolution, conflicting managed
 names, explicit ID mismatch, schema15/schema17 rejection without conversion and
 continued reporting failure for the untouched malformed observation. T32/T38 here cover only the startup/report dependency; their admission
 and reconciliation cases remain pending.
+
+**C02 / G01 first boundary contract:** Expiry recovery must classify local proof
+failures by typed source errors, including errors wrapped in context. Preserve all
+existing exact-tip, age, burial, input identity/value/unspent and canonical inclusion
+predicates. A freshness/burial failure waits for ordinary observation; contradictory
+input/transaction evidence requires review. Diagnostic text, even an exact copy of
+a local message, cannot select either recovery disposition. This slice deletes the
+`evidence_outcome` string interpreter; durable preparation provenance and the
+remaining job diagnostic-prefix interpreters still require subsequent C02 work.
+No new persisted facts or schema are needed for this error boundary. Implemented
+in the working tree. Five `treasury::recovery::tests` and
+`rotation::store::expiry::tests::expiry_release_is_revision_guarded_and_preserves_job_identity`
+pass in the default Zcash build. The latter verifies the typed exact-tip failure,
+retained pending operation, revision checks, later release and recovery restrictions.
+C02/G01 remains partial: this does not remove durable diagnostic-prefix authority
+or establish preparation provenance.
 
 ### Stage 1 — Minimal authority and dependency specification
 
