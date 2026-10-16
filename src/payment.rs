@@ -216,6 +216,7 @@ pub struct PaidClient {
     source_identity: Arc<str>,
     cover: Option<(Arc<crate::cover::Config>, crate::cover::Scope)>,
     unsigned_only: bool,
+    unavailable: Option<crate::rotation::error::AdmissionError>,
     transport: crate::network::HttpPolicy,
     public_only: bool,
     timeout: Option<std::time::Duration>,
@@ -231,6 +232,7 @@ impl PaidClient {
             source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: false,
+            unavailable: None,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -246,6 +248,7 @@ impl PaidClient {
             source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: false,
+            unavailable: None,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -262,6 +265,7 @@ impl PaidClient {
             source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: true,
+            unavailable: None,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -270,6 +274,20 @@ impl PaidClient {
             payer: None,
             managed: None,
         }
+    }
+    /// Preserve the configured tool binding without any transport or signing
+    /// capability when its managed connection policy is unavailable.
+    pub(crate) fn unavailable(reason: crate::rotation::error::AdmissionError) -> Self {
+        let mut client = Self::unsigned();
+        client.unsigned_only = false;
+        client.unavailable = Some(reason);
+        client
+    }
+    fn require_available(&self) -> Result<()> {
+        if let Some(error) = self.unavailable {
+            return Err(error.into());
+        }
+        Ok(())
     }
     pub fn with_cover(
         mut self,
@@ -346,6 +364,7 @@ impl PaidClient {
     /// Pin an existing wallet's isolation identity for unsigned documentation probes.
     /// This selects no spending authority and never prepares or funds a wallet.
     pub(crate) async fn documentation_identity(&self) -> Result<crate::network::IsolationId> {
+        self.require_available()?;
         let address = if let Some(pool) = &self.managed {
             pool.documentation_address().await?
         } else {
@@ -437,6 +456,7 @@ impl PaidClient {
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
     ) -> Result<crate::output::HttpOutput> {
+        self.require_available()?;
         // Pin static signer before any I/O; replacement affects only later calls.
         let payer = self
             .payer
