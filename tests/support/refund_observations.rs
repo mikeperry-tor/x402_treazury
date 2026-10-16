@@ -134,14 +134,32 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
         .get_mut(&first)
         .unwrap()
         .update_status(ConfirmationStatus::Failed(21.into()), 0, true);
+    let disputed = collect_refunds(&wallet, &accounting, 21, 2).unwrap();
+    assert!(disputed.credits.is_empty());
+    assert!(disputed.issues.iter().any(|issue| matches!(issue, ReturnAccountingIssue::NoncanonicalCreditedOutput { operation_id } if operation_id == "op")));
+    assert!(require_refund_shielding_evidence(&wallet, &accounting, 21, 2, "op").is_err());
+    assert!(require_refund_shielding_evidence(&wallet, &accounting, 21, 2, "independent").is_ok());
+    let removed = wallet.wallet_transactions.remove(&first).unwrap();
+    let missing = collect_refunds(&wallet, &accounting, 21, 2).unwrap();
+    assert!(missing.credits.is_empty());
+    assert!(missing.issues.iter().any(|issue| matches!(
+        issue,
+        ReturnAccountingIssue::MissingCreditedTransaction { .. }
+    )));
+    wallet.wallet_transactions.insert(first, removed);
+    wallet
+        .wallet_transactions
+        .get_mut(&first)
+        .unwrap()
+        .update_status(ConfirmationStatus::Confirmed(2.into()), 0, true);
     assert!(
         collect_refunds(&wallet, &accounting, 21, 2)
-            .unwrap_err()
-            .to_string()
-            .contains("treasury_refund_reorg")
+            .unwrap()
+            .credits
+            .is_empty(),
+        "reappearance cannot credit again"
     );
-    wallet.wallet_transactions.remove(&first);
-    assert!(collect_refunds(&wallet, &accounting, 21, 2).is_err());
+    assert_eq!(store.return_accounting().unwrap().credited.len(), 2);
 }
 
 #[tokio::test]
@@ -280,14 +298,8 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
         .await
         .wallet_transactions
         .remove(&independent_txid);
-    assert!(
-        session
-            .reconcile_refunds(20, 2)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("treasury_refund_reorg")
-    );
+    let missing = session.reconcile_refunds(20, 2).await.unwrap();
+    assert!(missing.issues.iter().any(|issue| matches!(issue, ReturnAccountingIssue::MissingCreditedTransaction { operation_id } if operation_id == &independent_operation)));
     assert_eq!(
         session
             .store
@@ -295,5 +307,78 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
             .await
             .unwrap(),
         1
+    );
+}
+
+#[test]
+fn credited_refund_issues_preserve_dedup_and_scope_shielding_to_both_claimed_owners() {
+    let wallet = SyntheticWalletBuilder::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").transparent_coin(100).build();
+    let coin = wallet.wallet_outputs::<pepper_sync::wallet::TransparentCoin>()[0];
+    let address = coin.address().to_owned();
+    let mut accounting = crate::rotation::store::refunds::ReturnAccounting::default();
+    accounting.bindings.insert(
+        address.clone(),
+        std::collections::BTreeSet::from(["old".into()]),
+    );
+    accounting.confirmed.extend(["old".into(), "new".into()]);
+    accounting.credited = collect_refunds(&wallet, &accounting, 20, 2)
+        .unwrap()
+        .credits;
+    assert_eq!(accounting.credited.len(), 1);
+    let original = accounting.credited[0].clone();
+    for (reason, amount, index) in [
+        ("amount", 99, original.output_index),
+        ("output", 100, original.output_index + 1),
+    ] {
+        accounting.credited[0].amount = amount;
+        accounting.credited[0].output_index = index;
+        let observed = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+        assert!(observed.issues.iter().any(|issue| match reason {
+            "amount" => matches!(issue, ReturnAccountingIssue::CreditedAmountConflict { .. }),
+            _ => matches!(issue, ReturnAccountingIssue::MissingCreditedOutput { .. }),
+        }));
+        assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, "old").is_err());
+        assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, "healthy").is_ok());
+    }
+    accounting.credited[0] = original.clone();
+    accounting.bindings.insert(
+        address.clone(),
+        std::collections::BTreeSet::from(["new".into()]),
+    );
+    let conflict = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert!(conflict.credits.is_empty());
+    for owner in ["old", "new"] {
+        assert!(
+            conflict
+                .issues
+                .contains(&ReturnAccountingIssue::CreditedOwnershipConflict {
+                    operation_id: owner.into()
+                })
+        );
+        assert!(require_refund_shielding_evidence(&wallet, &accounting, 20, 2, owner).is_err());
+    }
+    accounting
+        .bindings
+        .insert(address, std::collections::BTreeSet::from(["old".into()]));
+    accounting.credited[0].txid = "malformed".into();
+    let unknown = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert!(unknown.credits.is_empty());
+    assert!(
+        unknown
+            .issues
+            .contains(&ReturnAccountingIssue::InvalidCreditedIdentity {
+                operation_id: "old".into()
+            })
+    );
+    accounting.credited[0] = original;
+    accounting.confirmed.remove("old");
+    let unconfirmed = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert!(unconfirmed.credits.is_empty());
+    assert!(
+        unconfirmed
+            .issues
+            .contains(&ReturnAccountingIssue::UnconfirmedCreditedSource {
+                operation_id: "old".into()
+            })
     );
 }

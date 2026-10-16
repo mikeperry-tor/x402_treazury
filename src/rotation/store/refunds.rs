@@ -19,6 +19,28 @@ pub(super) fn read_refunds(db: &Connection) -> Result<Vec<RefundStatus>> {
 pub(crate) enum ReturnAccountingIssue {
     MissingOriginalBinding { operation_id: String },
     AmbiguousOriginalBinding { operation_id: String },
+    InvalidCreditedIdentity { operation_id: String },
+    MissingCreditedTransaction { operation_id: String },
+    MissingCreditedOutput { operation_id: String },
+    NoncanonicalCreditedOutput { operation_id: String },
+    CreditedAmountConflict { operation_id: String },
+    UnconfirmedCreditedSource { operation_id: String },
+    CreditedOwnershipConflict { operation_id: String },
+}
+impl ReturnAccountingIssue {
+    pub(crate) fn operation_id(&self) -> &str {
+        match self {
+            Self::MissingOriginalBinding { operation_id }
+            | Self::AmbiguousOriginalBinding { operation_id }
+            | Self::InvalidCreditedIdentity { operation_id }
+            | Self::MissingCreditedTransaction { operation_id }
+            | Self::MissingCreditedOutput { operation_id }
+            | Self::NoncanonicalCreditedOutput { operation_id }
+            | Self::CreditedAmountConflict { operation_id }
+            | Self::UnconfirmedCreditedSource { operation_id }
+            | Self::CreditedOwnershipConflict { operation_id } => operation_id,
+        }
+    }
 }
 /// Targeted source-return accounting, independent of destination lifecycle/status.
 #[derive(Default)]

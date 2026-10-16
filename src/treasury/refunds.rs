@@ -80,6 +80,20 @@ impl SyncSession {
                     })
                     .count(),
             ),
+            (
+                "credited_return_evidence",
+                report
+                    .issues
+                    .iter()
+                    .filter(|issue| {
+                        !matches!(
+                            issue,
+                            ReturnAccountingIssue::MissingOriginalBinding { .. }
+                                | ReturnAccountingIssue::AmbiguousOriginalBinding { .. }
+                        )
+                    })
+                    .count(),
+            ),
         ] {
             if count > 0 {
                 tracing::warn!(
@@ -111,40 +125,78 @@ fn collect_refunds(
             .map(|h| u64::from(u32::from(h)))
             .filter(|h| *h > 0 && height >= *h && height - *h + 1 >= u64::from(confirmations))
     };
-    // Known credits are canonical financial support, including outputs already
-    // spent or shielded. Missing origins or changed amounts must block readiness.
+    // Deduplication precedes revalidation: disputed historical credits never
+    // become discoveries or receive another credit when they reappear.
     let mut known = std::collections::HashSet::with_capacity(accounting.credited.len());
+    let mut unknown_outpoint_operations = std::collections::HashSet::new();
     for credited in &accounting.credited {
-        let txid = zcash_primitives::transaction::TxId::from_hex(&credited.txid)
-            .context("invalid credited return transaction identity")?;
-        let record = wallet
-            .wallet_transactions
-            .get(&txid)
-            .context("treasury_refund_reorg: credited refund requires recovery")?;
-        let coin = record
+        let operation_id = credited.operation_id.clone();
+        ensure!(
+            !operation_id.is_empty(),
+            "credited return ownership missing"
+        );
+        let txid = match zcash_primitives::transaction::TxId::from_hex(&credited.txid) {
+            Some(txid) => txid,
+            None => {
+                // Without either an outpoint or one unambiguous original address,
+                // we cannot identify which other discovery might duplicate this credit.
+                ensure!(
+                    accounting
+                        .bindings
+                        .values()
+                        .filter(|owners| owners.contains(&operation_id))
+                        .count()
+                        == 1
+                        && accounting
+                            .bindings
+                            .values()
+                            .any(|owners| owners.len() == 1 && owners.contains(&operation_id))
+                        && !accounting.ambiguous_operations.contains(&operation_id),
+                    "credited return identity and ownership unidentifiable"
+                );
+                unknown_outpoint_operations.insert(operation_id.clone());
+                issues.insert(ReturnAccountingIssue::InvalidCreditedIdentity { operation_id });
+                continue;
+            }
+        };
+        known.insert((txid, credited.output_index));
+        if !accounting.confirmed.contains(&operation_id) {
+            issues.insert(ReturnAccountingIssue::UnconfirmedCreditedSource {
+                operation_id: operation_id.clone(),
+            });
+        }
+        let Some(record) = wallet.wallet_transactions.get(&txid) else {
+            issues.insert(ReturnAccountingIssue::MissingCreditedTransaction { operation_id });
+            continue;
+        };
+        let Some(coin) = record
             .transparent_coins()
             .iter()
             .find(|coin| coin.output_id().output_index() == credited.output_index)
-            .context("treasury_refund_reorg: credited output missing")?;
-        ensure!(
-            canonical_height(record).is_some()
-                && i64::try_from(coin.value())? == credited.amount
-                && accounting.confirmed.contains(&credited.operation_id),
-            "treasury_refund_reorg: credited refund requires recovery"
-        );
-        known.insert((txid, credited.output_index));
-        // A positive contradictory ownership claim undermines credited accounting.
-        // Missing/ambiguous correlation alone retains the old credit and its review
-        // obligation; it cannot erase canonical money or block unrelated readiness.
-        if let Some(owners) = accounting.bindings.get(coin.address()) {
-            ensure!(
-                owners.contains(&credited.operation_id),
-                "treasury_refund_ownership: credited refund requires recovery"
-            );
-        } else {
-            issues.insert(ReturnAccountingIssue::MissingOriginalBinding {
-                operation_id: credited.operation_id.clone(),
+        else {
+            issues.insert(ReturnAccountingIssue::MissingCreditedOutput { operation_id });
+            continue;
+        };
+        if canonical_height(record).is_none() {
+            issues.insert(ReturnAccountingIssue::NoncanonicalCreditedOutput {
+                operation_id: operation_id.clone(),
             });
+        }
+        if i64::try_from(coin.value()).ok() != Some(credited.amount) {
+            issues.insert(ReturnAccountingIssue::CreditedAmountConflict {
+                operation_id: operation_id.clone(),
+            });
+        }
+        if let Some(owners) = accounting.bindings.get(coin.address()) {
+            if !owners.contains(&operation_id) {
+                // Both original and asserted new owners must reject shielding.
+                issues.insert(ReturnAccountingIssue::CreditedOwnershipConflict { operation_id });
+                issues.extend(owners.iter().cloned().map(|operation_id| {
+                    ReturnAccountingIssue::CreditedOwnershipConflict { operation_id }
+                }));
+            }
+        } else {
+            issues.insert(ReturnAccountingIssue::MissingOriginalBinding { operation_id });
         }
     }
     let mut refunds = vec![];
@@ -167,13 +219,14 @@ fn collect_refunds(
             }
             let operation = owners.first().expect("one owner");
             if accounting.ambiguous_operations.contains(operation)
+                || unknown_outpoint_operations.contains(operation)
                 || !accounting.confirmed.contains(operation)
             {
                 continue;
             }
             observed_outputs += 1;
-            // Known outputs were revalidated above, including spent/shielded
-            // origins. Only discoveries need another store publication.
+            // Known outputs retain their original accounting even when disputed.
+            // Only previously uncredited discoveries may be published.
             if known.contains(&(coin.output_id().txid(), coin.output_id().output_index())) {
                 continue;
             }
@@ -192,6 +245,23 @@ fn collect_refunds(
         issues: issues.into_iter().collect(),
     })
 }
+fn require_refund_shielding_evidence(
+    wallet: &zingolib::wallet::LightWallet,
+    accounting: &crate::rotation::store::refunds::ReturnAccounting,
+    height: u64,
+    confirmations: u32,
+    operation: &str,
+) -> Result<()> {
+    let observation = collect_refunds(wallet, accounting, height, confirmations)?;
+    ensure!(
+        !observation
+            .issues
+            .iter()
+            .any(|issue| issue.operation_id() == operation),
+        "refund_accounting_issue: shielding requires operation-scoped review"
+    );
+    Ok(())
+}
 impl Treasury {
     /// Operator requested, one job/address per transaction. No broadcast here.
     pub async fn shield_refund(
@@ -201,7 +271,7 @@ impl Treasury {
         stop: &CancellationToken,
     ) -> Result<PreparedTransaction> {
         self.sync_once(stop).await?;
-        let (address, recipient) = self
+        let (address, recipient, funding_operation, accounting) = self
             .store
             .call(move |s| {
                 let funding = s
@@ -220,7 +290,7 @@ impl Treasury {
                                 .contains(&funding.operation_id)),
                     "ambiguous_return_binding: shielding requires operation-scoped review"
                 );
-                Ok((address, funding.recipient))
+                Ok((address, funding.recipient, funding.operation_id, accounting))
             })
             .await?;
         let status = self.store.call(|s| s.treasury_sync_state()).await?;
@@ -232,6 +302,24 @@ impl Treasury {
                 && !status.outgoing_pending,
             "treasury not ready for shielding"
         );
+        let sync = status.sync.as_ref().context("treasury sync missing")?;
+        let height = sync.height.context("treasury sync height missing")?;
+        {
+            let wallet = self
+                .client
+                .as_ref()
+                .context("treasury unavailable")?
+                .wallet()
+                .read()
+                .await;
+            require_refund_shielding_evidence(
+                &wallet,
+                &accounting,
+                height,
+                sync.confirmations,
+                &funding_operation,
+            )?;
+        }
         let operation = uuid::Uuid::new_v4().to_string();
         self.healthy = false;
         let client = self.client.as_mut().context("treasury unavailable")?;

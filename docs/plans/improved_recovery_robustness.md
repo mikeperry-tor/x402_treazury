@@ -931,6 +931,23 @@ passed. Independent review found no blocking findings; its requested provenance
 negative cases were added and passed. This does not remove live-input global guards,
 refund issues or full-history traversal; their scoped ownership/fairness work remains.
 
+**C13 refund-observation contract (reviewed scoped slice):** Known credited
+outpoints enter deduplication before canonicality, amount or ownership checks.
+Disputes become typed operation-scoped observations without deleting original
+credits, rewriting costs or preventing unrelated SDK spendability. Positive
+ownership contradictions affect both original and asserted owners. Malformed
+identity can be isolated only with an unambiguous original address; otherwise the
+existing wider unresolved-attribution stop remains explicit. New issue categories
+are visible through fixed warning categories/counts. Explicit shielding repeats
+fresh refund evidence checks for its operation before proposal or reservation.
+No replacement credit, liability closure or automatic shielding is authorized.
+
+Three synthetic refund-observation tests passed. Independent review identified
+that missing original outpoints and contradictory owners must also suppress fresh
+credit attribution for their affected operations, not only shielding. The immediate
+review fixup adds per-pass affected-owner suppression and independent-owner controls;
+this contract is not closed until that fixup is validated.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
