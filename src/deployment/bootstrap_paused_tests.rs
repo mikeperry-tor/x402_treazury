@@ -3,7 +3,7 @@ use crate::rotation::store::funding::FundingPhase;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
-async fn paused_funding_observer_survives_startup_handoff_and_drains() {
+async fn paused_funding_observer_starts_with_serving_and_drains() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -69,60 +69,42 @@ sources=["api"]
         key.display()
     ))
     .unwrap();
-    let wallet_resolution = config.validate().unwrap();
-    let deployment = Deployment {
-        prebound: BTreeMap::new(),
-        pending_sources: BTreeMap::new(),
-        defer_discovery: false,
-        unavailable_sources: Default::default(),
-        config,
-        wallet_resolution,
-        initialized: None,
-        sources: BTreeMap::new(),
-        selected: BTreeMap::new(),
-        config_path: dir.path().join("deployment.toml"),
-    };
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    std::fs::write(dir.path().join("unused.json"), r#"{"servers":[{"url":"https://api.example"}],"operations":[{"method":"GET","path":"/read"}]}"#).unwrap();
     let env = BTreeMap::from([
+        ("TOKEN".into(), "fixture".into()),
         ("BASE".into(), base),
         ("INDEXER".into(), "http://127.0.0.1:1".into()),
         ("SUBMIT".into(), "http://127.0.0.1:1".into()),
     ]);
-    // An unfunded inventory must not make paused startup wait for bootstrap.
-    let mut initialized = tokio::time::timeout(
+    let deployment = tokio::time::timeout(
         Duration::from_secs(10),
-        deployment.bootstrap_for_serving(&env, Default::default()),
+        Deployment::load_for_serving_with_relay(&path, &env, Default::default()),
     )
     .await
     .unwrap()
     .unwrap();
+    let running = deployment.bind(&env).await.unwrap();
+    let store = running.treasury.as_ref().unwrap().store_handle();
+    assert!(
+        store
+            .call(|s| s.funding_jobs())
+            .await
+            .unwrap()
+            .iter()
+            .all(|job| job.phase == FundingPhase::Allocated)
+    );
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(running.serve(stop.clone()));
     tokio::time::timeout(Duration::from_secs(10), observed)
         .await
         .unwrap()
         .unwrap();
-    let supervisor = initialized.supervisor.take().unwrap();
-    let store = supervisor.store();
-    let stop = supervisor.stop.clone();
-    let original_treasury = supervisor.treasury.as_ref().unwrap().id();
-    let original_funding = supervisor.funding.as_ref().unwrap().id();
-    let (treasury, funding) = supervisor.into_tasks();
-    let treasury = treasury.unwrap();
-    let funding = funding.unwrap();
-    assert_eq!(treasury.id(), original_treasury);
-    assert_eq!(funding.id(), original_funding);
-    assert!(!stop.is_cancelled());
-    assert!(
-        !funding.is_finished(),
-        "accepted observer must survive handoff"
-    );
     stop.cancel();
-    assert!(!funding.is_finished(), "accepted observation must drain");
+    assert!(!serving.is_finished(), "accepted observation must drain");
     release.send(()).unwrap();
     rpc.await.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), funding)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
     let after = store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
     for (original, current) in before.funding_jobs.iter().zip(&after.funding_jobs) {
@@ -148,8 +130,7 @@ sources=["api"]
             .unwrap()
     );
     drop(store);
-    drop(initialized);
-    tokio::time::timeout(Duration::from_secs(10), treasury)
+    tokio::time::timeout(Duration::from_secs(10), serving)
         .await
         .unwrap()
         .unwrap()

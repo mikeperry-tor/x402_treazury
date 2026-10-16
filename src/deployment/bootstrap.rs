@@ -133,196 +133,11 @@ impl Deployment {
     }
 }
 
-/// The same treasury and funding tasks survive startup readiness and catalog I/O.
-/// Dropping a startup waiter cancels new work, then drains the owned tasks.
-type FundingTask = tokio::task::JoinHandle<Result<()>>;
-pub(super) type FundingTasks = (Option<FundingTask>, Option<FundingTask>);
-pub(super) struct FundingSupervisor {
-    pub(super) stop: CancellationToken,
-    store: Option<crate::rotation::store::StoreHandle>,
-    treasury: Option<tokio::task::JoinHandle<Result<()>>>,
-    funding: Option<tokio::task::JoinHandle<Result<()>>>,
-    attempts: BTreeMap<String, u32>,
-}
-impl FundingSupervisor {
-    fn start(
-        owner: crate::treasury::Treasury,
-        runtime: FundingRuntime,
-        attempts: BTreeMap<String, u32>,
-    ) -> Self {
-        let store = owner.store_handle();
-        let stop = CancellationToken::new();
-        let (commands, sender, worker) = runtime;
-        let treasury = tokio::spawn({
-            let stopped = stop.clone();
-            async move {
-                let _stop_on_exit = stopped.clone().drop_guard();
-                owner.run_commands(commands, sender, stopped).await
-            }
-        });
-        let funding = tokio::spawn({
-            let stopped = stop.clone();
-            async move {
-                let _stop_on_exit = stopped.clone().drop_guard();
-                worker.run(stopped).await
-            }
-        });
-        Self {
-            stop,
-            store: Some(store),
-            treasury: Some(treasury),
-            funding: Some(funding),
-            attempts,
-        }
-    }
-    pub(super) fn store(&self) -> crate::rotation::store::StoreHandle {
-        self.store.as_ref().expect("owned funding store").clone()
-    }
-    pub(super) fn into_tasks(mut self) -> FundingTasks {
-        self.store.take();
-        (self.treasury.take(), self.funding.take())
-    }
-    pub(super) async fn shutdown(mut self) -> Result<()> {
-        self.stop.cancel();
-        self.store.take();
-        let funding = self.funding.take();
-        let treasury = self.treasury.take();
-        let funding_result = match funding {
-            Some(task) => task
-                .await
-                .context("startup funding drain failed")
-                .and_then(|result| result),
-            None => Ok(()),
-        };
-        let treasury_result = match treasury {
-            Some(task) => task
-                .await
-                .context("startup treasury drain failed")
-                .and_then(|result| result),
-            None => Ok(()),
-        };
-        funding_result?;
-        treasury_result
-    }
-    async fn wait_inventory(&self, names: &BTreeSet<String>) -> Result<()> {
-        let mut next_progress = tokio::time::Instant::now();
-        loop {
-            ensure!(
-                !self.stop.is_cancelled(),
-                "startup funding owner stopped; persisted work retained"
-            );
-            let progress = tokio::time::Instant::now() >= next_progress;
-            if check_startup(&self.store(), names, &self.attempts, None, progress).await? {
-                return Ok(());
-            }
-            if progress {
-                next_progress = tokio::time::Instant::now() + Duration::from_secs(60);
-            }
-            tokio::select! {
-                _ = self.stop.cancelled() => bail!("startup funding owner stopped; persisted work retained"),
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
-            }
-        }
-    }
-}
-impl Drop for FundingSupervisor {
-    fn drop(&mut self) {
-        if self.treasury.is_none() && self.funding.is_none() {
-            return;
-        }
-        self.stop.cancel();
-        self.store.take();
-        let treasury = self.treasury.take();
-        let funding = self.funding.take();
-        // Accepted financial commands retain their owner after a cancelled caller.
-        tokio::spawn(async move {
-            if let Some(task) = funding
-                && !matches!(task.await, Ok(Ok(())))
-            {
-                tracing::warn!(
-                    category = "startup_funding_drain_failed",
-                    "Startup funding drain failed; persisted financial work retained"
-                );
-            }
-            if let Some(task) = treasury
-                && !matches!(task.await, Ok(Ok(())))
-            {
-                tracing::warn!(
-                    category = "startup_treasury_drain_failed",
-                    "Startup treasury drain failed; persisted financial work retained"
-                );
-            }
-        });
-    }
-}
-
-impl Deployment {
-    pub(super) async fn bootstrap_for_serving(
-        &self,
-        env: &BTreeMap<String, String>,
-        restriction: crate::rotation::restriction::FundingRestriction,
-    ) -> Result<InitializedWallets> {
-        let names: BTreeSet<_> = self
-            .wallet_resolution
-            .wallets
-            .iter()
-            .filter(|(_, wallet)| wallet.managed())
-            .map(|(name, _)| name.clone())
-            .collect();
-        let needed = self
-            .config
-            .discovery_relay
-            .as_ref()
-            .filter(|policy| policy.serve)
-            .map(|policy| {
-                crate::discovery_relay::resolve_wallets(
-                    policy,
-                    &self.config,
-                    &self.wallet_resolution,
-                    self.config.sources.keys().cloned(),
-                )
-            })
-            .transpose()?
-            .unwrap_or_default()
-            .into_values()
-            .collect();
-        let mut initialized = self
-            .initialize_wallets(env, restriction, None, &needed)
-            .await?;
-        let owner = initialized
-            .treasury
-            .take()
-            .context("startup treasury unavailable")?;
-        let runtime = initialized
-            .funding_runtime
-            .take()
-            .context("startup funding worker unavailable")?;
-        let supervisor = FundingSupervisor::start(
-            owner,
-            runtime,
-            startup_attempts(&self.wallet_resolution.wallets),
-        );
-        if self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
-            && let Err(error) = supervisor.wait_inventory(&names).await
-        {
-            drop(initialized);
-            supervisor.shutdown().await?;
-            return Err(error);
-        }
-        initialized.supervisor = Some(supervisor);
-        Ok(initialized)
-    }
-}
-
 impl InitializedWallets {
     pub(super) async fn shutdown(mut self) -> Result<()> {
-        let supervisor = self.supervisor.take();
         let treasury = self.treasury.take();
         let store_only = self.store_only.take();
         drop(self);
-        if let Some(supervisor) = supervisor {
-            supervisor.shutdown().await?;
-        }
         if let Some(treasury) = treasury {
             treasury.close().await?;
         }
@@ -343,17 +158,12 @@ async fn supervise(
         wallets,
         treasury,
         funding_runtime,
-        supervisor,
         managed_pools,
         store_only,
     } = initialized;
     ensure!(
         store_only.is_none(),
         "explicit bootstrap requires treasury SDK"
-    );
-    ensure!(
-        supervisor.is_none(),
-        "explicit bootstrap received a running supervisor"
     );
     let owner = treasury.context("bootstrap treasury unavailable")?;
     let store = owner.store_handle();
@@ -391,7 +201,7 @@ async fn supervise(
         funding_runtime.context("bootstrap funding worker unavailable")?;
     tracing::info!(
         wallets = names.len(),
-        "Bootstrapping initial managed wallet capacity before discovery; waiting for confirmed USDC credit"
+        "Explicit wallet bootstrap waiting for captured confirmed USDC credit"
     );
     let monitored_names = names.clone();
     let monitor = async move {
@@ -816,108 +626,6 @@ mod tests {
         );
         drop(store);
         owner.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn startup_handoff_keeps_the_same_store_and_workers_alive() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::rotation::store::Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture",
-        )
-        .unwrap();
-        let (store, store_owner) = crate::rotation::store::StoreHandle::spawn(store);
-        let stop = CancellationToken::new();
-        let treasury_stop = stop.clone();
-        let treasury = tokio::spawn(async move {
-            treasury_stop.cancelled().await;
-            store_owner.await?;
-            Ok(())
-        });
-        let funding_stop = stop.clone();
-        let funding_store = store.clone();
-        let funding = tokio::spawn(async move {
-            funding_stop.cancelled().await;
-            drop(funding_store);
-            Ok(())
-        });
-        let supervisor = FundingSupervisor {
-            stop: stop.clone(),
-            store: Some(store.clone()),
-            treasury: Some(treasury),
-            funding: Some(funding),
-            attempts: BTreeMap::new(),
-        };
-        let (treasury, funding) = supervisor.into_tasks();
-        assert!(
-            !stop.is_cancelled(),
-            "readiness handoff must not stop funding"
-        );
-        assert_eq!(store.call(|s| Ok(s.status()?.birthday)).await.unwrap(), 1);
-        assert!(!treasury.as_ref().unwrap().is_finished());
-        assert!(!funding.as_ref().unwrap().is_finished());
-        drop(store);
-        stop.cancel();
-        funding.unwrap().await.unwrap().unwrap();
-        treasury.unwrap().await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn dropped_startup_owner_drains_accepted_work_and_releases_store() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::rotation::store::Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture",
-        )
-        .unwrap();
-        let (store, store_owner) = crate::rotation::store::StoreHandle::spawn(store);
-        let stop = CancellationToken::new();
-        let (finish, accepted) = tokio::sync::oneshot::channel::<()>();
-        let (closed, closure) = tokio::sync::oneshot::channel();
-        let treasury_stop = stop.clone();
-        let treasury = tokio::spawn(async move {
-            treasury_stop.cancelled().await;
-            store_owner.await?;
-            let _ = closed.send(());
-            Ok(())
-        });
-        let funding_store = store.clone();
-        let funding = tokio::spawn(async move {
-            accepted.await?;
-            funding_store
-                .call(|s| {
-                    crate::rotation::test_capacity::declare_and_allocate!(
-                        s,
-                        "accepted",
-                        crate::rotation::test_capacity::two_reserves("2"),
-                        Some(alloy_primitives::U256::from(1_000_000u64)),
-                        0
-                    )?;
-                    Ok(())
-                })
-                .await?;
-            drop(funding_store);
-            Ok(())
-        });
-        drop(FundingSupervisor {
-            stop: stop.clone(),
-            store: Some(store),
-            treasury: Some(treasury),
-            funding: Some(funding),
-            attempts: BTreeMap::new(),
-        });
-        assert!(stop.is_cancelled());
-        finish.send(()).unwrap();
-        tokio::time::timeout(Duration::from_secs(2), closure)
-            .await
-            .unwrap()
-            .unwrap();
-        let status = crate::rotation::store::status(&dir.path().join("state")).unwrap();
-        assert!(status.pools.iter().any(|pool| pool.name == "accepted"));
     }
 
     #[tokio::test]

@@ -644,6 +644,20 @@ an injected publisher panic followed by immediate store reopen. Enabled-relay in
 bootstrap and the initial unsigned-catalog barrier remain separate pending C08 work;
 this slice does not claim their removal or full T41 acceptance.
 
+**C08 serving-bootstrap removal contract (reviewed):** Delete the serving-only
+FundingSupervisor, bootstrap wait and handoff rather than preserving a dormant second
+startup policy. All ordinary serving, including enabled relay, prepares dormant
+owners and starts funding/reconciliation only after listener binding. Extend the
+same authenticated store/SDK/funding/Base capability isolation to relay initialization;
+shared identity/key/schema/ownership faults remain fatal. Explicit `wallet bootstrap`
+retains its independent captured-claim monitor, accepted-command drain and completeness.
+Entry-point tests cover enabled auto-funding with an empty managed payer, zero
+pre-serving allocation/provider I/O, immediate managed refusal, SDK/funding/Base
+fault isolation with real static MCP calls, and paused observation after serving
+starts. Obsolete supervisor-handoff tests are replaced by real serving ownership
+coverage. The initial unsigned-catalog barrier and remaining C08 end-to-end
+restoration/status evidence are still tracked separately.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
