@@ -583,3 +583,9 @@ Base background reconciliation retries transient SQLite busy/locked inventory re
 on its existing cadence while retaining the owner, cursor and active observations.
 One-pass reconciliation reports an incomplete pass after independent work drains.
 This retry applies only to read-only inventory; it never replays a financial commit.
+
+Funding uses the same transient-read classification at inventory boundaries and
+pages. Only the affected inventory lane waits for its normal poll cadence; accepted
+source work and independent credit/status observations retain their owners. Initial
+inventory acquisition also retains its lease while retrying. Financial publication
+and source mutations are never replayed by this mechanism.

@@ -41,6 +41,8 @@ impl Store {
     /// Rows are never deleted. Capture committed insertion order independently
     /// from the indexed ID cursor so later UUIDs cannot join this pass.
     pub(crate) fn funding_work_boundary(&self) -> Result<i64> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::FundingBoundary)?;
         Ok(self
             .db
             .query_row("SELECT COALESCE(MAX(rowid),0) FROM funding_jobs", [], |r| {
@@ -49,6 +51,8 @@ impl Store {
     }
 
     pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingEntry>> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::FundingPage)?;
         let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_actionable_inventory WHERE (state!='COMPLETE' OR readiness_disputed IS NOT NULL) AND id>?1 AND rowid<=?2 ORDER BY id LIMIT ?3")?
             .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;

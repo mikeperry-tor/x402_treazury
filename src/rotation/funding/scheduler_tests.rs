@@ -1972,3 +1972,154 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
         }
     }
 }
+
+#[tokio::test]
+async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() {
+    use crate::rotation::store::inventory::{Read, transient_read};
+    for read in [Read::FundingBoundary, Read::FundingPage] {
+        for once in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut raw = Store::create(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                1,
+                b"fixture",
+            )
+            .unwrap();
+            crate::rotation::store::test_support::declare_two_reserves(
+                &mut raw,
+                "pool",
+                "5",
+                Some(alloy_primitives::U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+            let jobs = raw.funding_jobs().unwrap();
+            submitted(&mut raw, &jobs[0]);
+            raw.confirm_spend(&jobs[0].operation_id, 60, 1).unwrap();
+            submitted(&mut raw, &jobs[1]);
+            let treasury = raw.id().to_owned();
+            raw.fail_next_inventory_read(read, rusqlite::ffi::SQLITE_LOCKED);
+            let (store, actor) = StoreHandle::spawn(raw);
+            let (statuses, mut status_events) = mpsc::unbounded_channel();
+            let (started, mut source_events) = mpsc::unbounded_channel();
+            let credits = Arc::new(AtomicUsize::new(0));
+            let gate = Arc::new(Semaphore::new(if once { 1 } else { 0 }));
+            let worker = FundingWorker::new(
+                store.clone(),
+                Source {
+                    store: store.clone(),
+                    reads: Reads {
+                        credits: Arc::new(Semaphore::new(64)),
+                        credit_calls: credits.clone(),
+                        statuses,
+                        status_gates: Default::default(),
+                        failed_job: Default::default(),
+                        processing: true,
+                        quotes: None,
+                    },
+                    gate: gate.clone(),
+                    started,
+                },
+                1,
+            );
+            let stop = CancellationToken::new();
+            let waiter = tokio::spawn({
+                let worker = worker.clone();
+                let stop = stop.clone();
+                async move { worker.schedule(1000, stop, once).await }
+            });
+            if once {
+                let error = tokio::time::timeout(std::time::Duration::from_secs(4), waiter)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap_err();
+                assert!(transient_read(&error));
+                if read == Read::FundingPage {
+                    assert_eq!(source_events.try_recv().unwrap(), jobs[1].id);
+                    let observed = event(&mut status_events).await;
+                    assert!(jobs.iter().any(|job| job.id == observed));
+                }
+            } else {
+                assert_eq!(event(&mut source_events).await, jobs[1].id);
+                wait_until(|| credits.load(Ordering::SeqCst) >= 2).await;
+                let observed = event(&mut status_events).await;
+                assert!(jobs.iter().any(|job| job.id == observed));
+                let before = credits.load(Ordering::SeqCst);
+                while status_events.try_recv().is_ok() {}
+                store
+                    .call(|s| {
+                        s.fail_next_inventory_read(
+                            Read::FundingBoundary,
+                            rusqlite::ffi::SQLITE_BUSY,
+                        );
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while store
+                        .call(|s| Ok(s.inventory_fault_pending()))
+                        .await
+                        .unwrap()
+                    {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                wait_until(|| credits.load(Ordering::SeqCst) >= before + 2).await;
+                let observed = event(&mut status_events).await;
+                assert!(jobs.iter().any(|job| job.id == observed));
+                assert!(worker.tick(1001).await.unwrap_err().is::<AlreadyOwned>());
+                assert!(source_events.try_recv().is_err());
+                stop.cancel();
+                assert!(worker.tick(1002).await.unwrap_err().is::<AlreadyOwned>());
+                gate.add_permits(1);
+                tokio::time::timeout(std::time::Duration::from_secs(4), waiter)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            }
+            // Permanent store corruption never enters inventory retry.
+            store
+                .call(|s| {
+                    s.fail_next_inventory_read(
+                        Read::FundingBoundary,
+                        rusqlite::ffi::SQLITE_CORRUPT,
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let error = tokio::time::timeout(std::time::Duration::from_secs(2), worker.tick(1003))
+                .await
+                .unwrap()
+                .unwrap_err();
+            assert!(!transient_read(&error));
+            drop(worker);
+            drop(store);
+            actor.await.unwrap();
+            let reopened = Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &treasury,
+            )
+            .unwrap();
+            for job in &jobs {
+                assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
+                assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
+                assert_eq!(
+                    reopened
+                        .prepared_bytes(&job.operation_id)
+                        .unwrap()
+                        .as_slice(),
+                    b"signed"
+                );
+            }
+            assert!(reopened.operation_pending(&jobs[1].operation_id).unwrap());
+        }
+    }
+}

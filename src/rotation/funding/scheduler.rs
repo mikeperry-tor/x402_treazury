@@ -1,5 +1,6 @@
 //! One retained funding owner; observations never borrow the source backend.
 use super::*;
+use crate::rotation::store::inventory::read_result;
 use crate::rotation::store::{
     funding::FundingFacts,
     scheduling::{FundingWork, MalformedFunding},
@@ -108,6 +109,7 @@ struct LaneInventory {
     exhausted: bool,
     pass_due: u64,
     decode_failure: Option<MalformedFunding>,
+    read_failure: Option<anyhow::Error>,
 }
 impl LaneInventory {
     fn new(kind: Kind, through: i64, pass_due: u64) -> Self {
@@ -118,6 +120,7 @@ impl LaneInventory {
             exhausted: false,
             pass_due,
             decode_failure: None,
+            read_failure: None,
         }
     }
 }
@@ -242,12 +245,26 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let mut pending = VecDeque::<Pending>::new();
         // Quote here names the prerequisite inventory lane; its owned step
         // shares Source serialization, then yields an independent Quote read.
-        let boundary = self.store.call(|s| s.funding_work_boundary()).await?;
+        let mut first_error = None;
+        let boundary = loop {
+            if let Some(boundary) = read_result(
+                self.store.call(|s| s.funding_work_boundary()).await,
+                &mut first_error,
+            )? {
+                break boundary;
+            }
+            if once {
+                return Err(first_error.take().expect("failed inventory read"));
+            }
+            tokio::select! {
+                _=stop.cancelled()=>return Ok(()),
+                _=tokio::time::sleep(std::time::Duration::from_secs(self.poll_seconds.max(1)))=>{},
+            }
+        };
         let pass_due = clock.now();
         let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
             .map(|kind| LaneInventory::new(kind, boundary, pass_due));
         let mut stopping = false;
-        let mut first_decode_failure = None;
         loop {
             stopping |= stop.is_cancelled();
             if !once && !stopping && !allocation_groups.is_empty() && clock.now() >= allocation_due
@@ -272,7 +289,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     .await?;
                 for lane in &mut inventory {
                     if let Some(error) = lane.decode_failure.take() {
-                        first_decode_failure.get_or_insert(error);
+                        first_error.get_or_insert(error.into());
+                    }
+                    if let Some(error) = lane.read_failure.take() {
+                        first_error.get_or_insert(error);
                     }
                 }
                 self.dispatch_pending(&mut pending, &mut flight, &reader, &lease, &clock);
@@ -292,11 +312,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 && flight.reads.is_empty()
                 && flight.quote_pending.is_none()
             {
-                return first_decode_failure.map_or(Ok(()), |error| Err(error.into()));
+                return first_error.map_or(Ok(()), Err);
             }
-            let needs_page = inventory
-                .iter()
-                .any(|lane| !lane.exhausted && !pending.iter().any(|item| item.lane == lane.kind));
+            let needs_page = inventory.iter().any(|lane| {
+                !lane.exhausted
+                    && clock.now() >= lane.pass_due
+                    && !pending.iter().any(|item| item.lane == lane.kind)
+            });
             let completion = if needs_page && !stopping {
                 flight.reads.next().now_or_never().flatten()
             } else {
@@ -328,7 +350,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                             .await?
                         {
                             report_decode_failure(&fault);
-                            first_decode_failure.get_or_insert(fault);
+                            first_error.get_or_insert(fault.into());
                         }
                     }
                 }
@@ -347,8 +369,19 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         for lane in inventory {
             let kind = lane.kind;
             let waiting = pending.iter().any(|item| item.lane == kind);
+            if clock.now() < lane.pass_due {
+                continue;
+            }
             if !once && lane.exhausted && !waiting && clock.now() >= lane.pass_due {
-                lane.through = self.store.call(|s| s.funding_work_boundary()).await?;
+                let Some(through) = read_result(
+                    self.store.call(|s| s.funding_work_boundary()).await,
+                    &mut lane.read_failure,
+                )?
+                else {
+                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    continue;
+                };
+                lane.through = through;
                 lane.cursor.clear();
                 lane.exhausted = false;
             }
@@ -360,7 +393,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             let page = self
                 .store
                 .call(move |s| s.funding_work_page(&after, upper))
-                .await?;
+                .await;
+            let Some(page) = read_result(page, &mut lane.read_failure)? else {
+                lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                lane.exhausted |= once;
+                continue;
+            };
             if page.is_empty() {
                 lane.exhausted = true;
                 lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
