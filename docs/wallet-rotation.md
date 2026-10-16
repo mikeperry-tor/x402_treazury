@@ -393,9 +393,11 @@ from invalidated liability-release/accounting support: fresh observations cannot
 silently clear a durable financial repair block or reactivate a retiree. Once a
 historical balance is recorded, its archival anchors do not gate independent fresh
 capacity; historical revalidation belongs to accounting, and original support and
-disputes remain durable. Current payment
-admission still subtracts all unresolved liabilities and verifies every actual
-financial checkpoint, including one at the same disputed historical anchor.
+disputes remain durable. Ordinary payment admission verifies its financial
+checkpoint and subtracts all unresolved liabilities. While resolution support is
+disputed, the separate capacity-only path reserves every resolved authorization
+at its full amount and retains the debit-height floor; it need not reverify the
+disputed checkpoint before using independently proven remaining capacity.
 
 Maintenance repairs disputed payment resolutions using exact original authorization
 bindings and current canonical used/expired-unused proofs. It retains every disputed
