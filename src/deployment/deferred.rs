@@ -419,6 +419,7 @@ discover_on_demand=true
         (dir, running, catalog, fixture, relay_task, api_task)
     }
 
+    #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn canonical_capacity_wakes_deferred_publication_in_same_serving_process() {
         use crate::rotation::{
@@ -467,6 +468,9 @@ discover_on_demand=true
         );
         let (_dir, running, catalog, fixture, relay, api) =
             prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
+        let relay_owner = running.deferred.as_ref().unwrap().relays()[0].clone();
+        let waiting = crate::discovery_relay::tests::dependency_wait_signal(&relay_owner).await;
+        drop(relay_owner);
         let initial = catalog.read();
         let healthy = initial.views["one"][0].clone();
         let stop = CancellationToken::new();
@@ -476,7 +480,9 @@ discover_on_demand=true
             "healthy"
         );
         // The pending source cannot sign with an allocated but unobserved payer.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+            .await
+            .unwrap();
         assert_eq!(catalog.read().views["one"].len(), 1);
         assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
         assert_eq!(store.call(|s| s.funding_jobs()).await.unwrap().len(), 1);
