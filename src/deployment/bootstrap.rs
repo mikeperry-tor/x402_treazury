@@ -571,8 +571,15 @@ mod tests {
         let (store, owner) = StoreHandle::spawn(state);
         let names = BTreeSet::from(["web".to_owned()]);
         let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+        let captured = capture_startup(&store, &names).await.unwrap();
         assert!(
-            !check_startup(&store, &names, &attempts, None, false)
+            check_startup(&store, &names, &attempts, None, false)
+                .await
+                .unwrap(),
+            "an allocated payer identity keeps serving available while claims fund"
+        );
+        assert!(
+            !check_startup(&store, &names, &attempts, Some(&captured), false)
                 .await
                 .unwrap()
         );
@@ -594,7 +601,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let error = check_startup(&store, &names, &attempts, None, false)
+        let error = check_startup(&store, &names, &attempts, Some(&captured), false)
             .await
             .unwrap_err();
         assert!(error.is::<StartupObstructed>());
@@ -606,7 +613,6 @@ mod tests {
         assert!(!message.contains("private fixture prose"));
         assert!(message.contains("insufficient spendable ZEC"));
         assert!(message.contains("cost, amount or authentication policy"));
-        let captured = capture_startup(&store, &names).await.unwrap();
         store
             .call(move |s| {
                 for job in jobs {

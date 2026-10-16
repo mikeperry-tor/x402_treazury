@@ -604,16 +604,50 @@ sources=['healthy','late']
             let (store, worker) = StoreHandle::spawn(state);
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
+            // Existing identities can use their first foreground balance read.
+            // A missing identity still waits without contacting the provider.
+            let funded = Arc::new(std::sync::atomic::AtomicBool::new(existing));
+            let published = funded.clone();
             let rpc = tokio::spawn(async move {
-                axum::serve(
-                    listener,
-                    Router::new().route(
-                        "/",
-                        axum::routing::post(crate::discovery_relay::readiness_tests::rpc),
-                    ),
-                )
-                .await
-                .unwrap();
+                let app = Router::new().route(
+                    "/",
+                    axum::routing::post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+                        let published = published.clone();
+                        async move {
+                            let axum::Json(mut response) =
+                                crate::discovery_relay::readiness_tests::rpc(axum::Json(v.clone()))
+                                    .await;
+                            if v["method"] == "eth_getBlockByNumber"
+                                && v["params"][0] == "latest"
+                                && published.load(Ordering::SeqCst)
+                            {
+                                response["result"]["number"] = json!("0xc8");
+                                response["result"]["hash"] = json!(format!("0x{:064x}", 200));
+                            }
+                            if v["method"] == "eth_call"
+                                && v["params"][0]["data"]
+                                    .as_str()
+                                    .unwrap()
+                                    .starts_with("0x70a08231")
+                            {
+                                let height = u64::from_str_radix(
+                                    v["params"][1]["blockHash"]
+                                        .as_str()
+                                        .unwrap()
+                                        .trim_start_matches("0x"),
+                                    16,
+                                )
+                                .unwrap();
+                                response["result"] = json!(format!(
+                                    "0x{:064x}",
+                                    if height >= 188 { 5_000_000 } else { 0 }
+                                ));
+                            }
+                            axum::Json(response)
+                        }
+                    }),
+                );
+                axum::serve(listener, app).await.unwrap();
             });
             let manager = Arc::new(
                 ManagedPool::new(
@@ -637,17 +671,16 @@ sources=['healthy','late']
                 healthy.invoke(&Default::default()).await.unwrap(),
                 "healthy"
             );
-            // The pending source cannot sign with an allocated but unobserved payer.
-            tokio::time::timeout(Duration::from_secs(5), waiting.notified())
-                .await
-                .unwrap();
-            assert_eq!(catalog.read().views["one"].len(), 1);
-            assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
             assert_eq!(
                 store.call(|s| s.funding_jobs()).await.unwrap().len(),
                 usize::from(existing)
             );
             if !existing {
+                tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+                    .await
+                    .unwrap();
+                assert_eq!(catalog.read().views["one"].len(), 1);
+                assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
                 tokio::time::timeout(Duration::from_secs(5), async {
                     while !catalog.read().instructions["one"]
                         .as_ref()
@@ -661,6 +694,7 @@ sources=['healthy','late']
                 .unwrap();
                 // Explicit fixture action supplies the missing allocation. The
                 // diagnostic waiter neither allocates nor becomes terminal.
+                funded.store(true, Ordering::SeqCst);
                 store
                     .call(move |s| s.allocate_capacity_kind(&pool, AllocationKind::Small, true))
                     .await
@@ -677,23 +711,9 @@ sources=['healthy','late']
                 })
                 .await
                 .unwrap();
-                assert_eq!(catalog.read().views["one"].len(), 1);
-                assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
-                assert!(
-                    catalog.read().instructions["one"]
-                        .as_ref()
-                        .unwrap()
-                        .contains("PENDING")
-                );
-            } else {
-                assert!(
-                    !catalog.read().instructions["one"]
-                        .as_ref()
-                        .unwrap()
-                        .contains("OPERATOR_REQUIRED")
-                );
             }
-            manager.reconcile().await.unwrap();
+            // Allocation/identity wakeup uses fresh challenge-time capacity;
+            // no maintenance publication or target-readiness gate is needed.
             tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
                     if catalog.read().views["one"].len() == 2 {

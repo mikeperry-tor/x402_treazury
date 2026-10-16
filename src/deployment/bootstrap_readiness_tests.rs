@@ -379,12 +379,25 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
         expected
     );
     let other = BTreeSet::from(["unselected".to_owned()]);
+    let other_claims = capture_startup(&store, &other).await.unwrap();
+    assert!(
+        check_startup(
+            &store,
+            &other,
+            &BTreeMap::from([("unselected".into(), 3)]),
+            None,
+            false
+        )
+        .await
+        .unwrap(),
+        "an unrelated allocated identity is available without completing its claims"
+    );
     assert!(
         !check_startup(
             &store,
             &other,
             &BTreeMap::from([("unselected".into(), 3)]),
-            None,
+            Some(&other_claims),
             false
         )
         .await
@@ -428,15 +441,19 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
     let names = BTreeSet::from(["web".to_owned()]);
     let attempts = BTreeMap::from([("web".to_owned(), 3)]);
     let captured = capture_startup(&store, &names).await.unwrap();
-    // Neither the initial CLI check nor the serving monitor may stop the worker
-    // on a historical diagnostic, even with an old persisted backoff.
-    for scope in [None, Some(&captured)] {
-        assert!(
-            !check_startup(&store, &names, &attempts, scope, false)
-                .await
-                .unwrap()
-        );
-    }
+    // Identity availability does not certify funding completion. Captured claims
+    // keep waiting on historical diagnostics, even with old persisted backoff.
+    assert!(
+        check_startup(&store, &names, &attempts, None, false)
+            .await
+            .unwrap(),
+        "historical funding shortage cannot remove the allocated serving identity"
+    );
+    assert!(
+        !check_startup(&store, &names, &attempts, Some(&captured), false)
+            .await
+            .unwrap()
+    );
     for (index, job) in jobs.iter().enumerate() {
         let job = job.clone();
         store
@@ -458,13 +475,11 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
             })
             .await
             .unwrap();
-        for scope in [None, Some(&captured)] {
-            assert!(
-                !check_startup(&store, &names, &attempts, scope, false)
-                    .await
-                    .unwrap()
-            );
-        }
+        assert!(
+            !check_startup(&store, &names, &attempts, Some(&captured), false)
+                .await
+                .unwrap()
+        );
         let job = jobs[index].clone();
         store
             .call(move |s| {
@@ -484,15 +499,13 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
             .await
             .unwrap();
     }
-    for scope in [None, Some(&captured)] {
-        let error = check_startup(&store, &names, &attempts, scope, false)
-            .await
-            .unwrap_err();
-        assert!(
-            error.is::<StartupObstructed>(),
-            "a newly reproduced shortage still stops startup"
-        );
-    }
+    let error = check_startup(&store, &names, &attempts, Some(&captured), false)
+        .await
+        .unwrap_err();
+    assert!(
+        error.is::<StartupObstructed>(),
+        "a newly reproduced shortage still stops startup"
+    );
     store
         .call(move |s| {
             for job in jobs {
