@@ -335,7 +335,7 @@ async fn gated_selection_rechecks_current_liabilities_and_all_completed_candidat
     let task = tokio::spawn(async move { manager.acquire_candidate(&bound, U256::from(5)).await });
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='7' WHERE id=?1 OR id=?2",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'7','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?1 OR id=?2 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             rusqlite::params![f.bound.wallet, f.retained[0]],
         )
         .unwrap();
@@ -772,14 +772,14 @@ async fn evicted_owned_proof_keeps_expiry_and_rechecks_liabilities_and_invalidat
     assert!(select_owned(&f, expired, 5).await.is_none());
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='7' WHERE id=?1",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'7','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?1 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             [&f.bound.wallet],
         )
         .unwrap();
     assert!(select_owned(&f, view.clone(), 5).await.is_none());
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='0' WHERE id=?1",
+            "DELETE FROM payment_attempts WHERE id IN (SELECT 'fixture-'||id FROM wallets WHERE id=?1)",
             [&f.bound.wallet],
         )
         .unwrap();
@@ -1740,7 +1740,7 @@ async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity
     );
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='5' WHERE role='RETAINED'",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'5','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE role='RETAINED' ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             [],
         )
         .unwrap();
@@ -1756,7 +1756,7 @@ async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity
     );
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='11' WHERE role IN ('ACTIVE','RETAINED')",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'11','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE role IN ('ACTIVE','RETAINED') ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             [],
         )
         .unwrap();
@@ -1766,7 +1766,7 @@ async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity
     );
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='5' WHERE id=?1",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'5','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?1 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             [&f.large],
         )
         .unwrap();
@@ -1776,7 +1776,7 @@ async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity
     );
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='6' WHERE id=?1",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'6','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?1 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             [&f.large],
         )
         .unwrap();
@@ -1878,7 +1878,7 @@ async fn malformed_exposure_isolated_in_cached_hinted_and_challenge_selection() 
     }
     let db = f.db();
     db.execute(
-        "UPDATE wallets SET unresolved_exposure='malformed' WHERE id=?1",
+        "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'malformed','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?1 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
         [&f.bound.wallet],
     )
     .unwrap();
@@ -1911,7 +1911,7 @@ async fn malformed_exposure_isolated_in_cached_hinted_and_challenge_selection() 
     );
     let exposure: String = db
         .query_row(
-            "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+            "SELECT amount FROM payment_attempts WHERE wallet_id=?1",
             [&f.bound.wallet],
             |r| r.get(0),
         )
@@ -1921,14 +1921,12 @@ async fn malformed_exposure_isolated_in_cached_hinted_and_challenge_selection() 
         .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        attempts, 0,
-        "selection cannot sign or reserve on either wallet"
+        attempts, 1,
+        "selection cannot add a signed reservation on either wallet"
     );
     // A shared SQL failure must not be mistaken for wallet-local unavailability.
-    db.execute_batch(
-        "ALTER TABLE wallets RENAME COLUMN unresolved_exposure TO unavailable_exposure",
-    )
-    .unwrap();
+    db.execute_batch("ALTER TABLE payment_attempts RENAME COLUMN amount TO unavailable_amount")
+        .unwrap();
     assert!(f.manager.candidate_for(Some(U256::from(5))).await.is_err());
     f.close().await;
 }
@@ -2029,7 +2027,7 @@ async fn all_malformed_exposures_retain_failure_instead_of_insufficient_funds() 
             .unwrap();
     }
     f.db()
-        .execute("UPDATE wallets SET unresolved_exposure='malformed'", [])
+        .execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'malformed','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE 1 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount", [])
         .unwrap();
     let error = f
         .manager
@@ -2055,7 +2053,7 @@ async fn malformed_cached_hint_still_reaches_uncached_independent_payer() {
     f.balance(&f.small, 8);
     f.db()
         .execute(
-            "UPDATE wallets SET unresolved_exposure='malformed' WHERE id=?1",
+            "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'fixture-'||id,pool_id,id,0,'malformed','fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?1 ON CONFLICT(id) DO UPDATE SET amount=excluded.amount",
             [&f.bound.wallet],
         )
         .unwrap();
@@ -2075,7 +2073,7 @@ async fn malformed_cached_hint_still_reaches_uncached_independent_payer() {
             .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
                 .get::<_, i64>(0))
             .unwrap(),
-        0
+        1
     );
     f.close().await;
 }

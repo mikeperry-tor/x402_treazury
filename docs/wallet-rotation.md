@@ -351,6 +351,12 @@ canonical header checks are shared across captured wallet dependencies within on
 verification phase on one endpoint. Initial reads never replace post-state checks,
 and reuse neither renews evidence nor skips comparison against each expected hash.
 
+Payment exposure is derived with exact arithmetic from the wallet's outstanding
+authorization journal, including during transactional admission and status reporting.
+The legacy stored total is a compatibility projection and cannot override that
+journal. Malformed identifiable liabilities block the affected wallet; existing
+stops for disputed resolution evidence remain in force.
+
 Historical liability release and fresh spending capacity have separate anchors.
 A confirmed USED proof requires a new balance observation at or beyond its debit
 block before that released amount can contribute to capacity. EXPIRED_UNUSED can

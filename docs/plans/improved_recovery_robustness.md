@@ -687,6 +687,28 @@ All ordinary listener binding still precedes funding-worker start. This removes
 the initial remote-catalog barrier without introducing another scheduler or
 changing signed relay retry policy.
 
+**C08 operator-dependent discovery:** No-wallet evidence is read separately from
+identity availability. When this serving owner cannot allocate, that fact reports
+operator-required discovery while retaining the existing notification waiter.
+Committed allocation notifies its pool and clears the diagnostic before Base
+readiness; existing allocated wallets stay recoverable pending. Tests cover both
+paths with no relay request before canonical evidence, then one signed request and
+same-process publication. Diagnostics never grant spending or replacement authority.
+
+**C09 payment projection-removal contract (reviewed narrow slice):** Pending
+payment-attempt membership is the durable journal state constrained to
+POSSIBLY_SUBMITTED/RESOLVED; sum exact outstanding amounts with checked U256
+arithmetic using the existing wallet/state index, validating each row's pool
+ownership. Selection, admission, transactional commit and reporting share this
+derivation. The legacy wallet total may remain a compatibility projection, but
+neither malformed/stale totals nor projection underflow control payment/repair
+eligibility. Preserve serialized admission exposure comparisons and all existing
+resolution-support invalidation gates. This slice does not discharge invalidated
+resolved authorizations or claim full C09/G14 completion: durable disputed-release
+membership and funding-obligation inventory remain subsequent work. The fault model
+covers malformed identifiable rows and stale projections, not undetectable deletion
+or internally consistent rewriting of the authoritative journal.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

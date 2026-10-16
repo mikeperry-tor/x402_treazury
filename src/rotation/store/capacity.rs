@@ -1063,11 +1063,12 @@ mod tests {
             [&wallet],
         )
         .unwrap();
+        pending_payment(&db, "retirement-liability", &wallet);
         let zero = support(&db, &job, 0, 0);
         assert!(!retire_with_support(&db, "pool", &wallet, &zero, 100).unwrap());
         db.execute(
-            "UPDATE wallets SET unresolved_exposure='0' WHERE id=?1",
-            [&wallet],
+            "DELETE FROM payment_attempts WHERE id='retirement-liability'",
+            [],
         )
         .unwrap();
         db.execute(

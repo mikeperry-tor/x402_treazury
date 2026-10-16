@@ -186,9 +186,9 @@ fn advance_original_anchor(saved: &mut Option<Anchor>, next: &Anchor) -> Result<
 
 impl Store {
     fn repair_snapshot(&self, pool: &str, wallet: &str) -> Result<Option<Snapshot>> {
-        let (role,repair,address,exposure,debit_height,debit_hash): (String,Option<String>,String,String,Option<i64>,Option<String>) = self.db.query_row(
-            "SELECT role,evidence_repair,address,unresolved_exposure,debit_height,debit_hash FROM wallets WHERE id=?1 AND pool_id=?2",
-            params![wallet,pool], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
+        let (role,repair,address,debit_height,debit_hash): (String,Option<String>,String,Option<i64>,Option<String>) = self.db.query_row(
+            "SELECT role,evidence_repair,address,debit_height,debit_hash FROM wallets WHERE id=?1 AND pool_id=?2",
+            params![wallet,pool], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
         if repair.as_deref() != Some("chain_repair_required")
             || !matches!(role.as_str(), "ACTIVE" | "RETAINED")
         {
@@ -221,7 +221,7 @@ impl Store {
         );
         let mut hash = Sha256::new();
         let header: String = self.db.query_row(
-            "SELECT json_array(w.pool_id,w.role,w.address,w.balance,w.block_height,w.block_hash,w.financial_height,w.financial_hash,w.debit_height,w.debit_hash,w.evidence_repair,w.unresolved_exposure,f.state,f.readiness_operation,f.readiness_requirement,f.readiness_capacity,f.readiness_support,f.readiness_hash,f.readiness_height,f.readiness_latest_hash,f.readiness_endpoint,f.readiness_checkpoint_hash,f.readiness_disputed,f.completion_outcome,j.operation_id,j.phase,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.accepted_output,j.accepted_recipient) FROM wallets w JOIN funding_jobs f ON f.wallet_id=w.id JOIN funding_progress j ON j.job_id=f.id WHERE w.id=?1", [wallet], |r|r.get(0))?;
+            "SELECT json_array(w.pool_id,w.role,w.address,w.balance,w.block_height,w.block_hash,w.financial_height,w.financial_hash,w.debit_height,w.debit_hash,w.evidence_repair,f.state,f.readiness_operation,f.readiness_requirement,f.readiness_capacity,f.readiness_support,f.readiness_hash,f.readiness_height,f.readiness_latest_hash,f.readiness_endpoint,f.readiness_checkpoint_hash,f.readiness_disputed,f.completion_outcome,j.operation_id,j.phase,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.accepted_output,j.accepted_recipient) FROM wallets w JOIN funding_jobs f ON f.wallet_id=w.id JOIN funding_progress j ON j.job_id=f.id WHERE w.id=?1", [wallet], |r|r.get(0))?;
         hash_row(&mut hash, &header);
         snapshot.header = header;
         let mut after = 0;
@@ -271,7 +271,7 @@ impl Store {
         ensure!(
             snapshot.resolutions > 0
                 && snapshot.attempts == total
-                && pending == amount(&exposure)?
+                && pending == exposure(&self.db, wallet)?
                 && latest == snapshot.capture.checkpoint
                 && debit
                     .as_ref()

@@ -71,15 +71,53 @@ pub struct BalanceSupport {
 }
 
 pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
+    let pool: String =
+        db.query_row("SELECT pool_id FROM wallets WHERE id=?1", [wallet], |row| {
+            row.get(0)
+        })?;
+    let mut statement = db.prepare("SELECT pool_id,amount FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED'")?;
+    let mut rows = statement.query([wallet])?;
+    let mut total = U256::ZERO;
+    while let Some(row) = rows.next()? {
+        let owner: String = row.get(0).map_err(|_| EvidenceFailure::MalformedExposure)?;
+        let raw: String = row.get(1).map_err(|_| EvidenceFailure::MalformedExposure)?;
+        let value = amount(&raw).map_err(|_| EvidenceFailure::MalformedExposure)?;
+        ensure!(
+            owner == pool && value > U256::ZERO,
+            EvidenceFailure::MalformedExposure
+        );
+        total = total
+            .checked_add(value)
+            .context(EvidenceFailure::MalformedExposure)?;
+    }
+    Ok(total)
+}
+
+// Compatibility projection only; no read of this value grants admission.
+pub(super) fn refresh_exposure_projection(db: &Connection, wallet: &str) -> Result<()> {
+    let total = exposure(db, wallet)?;
+    ensure!(
+        db.execute(
+            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
+            params![wallet, total.to_string()]
+        )? == 1,
+        "missing liability wallet"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+fn projected_exposure(db: &Connection, wallet: &str) -> Result<U256> {
     let value: String = db.query_row(
         "SELECT unresolved_exposure FROM wallets WHERE id=?1",
         [wallet],
         |row| row.get(0),
     )?;
-    amount(&value).map_err(|_| EvidenceFailure::MalformedExposure.into())
+    amount(&value)
 }
+#[cfg(test)]
 pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
-    let total = exposure(db, wallet)?
+    let total = projected_exposure(db, wallet)?
         .checked_add(value)
         .context("reservation overflow")?;
     ensure!(
@@ -91,8 +129,9 @@ pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result
     );
     Ok(())
 }
+#[cfg(test)]
 pub(super) fn subtract_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
-    let total = exposure(db, wallet)?
+    let total = projected_exposure(db, wallet)?
         .checked_sub(value)
         .context("reservation underflow")?;
     ensure!(
@@ -692,15 +731,79 @@ mod tests {
             .addresses
             .remove(0)
             .id;
-        add_exposure(&store.db, &wallet, U256::MAX).unwrap();
-        assert!(add_exposure(&store.db, &wallet, U256::from(1)).is_err());
-        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::MAX);
-        subtract_exposure(&store.db, &wallet, U256::MAX).unwrap();
-        assert!(subtract_exposure(&store.db, &wallet, U256::from(1)).is_err());
+        let insert = |db: &Connection, id: &str, value: U256| {
+            db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT ?1,pool_id,id,0,?3,'fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?2", params![id,wallet,value.to_string()]).unwrap();
+        };
+        insert(&store.db, "one", U256::MAX);
+        for projection in [
+            "malformed",
+            "0",
+            "99999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        ] {
+            store
+                .db
+                .execute(
+                    "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
+                    params![wallet, projection],
+                )
+                .unwrap();
+            assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::MAX);
+            assert_eq!(
+                store.status().unwrap().pools[0]
+                    .addresses
+                    .iter()
+                    .find(|w| w.id == wallet)
+                    .unwrap()
+                    .signed_exposure_atomic
+                    .as_deref(),
+                Some(U256::MAX.to_string().as_str())
+            );
+        }
+        insert(&store.db, "two", U256::from(1));
+        assert_eq!(
+            exposure(&store.db, &wallet)
+                .unwrap_err()
+                .downcast_ref::<EvidenceFailure>(),
+            Some(&EvidenceFailure::MalformedExposure)
+        );
+        store
+            .db
+            .execute("DELETE FROM payment_attempts WHERE id='two'", [])
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET amount='bad' WHERE id='one'",
+                [],
+            )
+            .unwrap();
+        assert!(exposure(&store.db, &wallet).is_err());
+        store
+            .db
+            .execute("UPDATE payment_attempts SET amount='7' WHERE id='one'", [])
+            .unwrap();
+        store
+            .db
+            .execute("INSERT INTO pools(id,name) VALUES('other','other')", [])
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET pool_id='other' WHERE id='one'",
+                [],
+            )
+            .unwrap();
+        assert!(exposure(&store.db, &wallet).is_err());
+        store.db.execute("UPDATE payment_attempts SET pool_id=(SELECT pool_id FROM wallets WHERE id=wallet_id) WHERE id='one'", []).unwrap();
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
         let tx = store.db.transaction().unwrap();
-        add_exposure(&tx, &wallet, U256::from(10)).unwrap();
+        insert(&tx, "rolled-back", U256::from(10));
+        assert_eq!(exposure(&tx, &wallet).unwrap(), U256::from(17));
         tx.rollback().unwrap();
-        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
+        let plan: String = store.db.query_row("EXPLAIN QUERY PLAN SELECT pool_id,amount FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED'", [&wallet], |r| r.get(3)).unwrap();
+        assert!(plan.contains("payment_wallet_state"));
+        assert!(plan.contains("state=?"));
     }
 }
 

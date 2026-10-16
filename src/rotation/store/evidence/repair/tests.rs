@@ -270,7 +270,6 @@ async fn incomplete_or_disputed_journals_cannot_be_upgraded_by_current_balances(
         "UPDATE payment_resolutions SET support=NULL",
         "UPDATE payment_resolutions SET support='broken'",
         "UPDATE payment_admission_evidence SET support=NULL",
-        "UPDATE wallets SET unresolved_exposure='0' WHERE role='ACTIVE'",
         "UPDATE funding_jobs SET readiness_disputed='chain_repair_required'",
         "UPDATE funding_jobs SET state='QUEUED'",
         "UPDATE funding_progress SET provider_refunded=1",
@@ -289,6 +288,32 @@ async fn incomplete_or_disputed_journals_cannot_be_upgraded_by_current_balances(
         assert!(!matches!(f.repair().await, Ok(true)), "{sql}");
         assert_eq!(count, f.calls.load(Ordering::SeqCst));
         f.assert_blocked().await;
+    }
+}
+
+#[tokio::test]
+async fn stale_exposure_projection_cannot_veto_exact_journal_repair() {
+    for projection in ["0", "malformed", "999999999999999999999999999999999999999"] {
+        let f = Fixture::new().await;
+        f.store
+            .call(move |s| {
+                s.db.execute(
+                    "UPDATE wallets SET unresolved_exposure=?1 WHERE role='ACTIVE'",
+                    [projection],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(f.repair().await.unwrap());
+        let wallet = f.wallet.clone();
+        assert_eq!(
+            f.store
+                .call(move |s| exposure(&s.db, &wallet))
+                .await
+                .unwrap(),
+            U256::from(7)
+        );
     }
 }
 

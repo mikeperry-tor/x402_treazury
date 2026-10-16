@@ -426,8 +426,20 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
             query: Default::default(),
             body: None,
         };
-        assert_eq!(client.execute(route()).await.unwrap(), "paid");
         let db = rusqlite::Connection::open(&fixture.db).unwrap();
+        db.execute(
+            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
+            rusqlite::params![
+                wallet,
+                if used {
+                    "malformed"
+                } else {
+                    "999999999999999999999999999"
+                }
+            ],
+        )
+        .unwrap();
+        assert_eq!(client.execute(route()).await.unwrap(), "paid");
         let expiry: i64 = db
             .query_row("SELECT valid_before FROM payment_attempts", [], |r| {
                 r.get(0)
@@ -442,6 +454,11 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
             .unwrap(),
             "4000000"
         );
+        db.execute(
+            "UPDATE wallets SET unresolved_exposure='0' WHERE id=?1",
+            [&wallet],
+        )
+        .unwrap();
         fixture.price.store(8_000_000, Ordering::SeqCst);
         assert!(
             client.execute(route()).await.is_err(),
@@ -467,6 +484,11 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
             })
             .await
             .unwrap();
+        db.execute(
+            "UPDATE wallets SET unresolved_exposure='malformed' WHERE id=?1",
+            [&wallet],
+        )
+        .unwrap();
         let proof = base.view(history).await.unwrap();
         let p = pool.clone();
         store
