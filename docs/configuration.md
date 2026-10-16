@@ -1133,7 +1133,13 @@ per-returned-record metering. Conditional surcharge amounts are shown as upper
 bounds, since the metadata may describe a maximum across multiple assets.
 Original credit prose remains alongside the estimate. Missing, malformed or unknown
 metadata retains that prose and the configured rate, explicitly marks the per-call
-estimate unavailable, and logs a warning.
+estimate unavailable, and logs one WARN summary per catalog build. The summary
+identifies the provider prefix, configured metadata key, affected-operation count
+and failure-category counts. Only tools retained by the provider's final name
+filters count. DEBUG diagnostics identify each affected tool and method with a
+fixed reason; raw tariff metadata and parser error text are never logged. Separate
+source builds or catalog reloads each report their own summary. Payment limits are
+unchanged.
 
 SocialFetch enables this using the historical 0.014 USDC/credit estimate; it is not
 a verified current x402 tariff. Every converted tool names the configured rate and

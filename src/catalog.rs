@@ -961,9 +961,10 @@ pub fn build_tools_with_prices(
         credits.validate().map_err(ToolConfigurationError)?;
     }
     let selected = selected_operations(cfg, root, prefix)?;
+    let mut credit_diagnostics = credit_pricing::Diagnostics::default();
     let mut tools = selected
         .into_iter()
-        .map(|(op, name)| operation_tool(cfg, &op, name, prices))
+        .map(|(op, name)| operation_tool(cfg, &op, name, prices, &mut credit_diagnostics))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
         tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
@@ -980,6 +981,9 @@ pub fn build_tools_with_prices(
         bail!("duplicate generated tool names");
     }
     filter_tool_names(cfg, &mut tools).map_err(ToolConfigurationError)?;
+    if let Some(credits) = &cfg.credit_pricing {
+        credit_diagnostics.report(prefix, credits, &tools);
+    }
     Ok(tools)
 }
 
@@ -1257,6 +1261,7 @@ fn operation_description(
     cfg: &Config,
     op: &Value,
     prices: &BTreeMap<(String, String), String>,
+    credit_estimate: Option<String>,
 ) -> String {
     let method = op["method"].as_str().unwrap();
     let text = op["description"]
@@ -1274,8 +1279,7 @@ fn operation_description(
     {
         price = line.clone();
     }
-    if let Some(credits) = &cfg.credit_pricing {
-        let estimate = credits.describe(&op["credit_pricing"]);
+    if let Some(estimate) = credit_estimate {
         price = if price == DEFAULT_PRICE {
             estimate
         } else {
@@ -1309,10 +1313,16 @@ fn operation_tool(
     op: &Value,
     name: String,
     prices: &BTreeMap<(String, String), String>,
+    credit_diagnostics: &mut credit_pricing::Diagnostics,
 ) -> Result<ToolSpec> {
     let input = operation_input(op)?;
     let method = op["method"].as_str().unwrap();
-    let description = operation_description(cfg, op, prices);
+    let credit_estimate = cfg.credit_pricing.as_ref().map(|credits| {
+        let (description, reason) = credits.describe(&op["credit_pricing"]);
+        credit_diagnostics.record(&name, reason);
+        description
+    });
+    let description = operation_description(cfg, op, prices, credit_estimate);
     Ok(ToolSpec {
         response_mapping: cfg
             .response_mappings

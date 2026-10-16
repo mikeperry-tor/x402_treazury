@@ -40,36 +40,43 @@ impl CreditPricing {
             .context("credit_pricing.usdc_per_credit is zero or out of range")?;
         Ok(units)
     }
-    pub(super) fn describe(&self, metadata: &Value) -> String {
+    pub(super) fn describe(&self, metadata: &Value) -> (String, Option<&'static str>) {
         let rate = self.rate().expect("validated credit pricing");
-        let provenance = " [conf].";
         match self.estimate(metadata, rate) {
-            Some(line) => format!("Estimated cost: {line}{provenance}"),
-            None => {
-                tracing::warn!(
-                    code = "credit_pricing_unrecognized",
-                    "Credit pricing metadata is missing or unsupported; per-call USDC estimate unavailable, retaining original pricing and configured conversion"
-                );
-                format!("Per-call USDC estimate unavailable{provenance}")
-            }
+            Ok(line) => (format!("Estimated cost: {line} [conf]."), None),
+            Err(reason) => (
+                "Per-call USDC estimate unavailable [conf].".into(),
+                Some(reason),
+            ),
         }
     }
-    fn estimate(&self, metadata: &Value, rate: u64) -> Option<String> {
-        let p: Tariff = serde_json::from_value(metadata.clone()).ok()?;
-        if p.version != 1
-            || p.max_credits < p.base_credits
-            || p.normalization_failure_credits > p.max_credits
-            || (p.batch.is_some() && p.metered.is_some())
-            || p.settlement
-                .as_deref()
-                .is_some_and(|s| s != "actual_credits")
+    fn estimate(&self, metadata: &Value, rate: u64) -> std::result::Result<String, &'static str> {
+        if metadata.is_null() {
+            return Err("missing_metadata");
+        }
+        let p: Tariff = serde_json::from_value(metadata.clone())
+            .map_err(|_| "malformed_or_unsupported_schema")?;
+        if p.version != 1 {
+            return Err("unsupported_version");
+        }
+        if p.max_credits < p.base_credits || p.normalization_failure_credits > p.max_credits {
+            return Err("inconsistent_credit_bounds");
+        }
+        if p.batch.is_some() && p.metered.is_some() {
+            return Err("conflicting_billing_modes");
+        }
+        if p.settlement
+            .as_deref()
+            .is_some_and(|s| s != "actual_credits")
         {
-            return None;
+            return Err("unsupported_settlement");
         }
         let mut line = if let Some(m) = &p.metered {
-            m.estimate(p.base_credits, p.max_credits, rate)?
+            m.estimate(p.base_credits, p.max_credits, rate)
+                .ok_or("invalid_or_unsupported_metered_tariff")?
         } else if let Some(b) = &p.batch {
-            b.estimate(p.base_credits, p.max_credits, rate)?
+            b.estimate(p.base_credits, p.max_credits, rate)
+                .ok_or("invalid_or_unsupported_batch_tariff")?
         } else if p.base_credits == p.max_credits && p.surcharges.is_empty() {
             format!("{}/request", cost(p.base_credits, rate))
         } else {
@@ -79,8 +86,9 @@ impl CreditPricing {
                 cost(p.max_credits, rate)
             )
         };
-        p.append_charges(&mut line, rate)?;
-        Some(line)
+        p.append_charges(&mut line, rate)
+            .ok_or("invalid_or_unsupported_surcharge")?;
+        Ok(line)
     }
 }
 fn cost(credits: u64, rate: u64) -> String {
@@ -195,5 +203,47 @@ impl Tariff {
             ));
         }
         Some(())
+    }
+}
+
+/// Build-local failures, reported only for tools retained by final name filters.
+#[derive(Default)]
+pub(super) struct Diagnostics {
+    failures: std::collections::BTreeMap<String, &'static str>,
+}
+impl Diagnostics {
+    pub(super) fn record(&mut self, tool: &str, reason: Option<&'static str>) {
+        if let Some(reason) = reason {
+            self.failures.insert(tool.to_owned(), reason);
+        }
+    }
+    pub(super) fn report(
+        &self,
+        provider: &str,
+        pricing: &CreditPricing,
+        tools: &[super::ToolSpec],
+    ) {
+        let mut categories = std::collections::BTreeMap::<&str, usize>::new();
+        let mut affected_operations = 0usize;
+        for tool in tools {
+            if let Some(reason) = self.failures.get(&tool.name) {
+                affected_operations += 1;
+                *categories.entry(reason).or_default() += 1;
+                tracing::debug!(
+                    code = "credit_pricing_operation_unrecognized", provider,
+                    tool = %tool.name, method = %tool.method,
+                    metadata_key = %pricing.credit_cost_key, reason,
+                    "Per-call USDC display estimate unavailable for operation"
+                );
+            }
+        }
+        if affected_operations > 0 {
+            tracing::warn!(
+                code = "credit_pricing_unrecognized", provider,
+                metadata_key = %pricing.credit_cost_key,
+                affected_operations, categories = ?categories,
+                "Catalog credit pricing incomplete: per-call USDC display estimates unavailable for affected operations; retaining original pricing and configured conversion. Payment limits are unchanged; enable DEBUG for per-operation reasons"
+            );
+        }
     }
 }

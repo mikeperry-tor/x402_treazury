@@ -117,6 +117,7 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     let writer = Writer(Arc::default());
     let sink = writer.clone();
     let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
         .with_ansi(false)
         .with_writer(move || sink.clone())
         .finish();
@@ -124,13 +125,14 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     let mut future = tariff();
     future["version"] = json!(2);
     let mut unknown = tariff();
-    unknown["newBillingRule"] = json!(1);
+    unknown["newBillingRule"] = json!("private-tariff-value");
     let mut negative = tariff();
     negative["baseCredits"] = json!(-1);
     let mut inconsistent = tariff();
     inconsistent["baseCredits"] = json!(2);
-    for metadata in [Value::Null, future, unknown, negative, inconsistent] {
-        let tool = tools(metadata).remove(0);
+    let invalid = [Value::Null, future, unknown, negative, inconsistent];
+    for metadata in &invalid {
+        let tool = tools(metadata.clone()).remove(0);
         assert!(
             tool.description
                 .contains("Per-call USDC estimate unavailable")
@@ -141,6 +143,64 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     }
     let logs = String::from_utf8(writer.0.lock().unwrap().clone()).unwrap();
     assert!(logs.contains("credit_pricing_unrecognized"), "{logs}");
+
+    let mut cfg = Config {
+        credit_pricing: Some(CreditPricing {
+            credit_cost_key: "credit_tariff".into(),
+            usdc_per_credit: "0.014".into(),
+        }),
+        ..Default::default()
+    };
+    let mut paths = serde_json::Map::new();
+    for (i, metadata) in invalid.iter().enumerate() {
+        paths.insert(
+            format!("/bad{i}"),
+            json!({"get":{"credit_tariff":metadata}}),
+        );
+    }
+    paths.insert("/good".into(), json!({"get":{"credit_tariff":tariff()}}));
+    let document = json!({"paths":paths});
+    writer.0.lock().unwrap().clear();
+    catalog::build_tools(&cfg, &document, "provider_a").unwrap();
+    let logs = String::from_utf8(writer.0.lock().unwrap().clone()).unwrap();
+    assert_eq!(logs.matches(" WARN ").count(), 1, "{logs}");
+    assert_eq!(
+        logs.matches("DEBUG x402_treazury::catalog::credit_pricing:")
+            .count(),
+        5,
+        "{logs}"
+    );
+    for expected in [
+        "provider=\"provider_a\"",
+        "metadata_key=credit_tariff",
+        "affected_operations=5",
+        "\"missing_metadata\": 1",
+        "\"unsupported_version\": 1",
+        "\"malformed_or_unsupported_schema\": 2",
+        "\"inconsistent_credit_bounds\": 1",
+        "tool=provider_a_bad0",
+        "method=GET",
+    ] {
+        assert!(logs.contains(expected), "missing {expected}: {logs}");
+    }
+    assert!(!logs.contains("private-tariff-value"));
+    assert!(!logs.contains("newBillingRule"));
+
+    // Name-filtered failures do not count or produce diagnostics.
+    cfg.exclude_tools = vec!["provider_a_bad*".into()];
+    writer.0.lock().unwrap().clear();
+    let retained = catalog::build_tools(&cfg, &document, "provider_a").unwrap();
+    assert_eq!(retained.len(), 1);
+    assert!(retained[0].description.contains("Estimated cost:"));
+    assert!(writer.0.lock().unwrap().is_empty());
+
+    // Summaries are build-local, not globally suppressed across sources or reloads.
+    cfg.exclude_tools.clear();
+    catalog::build_tools(&cfg, &document, "provider_b").unwrap();
+    catalog::build_tools(&cfg, &document, "provider_b").unwrap();
+    let logs = String::from_utf8(writer.0.lock().unwrap().clone()).unwrap();
+    assert_eq!(logs.matches(" WARN ").count(), 2, "{logs}");
+    assert_eq!(logs.matches("affected_operations=5").count(), 2, "{logs}");
 }
 #[tokio::test]
 async fn privacy_subsets_inherit_conversion_despite_instruction_overrides() {
