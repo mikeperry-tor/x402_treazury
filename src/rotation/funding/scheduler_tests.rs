@@ -2175,6 +2175,10 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
         .unwrap();
     db.execute("UPDATE funding_progress SET phase='\"COMPLETE\"'", [])
         .unwrap();
+    // A prior wall-clock jump must not strand observation after restart. This
+    // durable aggregate is reporting only, never a restored lane backoff.
+    db.execute("UPDATE funding_progress SET next_poll=?1", [i64::MAX])
+        .unwrap();
     drop(db);
     let raw = Store::open(
         &dir.path().join("state"),
