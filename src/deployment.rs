@@ -150,7 +150,7 @@ impl MetaConfig {
     pub(crate) fn validate(&self) -> Result<Resolution> {
         self.validate_capabilities(false)
     }
-    fn validate_capabilities(&self, base_only: bool) -> Result<Resolution> {
+    fn validate_capabilities(&self, shared_only: bool) -> Result<Resolution> {
         self.startup.validate()?;
         self.network.validate()?;
         crate::discovery::policy::validate(self)?;
@@ -166,7 +166,7 @@ impl MetaConfig {
         self.validate_declarations()?;
         self.validate_listeners()?;
         let resolution = assignment::resolve(self)?;
-        self.validate_resolved_funding(&resolution, base_only)?;
+        self.validate_resolved_funding(&resolution, shared_only)?;
         Ok(resolution)
     }
 
@@ -257,13 +257,13 @@ impl MetaConfig {
         Ok(())
     }
 
-    fn validate_resolved_funding(&self, resolution: &Resolution, base_only: bool) -> Result<()> {
+    fn validate_resolved_funding(&self, resolution: &Resolution, shared_only: bool) -> Result<()> {
         if resolution.wallets.values().any(WalletConfig::managed) {
             let treasury = self
                 .treasury
                 .as_ref()
                 .context("managed profiles require [treasury]")?;
-            if base_only {
+            if shared_only {
                 treasury.validate_shared()?;
             } else {
                 treasury.validate()?;
@@ -272,25 +272,21 @@ impl MetaConfig {
                 .funding
                 .as_ref()
                 .context("managed profiles require [funding]")?;
-            if base_only {
-                funding.validate_base()?;
-            } else {
+            if !shared_only {
                 funding.validate()?;
             }
         } else {
             if let Some(t) = &self.treasury {
-                if base_only {
+                if shared_only {
                     t.validate_shared()?;
                 } else {
                     t.validate()?;
                 }
             }
-            if let Some(f) = &self.funding {
-                if base_only {
-                    f.validate_base()?;
-                } else {
-                    f.validate()?;
-                }
+            if let Some(f) = &self.funding
+                && !shared_only
+            {
+                f.validate()?;
             }
         }
         Ok(())
@@ -467,7 +463,13 @@ impl Deployment {
                 && let Some((env, restriction)) = relay_env
             {
                 ensure!(
-                    !crate::qualification::active() && !catalog_evidence::collecting(),
+                    !crate::qualification::active()
+                        && !catalog_evidence::collecting()
+                        && !self
+                            .config
+                            .discovery_relay
+                            .as_ref()
+                            .is_some_and(|p| p.serve),
                     "paid discovery relay is unavailable during qualification"
                 );
                 // Validate listener credentials before discovery can spend.
@@ -824,29 +826,41 @@ impl Deployment {
                         crate::rotation::store::TreasuryNetwork::Mainnet,
                     )
                     .await?;
-                    let base = self.base_connection_preflight(env)?;
-                    match self.funding_connection_preflight(env) {
-                        Ok(source) => match crate::treasury::Treasury::reconstruct(shared).await? {
-                            crate::treasury::OpenedTreasury::Ready(owner) => {
-                                (Some(*owner), base, Some(source))
-                            }
-                            crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
-                                tracing::warn!(
-                                    category = "treasury_snapshot_unavailable",
-                                    "Treasury SDK unavailable; Base service retains shared ownership; funding unavailable"
-                                );
-                                store_only = Some(StoreOnlyOwner::new(*shared));
-                                (None, base, None)
-                            }
-                        },
+                    let base = self.base_connection_preflight(env);
+                    match base {
                         Err(_) => {
                             tracing::warn!(
-                                category = "funding_configuration_unavailable",
-                                "Funding configuration unavailable; Base service retains shared ownership; correct funding configuration and restart"
+                                category = "base_configuration_unavailable",
+                                "Managed Base configuration unavailable; independent static service remains available; correct Base configuration and restart"
                             );
                             store_only = Some(StoreOnlyOwner::new(shared));
-                            (None, base, None)
+                            (None, None, None)
                         }
+                        Ok(base) => match self.funding_connection_preflight(env) {
+                            Ok(source) => match crate::treasury::Treasury::reconstruct(shared)
+                                .await?
+                            {
+                                crate::treasury::OpenedTreasury::Ready(owner) => {
+                                    (Some(*owner), Some(base), Some(source))
+                                }
+                                crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
+                                    tracing::warn!(
+                                        category = "treasury_snapshot_unavailable",
+                                        "Treasury SDK unavailable; Base service retains shared ownership; funding unavailable"
+                                    );
+                                    store_only = Some(StoreOnlyOwner::new(*shared));
+                                    (None, Some(base), None)
+                                }
+                            },
+                            Err(_) => {
+                                tracing::warn!(
+                                    category = "funding_configuration_unavailable",
+                                    "Funding configuration unavailable; Base service retains shared ownership; correct funding configuration and restart"
+                                );
+                                store_only = Some(StoreOnlyOwner::new(shared));
+                                (None, Some(base), None)
+                            }
+                        },
                     }
                 } else {
                     let (source, base) = self.managed_connection_preflight(env)?;
@@ -856,7 +870,7 @@ impl Deployment {
                         t.runtime_id()?,
                     )
                     .await?;
-                    (Some(owner), base, Some(source))
+                    (Some(owner), Some(base), Some(source))
                 };
                 if let (Some(owner), Some(source)) = (&mut owner, &source) {
                     owner.configure_sync(source.sync_settings.clone());
@@ -912,10 +926,15 @@ impl Deployment {
                                 s.ensure_capacity_group(&group_name, &reserves, cap, retirement)
                             })
                             .await?;
-                        let manager = ManagedPool::new(store.clone(), pool, base.clone(), policy)?;
-                        let manager = std::sync::Arc::new(manager);
-                        managed_pools.push(manager.clone());
-                        wallets.insert(name.clone(), PaidClient::managed(manager));
+                        let client = if let Some(base) = &base {
+                            let manager = std::sync::Arc::new(ManagedPool::new(store.clone(), pool, base.clone(), policy)?);
+                            managed_pools.push(manager.clone());
+                            PaidClient::managed(manager)
+                        } else {
+                            PaidClient::unavailable(crate::rotation::error::AdmissionError::WalletNotReady(
+                                "managed Base configuration unavailable; correct configuration and restart"))
+                        };
+                        wallets.insert(name.clone(), client);
                     }
                 }
                 if owner.is_some() {
@@ -927,7 +946,7 @@ impl Deployment {
                         treasury: handle,
                         store: store.clone(),
                         near: source.near,
-                        base,
+                        base: base.expect("validated Base connection"),
                         wallets: self.wallet_resolution.wallets.clone(),
                         funding: f.clone(),
                         max_network_fee: crate::rotation::config::zatoshis(
@@ -1130,7 +1149,13 @@ impl Deployment {
                 restriction,
                 None,
                 &BTreeSet::new(),
-                !crate::qualification::active() && !catalog_evidence::collecting(),
+                !crate::qualification::active()
+                    && !catalog_evidence::collecting()
+                    && !self
+                        .config
+                        .discovery_relay
+                        .as_ref()
+                        .is_some_and(|p| p.serve),
             )
             .await?
         };

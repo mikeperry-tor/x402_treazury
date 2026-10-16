@@ -531,6 +531,22 @@ SDK snapshots with malformed credentials, invalid quote window and fee, successf
 Base signing and static MCP calls, retained exposure, and a declaration matrix with
 shared-key failure controls. This is local synthetic evidence, not live settlement.
 
+**C06 Base-unavailable static-service contract (reviewed incremental slice):**
+Ordinary no-relay serving defers Base dependency validation to its constructor after
+shared Store authentication. A Base declaration/connection failure retains that
+owner with funding paused and installs an explicit unavailable PaidClient for each
+managed binding. Profile/identity reconciliation remains authoritative; no Base
+manager, reconciliation or funding actor starts through invalid Base policy. API
+execution and wallet-identity documentation probes return typed WalletNotReady
+before transport/provider I/O. Static API service, catalog discovery and independent
+unsigned help/import capabilities remain available. Strict validation, explicit
+bootstrap, enabled relay and qualification are unchanged. Missing treasury/funding
+sections and shared-state failures still stop dependent deployment initialization.
+Corrected Base configuration takes effect on restart. Entry-point fixtures cover
+invalid Base limits, missing explicit environment values and insecure endpoints,
+actual managed MCP rejection versus successful static MCP invocation, cloned
+clients/probe identity refusal, no allocation/funding jobs and owner cleanup.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

@@ -373,7 +373,7 @@ async fn store_only_binding_rollback_and_cancelled_serving_release_owner() {
 }
 
 #[tokio::test]
-async fn source_declaration_failures_are_scoped_but_base_and_shared_failures_remain_fatal() {
+async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_fatal() {
     let cases = [
         ("[treasury]", "confirmations=0", true),
         ("[treasury]", "max_sync_age_seconds=0", true),
@@ -409,10 +409,6 @@ async fn source_declaration_failures_are_scoped_but_base_and_shared_failures_rem
         std::fs::write(&path, config).unwrap();
         let loaded =
             Deployment::load_for_serving_with_relay(&path, &env(), Default::default()).await;
-        if !scoped {
-            assert!(loaded.is_err(), "{declaration}");
-            continue;
-        }
         let deployment = loaded.unwrap();
         let strict = deployment
             .initialize_wallets(&env(), Default::default(), None, &BTreeSet::new())
@@ -420,6 +416,7 @@ async fn source_declaration_failures_are_scoped_but_base_and_shared_failures_rem
         assert!(strict.is_err(), "strict preflight accepted {declaration}");
         let running = deployment.bind(&env()).await.unwrap();
         assert!(running.store_only.is_some(), "{declaration}");
+        assert_eq!(running.managed_pools.is_empty(), !scoped, "{declaration}");
         assert!(running.funding_runtime.is_none());
         // No accepted work exists before serve. Use the normal close sequence
         // without detaching the owner while checking every declaration.
@@ -439,5 +436,122 @@ async fn source_declaration_failures_are_scoped_but_base_and_shared_failures_rem
             deployment.bind(&env()).await.is_err(),
             "source fallback hid wrong key: {declaration}"
         );
+    }
+}
+
+#[tokio::test]
+async fn base_configuration_failure_preserves_static_service_and_refuses_managed_io() {
+    for fault in ["declaration", "missing_env", "insecure_endpoint"] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let store = Store::create(&state, &key, 1, b"invalid SDK fixture").unwrap();
+        let id = store.id().to_owned();
+        let before = store.snapshot().unwrap();
+        drop(store);
+        let requests = Arc::new(AtomicUsize::new(0));
+        let count = requests.clone();
+        let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", provider.local_addr().unwrap());
+        let app = Router::new().fallback(move || {
+            let count = count.clone();
+            async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                "static-ok"
+            }
+        });
+        let server = tokio::spawn(async move { axum::serve(provider, app).await.unwrap() });
+        write_spec(dir.path());
+        let mut config = managed_config().replace("http://127.0.0.1:1", &origin);
+        if fault == "declaration" {
+            config = config.replace("[funding]", "[funding]\nbase_confirmations=0");
+        }
+        config.push_str("\n[wallets.static]\nmode='static'\nprivate_key_env='STATIC'\n[servers.static]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='static'\nsources=['api']\n");
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(&path, config).unwrap();
+        let mut env = env();
+        env.insert("STATIC".into(), format!("{:064x}", 1));
+        match fault {
+            "missing_env" => {
+                env.remove("BASE");
+            }
+            "insecure_endpoint" => {
+                env.insert("BASE".into(), "http://untrusted.example".into());
+            }
+            _ => {}
+        }
+        let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+            .await
+            .unwrap();
+        let strict = deployment
+            .initialize_wallets(&env, Default::default(), None, &BTreeSet::new())
+            .await;
+        assert!(strict.is_err());
+        // Inspect the same client binding used by tool/raw/documentation paths.
+        let initialized = deployment
+            .initialize_wallets_mode(&env, Default::default(), None, &BTreeSet::new(), true)
+            .await
+            .unwrap();
+        assert!(initialized.managed_pools.is_empty());
+        let payer = initialized.wallets["selected"].clone();
+        let error = payer.documentation_identity().await.unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<crate::rotation::error::AdmissionError>(),
+            Some(crate::rotation::error::AdmissionError::WalletNotReady(_))
+        ));
+        let error = payer
+            .clone()
+            .with_source_identity("dynamic")
+            .execute(crate::catalog::RoutedRequest {
+                method: "GET".into(),
+                url: format!("{origin}/read"),
+                query: Default::default(),
+                body: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<crate::rotation::error::AdmissionError>(),
+            Some(crate::rotation::error::AdmissionError::WalletNotReady(_))
+        ));
+        drop(payer);
+        initialized.shutdown().await.unwrap();
+        let running = deployment.bind(&env).await.unwrap();
+        assert!(running.managed_pools.is_empty());
+        assert!(running.funding_runtime.is_none());
+        assert!(running.treasury.is_none());
+        assert!(running.store_only.is_some());
+        let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(running.serve(stop.clone()));
+        for (listener, expected) in [("one", "wallet_not_ready"), ("static", "static-ok")] {
+            let response = reqwest::Client::new().post(format!("http://{}/mcp",addresses[listener]))
+                .bearer_auth("fixture-token").header("accept","application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api_read","arguments":{}}}))
+                .send().await.unwrap().text().await.unwrap();
+            assert!(response.contains(expected), "{fault}: {response}");
+            assert_eq!(
+                requests.load(Ordering::SeqCst),
+                usize::from(listener == "static")
+            );
+        }
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let store = Store::open(&state, &key, &id).unwrap();
+        assert_eq!(store.snapshot().unwrap(), before);
+        assert!(store.funding_jobs().unwrap().is_empty());
+        assert!(
+            store
+                .status()
+                .unwrap()
+                .pools
+                .iter()
+                .all(|p| p.addresses.is_empty())
+        );
+        server.abort();
     }
 }

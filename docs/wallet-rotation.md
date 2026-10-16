@@ -600,7 +600,10 @@ pauses new funding. Schema, key, identity, authentication and owner failures sti
 stop initialization. Funding-only configuration or preflight failures also select this Base-only runtime:
 invalid treasury sync/fee settings, source endpoints or NEAR credentials do not
 prevent existing Base service. Correcting those settings or SDK snapshot availability
-requires restart. Shared identity/path and Base RPC policy remain required; missing
-treasury/funding sections still fail initialization. Paid relay startup, explicit
+requires restart. Shared identity/path remains required; missing treasury/funding sections still
+fail initialization. If Base configuration itself is invalid, static service stays
+available while managed API calls and identity-bound probes return `wallet_not_ready`
+without provider I/O. No Base reconciliation runs through that invalid configuration;
+unsigned catalog/help operations remain independent. Paid relay startup, explicit
 bootstrap, config checking and qualification remain strict. The store-only runtime
 does not run source/swap observers; their unresolved obligations remain durable.
