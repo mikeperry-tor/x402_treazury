@@ -419,6 +419,126 @@ discover_on_demand=true
         (dir, running, catalog, fixture, relay_task, api_task)
     }
 
+    #[tokio::test]
+    async fn ordinary_serving_binds_before_slow_unsigned_origin_without_relay() {
+        let dir = tempfile::tempdir().unwrap();
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", origin.local_addr().unwrap());
+        let (arrived, observed) = tokio::sync::oneshot::channel();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let arrived = Arc::new(tokio::sync::Mutex::new(Some(arrived)));
+        let wait = Arc::new(tokio::sync::Mutex::new(Some(wait)));
+        let api = tokio::spawn(async move {
+            axum::serve(
+                origin,
+                Router::new()
+                    .route("/read", get(|| async { "healthy" }))
+                    .route(
+                        "/spec",
+                        get(move || {
+                            let arrived = arrived.clone();
+                            let wait = wait.clone();
+                            async move {
+                                arrived.lock().await.take().unwrap().send(()).unwrap();
+                                wait.lock().await.take().unwrap().await.unwrap();
+                                axum::Json(json!({"operations":[{"method":"GET","path":"/read"}]}))
+                            }
+                        }),
+                    ),
+            )
+            .await
+            .unwrap();
+        });
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"operations":[{"method":"GET","path":"/read"}]}"#,
+        )
+        .unwrap();
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(
+            &path,
+            format!(
+                r#"
+version=1
+[wallets.selected]
+mode='static'
+private_key_env='KEY'
+[sources.healthy]
+spec='spec.json'
+base_url='{base}'
+probe_pricing=false
+[sources.late]
+spec='{base}/spec'
+base_url='{base}'
+probe_pricing=false
+[servers.one]
+listen='127.0.0.1:0'
+bearer_token_env='TOKEN'
+wallet='selected'
+sources=['healthy','late']
+"#
+            ),
+        )
+        .unwrap();
+        let env = BTreeMap::from([
+            ("KEY".into(), format!("{:064x}", 2)),
+            ("TOKEN".into(), "fixture".into()),
+        ]);
+        let deployment = tokio::time::timeout(
+            Duration::from_secs(5),
+            Deployment::load_for_serving_with_relay(&path, &env, Default::default()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(deployment.sources.len(), 1);
+        assert_eq!(deployment.pending_sources.len(), 1);
+        let running = deployment.bind(&env).await.unwrap();
+        assert_ne!(running.addresses()[0].1.port(), 0);
+        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(running.serve(stop.clone()));
+        tokio::time::timeout(Duration::from_secs(5), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        let initial = catalog.read();
+        assert_eq!(initial.views["one"].len(), 1);
+        assert!(
+            initial.instructions["one"]
+                .as_ref()
+                .unwrap()
+                .contains("PENDING")
+        );
+        assert_eq!(
+            initial.views["one"][0]
+                .invoke(&Default::default())
+                .await
+                .unwrap(),
+            "healthy"
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while catalog.read().views["one"].len() != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            !catalog.read().instructions["one"]
+                .as_ref()
+                .is_some_and(|s| s.contains("PENDING"))
+        );
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        api.abort();
+    }
+
     #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn canonical_capacity_wakes_deferred_publication_in_same_serving_process() {

@@ -541,8 +541,7 @@ impl Deployment {
             pending_sources: BTreeMap::new(),
             defer_discovery: relay_env.is_some()
                 && !crate::qualification::active()
-                && !catalog_evidence::collecting()
-                && config.discovery_relay.as_ref().is_some_and(|p| p.serve),
+                && !catalog_evidence::collecting(),
             initialized: None,
             config,
             wallet_resolution,

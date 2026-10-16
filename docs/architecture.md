@@ -97,8 +97,8 @@ its route, output policy and payer binding so a concurrent catalog replacement
 cannot redirect an in-flight call. Listener filters constrain invocation as well
 as listing. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
-Enabled-relay serving publishes available tools before running retained relay
-catalog continuations and startup pricing. Late sources publish complete listener
+Ordinary serving publishes available local tools before running remote catalog
+discovery, retained relay continuations and startup pricing. Late sources publish complete listener
 views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources. Each `tools/list` response also exposes
 listener-specific current instructions, catalog generation and publication-stop
@@ -106,8 +106,8 @@ status in `_meta["x402_treazury/catalog"]`, alongside tools from that snapshot.
 Clients must inspect this metadata; it does not imply a UI notification. Unsigned
 dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
-Enabled-relay serving also defers initial remote unsigned catalog loading; local
-authored catalogs remain validated before serving.
+Local authored catalogs remain validated before serving; strict inspection and
+qualification still require complete discovery.
 
 ## MCP and output boundaries
 
