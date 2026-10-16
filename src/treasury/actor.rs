@@ -30,10 +30,27 @@ pub struct TreasuryHandle {
 }
 pub struct TreasuryCommands {
     receiver: mpsc::Receiver<Command>,
+    // Retained for upcoming actor maintenance; no automatic scheduling yet.
+    #[allow(dead_code)]
+    shielding: Option<crate::rotation::store::shielding::ServingAuthority>,
 }
 pub fn channel() -> (TreasuryHandle, TreasuryCommands) {
     let (sender, receiver) = mpsc::channel(8);
-    (TreasuryHandle { sender }, TreasuryCommands { receiver })
+    (
+        TreasuryHandle { sender },
+        TreasuryCommands {
+            receiver,
+            shielding: None,
+        },
+    )
+}
+impl TreasuryCommands {
+    pub(crate) fn install_serving_shielding(
+        &mut self,
+        authority: Option<crate::rotation::store::shielding::ServingAuthority>,
+    ) {
+        self.shielding = authority;
+    }
 }
 impl TreasuryHandle {
     pub async fn recover_funding(

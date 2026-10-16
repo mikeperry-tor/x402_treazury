@@ -1528,6 +1528,25 @@ expiry-only submission, legacy header-bound numeric facts and block-expiry rejec
 The fixture now awaits production owner close before reopening. Independent review
 is clear; no live-funded work was run.
 
+**C20 serving capability (implemented; activation deferred):** After every listener
+bind succeeds, ordinary enabled managed serving may capture the current enabled
+profile/pool fee policy in an opaque Store-owner-bound capability. The command owner
+retains it across SDK reconstruction; generic sync, bootstrap, administration and
+reopened state cannot create or inherit it. Positive and zero qualification limits,
+paused policy and declared restoration prevent capture or new preparation. The
+accepted policy source determines the immutable automatic flag; callers supply no
+flag. Current policy is checked before the C16 marker, fee reservation and new
+publication, while an exact already-accepted commit remains readable after policy
+changes. Invalid optional shielding policy retains the scoped listener startup path.
+
+Automatic scheduling is still disabled until canonical input reorg/expiry accounting
+is complete. Focused tests cover removed/disabled profiles, policy changes, namespace
+mismatch after reopen, qualification/restoration denial and unchanged pre-mutation
+journals. The real SDK regression repeats an accepted exact commit after policy is
+paused to qualify lost-acknowledgement handling.
+Ten focused Store cases and the real SDK shielding regression passed; independent
+review is clear. No automatic scheduling or live-funded qualification was run.
+
 **C22 declared restoration contract (implemented and reviewed):** Ordinary reopen
 cannot detect an undeclared filesystem rollback. The explicit offline
 `wallet mark-restored` command declares a manually restored working copy before

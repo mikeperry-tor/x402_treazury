@@ -1442,13 +1442,60 @@ impl Deployment {
         #[cfg(feature = "zcash")]
         let store_only = initialized.store_only;
         #[cfg(feature = "zcash")]
-        let funding_runtime = initialized.funding_runtime;
+        let mut funding_runtime = initialized.funding_runtime;
         #[cfg(feature = "zcash")]
         let reconciliation_owners = initialized.reconciliation_owners;
         #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
         let deferred_wallets = wallets.clone();
-        let bound = self.bind_catalog_listeners(wallets, tokens).await;
+        let bound = async {
+            let bound = self.bind_catalog_listeners(wallets, tokens).await?;
+            #[cfg(feature = "zcash")]
+            if let (Some(owner), Some((commands, _, _)), Some(treasury_config)) =
+                (&treasury, &mut funding_runtime, &self.config.treasury)
+            {
+                let auto_fund = self
+                    .config
+                    .funding
+                    .as_ref()
+                    .is_some_and(|funding| funding.auto_fund)
+                    && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
+                let fee = if auto_fund {
+                    match crate::rotation::config::zatoshis(
+                        &treasury_config.max_refund_shielding_fee_zec,
+                    ) {
+                        Ok(fee) if fee > 0 => Some(fee as u64),
+                        _ => {
+                            tracing::warn!(
+                                category = "shielding_policy_unavailable",
+                                "automatic shielding unavailable: invalid configured fee limit"
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let authority = if let Some(fee) = fee {
+                    let profiles = self
+                        .wallet_resolution
+                        .wallets
+                        .iter()
+                        .filter(|(_, wallet)| wallet.managed())
+                        .map(|(name, _)| (name.clone(), fee))
+                        .collect();
+                    owner
+                        .store_handle()
+                        .call(move |store| store.capture_serving_shielding(&profiles, auto_fund))
+                        .await?
+                } else {
+                    None
+                };
+                commands.install_serving_shielding(authority);
+            }
+            Ok::<_, anyhow::Error>(bound)
+        }
+        .await;
         let BoundListeners {
             listeners,
             accepted_work,

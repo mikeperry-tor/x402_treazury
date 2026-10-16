@@ -25,6 +25,7 @@ fn fixture() -> (tempfile::TempDir, Store, String, Policy) {
         wallet: job.wallet_id,
         address: "test-address".into(),
         max_fee: 10,
+        automatic: false,
     };
     (dir, store, job.id, policy)
 }
@@ -335,4 +336,187 @@ fn historical_numeric_deadlines_decode_without_reinterpreting_source_authority()
     assert!(window.check(200, false).is_err());
     assert!(window.check(199, false).is_ok());
     assert!(window.check(1, true).is_err());
+}
+
+fn serving(store: &Store) -> ServingAuthority {
+    store
+        .capture_serving_shielding(&[("shield".into(), 10)].into(), true)
+        .unwrap()
+        .unwrap()
+}
+fn untouched(store: &Store, revision: i64) {
+    assert_eq!(store.snapshot().unwrap().0, revision);
+    for table in [
+        "treasury_preparations",
+        "budget_entries",
+        "outgoing",
+        "shielding_operations",
+        "shielding_inputs",
+    ] {
+        assert_eq!(
+            store
+                .db
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "{table}"
+        );
+    }
+}
+#[test]
+fn serving_capability_is_current_policy_scoped_before_preparation() {
+    for cause in [
+        "paused", "disabled", "removed", "positive", "zero", "restored", "unlisted", "address",
+    ] {
+        let (_dir, mut store, job, _) = fixture();
+        let mut authority = serving(&store);
+        let revision = store.snapshot().unwrap().0;
+        match cause {
+            "paused" => store.pause_new_funding(),
+            "disabled" => store.disable_pool("shield").unwrap(),
+            "removed" => store
+                .configure_profiles(
+                    &std::collections::BTreeSet::new(),
+                    &std::collections::BTreeSet::new(),
+                )
+                .unwrap(),
+            "positive" => store
+                .install_funding_permits(std::sync::Arc::new(PositivePermits))
+                .unwrap(),
+            "zero" => store.deny_new_funding(),
+            "restored" => store.declare_restored_backup().unwrap(),
+            "unlisted" => authority.pools.clear(),
+            "address" => (),
+            _ => unreachable!(),
+        }
+        let address = if cause == "address" {
+            "another-address"
+        } else {
+            "test-address"
+        };
+        assert!(
+            store
+                .begin_automatic_shielding("auto", revision, &job, address, &authority)
+                .is_err(),
+            "{cause}"
+        );
+        untouched(&store, revision);
+    }
+}
+#[test]
+fn serving_capability_is_not_restored_from_reopened_state() {
+    let (dir, mut store, job, _) = fixture();
+    let authority = serving(&store);
+    let revision = store.snapshot().unwrap().0;
+    // A new process/Store owner cannot inherit a prior owner's live authority.
+    let id = store.id.clone();
+    drop(store);
+    store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    assert!(
+        store
+            .begin_automatic_shielding("auto", revision, &job, "test-address", &authority)
+            .is_err()
+    );
+    untouched(&store, revision);
+    let authority = serving(&store);
+    let (owner, policy) = store
+        .begin_automatic_shielding("auto", revision, &job, "test-address", &authority)
+        .unwrap();
+    assert!(policy.automatic);
+    assert_eq!(policy.max_fee, 10);
+    let binding = Binding::new(policy, vec![input()], 10).unwrap();
+    // The only header flag comes from this accepted PolicySource, with no bool
+    // accepted by the automatic preparation or publication APIs.
+    store.reserve(owner.operation(), None, 0, 10).unwrap();
+    store
+        .prepare_owned(&owner, b"calculated", b"fixture bytes", facts(10))
+        .unwrap();
+    binding
+        .insert(
+            &store.db,
+            &store.key,
+            &store.id,
+            store.network.name(),
+            owner.operation(),
+        )
+        .unwrap();
+    assert!(
+        store
+            .db
+            .query_row(
+                "SELECT automatic FROM shielding_operations WHERE operation_id='auto'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+    );
+    binding
+        .check_saved(
+            &store.db,
+            &store.key,
+            &store.id,
+            store.network.name(),
+            owner.operation(),
+        )
+        .unwrap();
+}
+#[test]
+fn disabled_or_qualification_serving_cannot_capture_authority() {
+    for cause in ["false", "paused", "positive", "zero", "restored", "removed"] {
+        let (_dir, mut store, _, _) = fixture();
+        let revision = store.snapshot().unwrap().0;
+        match cause {
+            "false" => (),
+            "paused" => store.pause_new_funding(),
+            "positive" => store
+                .install_funding_permits(std::sync::Arc::new(PositivePermits))
+                .unwrap(),
+            "zero" => store.deny_new_funding(),
+            "restored" => store.declare_restored_backup().unwrap(),
+            "removed" => store
+                .configure_profiles(
+                    &std::collections::BTreeSet::new(),
+                    &std::collections::BTreeSet::new(),
+                )
+                .unwrap(),
+            _ => unreachable!(),
+        }
+        assert!(
+            store
+                .capture_serving_shielding(&[("shield".into(), 10)].into(), cause != "false")
+                .unwrap()
+                .is_none(),
+            "{cause}"
+        );
+        untouched(&store, revision);
+    }
+}
+
+#[test]
+fn accepted_owner_rechecks_policy_before_reservation_and_publication() {
+    let (_dir, mut store, job, _) = fixture();
+    let authority = serving(&store);
+    let revision = store.snapshot().unwrap().0;
+    let (owner, policy) = store
+        .begin_automatic_shielding("auto", revision, &job, "test-address", &authority)
+        .unwrap();
+    let binding = Binding::new(policy, vec![input()], 10).unwrap();
+    store.disable_pool("shield").unwrap();
+    assert!(store.check_shielding_inputs(&owner, &binding).is_err());
+    assert!(
+        store
+            .prepare_owned_shielding(&owner, b"mutated", b"raw", facts(10), &binding)
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .db
+            .query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(store.snapshot().unwrap().0, revision);
+    assert!(store.close_retired_preparation(&owner).unwrap());
 }

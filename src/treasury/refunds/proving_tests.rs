@@ -38,6 +38,7 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
             .await
             .unwrap();
         let address = treasury.refund_address(job.id.clone()).await.unwrap();
+        let selected_input;
         {
             let mut wallet = treasury.client.as_ref().unwrap().wallet().write().await;
             let empty = SyntheticWalletBuilder::new(SEED).tip(TIP).build();
@@ -63,6 +64,12 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
                 receiver.script().into(),
                 Zatoshis::const_from_u64(100_000),
             );
+            selected_input = crate::rotation::store::shielding::Input {
+                txid: txid.to_string(),
+                output_index: 0,
+                amount: 100_000,
+                script: coin.script().0.0.clone(),
+            };
             wallet.wallet_transactions.insert(
                 txid,
                 WalletTransaction::new_for_test(txid, ConfirmationStatus::Confirmed(2.into()))
@@ -107,7 +114,7 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
             db.execute_batch("CREATE TRIGGER reject_shield BEFORE INSERT ON shielding_inputs BEGIN SELECT RAISE(ABORT,'fixture shielding commit failure'); END;").unwrap();
         }
         let result = treasury
-            .finish_owned_refund(address, recipient, 50_000, owner, policy)
+            .finish_owned_refund(address, recipient, 50_000, owner.clone(), policy.clone())
             .await;
         if fail_commit {
             let error = result.err().unwrap();
@@ -146,6 +153,33 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
             prepared.check_submission_window(u64::MAX, true).unwrap();
             let fee = prepared.facts().unwrap().fee_zatoshis;
             assert!(fee > 0 && fee < 100_000);
+            let binding =
+                crate::rotation::store::shielding::Binding::new(policy, vec![selected_input], fee)
+                    .unwrap();
+            let repeated_facts = prepared.facts().unwrap().clone();
+            let repeated_raw = prepared.bytes().to_vec();
+            treasury
+                .store
+                .call(move |s| {
+                    let (revision, snapshot) = s.snapshot()?;
+                    s.pause_new_funding();
+                    // A lost acknowledgement is a read of the exact accepted commit,
+                    // not new preparation authority after policy is disabled.
+                    assert_eq!(
+                        s.prepare_owned_shielding(
+                            &owner,
+                            &snapshot,
+                            &repeated_raw,
+                            repeated_facts,
+                            &binding
+                        )?,
+                        revision
+                    );
+                    assert_eq!(s.snapshot()?.0, revision);
+                    Ok(())
+                })
+                .await
+                .unwrap();
             assert_eq!(
                 db.query_row(
                     "SELECT reserved FROM budget_entries WHERE id='shield'",

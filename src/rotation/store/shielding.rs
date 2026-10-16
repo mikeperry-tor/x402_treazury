@@ -7,7 +7,24 @@ pub(crate) struct Policy {
     wallet: String,
     address: String,
     max_fee: u64,
+    automatic: bool,
 }
+/// Current serving policy, scoped to the retained serialized Store owner.
+/// Never persisted or reconstructed from wallet state or funding journals.
+#[derive(Clone)]
+pub(crate) struct ServingAuthority {
+    namespace: Uuid,
+    treasury: String,
+    pools: std::collections::BTreeMap<String, u64>,
+}
+
+enum PolicySource<'a> {
+    Manual(u64),
+    // Next consumer is actor shielding maintenance after exact reorg recovery.
+    #[allow(dead_code)]
+    Serving(&'a ServingAuthority),
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Input {
     pub txid: String,
@@ -155,7 +172,7 @@ impl Binding {
             &format!("v1:{treasury}:{network}:shielding:{operation}"),
             self.policy.address.as_bytes(),
         )?;
-        tx.execute("INSERT INTO shielding_operations(operation_id,policy_pool_id,policy_wallet_id,address,max_fee,automatic) VALUES(?1,?2,?3,?4,?5,0)",params![operation,self.policy.pool,self.policy.wallet,address,i64::try_from(self.policy.max_fee)?])?;
+        tx.execute("INSERT INTO shielding_operations(operation_id,policy_pool_id,policy_wallet_id,address,max_fee,automatic) VALUES(?1,?2,?3,?4,?5,?6)",params![operation,self.policy.pool,self.policy.wallet,address,i64::try_from(self.policy.max_fee)?,self.policy.automatic])?;
         for input in &self.inputs {
             tx.execute("INSERT INTO shielding_inputs(operation_id,txid,output_index,amount,script) VALUES(?1,?2,?3,?4,?5)",params![operation,input.txid,input.output_index,i64::try_from(input.amount)?,input.script])?;
         }
@@ -174,7 +191,7 @@ impl Binding {
             pool == self.policy.pool
                 && wallet == self.policy.wallet
                 && max_fee == i64::try_from(self.policy.max_fee)?
-                && !automatic
+                && automatic == self.policy.automatic
                 && unseal(
                     key,
                     &format!("v1:{treasury}:{network}:shielding:{operation}"),
@@ -199,11 +216,11 @@ impl Store {
         operation: &str,
         facts: &TransactionFacts,
     ) -> Result<bool> {
-        let header: Option<(String, String, Vec<u8>, i64)> = self.db.query_row(
-            "SELECT policy_pool_id,policy_wallet_id,address,max_fee FROM shielding_operations WHERE operation_id=?1",
-            [operation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        let header: Option<(String, String, Vec<u8>, i64, bool)> = self.db.query_row(
+            "SELECT policy_pool_id,policy_wallet_id,address,max_fee,automatic FROM shielding_operations WHERE operation_id=?1",
+            [operation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         ).optional()?;
-        let Some((pool, wallet, address, max_fee)) = header else {
+        let Some((pool, wallet, address, max_fee, automatic)) = header else {
             return Ok(false);
         };
         let address = unseal(
@@ -220,6 +237,7 @@ impl Store {
             wallet,
             address: std::str::from_utf8(&address)?.into(),
             max_fee: u64::try_from(max_fee)?,
+            automatic,
         };
         let inputs = self.db.prepare("SELECT txid,output_index,amount,script FROM shielding_inputs WHERE operation_id=?1")?
             .query_map([operation], |r| Ok(Input { txid: r.get(0)?, output_index: r.get(1)?, amount: sql_u64(r,2)?, script: r.get(3)? }))?
@@ -230,6 +248,65 @@ impl Store {
         binding.check_transaction(&self.prepared_bytes(operation)?, facts)?;
         Ok(true)
     }
+    /// Installed only by managed serving after all listeners are bound. The
+    /// caller supplies current configured profiles, never historical job policy.
+    pub(crate) fn capture_serving_shielding(
+        &self,
+        profiles: &std::collections::BTreeMap<String, u64>,
+        auto_fund: bool,
+    ) -> Result<Option<ServingAuthority>> {
+        if !auto_fund
+            || self.funding_permits.is_some()
+            || self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
+            || super::restoration::declared(&self.db)?
+        {
+            return Ok(None);
+        }
+        let mut pools = std::collections::BTreeMap::new();
+        for (name, fee) in profiles {
+            ensure!(
+                *fee > 0 && i64::try_from(*fee).is_ok(),
+                "invalid shielding fee cap"
+            );
+            let pool: Option<String> = self
+                .db
+                .query_row(
+                    "SELECT id FROM pools WHERE name=?1 AND enabled=1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(pool) = pool {
+                pools.insert(pool, *fee);
+            }
+        }
+        Ok((!pools.is_empty()).then(|| ServingAuthority {
+            namespace: self.evidence_namespace,
+            treasury: self.id.clone(),
+            pools,
+        }))
+    }
+
+    // Staged entry point for actor maintenance; scheduling waits for exact
+    // confirmed-input reorg/expiry accounting. Remove this annotation at activation.
+    #[allow(dead_code)]
+    pub(crate) fn begin_automatic_shielding(
+        &mut self,
+        operation: &str,
+        revision: i64,
+        job: &str,
+        address: &str,
+        authority: &ServingAuthority,
+    ) -> Result<(preparation::Preparation, Policy)> {
+        self.begin_shielding(
+            operation,
+            revision,
+            job,
+            address,
+            PolicySource::Serving(authority),
+        )
+    }
+
     /// Explicit CLI preparation only. Automatic policy is a separate capability;
     /// neither generic sync nor a positive source-funding permit grants it.
     pub(crate) fn begin_manual_shielding(
@@ -240,6 +317,23 @@ impl Store {
         address: &str,
         max_fee: u64,
     ) -> Result<(preparation::Preparation, Policy)> {
+        self.begin_shielding(
+            operation,
+            revision,
+            job,
+            address,
+            PolicySource::Manual(max_fee),
+        )
+    }
+
+    fn begin_shielding(
+        &mut self,
+        operation: &str,
+        revision: i64,
+        job: &str,
+        address: &str,
+        source: PolicySource<'_>,
+    ) -> Result<(preparation::Preparation, Policy)> {
         ensure!(
             self.funding_permits.is_none(),
             AdmissionError::FundingPermitDenied
@@ -247,10 +341,6 @@ impl Store {
         self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("shielding_preparation")?;
-        ensure!(
-            max_fee > 0 && i64::try_from(max_fee).is_ok(),
-            "invalid shielding fee cap"
-        );
         ensure!(
             self.refund_address(job)?.as_deref() == Some(address),
             "shielding address binding changed"
@@ -260,6 +350,30 @@ impl Store {
             [job],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
+        let (max_fee, automatic) = match source {
+            PolicySource::Manual(fee) => (fee, false),
+            PolicySource::Serving(authority) => {
+                ensure!(
+                    authority.namespace == self.evidence_namespace && authority.treasury == self.id,
+                    "shielding serving owner mismatch"
+                );
+                let fee = authority
+                    .pools
+                    .get(&pool)
+                    .context("shielding profile not authorized")?;
+                let enabled: bool =
+                    self.db
+                        .query_row("SELECT enabled FROM pools WHERE id=?1", [&pool], |r| {
+                            r.get(0)
+                        })?;
+                ensure!(enabled, "shielding profile disabled");
+                (*fee, true)
+            }
+        };
+        ensure!(
+            max_fee > 0 && i64::try_from(max_fee).is_ok(),
+            "invalid shielding fee cap"
+        );
         let pending: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
             [],
@@ -274,14 +388,34 @@ impl Store {
                 wallet,
                 address: address.into(),
                 max_fee,
+                automatic,
             },
         ))
+    }
+    pub(super) fn require_current_shielding_policy(&self, binding: &Binding) -> Result<()> {
+        ensure!(
+            self.funding_permits.is_none(),
+            AdmissionError::FundingPermitDenied
+        );
+        self.require_complete_provenance()?;
+        self.funding_restriction
+            .require_new_funding("shielding_preparation")?;
+        if binding.policy.automatic {
+            let enabled: bool = self.db.query_row(
+                "SELECT enabled FROM pools WHERE id=?1",
+                [&binding.policy.pool],
+                |r| r.get(0),
+            )?;
+            ensure!(enabled, "shielding profile disabled");
+        }
+        Ok(())
     }
     pub(crate) fn check_shielding_inputs(
         &self,
         owner: &preparation::Preparation,
         binding: &Binding,
     ) -> Result<()> {
+        self.require_current_shielding_policy(binding)?;
         self.require_owned_reservation(owner)?;
         binding.check_claims(&self.db, owner.operation())
     }

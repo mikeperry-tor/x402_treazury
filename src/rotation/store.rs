@@ -946,6 +946,9 @@ impl Store {
             }
             return Ok(revision);
         }
+        if let Some(binding) = shielding {
+            self.require_current_shielding_policy(binding)?;
+        }
         self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("source_preparation_commit")?;
