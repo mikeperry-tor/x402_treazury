@@ -668,7 +668,8 @@ Managed payments accept only v2 `exact` EIP-3009 on Base with canonical USDC,
 the `USD Coin`/`2` signing domain, and an amount within the payment cap and
 current unreserved capacity. Selection chooses the lowest-priced supported offer
 within the payment cap. Permit2, `upto`, v1, non-authorization flows, nested
-extensions and unknown extra/offer fields are rejected. Top-level extension maps
+extensions and conflicting payment-authority metadata are rejected. Opaque
+annotations do not change authority and remain in the accepted offer. Top-level extension maps
 are removed before signing, with DEBUG diagnostics for `bazaar` discovery metadata
 and WARN diagnostics for other extensions, naming extensions but never logging
 their values. Managed payments attempt one ordinary payment without
