@@ -667,6 +667,17 @@ authored catalogs and strict inspection/qualification/warm loading are unchanged
 Focused tests cover deferred I/O, alias coalescing, late publication and shutdown.
 No-relay startup and the remaining recovery/status acceptance remain pending.
 
+**C08 observation and recovery evidence:** A combined managed-relay fixture now
+waits deterministically for discovery's dependency wait, reconciles canonical Base
+capacity through production code, and observes late publication plus callable
+independent/late tools in the same serving process. It preserves the initial
+allocation count, wallet snapshot and one signed relay request; it is not a full
+entry-point initialization proof. `tools/list` now carries listener-scoped current
+catalog instructions, generation and publication-stopped status in namespaced
+metadata, so status is readable without reinitialization. The response captures
+one snapshot for definitions and instructions. Operator-required readiness
+classification remains pending rather than inferred from a false identity lookup.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

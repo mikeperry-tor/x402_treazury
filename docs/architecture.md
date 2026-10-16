@@ -100,7 +100,11 @@ as listing. Agent-added sources use the same execution path; see
 Enabled-relay serving publishes available tools before running retained relay
 catalog continuations and startup pricing. Late sources publish complete listener
 views through the same mutation boundary as dynamic registrations. Instructions
-report pending or unavailable sources; unsigned dependency waits add no timer or
+report pending or unavailable sources. Each `tools/list` response also exposes
+listener-specific current instructions, catalog generation and publication-stop
+status in `_meta["x402_treazury/catalog"]`, alongside tools from that snapshot.
+Clients must inspect this metadata; it does not imply a UI notification. Unsigned
+dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
 Enabled-relay serving also defers initial remote unsigned catalog loading; local
 authored catalogs remain validated before serving. Broader independent startup
