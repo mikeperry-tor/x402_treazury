@@ -621,6 +621,29 @@ waiting, production reconciliation wakeup, sibling paid-failure disablement and
 cancelled accepted payment drain. Strict fetch remains unchanged; wiring this API
 into deployment-owned deferred publication remains pending.
 
+**C08 deferred-publication integration contract (reviewed incremental slice):**
+Enabled-relay ordinary serving retains eligible origin failures as shared, immutable
+continuations and binds available tools before invoking those continuations. One
+serving-owned publisher schedules relay attempts under the configured catalog
+concurrency, releasing lanes during identity waits; accepted owners retain permits.
+Startup pricing uses its existing source/request limits after binding. Complete
+listener views and instructions publish together through the shared Manager or a
+standalone revision comparison. Late source validation failures remain source-local;
+existing priced definitions, captured calls and help cells survive other publications.
+Pending, unavailable and stopped-publication status is explicit. Shutdown cancels
+unsigned waits, finishes accepted publication, drains foreground calls, then drains
+retained relay owners before closing financial owners. Inspection/qualification and
+warm commands remain strict. Review found and corrected retained-wallet bind cleanup,
+unbounded accepted-work scheduling, reserved-name rejection scope and early return
+on publisher panic. Independent drain handles survive worker failure; its error is
+reported only after financial ownership closes. Tests cover
+140 waiting requests with one runnable lane and an independent ready wallet, alias
+coalescing, invalid/valid late-source ordering, healthy calls during accepted relay
+work, price/help retention, and shutdown without replay or late publication, including
+an injected publisher panic followed by immediate store reopen. Enabled-relay initial funding
+bootstrap and the initial unsigned-catalog barrier remain separate pending C08 work;
+this slice does not claim their removal or full T41 acceptance.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

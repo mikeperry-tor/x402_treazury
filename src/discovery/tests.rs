@@ -26,6 +26,7 @@ async fn manager_with(
     listeners: BTreeMap<String, ListenerConfig>,
 ) -> Arc<Manager> {
     let snapshot = CatalogSnapshot {
+        instructions: Default::default(),
         generation: 0,
         views: listeners.keys().map(|k| (k.clone(), vec![])).collect(),
     };
@@ -812,6 +813,7 @@ async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
     let shared = payer();
     let other = payer();
     let snapshot = CatalogSnapshot {
+        instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
     };
@@ -941,6 +943,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     )
     .await;
     let snapshot = CatalogSnapshot {
+        instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
     };
@@ -973,6 +976,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         ls.clone(),
         BTreeMap::from([("shared".into(), managed)]),
         Arc::new(CatalogState::new(CatalogSnapshot {
+            instructions: Default::default(),
             generation: 0,
             views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
         })),
@@ -1351,6 +1355,7 @@ async fn directory_payment_fixture() {
     })
     .collect();
     let snapshot = CatalogSnapshot {
+        instructions: Default::default(),
         views: ls.keys().map(|name| (name.clone(), vec![])).collect(),
         ..Default::default()
     };

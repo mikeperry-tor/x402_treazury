@@ -376,6 +376,18 @@ pub(crate) struct RelayContinuation {
 }
 impl RelayContinuation {
     pub(crate) async fn resume(&self) -> Result<Value> {
+        self.resume_mode(None).await
+    }
+    pub(crate) async fn resume_when_ready(
+        &self,
+        gate: std::sync::Arc<tokio::sync::Semaphore>,
+    ) -> Result<Value> {
+        self.resume_mode(Some(gate)).await
+    }
+    async fn resume_mode(
+        &self,
+        gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+    ) -> Result<Value> {
         let cfg = &self.config;
         let error = &self.origin_error;
         let http_error = error.downcast_ref::<reqwest::Error>();
@@ -404,12 +416,24 @@ impl RelayContinuation {
                 .map(|s| s.as_u16()),
         );
         let relay = cfg.discovery_relay.as_ref().expect("captured relay");
-        let response = relay
-            .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
-            .await
-            .inspect_err(|error| {
-                crate::discovery_relay::log_failure(cfg, "catalog", error);
-            })?;
+        let response = if let Some(gate) = gate {
+            relay
+                .fetch_when_ready_bounded(
+                    &cfg.spec,
+                    200,
+                    cfg.max_spec_bytes,
+                    "max_spec_bytes",
+                    Some(gate),
+                )
+                .await
+        } else {
+            relay
+                .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
+                .await
+        }
+        .inspect_err(|error| {
+            crate::discovery_relay::log_failure(cfg, "catalog", error);
+        })?;
         // The relay has already validated complete JSON before caching the response.
         let document = parse_document(&response.body)?;
         if let Some(slot) = &self.relay_slot {

@@ -98,6 +98,8 @@ pub async fn warm_cache(
         }
         let deployment = Deployment {
             prebound: BTreeMap::new(),
+            pending_sources: BTreeMap::new(),
+            defer_discovery: false,
             unavailable_sources: Default::default(),
             wallet_resolution: config.validate()?,
             config,

@@ -357,6 +357,17 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
+        self.fetch_when_ready_bounded(url, expected, limit, setting, None)
+            .await
+    }
+    pub(crate) async fn fetch_when_ready_bounded(
+        &self,
+        url: &str,
+        expected: u16,
+        limit: usize,
+        setting: &'static str,
+        gate: Option<Arc<tokio::sync::Semaphore>>,
+    ) -> Result<Arc<Response>> {
         let capacity = self.client.discovery_changes().await?;
         let relay_changes = self.state.lock().await.changes.clone();
         loop {
@@ -373,7 +384,13 @@ impl Relay {
             if let Some(notice) = &mut capacity_notice {
                 notice.as_mut().enable();
             }
-            let result = self.fetch(url, expected, limit, setting).await;
+            let permit = match &gate {
+                Some(gate) => Some(gate.clone().acquire_owned().await?),
+                None => None,
+            };
+            let result = self
+                .fetch_with_permit(url, expected, limit, setting, permit)
+                .await;
             match result {
                 Err(error) => match RetryDisposition::from_error(&error) {
                     RetryDisposition::DependencyWait => {
@@ -399,10 +416,24 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
+        self.fetch_with_permit(url, expected, limit, setting, None)
+            .await
+    }
+    async fn fetch_with_permit(
+        &self,
+        url: &str,
+        expected: u16,
+        limit: usize,
+        setting: &'static str,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Result<Arc<Response>> {
         let relay = self.clone();
         let url = url.to_owned();
         self.client
-            .run_owned(async move { relay.fetch_owned(&url, expected, limit, setting).await })
+            .run_owned(async move {
+                let _permit = permit;
+                relay.fetch_owned(&url, expected, limit, setting).await
+            })
             .await?
     }
     async fn fetch_owned(
@@ -806,6 +837,13 @@ pub(crate) mod tests {
             f,
             task,
         )
+    }
+    pub(crate) fn is_idle(relay: &Relay) -> bool {
+        relay.state.try_lock().is_ok()
+    }
+    pub(crate) fn set_timeout(relay: &mut Arc<Relay>, timeout: std::time::Duration) {
+        let inner = Arc::get_mut(relay).expect("fixture relay is unshared");
+        inner.client = inner.client.clone().with_timeout(timeout);
     }
     fn second_wallet(first: &Relay) -> Relay {
         let payer = crate::payment::Payer::new(

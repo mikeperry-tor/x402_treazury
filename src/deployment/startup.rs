@@ -1,4 +1,4 @@
-//! Bounded, scoped catalog futures: no detached tasks or partial inventory publication.
+//! Bounded initial catalog loading and retained relay continuations for serving.
 use super::catalog_evidence::{self, State};
 use super::{MetaConfig, Source, SourceConfig};
 use crate::catalog;
@@ -27,6 +27,37 @@ type DownloadKey = (
 );
 type Document = Arc<serde_json::Value>;
 
+#[derive(Clone)]
+struct DeferredDocument(Arc<catalog::RelayContinuation>);
+impl std::fmt::Debug for DeferredDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("deferred relay catalog")
+    }
+}
+impl std::fmt::Display for DeferredDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+impl std::error::Error for DeferredDocument {}
+#[derive(Clone, Debug)]
+pub(super) struct PendingSource {
+    pub config: catalog::Config,
+    document: DeferredDocument,
+}
+impl std::fmt::Display for PendingSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("source awaiting relay catalog")
+    }
+}
+impl std::error::Error for PendingSource {}
+impl PendingSource {
+    pub async fn resume(&self, id: &str, gate: Arc<tokio::sync::Semaphore>) -> Result<Source> {
+        let document = Arc::new(self.document.0.resume_when_ready(gate).await?);
+        Source::from_document(id, self.config.clone(), document)
+    }
+}
+
 // Preserve the original typed failure across aliases without a second request.
 #[derive(Clone, Debug)]
 struct SharedFailure(Arc<anyhow::Error>);
@@ -46,6 +77,7 @@ type DownloadResult = std::result::Result<Document, SharedFailure>;
 /// documents only for this load; aliases still generate/filter/bind independently.
 #[derive(Default)]
 struct Downloads {
+    defer: bool,
     relay: crate::discovery_relay::Relays,
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
@@ -86,8 +118,18 @@ impl Downloads {
         };
         // No detached tasks: cancellation drops the initializer and its HTTP request.
         cell.get_or_init(|| async {
-            catalog::load_json_discovery(cfg, http)
-                .await
+            let result = if self.defer {
+                match catalog::prepare_json_discovery(cfg, http).await {
+                    Ok(catalog::CatalogLoad::Ready(doc)) => Ok(doc),
+                    Ok(catalog::CatalogLoad::RelayPending(pending)) => {
+                        Err(DeferredDocument(Arc::from(pending)).into())
+                    }
+                    Err(error) => Err(error),
+                }
+            } else {
+                catalog::load_json_discovery(cfg, http).await
+            };
+            result
                 .map(Arc::new)
                 .map_err(|error| SharedFailure(Arc::new(error)))
         })
@@ -153,13 +195,19 @@ pub(super) async fn load(
     path: &Path,
     warn: bool,
     relay: crate::discovery_relay::Relays,
-) -> Result<(BTreeMap<String, Source>, BTreeMap<String, String>)> {
+    defer: bool,
+) -> Result<(
+    BTreeMap<String, Source>,
+    BTreeMap<String, String>,
+    BTreeMap<String, PendingSource>,
+)> {
     let started = Instant::now();
     let total = config.sources.len();
     catalog_evidence::register(config.sources.keys())?;
     let limit = config.startup.catalog_concurrency;
-    tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, "Loading catalogs; startup waits for all sources");
+    tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, defer_relay = defer, "Loading initial catalogs");
     let downloads = Downloads {
+        defer,
         relay,
         direct_warm_target: None,
         entries: Mutex::default(),
@@ -187,6 +235,7 @@ pub(super) async fn load(
     let mut pending = stream::iter(loads).buffer_unordered(limit);
     let mut sources = BTreeMap::new();
     let mut unavailable = BTreeMap::new();
+    let mut deferred = BTreeMap::new();
     let collect_failures = catalog_evidence::collecting();
     let mut failures = 0usize;
     let mut first_error = None;
@@ -197,6 +246,13 @@ pub(super) async fn load(
             result = pending.next() => match result {
                 Some((source_id, result)) => {
                     let (id, source) = match result {
+                        Err(error) if error.is::<PendingSource>() => {
+                            let source = error.downcast::<PendingSource>().expect("typed pending source");
+                            unavailable.insert(source_id.clone(), source.config.prefix.clone().expect("resolved prefix"));
+                            deferred.insert(source_id.clone(), source);
+                            tracing::info!(source=source_id, state="pending", "Catalog relay continuation retained for serving");
+                            continue;
+                        }
                         Err(error) if warn && !crate::qualification::active() && !catalog_evidence::collecting()
                             && config.sources[source_id].optional_startup && error.is::<RemoteCatalogUnavailable>() => {
                             failures += 1;
@@ -219,7 +275,7 @@ pub(super) async fn load(
                 None => break,
             },
             _ = heartbeat.tick() => tracing::debug!(target: "x402_treazury::startup", completed = sources.len(), total,
-                failed = failures, remaining = total - sources.len() - failures, elapsed_ms = started.elapsed().as_millis() as u64,
+                failed = failures, remaining = total - sources.len() - failures - deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64,
                 "Startup waiting for catalogs; remaining count includes queued sources"),
         }
     }
@@ -228,8 +284,8 @@ pub(super) async fn load(
             completed = sources.len(), "Catalog inspection finished with failures; no partial inventory published");
         return Err(error.context(format!("catalog inspection failed for {failures} of {total} sources; independent catalog results retained")));
     }
-    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len(), elapsed_ms = started.elapsed().as_millis() as u64, "Catalog startup finished; required inventory complete");
-    Ok((sources, unavailable))
+    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64, "Initial catalog loading finished");
+    Ok((sources, unavailable, deferred))
 }
 
 async fn load_one(
@@ -249,6 +305,9 @@ async fn load_one(
     let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
     progress.finished = true;
     if let Err(error) = &result {
+        if error.is::<PendingSource>() {
+            return result.map(|source| (id.to_owned(), source));
+        }
         let error = error
             .downcast_ref::<SharedFailure>()
             .map(|shared| shared.0.as_ref())
@@ -316,12 +375,38 @@ impl Source {
             "Loading catalog document");
         let document = downloads.load(id, &cfg, &http)
             .instrument(tracing::debug_span!(target: "x402_treazury::startup", "catalog_download", source = id))
-            .await
-            .map_err(|e| if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") { e.context(RemoteCatalogUnavailable { prefix: cfg.prefix.clone().expect("resolved prefix") }) } else { e })
+            .await;
+        if let Err(error) = &document
+            && let Some(shared) = error.downcast_ref::<SharedFailure>()
+            && let Some(pending) = shared.0.downcast_ref::<DeferredDocument>()
+        {
+            return Err(PendingSource {
+                config: cfg,
+                document: pending.clone(),
+            }
+            .into());
+        }
+        let document = document
+            .map_err(|e| {
+                if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
+                    e.context(RemoteCatalogUnavailable {
+                        prefix: cfg.prefix.clone().expect("resolved prefix"),
+                    })
+                } else {
+                    e
+                }
+            })
             .with_context(|| format!("source {id}: loading spec"))?;
         tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
+        Self::from_document(id, cfg, document)
+    }
+    pub(super) fn from_document(
+        id: &str,
+        mut cfg: catalog::Config,
+        document: Document,
+    ) -> Result<Self> {
         let generation_started = Instant::now();
         let base_url: Result<String> = (|| {
             let base_url = cfg
@@ -430,7 +515,7 @@ pub(super) async fn price_source<'a>(
     progress.finished = true;
     if result.is_err() {
         tracing::warn!(target: "x402_treazury::startup", source = id,
-            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing failed; aborting startup");
+            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing discovery failed");
     }
     result
 }
@@ -516,6 +601,7 @@ pub(super) async fn warm(
     relay: crate::discovery_relay::Relays,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
+        defer: false,
         relay,
         entries: Mutex::default(),
         cache_directory: config

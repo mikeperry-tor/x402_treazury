@@ -108,6 +108,7 @@ async fn scope_child() {
         .unwrap(),
     );
     let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
+        instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
     }));

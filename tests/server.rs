@@ -336,6 +336,7 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
     tool.path = "/new".into();
     let tools = catalog_state::bind(vec![(tool.clone(), client, url)]);
     server.catalog.publish(CatalogSnapshot {
+        instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([("default".into(), tools.clone()), ("other".into(), tools)]),
     });
@@ -414,6 +415,7 @@ async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_cont
     let mut tool = tools.iter().find(|t| t.help_url.is_some()).unwrap().clone();
     tool.help_url = Some(format!("{url}/new-help"));
     server.catalog.publish(CatalogSnapshot {
+        instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([(
             "default".into(),
