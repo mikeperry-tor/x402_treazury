@@ -983,6 +983,7 @@ async fn uncertain_preparation_stays_quarantined_after_observation_clears_diagno
     );
     assert_eq!(worker.backend.lock().await.sends, 0);
     assert!(status.treasury_operations.is_empty());
+    assert!(later.treasury_operations.is_empty());
     drop(worker);
     task.await.unwrap();
 }

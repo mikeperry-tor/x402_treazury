@@ -376,8 +376,9 @@ Validation: all 26 bootstrap tests, eight startup tests, five scheduling tests a
 The funding integration suite passed 23 cases; its remaining historical-diagnostic
 assertion was updated to check unknown-preparation ownership after diagnostic clearing
 and a later tick, and that focused case passes. Read-only sub-agent review found no
-actionable defect. A focused sibling-lane
-condition retention/clearing regression is retained as a review follow-up.
+actionable runtime defect. Review follow-up adds a sibling-lane condition
+retention/clearing regression and corrects the later-tick assertion to inspect
+the later treasury-operation snapshot. Implementation: e27a5bd plus review fixup.
 
 ### Stage 1 — Minimal authority and dependency specification
 
