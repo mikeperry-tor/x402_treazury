@@ -1,4 +1,4 @@
--- Fresh schema19 only. Older state requires separately reviewed conversion.
+-- Fresh schema20 only. Older state requires separately reviewed conversion.
 -- Older schema16 stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -74,7 +74,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=19;
+PRAGMA user_version=20;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
@@ -82,3 +82,10 @@ CREATE INDEX funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_
 CREATE INDEX funding_recovery_job ON funding_recovery(job_id,operation_id);
 
 CREATE INDEX payment_undisputed_wallet ON payment_attempts(wallet_id,id) WHERE state='RESOLVED' AND resolution_disputed=0;
+
+-- Versioned calculate-only preparation; closed fences even unmanaged operations.
+CREATE TABLE treasury_preparations(operation_id TEXT PRIMARY KEY,job_id TEXT REFERENCES funding_jobs(id),base_revision INTEGER NOT NULL,contract_version INTEGER NOT NULL CHECK(contract_version>0),token TEXT UNIQUE NOT NULL,closed INTEGER NOT NULL DEFAULT 0 CHECK(closed IN (0,1)));
+CREATE TRIGGER immutable_preparation BEFORE UPDATE OF operation_id,job_id,base_revision,contract_version,token ON treasury_preparations
+ BEGIN SELECT RAISE(ABORT,'immutable preparation provenance'); END;
+CREATE TRIGGER terminal_preparation BEFORE UPDATE OF closed ON treasury_preparations WHEN OLD.closed=1 AND NEW.closed!=1
+ BEGIN SELECT RAISE(ABORT,'closed preparation'); END;

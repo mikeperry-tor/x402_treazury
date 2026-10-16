@@ -6,7 +6,10 @@ use super::*;
 // Absence of bytes never proves that an interrupted preparer did no work.
 // Only untouched phases or an exactly bound, already committed closure suffice.
 pub(crate) fn safely_unprepared(job: &FundingJob, facts: &FundingFacts) -> bool {
-    matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted) || facts.source_closed
+    (!facts.preparation_started
+        && !facts.archived
+        && matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted))
+        || facts.source_closed
 }
 
 pub(crate) fn can_recover_facts(
@@ -14,6 +17,10 @@ pub(crate) fn can_recover_facts(
     operation: Option<&crate::rotation::transaction::OperationStatus>,
     facts: &FundingFacts,
 ) -> bool {
+    if (facts.preparation_started || facts.archived) && operation.is_none() && !facts.source_closed
+    {
+        return false;
+    }
     if job.phase == FundingPhase::RefundPending {
         return false;
     }
@@ -94,6 +101,8 @@ pub struct FundingFacts {
     pub archived: bool,
     /// Exact operation/job archive plus zero remaining source liability.
     pub source_closed: bool,
+    /// Accepted owner provenance overrides stale derived workflow phases.
+    pub preparation_started: bool,
     pub provider_success: bool,
     pub provider_failed: bool,
     pub provider_refunded: bool,
@@ -118,6 +127,9 @@ impl FundingFacts {
             || self.readiness_disputed
             || self.status_needed()
             || self.source_reconciliation_needed()
+            || ((self.preparation_started || self.archived)
+                && !self.source_closed
+                && self.source_submission.is_none())
     }
     pub fn source_reconciliation_needed(&self) -> bool {
         self.source_attempts > 0
@@ -292,7 +304,8 @@ pub fn dispute_endpoint_support(db: &Connection, endpoint: &str) -> Result<()> {
 }
 
 fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
-    Ok(db.query_row("SELECT (NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",[operation],|r|r.get(0))?)
+    let (_, owner_unclosed) = super::preparation::source_state(db, operation)?;
+    Ok(db.query_row("SELECT (NOT ?2 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",params![operation,owner_unclosed],|r|r.get(0))?)
 }
 
 impl Store {
@@ -528,7 +541,7 @@ impl Store {
             amount(target)? > U256::ZERO && amount(ceiling)? >= amount(target)?,
             "invalid funding quote terms"
         );
-        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?2) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role IN ('ALLOCATED','ACTIVE','RETAINED') AND p.enabled=1)",params![job,operation,target,ceiling])?;
+        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM treasury_preparations WHERE operation_id=?2) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role IN ('ALLOCATED','ACTIVE','RETAINED') AND p.enabled=1)",params![job,operation,target,ceiling])?;
         ensure!(changed == 1, "funding quote boundary changed");
         Ok(())
     }
@@ -891,7 +904,7 @@ pub(super) fn read_funding_facts(
     let (mut facts, flags) = db.query_row(
             "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((FundingFacts {
-                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false,
+                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false, preparation_started: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
                 source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
             }, provider_flags(r, 4))),
@@ -902,6 +915,7 @@ pub(super) fn read_funding_facts(
         facts.provider_refunded,
         facts.provider_incomplete,
     ) = flags.context(super::scheduling::FundingDecodeFailure)?;
+    facts.preparation_started = super::preparation::source_state(db, operation)?.0;
     facts.source_closed = facts.archived && source_attempt_closed(db, operation)?;
     Ok(facts)
 }
@@ -948,7 +962,7 @@ impl Store {
             serde_json::from_str::<FundingPhase>(&phase)? == FundingPhase::Preparing,
             "preparation is not pending"
         );
-        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)", [&operation], |r| r.get(0))?;
+        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) OR EXISTS(SELECT 1 FROM treasury_preparations WHERE operation_id=?1)", [&operation], |r| r.get(0))?;
         ensure!(
             !touched,
             "preparation has durable effects; recovery required"
@@ -1002,10 +1016,9 @@ impl Store {
             matches!(phase, FundingPhase::Allocated | FundingPhase::Quoted),
             "preparation outcome unknown"
         );
-        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",[&operation],|r|r.get(0))?;
+        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) OR EXISTS(SELECT 1 FROM treasury_preparations WHERE operation_id=?1)",[&operation],|r|r.get(0))?;
         ensure!(!touched, "unprepared closure has source effects");
-        tx.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[job])?;
-        tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1",[job])?;
+        archive_unprepared(&tx, job, &operation)?;
         tx.commit()?;
         Ok(())
     }
@@ -1093,7 +1106,7 @@ impl Store {
         )?;
         ensure!(!signed, "recovery refused: operation has signed bytes");
         let reserved: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) OR EXISTS(SELECT 1 FROM treasury_preparations WHERE operation_id=?1)",
             [&operation],
             |r| r.get(0),
         )?;
@@ -1226,7 +1239,7 @@ impl Store {
                 "quote target mismatch"
             );
             let (_wallet, address, enabled, ready, pending): (String,String,bool,bool,bool) = tx.query_row(
-                "SELECT w.id,w.address,p.enabled,f.readiness_requirement IS NOT NULL,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED' AND w.role IN ('ALLOCATED','ACTIVE','RETAINED')", [id],
+                "SELECT w.id,w.address,p.enabled,f.readiness_requirement IS NOT NULL,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id) OR EXISTS(SELECT 1 FROM treasury_preparations t WHERE t.operation_id=j.operation_id) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED' AND w.role IN ('ALLOCATED','ACTIVE','RETAINED')", [id],
                 |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
             ensure!(
                 enabled && !ready && !pending,
@@ -2626,4 +2639,11 @@ mod recovery_classification_tests {
         assert!(store.close_unprepared_funding(&job.id).is_err());
         Ok(())
     }
+}
+
+/// Archive the exact closed source attempt without granting replacement authority.
+pub(super) fn archive_unprepared(db: &Connection, job: &str, operation: &str) -> Result<()> {
+    db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2",params![job,operation])?;
+    db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1 AND operation_id=?2",params![job,operation])?;
+    Ok(())
 }

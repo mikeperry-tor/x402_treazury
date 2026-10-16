@@ -190,7 +190,14 @@ fn read(db: &Connection) -> Result<Value> {
         .prepare("SELECT id FROM outgoing WHERE state='PREPARED' ORDER BY id")?
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let archived = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=r.operation_id AND b.consumed!=0) ORDER BY r.operation_id")?.query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let candidates = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=r.operation_id AND b.consumed!=0) ORDER BY r.operation_id")?.query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut archived = Vec::new();
+    for operation in candidates {
+        if !super::preparation::source_state(db, &operation)?.1 {
+            archived.push(operation);
+        }
+    }
+
     let status = read_status(db)?;
     let wallets = db.prepare("SELECT id,pool_id,role,balance,block_height,block_hash FROM wallets ORDER BY id")?
         .query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"role":r.get::<_,String>(2)?,"balance":r.get::<_,String>(3)?,"height":r.get::<_,Option<i64>>(4)?,"hash":r.get::<_,Option<String>>(5)?})))?

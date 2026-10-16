@@ -303,9 +303,10 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema19
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema20
 preserves original payer role, consumed slot/generation and exact balance support;
-older state requires separately reviewed stopped-service conversion and is never
+it also binds calculate-only treasury preparation to its operation and snapshot.
+Older state requires separately reviewed stopped-service conversion and is never
 upgraded on open. Canonical checkpoint conflicts restore conservative exposure for
 previously resolved authorizations in the affected wallet without rewriting their
 original proofs. A complete canonical replacement pass reads bounded nonce pages

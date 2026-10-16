@@ -56,7 +56,9 @@ records the reviewed schema19 implementation and passing validation.
 The separate C15 repair-owner slice landed in `07b5cad`; its database-turn
 fairness work remains explicit below. C21's Base freshness lease landed in
 `7c4f0ae` after focused tests, independent review and all-feature Clippy.
-C16 preparation provenance is next at the commit gate.
+C21 funding authority time is separated from scheduling in `06af797`; C10
+malformed ownership isolation is committed as `e559f28`. C16 preparation
+provenance has passed its focused tests and independent review.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
@@ -1096,6 +1098,37 @@ tests and seven concrete-backend unit tests passed. Integrations preserve prepar
 bytes and attempts after actual expiry, and artificial future scheduling ticks
 cannot expire a valid quote. All-target/all-feature Clippy also passed with these
 changes present.
+
+**C16 preparation provenance contract (implemented and reviewed):** Before SDK
+proposal mutation, atomically bind the exact operation/job and starting committed
+snapshot revision to version 1 of the calculate-only contract. Its private owner
+capability must accompany reservation and atomic publication. This contract cannot
+submit or expose signed bytes before the existing snapshot/outgoing/facts commit.
+Generic unstarted/closure paths must respect accepted provenance even if a derived
+phase says QUOTED or ALLOCATED. Unknown contracts and legacy PREPARING records do
+not acquire cleanup authority.
+
+After a synchronous preparation error, first take the SDK offline and drop it
+without saving. Then a serialized cleanup job may close only the exact owner with
+the unchanged starting snapshot, no outgoing bytes or unexplained durable effects,
+and only its own unconsumed reservation. Archive managed closure through existing
+`funding_recovery`; a terminal provenance marker also fences unmanaged operations.
+An already accepted outgoing commit wins over a missing acknowledgement and keeps
+its exact bytes and liability. Closure cannot restore SDK health; reconstruction
+on the existing shared store is separate C17 work. Process death currently retains
+open provenance for that explicit ownership handoff rather than guessing cleanup.
+
+Retain the global pending-outgoing preparation gate for now: the pinned SDK can
+clear input-spend markers when its transaction status becomes Failed while the
+application still owns PREPARED bytes until independent expiry recovery. Relaxing
+the gate requires exact exclusion of every application-live input, including after
+restart and reorg, rather than trusting SDK spendability alone. Synthetic multi-note
+evidence confirms this invariant. Two real-SDK preparation tests, nine provenance
+and crash tests, and 26 funding/classifier regressions passed. The subprocess
+helper exercised three process-death boundaries. Independent review cleared the
+qualification-retirement and generic-abandonment guards. All-target/all-feature
+Clippy, formatting and diff checks passed. Fresh schema20 adds the
+provenance boundary; there is no automatic state conversion.
 
 ### Stage 1 — Minimal authority and dependency specification
 

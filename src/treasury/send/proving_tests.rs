@@ -30,11 +30,13 @@ fn varint(mut n: u64) -> Vec<u8> {
 
 #[tokio::test]
 async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
-    qualify_preparation(true).await;
-    qualify_preparation(false).await;
+    qualify_preparation(Some("fee")).await;
+    qualify_preparation(Some("commit")).await;
+    qualify_preparation(None).await;
 }
 
-async fn qualify_preparation(fail_commit: bool) {
+async fn qualify_preparation(failure: Option<&str>) {
+    let fail_commit = failure == Some("commit");
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -56,14 +58,14 @@ async fn qualify_preparation(fail_commit: bool) {
         let empty = SyntheticWalletBuilder::new(SEED).tip(TIP).build();
         wallet.sync_state = empty.sync_state;
         wallet.shard_trees = empty.shard_trees;
-        inject_confirmed_orchard_notes(&mut wallet, 1, 100_000, TIP);
+        inject_confirmed_orchard_notes(&mut wallet, 2, 100_000, TIP);
         wallet.wallet_settings.min_confirmations = 1.try_into().unwrap();
         assert_eq!(
             wallet
                 .shielded_spendable_balance(zip32::AccountId::ZERO, false)
                 .unwrap()
                 .into_u64(),
-            100_000
+            200_000
         );
     }
     treasury
@@ -80,8 +82,8 @@ async fn qualify_preparation(fail_commit: bool) {
             confirmations: 1,
             max_age_seconds: 300,
             confirmed_pool_balances_zatoshis: None,
-            confirmed_shielded_zatoshis: 100_000,
-            spendable_shielded_zatoshis: 100_000,
+            confirmed_shielded_zatoshis: 200_000,
+            spendable_shielded_zatoshis: 200_000,
         })
         .await
         .unwrap();
@@ -129,16 +131,43 @@ async fn qualify_preparation(fail_commit: bool) {
         deadline: now().unwrap() + 600,
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,
-        max_fee_zatoshis: 120_000,
+        max_fee_zatoshis: if failure == Some("fee") { 1 } else { 120_000 },
         max_input_zatoshis: 180_000,
     };
-    if fail_commit {
+    if failure.is_some() {
         let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
-        db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
+        if fail_commit {
+            db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
+        }
         let revision = treasury.revision;
         let error = treasury.prepare(request()).await.err().unwrap();
-        assert!(format!("{error:#}").contains("fixture prepared commit failure"));
+        if fail_commit {
+            assert!(format!("{error:#}").contains("fixture prepared commit failure"));
+        } else {
+            assert_eq!(
+                error.downcast_ref::<crate::rotation::error::FundingCondition>(),
+                Some(&crate::rotation::error::FundingCondition::CostLimit)
+            );
+        }
         assert!(!treasury.healthy);
+        assert!(treasury.client.is_none());
+        assert!(
+            db.query_row(
+                "SELECT closed FROM treasury_preparations WHERE operation_id=?1",
+                [&operation],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM budget_entries WHERE id=?1",
+                [&operation],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
         assert_eq!(treasury.revision, revision);
         let status = treasury.status().await.unwrap();
         assert!(!status.outgoing_pending);
@@ -157,7 +186,9 @@ async fn qualify_preparation(fail_commit: bool) {
             1,
             "retry after failure must not reach the indexer"
         );
-        db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
+        if fail_commit {
+            db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
+        }
         drop(db);
         treasury.close().await.unwrap();
         let restored = Treasury::open(state, key, treasury_id).await.unwrap();
@@ -170,7 +201,7 @@ async fn qualify_preparation(fail_commit: bool) {
                 .shielded_spendable_balance(zip32::AccountId::ZERO, false)
                 .unwrap()
                 .into_u64(),
-            100_000,
+            200_000,
             "failed commit must restore the pre-calculation input state"
         );
         drop(wallet);
@@ -222,15 +253,31 @@ async fn qualify_preparation(fail_commit: bool) {
             .shielded_spendable_balance(zip32::AccountId::ZERO, false)
             .unwrap()
             .into_u64(),
-        0,
-        "calculated inputs and pending change must not be spendable after reopen"
+        100_000,
+        "only the independent second note is spendable after reopen"
     );
     drop(wallet);
+    {
+        let mut wallet = restored.client.as_ref().unwrap().wallet().write().await;
+        // This is the real pinned scanner's reorg/failed-transaction cleanup.
+        // Application PREPARED ownership can outlive the SDK input marker.
+        pepper_sync::sync::reset_spends(&mut wallet.wallet_transactions, vec![tx.txid()]);
+        assert_eq!(
+            wallet
+                .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+                .unwrap()
+                .into_u64(),
+            200_000
+        );
+    }
     restored
         .store
         .call(move |s| {
             assert!(s.abandon_unprepared(&operation).is_err());
-            assert!(s.require_spend_ready(now()?, 1).is_err());
+            assert_eq!(
+                s.require_spend_ready(now()?, 1).unwrap_err().to_string(),
+                "treasury_send_pending"
+            );
             Ok(())
         })
         .await

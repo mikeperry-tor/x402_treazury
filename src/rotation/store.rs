@@ -4,6 +4,7 @@ mod capacity;
 #[cfg(test)]
 mod io_failure_tests;
 mod preflight;
+pub(crate) mod preparation;
 #[cfg(test)]
 mod query_tests;
 #[cfg(test)]
@@ -443,7 +444,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 19,
+                version == 20,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -644,8 +645,12 @@ impl Store {
             // can release an old source reservation. Current operations cannot.
             let mut query = self.db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE r.job_id=?1 AND NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=r.operation_id AND b.consumed!=0)")?;
             for old in query.query_map([&job], |r| r.get::<_, String>(0))? {
+                let old = old?;
+                if preparation::source_state(&self.db, &old)?.1 {
+                    continue;
+                }
                 super::restriction::permit_result(
-                    permits.retire_unprepared(&self.id, &job, &old?),
+                    permits.retire_unprepared(&self.id, &job, &old),
                     "unprepared_recovery",
                 )?;
             }
@@ -822,6 +827,34 @@ impl Store {
         raw: &[u8],
         facts: Option<TransactionFacts>,
     ) -> Result<i64> {
+        self.prepare_bound(id, expected_revision, snapshot, raw, facts, None)
+    }
+    pub(crate) fn prepare_owned(
+        &mut self,
+        owner: &preparation::Preparation,
+        snapshot: &[u8],
+        raw: &[u8],
+        facts: TransactionFacts,
+    ) -> Result<i64> {
+        self.prepare_bound(
+            owner.operation(),
+            owner.revision(),
+            snapshot,
+            raw,
+            Some(facts),
+            Some(owner),
+        )
+    }
+    fn prepare_bound(
+        &mut self,
+        id: &str,
+        expected_revision: i64,
+        snapshot: &[u8],
+        raw: &[u8],
+        facts: Option<TransactionFacts>,
+        owner: Option<&preparation::Preparation>,
+    ) -> Result<i64> {
+        preparation::check_commit(&self.db, id, expected_revision, owner)?;
         ensure!(
             !raw.is_empty() && !snapshot.is_empty(),
             "empty prepared operation"
@@ -897,6 +930,7 @@ impl Store {
         ensure!(n == 0, "treasury_send_pending");
         let current: i64 = tx.query_row("SELECT MAX(revision) FROM snapshots", [], |r| r.get(0))?;
         ensure!(current == expected_revision, "snapshot_revision_conflict");
+        preparation::check_commit(&tx, id, expected_revision, owner)?;
         let reserved: i64 = tx.query_row(
             "SELECT reserved FROM budget_entries WHERE id=?1",
             [id],
@@ -949,7 +983,7 @@ impl Store {
     /// Proof for the pre-preparation path only; historical effects forbid deferral.
     pub fn require_unstarted_preparation(&self, id: &str) -> Result<()> {
         let touched: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) OR EXISTS(SELECT 1 FROM treasury_preparations WHERE operation_id=?1)",
             [id], |row| row.get(0),
         )?;
         ensure!(
@@ -1077,7 +1111,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 19,
+        schema == 20,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1285,7 +1319,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 19,
+        version == 20,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
@@ -1898,6 +1932,12 @@ impl Store {
             |r| r.get(0),
         )?;
         ensure!(!exists, "cannot abandon prepared transaction");
+        let owned: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM treasury_preparations WHERE operation_id=?1)",
+            [id],
+            |r| r.get(0),
+        )?;
+        ensure!(!owned, "preparation owner must retire before cleanup");
         self.db.execute(
             "DELETE FROM budget_entries WHERE id=?1 AND consumed=0",
             [id],
