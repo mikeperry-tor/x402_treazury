@@ -103,10 +103,17 @@ pub(crate) async fn build(
 
 #[derive(Default)]
 struct State {
+    changes: Arc<tokio::sync::Notify>,
     stopped: bool,
     attempts: BTreeMap<(String, String), (u8, Instant)>,
     responses: BTreeMap<(String, String), Arc<Response>>,
     failures: BTreeMap<(String, String), TargetFailure>,
+}
+struct NotifyOnCompletion(Arc<tokio::sync::Notify>);
+impl Drop for NotifyOnCompletion {
+    fn drop(&mut self) {
+        self.0.notify_waiters();
+    }
 }
 /// A completed Curl response reporting failure for this target, not the relay service.
 #[derive(Clone, Copy, Debug)]
@@ -340,6 +347,51 @@ impl Relay {
     pub async fn drain(&self) {
         self.client.drain().await;
     }
+    /// Deferred serving may wait for an existing managed identity. Cancelling
+    /// this waiter cancels unsigned waiting only; accepted paid work retains its
+    /// ordinary owner. Deployment shutdown must still call `drain`.
+    pub async fn fetch_when_ready(
+        &self,
+        url: &str,
+        expected: u16,
+        limit: usize,
+        setting: &'static str,
+    ) -> Result<Arc<Response>> {
+        let capacity = self.client.discovery_changes().await?;
+        let relay_changes = self.state.lock().await.changes.clone();
+        loop {
+            // Subscribe before the serialized fetch rechecks all target, breaker
+            // and identity facts. Events between that check and waiting survive.
+            let relay_changed = relay_changes.notified();
+            tokio::pin!(relay_changed);
+            relay_changed.as_mut().enable();
+            // Notified must be enabled before fetch, not first polled afterwards.
+            let capacity_notice = capacity
+                .as_ref()
+                .map(|changes| changes.clone().notified_owned());
+            let mut capacity_notice = capacity_notice.map(Box::pin);
+            if let Some(notice) = &mut capacity_notice {
+                notice.as_mut().enable();
+            }
+            let result = self.fetch(url, expected, limit, setting).await;
+            match result {
+                Err(error) => match RetryDisposition::from_error(&error) {
+                    RetryDisposition::DependencyWait => {
+                        let notice = async {
+                            match capacity_notice {
+                                Some(notice) => notice.await,
+                                None => std::future::pending().await,
+                            }
+                        };
+                        tokio::select! { _ = notice => {}, _ = relay_changed => {} }
+                    }
+                    RetryDisposition::Backoff(delay) => tokio::time::sleep(delay).await,
+                    RetryDisposition::Terminal => return Err(error),
+                },
+                success => return success,
+            }
+        }
+    }
     pub async fn fetch(
         &self,
         url: &str,
@@ -412,6 +464,7 @@ impl Relay {
         // The accepted owner retains this lock through payment, decoding and
         // publication. Cancelling its waiter cannot admit another paid fetch.
         // Leave the breaker closed if the owner fails before publishing an outcome.
+        let _notify_on_completion = NotifyOnCompletion(state.changes.clone());
         state.stopped = true;
         let progress = crate::payment::SubmissionProgress::default();
         let attempt = state

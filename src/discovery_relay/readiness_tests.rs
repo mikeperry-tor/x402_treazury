@@ -99,6 +99,52 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         RetryDisposition::Terminal
     );
     relay.state.lock().await.stopped = false;
+    let mut blocked = Box::pin(relay.fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut blocked)
+            .await
+            .is_err()
+    );
+    let (mut sibling, sibling_fixture, sibling_task) = fixture(envelope(TARGET), true, false).await;
+    Arc::get_mut(&mut sibling).unwrap().state = relay.state.clone();
+    assert!(
+        sibling
+            .fetch(TARGET, 200, 4096, "max_spec_bytes")
+            .await
+            .is_err()
+    );
+    let error = tokio::time::timeout(Duration::from_secs(5), &mut blocked)
+        .await
+        .unwrap()
+        .err()
+        .unwrap();
+    assert_eq!(
+        RetryDisposition::from_error(&error),
+        RetryDisposition::Terminal
+    );
+    assert_eq!(sibling_fixture.signed.load(Ordering::SeqCst), 1);
+    drop(blocked);
+    sibling.drain().await;
+    sibling_task.abort();
+    // Isolated breaker fixture completed. Resume the independent readiness case.
+    *relay.state.lock().await = State::default();
+    // Cancelling an unsigned dependency waiter owns no financial work or attempt.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            relay.fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes")
+        )
+        .await
+        .is_err()
+    );
+    assert!(relay.state.lock().await.attempts.is_empty());
+    assert_eq!(f.calls.load(Ordering::SeqCst), 0);
+    let mut waiting = Box::pin(relay.fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut waiting)
+            .await
+            .is_err()
+    );
     // Explicit fixture funding and canonical evidence; the readiness check itself
     // is forbidden from creating this capacity.
     let saved = pool.clone();
@@ -133,10 +179,11 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         rusqlite::params![pool, original_role],
     )
     .unwrap();
-    relay
-        .fetch(TARGET, 200, 4096, "max_spec_bytes")
+    tokio::time::timeout(Duration::from_secs(5), &mut waiting)
         .await
+        .unwrap()
         .unwrap();
+    drop(waiting);
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     let cap: String = db
         .query_row(
@@ -261,8 +308,11 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
         .clone()
         .with_timeout(Duration::from_millis(200));
     let accepted = relay.clone();
-    let request =
-        tokio::spawn(async move { accepted.fetch(TARGET, 200, 4096, "max_spec_bytes").await });
+    let request = tokio::spawn(async move {
+        accepted
+            .fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes")
+            .await
+    });
     tokio::time::timeout(Duration::from_secs(2), f.arrived.notified())
         .await
         .unwrap();

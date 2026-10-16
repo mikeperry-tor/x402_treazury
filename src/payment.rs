@@ -289,6 +289,13 @@ impl PaidClient {
         }
         Ok(())
     }
+    pub(crate) async fn discovery_changes(&self) -> Result<Option<Arc<tokio::sync::Notify>>> {
+        self.require_available()?;
+        match &self.managed {
+            Some(pool) => pool.discovery_changes().await.map(Some),
+            None => Ok(None),
+        }
+    }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
         self.require_available()?;
         match &self.managed {

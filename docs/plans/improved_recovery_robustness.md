@@ -609,6 +609,18 @@ A follow-up review found historical readiness restoration omitted the existing p
 notification. It now notifies that pool after commit; canonical restoration fixtures
 assert the wakeup, unrelated-pool isolation and unchanged balance/provenance.
 
+**C08 event-driven relay wait prerequisite (reviewed):** The opt-in deferred-fetch
+API enables existing pool-capacity and shared relay-outcome notifications before
+calling the same serialized fetch/readiness check. Empty identity waits consume no
+attempts or I/O; there is no added polling cadence or deadline. Pre-submission
+failures use the existing finite attempts and returned backoff. A completion guard
+wakes sibling wallet scopes on every accepted relay outcome, including unwind, so
+an empty payer observes a shared terminal failure. Cancellation drops only the
+waiter; accepted paid work remains drainable. Tests exercise cancelled unsigned
+waiting, production reconciliation wakeup, sibling paid-failure disablement and
+cancelled accepted payment drain. Strict fetch remains unchanged; wiring this API
+into deployment-owned deferred publication remains pending.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
