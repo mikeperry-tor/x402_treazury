@@ -912,6 +912,25 @@ ALLOCATED and already-ACTIVE claim holders each dispatch exactly one signature
 with correct journal ownership and a single claim-generation advance.
 All-target Clippy, formatting and diff checks passed for the core slice.
 
+**C13 source-history expiry contract (reviewed narrow slice):** A fresh scanned
+height at or beyond the original nonzero expiry plus required confirmations ends
+that transaction's ability to spend on this chain. Before omitting the historical
+wallet-transaction lookup, decode original retained signed bytes and require exact
+transaction-ID/expiry binding to the journal. Metadata alone never establishes
+expired authority. Zero expiry and still-live signed transactions retain the source
+reorg guard. Current SDK spendability, outgoing PREPARED restrictions, freshness,
+reservation ownership and the separate two-sync reservation-release proof remain
+unchanged. Original bytes, attempts, consumed expenses and historical dispositions
+remain intact; bypass makes no new canonical confirmation claim.
+
+The local synthetic-chain regression passed pre-expiry rejection, exact burial
+progress without source reappearance, metadata/bytes mismatch rejection, restored
+independent spendability, reopen, height-regression protection and a subsequent
+prepared operation with its reservation retained. The zero-expiry/boundary test also
+passed. Independent review found no blocking findings; its requested provenance
+negative cases were added and passed. This does not remove live-input global guards,
+refund issues or full-history traversal; their scoped ownership/fairness work remains.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

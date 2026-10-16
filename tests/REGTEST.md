@@ -35,9 +35,13 @@ The scenario exercises the shared treasury, journal and submission code:
    reservation or recalculating it.
 5. Explicitly rebroadcast the same saved bytes and mine sufficient confirmations.
    Resolve the operation and account its original amount plus fee.
-6. Replace that confirmed history with another longer branch. Sync must fail
-   closed with `treasury_confirmed_spend_reorg`, including after reopening. The
-   consumed budget must not become available just because the spend was orphaned.
+6. Replace that confirmed history with another longer branch while its signed
+   transaction remains live. Sync must fail closed with
+   `treasury_confirmed_spend_reorg`, including after reopening. Original expenses
+   and transaction bytes remain unchanged. Once the exact signed transaction's
+   expiry is buried by the fresh scanned height and required confirmations,
+   historical confirmation no longer gates current treasury spendability. This
+   grants no reservation release, replay, or new claim of canonical confirmation.
 
 The harness has a fifteen-minute outer deadline. It removes its UUID-named
 containers and dedicated bridge on normal return, error, panic or timeout. A hard

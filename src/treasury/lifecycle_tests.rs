@@ -536,7 +536,7 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
     let stop = CancellationToken::new();
     let mut sender = submission::GrpcSubmission::with_network(
         endpoint.clone(),
-        endpoint,
+        endpoint.clone(),
         TreasuryNetwork::Synthetic,
     )
     .unwrap();
@@ -589,6 +589,152 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         SyncPhase::Ready
     );
     accounting(&dir.path().join("state"), &prepared, true);
+    let expiry = prepared.facts().unwrap().expiry_height;
+    let buried = u64::from(expiry) + 1;
+    {
+        let mut chain = net.chain.write().await;
+        chain.reorg_to(23);
+        chain.mine_empty_blocks((buried - 1 - 23).try_into().unwrap());
+    }
+    assert!(
+        owner
+            .sync_for_command(&stop)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("treasury_confirmed_spend_reorg")
+    );
+    net.chain.write().await.mine_empty_blocks(1);
+    // Public metadata cannot shorten signed authority or substitute a different
+    // transaction. Corrupt only this temporary fixture, retaining encrypted bytes.
+    let database = dir.path().join("state/state.sqlite");
+    let original_facts: String = rusqlite::Connection::open(&database)
+        .unwrap()
+        .query_row(
+            "SELECT facts FROM treasury_operations WHERE id=?1",
+            [prepared.operation_id()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for field in ["expiry_height", "txid"] {
+        let mut altered: serde_json::Value = serde_json::from_str(&original_facts).unwrap();
+        altered[field] = if field == "expiry_height" {
+            serde_json::json!(expiry - 1)
+        } else {
+            serde_json::json!("00".repeat(32))
+        };
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "UPDATE treasury_operations SET facts=?2 WHERE id=?1",
+                rusqlite::params![prepared.operation_id(), altered.to_string()],
+            )
+            .unwrap();
+        let error = owner.sync_once(&stop).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("durable transaction identity mismatch"),
+            "{error:#}"
+        );
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "UPDATE treasury_operations SET facts=?2 WHERE id=?1",
+                rusqlite::params![prepared.operation_id(), original_facts],
+            )
+            .unwrap();
+    }
+    // Exact original expiry now ends its spending authority. Missing original
+    // confirmation cannot block the independent, freshly scanned source funds.
+    owner.sync_for_command(&stop).await.unwrap();
+    let sync = owner.status().await.unwrap().sync.unwrap();
+    assert_eq!(sync.phase, SyncPhase::Ready);
+    assert_eq!(sync.height, Some(buried));
+    assert!(sync.spendable_shielded_zatoshis >= 1_000_000);
+    accounting(&dir.path().join("state"), &prepared, true);
+    let id = owner.status().await.unwrap().treasury_id;
+    let operation = job.operation_id.clone();
+    let original = prepared.bytes().to_vec();
+    store
+        .call(move |s| {
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), original);
+            assert_eq!(s.operation(&operation)?.attempts, 1);
+            assert_eq!(s.operation(&operation)?.submission, "CONFIRMED");
+            assert!(!s.treasury_sync_state()?.outgoing_pending);
+            s.require_spend_ready(now()?, 100_000)
+        })
+        .await
+        .unwrap();
     drop(store);
     owner.close().await.unwrap();
+    let mut owner = Treasury::open_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        id,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    owner.configure_sync(SyncSettings::new(endpoint, 1, 300).unwrap());
+    owner.sync_once(&stop).await.unwrap();
+    assert_eq!(
+        owner.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Ready
+    );
+    // The bypass is tied to this scan, not a permanent terminal-state shortcut.
+    {
+        let mut chain = net.chain.write().await;
+        chain.reorg_to(23);
+        chain.mine_empty_blocks(1);
+    }
+    assert!(
+        owner
+            .sync_once(&stop)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("treasury_confirmed_spend_reorg")
+    );
+    net.chain
+        .write()
+        .await
+        .mine_empty_blocks((buried - 24).try_into().unwrap());
+    owner.sync_once(&stop).await.unwrap();
+    let pool = owner
+        .ensure_capacity_group(
+            "after_expiry".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool.clone(), AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let next = store
+        .call(move |s| {
+            Ok(s.funding_jobs()?
+                .into_iter()
+                .find(|job| job.pool_id == pool)
+                .unwrap())
+        })
+        .await
+        .unwrap();
+    save_quotes(&store, vec![next.clone()], deadline).await;
+    let next_prepared = owner.prepare(request(&next, deadline)).await.unwrap();
+    pending(&store, &next, next_prepared.bytes()).await;
+    accounting(&dir.path().join("state"), &prepared, true);
+    accounting(&dir.path().join("state"), &next_prepared, false);
+    drop(store);
+    owner.close().await.unwrap();
+}
+
+#[test]
+fn source_authority_expiry_requires_nonzero_buried_height() {
+    assert!(!source_expiry_buried(0, u64::MAX, 1));
+    assert!(!source_expiry_buried(100, 101, 2));
+    assert!(source_expiry_buried(100, 102, 2));
+    assert!(!source_expiry_buried(u32::MAX, u64::from(u32::MAX), 2));
 }

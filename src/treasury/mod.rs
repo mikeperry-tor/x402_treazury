@@ -714,10 +714,10 @@ impl SyncSession {
             height,
         )
         .await?;
-        // A later fork can invalidate a spend whose source cost was already
-        // accounted. Keep that cost consumed and fail closed until the same
-        // transaction regains the required depth; never make it spendable again
-        // merely because its outgoing journal entry was resolved earlier.
+        // Retain protection against still-live signed source authority after a
+        // fork. Once exact signed bytes have a buried expiry, their historical
+        // disposition is accounting evidence, not a veto on current spendability.
+        // This never releases a pending reservation or changes source accounting.
         tracing::debug!(
             "treasury sync: chain checks completed; reconciling prior spending and balances"
         );
@@ -734,6 +734,24 @@ impl SyncSession {
             let Some(last) = operations.last() else { break };
             cursor = last.operation_id.clone();
             for operation in operations {
+                if source_expiry_buried(
+                    operation.facts.expiry_height,
+                    height,
+                    settings.confirmations.get(),
+                ) {
+                    let id = operation.operation_id.clone();
+                    let raw = self.store.call(move |s| s.prepared_bytes(&id)).await?;
+                    let transaction = submission::decode(&raw)?;
+                    ensure!(
+                        transaction.txid().to_string() == operation.facts.txid
+                            && u32::from(transaction.expiry_height())
+                                == operation.facts.expiry_height,
+                        "durable transaction identity mismatch"
+                    );
+                    // No archival wallet lookup: the original confirmation or
+                    // expiry remains historical, without a new canonical claim.
+                    continue;
+                }
                 let txid = zcash_primitives::transaction::TxId::from_hex(&operation.facts.txid)
                     .context(if operation.submission == "EXPIRED" {
                         "invalid transaction identity"
@@ -807,6 +825,11 @@ impl SyncSession {
         observation.height = Some(height);
         Ok(())
     }
+}
+
+fn source_expiry_buried(expiry: u32, scanned_height: u64, confirmations: u32) -> bool {
+    // Consensus zero expiry has no finite authority boundary.
+    expiry != 0 && scanned_height >= u64::from(expiry) + u64::from(confirmations)
 }
 
 async fn address_info(client: &LightClient) -> Result<serde_json::Value> {
