@@ -26,6 +26,7 @@ struct Fixture {
     balances: Arc<StdMutex<BTreeMap<String, u64>>>,
     calls: Arc<StdMutex<BTreeMap<String, usize>>>,
     head: Arc<AtomicUsize>,
+    headers: Arc<StdMutex<Vec<u64>>>,
     blocked: Arc<StdMutex<BTreeSet<String>>>,
     started: Arc<StdMutex<BTreeSet<String>>>,
     unavailable: Arc<AtomicBool>,
@@ -146,13 +147,16 @@ async fn fixture(retained_count: usize) -> Fixture {
     let started = Arc::new(StdMutex::new(BTreeSet::<String>::new()));
     let calls = Arc::new(StdMutex::new(BTreeMap::<String, usize>::new()));
     let head = Arc::new(AtomicUsize::new(200));
+    let headers = Arc::new(StdMutex::new(Vec::new()));
     let release = Arc::new(tokio::sync::Notify::new());
     let unavailable = Arc::new(AtomicBool::new(false));
     let initializing = Arc::new(AtomicBool::new(true));
     let timestamp = now().unwrap();
     let app=Router::new().route("/",post({
+        let headers = headers.clone();
         let (balances,blocked,started,release,unavailable,initializing,calls,head)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone(),calls.clone(),head.clone());
         move |Json(v):Json<Value>| {
+            let headers = headers.clone();
             let (balances,blocked,started,release,unavailable,initializing,calls,head)=(balances.clone(),blocked.clone(),started.clone(),release.clone(),unavailable.clone(),initializing.clone(),calls.clone(),head.clone());
             async move {
                 if unavailable.load(Ordering::SeqCst) { return Json(json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32602,"message":"fixture unavailable"}})); }
@@ -161,6 +165,7 @@ async fn fixture(retained_count: usize) -> Fixture {
                     "eth_getBlockByNumber"=>{
                         let tag=v["params"][0].as_str().unwrap();
                         let height=if tag=="latest"{if initializing.load(Ordering::SeqCst){100}else{head.load(Ordering::SeqCst) as u64}}else{u64::from_str_radix(&tag[2..],16).unwrap()};
+                        headers.lock().unwrap().push(height);
                         json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     },
                     "eth_call"=>{
@@ -212,6 +217,7 @@ async fn fixture(retained_count: usize) -> Fixture {
     initializing.store(false, Ordering::SeqCst);
     started.lock().unwrap().clear();
     calls.lock().unwrap().clear();
+    headers.lock().unwrap().clear();
     let (store, worker) = StoreHandle::spawn(store);
     let manager =
         ManagedPool::new(store, pool, base, SpendPolicy::dollars("100").unwrap()).unwrap();
@@ -225,6 +231,7 @@ async fn fixture(retained_count: usize) -> Fixture {
         balances,
         calls,
         head,
+        headers,
         blocked,
         started,
         unavailable,
@@ -992,14 +999,15 @@ async fn healthy_selection_does_not_wait_for_late_wallet_local_failure() {
 }
 
 #[tokio::test]
-async fn malformed_readiness_is_wallet_local_in_cold_and_cached_selection() {
-    use crate::rotation::base::evidence::EvidenceFailure;
+async fn historical_readiness_does_not_control_cold_or_cached_capacity() {
     for cached in [false, true] {
         for sufficient in [false, true] {
             for support in ["{}", "tuple", "null"] {
                 let f = fixture(0).await;
                 if sufficient {
                     f.balance(&f.small, 10);
+                } else {
+                    f.balance(&f.large, 10);
                 }
                 if cached {
                     for wallet in [&f.bound.wallet, &f.small, &f.large] {
@@ -1036,19 +1044,18 @@ async fn malformed_readiness_is_wallet_local_in_cold_and_cached_selection() {
                     assert_eq!(hinted.wallet, f.small);
                 }
                 let result = f.manager.acquire_candidate(&f.bound, U256::from(5)).await;
-                match result {
-                    Ok(CandidatePassResult::Selected(selected)) if sufficient => {
-                        assert_eq!(selected.candidate.wallet, f.small);
-                        drop(selected);
+                let CandidatePassResult::Selected(selected) = result.unwrap() else {
+                    panic!("current capacity must not depend on historical readiness");
+                };
+                assert_eq!(
+                    selected.candidate.wallet,
+                    if sufficient {
+                        f.small.clone()
+                    } else {
+                        f.large.clone()
                     }
-                    Err(error) if !sufficient => assert_eq!(
-                        error.downcast_ref::<EvidenceFailure>(),
-                        Some(&EvidenceFailure::MalformedSupport)
-                    ),
-                    _ => {
-                        panic!("malformed sibling vetoed healthy selection or lost its diagnostic")
-                    }
-                }
+                );
+                drop(selected);
                 assert_eq!(
                     f.db()
                         .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
@@ -1074,6 +1081,24 @@ async fn malformed_readiness_is_wallet_local_in_cold_and_cached_selection() {
                         .unwrap(),
                     "READY"
                 );
+                assert!(
+                    f.headers.lock().unwrap().iter().all(|height| *height > 100),
+                    "current capacity must not request archival funding headers"
+                );
+                let current: Option<String> = f
+                    .db()
+                    .query_row(
+                        "SELECT readiness_support FROM funding_jobs WHERE wallet_id=?1",
+                        [&f.large],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                if support == "null" {
+                    assert!(current.is_none());
+                }
+                if support == "{}" {
+                    assert_eq!(current.as_deref(), Some("{}"));
+                }
                 f.close().await;
             }
         }
@@ -1114,8 +1139,7 @@ async fn selection_does_not_swallow_database_failures() {
 }
 
 #[tokio::test]
-async fn initial_identity_and_startup_isolate_malformed_wallet_readiness() {
-    use crate::rotation::base::evidence::EvidenceFailure;
+async fn identity_ignores_archival_readiness_but_bootstrap_inventory_validates_it() {
     for corrupt in ["active", "small", "large", "active_and_small", "all"] {
         let f = fixture(0).await;
         for (name, wallet) in [
@@ -1149,26 +1173,10 @@ async fn initial_identity_and_startup_isolate_malformed_wallet_readiness() {
             .store
             .call(|s| s.startup_groups(&["selection".into()]))
             .await;
-        if corrupt == "all" {
-            assert_eq!(
-                candidate.unwrap_err().downcast_ref::<EvidenceFailure>(),
-                Some(&EvidenceFailure::MalformedSupport)
-            );
-            assert_eq!(
-                startup.unwrap_err().downcast_ref::<EvidenceFailure>(),
-                Some(&EvidenceFailure::MalformedSupport)
-            );
-        } else {
-            let expected = match corrupt {
-                "active" => &f.small,
-                "active_and_small" => &f.large,
-                _ => &f.bound.wallet,
-            };
-            assert_eq!(candidate.unwrap().wallet, *expected);
-            let groups = startup.unwrap();
-            assert!(groups[0].serving_ready);
-            assert_eq!(groups[0].inventory_ready, corrupt == "active");
-        }
+        assert_eq!(candidate.unwrap().wallet, f.bound.wallet);
+        let groups = startup.unwrap();
+        assert!(groups[0].serving_ready);
+        assert_eq!(groups[0].inventory_ready, corrupt == "active");
         let after: Vec<(String, String)> = f
             .db()
             .prepare("SELECT id,role FROM wallets ORDER BY id")
@@ -1201,7 +1209,7 @@ async fn initial_identity_and_startup_isolate_malformed_wallet_readiness() {
 }
 
 #[tokio::test]
-async fn initial_identity_skips_malformed_retained_and_preserves_active_role() {
+async fn initial_identity_preserves_active_role_despite_malformed_archival_readiness() {
     let f = fixture(2).await;
     for wallet in [&f.bound.wallet, &f.retained[0]] {
         f.db()
@@ -1212,7 +1220,7 @@ async fn initial_identity_skips_malformed_retained_and_preserves_active_role() {
             .unwrap();
     }
     let candidate = f.manager.candidate_for(None).await.unwrap();
-    assert_eq!(candidate.wallet, f.retained[1]);
+    assert_eq!(candidate.wallet, f.bound.wallet);
     assert_eq!(
         f.db()
             .query_row(

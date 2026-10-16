@@ -204,15 +204,18 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
     state.lock().unwrap().2 = false;
     state.lock().unwrap().0 = 200;
 
-    // Reopen discards cache/generations, never durable D dependencies.
+    // Reopen preserves archival accounting support. Explicit historical
+    // revalidation, rather than current balance acquisition, checks its anchors.
     let id = store.id().to_owned();
     drop(store);
     let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     state.lock().unwrap().3 = true;
-    let query = store
-        .scoped_chain_query(&pool, vec![job.wallet_id.clone()], vec![])
-        .unwrap();
-    let error = rpc.view(query).await.err().unwrap();
+    let request = crate::rotation::base::historical::HistoricalBalanceRequest {
+        capture: store.capture_evidence(&job.wallet_id).unwrap(),
+        observation: support.observation.clone(),
+        checkpoint: support.checkpoint.clone(),
+    };
+    let error = rpc.verify_historical_balance(request).await.err().unwrap();
     assert!(error.is::<crate::rotation::base::EvidenceConflict>());
     store.record_base_failure(&error).unwrap();
     assert_eq!(

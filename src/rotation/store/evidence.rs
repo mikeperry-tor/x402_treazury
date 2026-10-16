@@ -843,90 +843,10 @@ impl Store {
                             && certificate.compatible(Some(checkpoint))
                     })
                 });
-        // Exactly one funding job owns a wallet. This keyed read is bounded;
-        // immutable support remains relevant after ordinary cache eviction.
-        let saved: Option<(Option<String>, Option<String>, Option<String>)> = self.db.query_row(
-            "SELECT readiness_requirement,readiness_support,readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
-            [wallet], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
-        let mut durable_balance_anchors = Vec::new();
-        if let Some((Some(_), support, disputed)) = saved {
-            let support: BalanceSupport = serde_json::from_str(
-                support
-                    .as_deref()
-                    .ok_or(EvidenceFailure::MalformedSupport)?,
-            )
-            .map_err(|_| EvidenceFailure::MalformedSupport)?;
-            support.observation.validate()?;
-            ensure!(
-                support.observation.wallet == wallet,
-                EvidenceFailure::ScopeMismatch
-            );
-            let address: String =
-                self.db
-                    .query_row("SELECT address FROM wallets WHERE id=?1", [wallet], |row| {
-                        row.get(0)
-                    })?;
-            ensure!(
-                support
-                    .observation
-                    .address
-                    .parse::<alloy_primitives::Address>()?
-                    == address.parse::<alloy_primitives::Address>()?,
-                EvidenceFailure::ScopeMismatch
-            );
-            // A known-disputed historical balance is retained for review, not
-            // a dependency of fresh capacity. Financial checkpoints are captured
-            // independently above and remain mandatory even at the same anchor.
-            if disputed.is_none() {
-                durable_balance_anchors.push(support.observation.confirmed.anchor);
-                durable_balance_anchors.push(support.observation.latest.anchor);
-                if let Some(anchor) = support.checkpoint {
-                    durable_balance_anchors.push(anchor);
-                }
-            }
-        }
-        let retired: Option<(String, Option<String>)> = self
-            .db
-            .query_row(
-                "SELECT support,disputed FROM wallet_retirements WHERE wallet_id=?1",
-                [wallet],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if let Some((retired, disputed)) = retired {
-            let support: BalanceSupport =
-                serde_json::from_str(&retired).map_err(|_| EvidenceFailure::MalformedSupport)?;
-            support.observation.validate()?;
-            ensure!(
-                support.observation.wallet == wallet,
-                EvidenceFailure::ScopeMismatch
-            );
-            let address: String =
-                self.db
-                    .query_row("SELECT address FROM wallets WHERE id=?1", [wallet], |row| {
-                        row.get(0)
-                    })?;
-            ensure!(
-                support
-                    .observation
-                    .address
-                    .parse::<alloy_primitives::Address>()?
-                    == address.parse::<alloy_primitives::Address>()?,
-                EvidenceFailure::ScopeMismatch
-            );
-            // A known-disputed historical balance is retained for review, not
-            // a dependency of fresh capacity. Financial checkpoints are captured
-            // independently above and remain mandatory even at the same anchor.
-            if disputed.is_none() {
-                durable_balance_anchors.push(support.observation.confirmed.anchor);
-                durable_balance_anchors.push(support.observation.latest.anchor);
-                if let Some(anchor) = support.checkpoint {
-                    durable_balance_anchors.push(anchor);
-                }
-            }
-        }
+        // Current capacity does not depend on archival funding/retirement
+        // balances. Financial checkpoint and debit support remain independent.
         Ok(crate::rotation::base::EvidenceCapture {
-            durable_balance_anchors,
+            durable_balance_anchors: Vec::new(),
             previous_confirmed_covered,
             namespace: self.evidence_namespace,
             wallet: wallet.into(),

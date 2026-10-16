@@ -179,7 +179,17 @@ impl Store {
             for claim in &claims {
                 let wallet:Option<String> = self.db.query_row("SELECT wallet_id FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND enabled=1",params![pool,claim.slot,claim.generation],|r|r.get(0))?;
                 let ready = if let Some(wallet) = wallet {
-                    match capacity::payment_ownership(&self.db, &pool, &wallet) {
+                    let readiness =
+                        capacity::payment_ownership(&self.db, &pool, &wallet).and_then(|owner| {
+                            if owner.is_some()
+                                && !funding::readiness_recorded_valid(&self.db, &wallet)?
+                            {
+                                Ok(None)
+                            } else {
+                                Ok(owner)
+                            }
+                        });
+                    match readiness {
                         Ok(owner) => owner.is_some_and(|owner| {
                             owner.role == "READY"
                                 && owner.slot.as_deref() == Some(claim.slot.as_str())

@@ -197,23 +197,15 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
     )
     .unwrap();
     let capture = store.capture_evidence(&wallet).unwrap();
-    assert!(
-        capture
-            .durable_balance_anchors
-            .iter()
-            .any(|anchor| anchor.height == 188)
-    );
-    assert!(
-        capture
-            .durable_balance_anchors
-            .iter()
-            .any(|anchor| anchor.height == 200)
-    );
+    assert!(capture.durable_balance_anchors.is_empty());
+    let support: BalanceSupport = serde_json::from_str(&original).unwrap();
     state.lock().unwrap().1 = true;
-    let query = store
-        .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
-        .unwrap();
-    let error = rpc.view(query).await.err().unwrap();
+    let request = crate::rotation::base::historical::HistoricalBalanceRequest {
+        capture,
+        observation: support.observation,
+        checkpoint: support.checkpoint,
+    };
+    let error = rpc.verify_historical_balance(request).await.err().unwrap();
     store.record_base_failure(&error).unwrap();
     assert_eq!(role(&store, &wallet), "RETIRED");
     assert!(

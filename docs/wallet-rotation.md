@@ -249,9 +249,10 @@ other extensions; seller rejection remains possible.
 Fresh compatible balances minus unresolved signed exposure govern each wallet's
 available capacity. A recent actual-price hint can select the smallest sufficient
 cached wallet without RPC or a pricing probe. Without a usable hint, the existing
-active identity remains the default. Malformed readiness support excludes the affected
-wallet from default selection and serving readiness without blocking independent
-funded wallets. Selection preserves the diagnostic if no eligible identity remains;
+active identity remains the default. Existing role and exact reserve ownership bind
+the payer; archival funding readiness does not grant or veto current payment
+capacity. Explicit bootstrap inventory and funding accounting still validate their
+historical support. Malformed current liabilities remain wallet-local failures;
 choosing a fallback does not consume a reserve or replace an existing active role.
 Once its actual challenge is known, a
 sufficient bound payer stays selected. Otherwise a bounded rolling pass considers
@@ -371,8 +372,9 @@ evidence. A demonstrated endpoint contradiction invalidates its affected support
 across groups. Historical readiness or retirement discrepancies remain separate
 from invalidated liability-release/accounting support: fresh observations cannot
 silently clear a durable financial repair block or reactivate a retiree. Once a
-historical balance is disputed, its anchors no longer gate independent fresh
-capacity; the original support and dispute remain durable. Current payment
+historical balance is recorded, its archival anchors do not gate independent fresh
+capacity; historical revalidation belongs to accounting, and original support and
+disputes remain durable. Current payment
 admission still subtracts all unresolved liabilities and verifies every actual
 financial checkpoint, including one at the same disputed historical anchor.
 

@@ -715,6 +715,16 @@ is malformed. A focused canonical-proof test resolves the valid attempt while
 leaving the malformed attempt outstanding and admission-blocking. Reports derive
 from journals; the old column remains only for schema compatibility.
 
+**C10 current-capacity historical-dependency deletion contract (reviewed):**
+Current balance captures retain financial checkpoint/debit support and namespace,
+wallet/endpoint generations, freshness and cache ordering. They no longer decode
+or require archival funding/retirement balance anchors. Payment identity uses the
+enabled pool, configured cap, existing eligible role and exact READY claim binding;
+historical funding support remains validated by explicit bootstrap inventory and
+accounting. Same-anchor contradictions and disputed resolution repair restrictions
+remain enforced in this slice; their decision-specific separation is subsequent
+work. ALLOCATED and RETIRED wallets remain excluded until C11's separate contract.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
