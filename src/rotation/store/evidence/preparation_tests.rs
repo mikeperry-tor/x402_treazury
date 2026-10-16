@@ -433,3 +433,79 @@ async fn scoped_publication_leaves_sibling_untouched_and_complete_requires_it() 
         .unwrap();
     assert_eq!(balance, "100");
 }
+
+#[tokio::test]
+async fn resolved_history_is_rechecked_before_reacquisition_at_a_newer_head() {
+    let mut fixture = Fixture::new().await;
+    let authorization = fixture.authorization();
+    let query = fixture
+        .store
+        .scoped_chain_query(&fixture.pool, vec![], vec![authorization.clone()])
+        .unwrap();
+    let first = fixture.rpc.view(query).await.unwrap();
+    fixture
+        .store
+        .publish_scoped_evidence(&fixture.pool, first)
+        .unwrap();
+    let original: (String, i64, String, String) = fixture
+        .store
+        .db
+        .query_row(
+            "SELECT outcome,height,hash,support FROM payment_resolutions WHERE attempt_id='proof'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    fixture.chain.lock().unwrap().0 = 101;
+    let query = fixture
+        .store
+        .scoped_chain_query(&fixture.pool, vec![], vec![authorization.clone()])
+        .unwrap();
+    assert!(query.pending.is_empty());
+    assert!(query.captures.is_empty());
+    let retained: (String, i64, String, String) = fixture
+        .store
+        .db
+        .query_row(
+            "SELECT outcome,height,hash,support FROM payment_resolutions WHERE attempt_id='proof'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(original, retained);
+    assert_eq!(
+        exposure(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+        U256::ZERO
+    );
+    let repair: Option<String> = fixture
+        .store
+        .db
+        .query_row(
+            "SELECT evidence_repair FROM wallets WHERE id=?1",
+            [&fixture.wallets[0]],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(repair.is_none());
+    for field in ["wallet", "payer", "nonce", "valid_before"] {
+        let mut wrong = authorization.clone();
+        match field {
+            "wallet" => wrong.wallet = "wrong".into(),
+            "payer" => wrong.payer = "wrong".into(),
+            "nonce" => wrong.nonce = "wrong".into(),
+            _ => wrong.valid_before += 1,
+        }
+        assert!(
+            fixture
+                .store
+                .scoped_chain_query(&fixture.pool, vec![], vec![wrong])
+                .is_err()
+        );
+    }
+    assert!(
+        fixture
+            .store
+            .scoped_chain_query("wrong-pool", vec![], vec![authorization])
+            .is_err()
+    );
+}

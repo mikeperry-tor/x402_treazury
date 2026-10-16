@@ -17,6 +17,36 @@ fn page_limit(limit: usize) -> Result<i64> {
 }
 
 impl Store {
+    /// Buffered pages are snapshots, not authority to acquire another nonce proof.
+    /// Revalidate identity and state in the serialized store immediately before I/O.
+    pub(super) fn pending_history(
+        &self,
+        pool: &str,
+        pending: Vec<PendingAuthorization>,
+    ) -> Result<Vec<PendingAuthorization>> {
+        let mut current = Vec::with_capacity(pending.len());
+        for auth in pending {
+            let (wallet, payer, nonce, valid_before, state, resolved): (String, String, String, u64, String, bool) = self.db.query_row(
+                "SELECT wallet_id,payer,nonce,valid_before,state,EXISTS(SELECT 1 FROM payment_resolutions r WHERE r.attempt_id=a.id) FROM payment_attempts a WHERE id=?1 AND pool_id=?2",
+                params![auth.id, pool],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, sql_u64(r, 3)?, r.get(4)?, r.get(5)?)),
+            )?;
+            ensure!(
+                wallet == auth.wallet
+                    && payer == auth.payer
+                    && nonce == auth.nonce
+                    && valid_before == auth.valid_before,
+                "authorization_evidence_binding_mismatch"
+            );
+            match (state.as_str(), resolved) {
+                ("POSSIBLY_SUBMITTED", false) => current.push(auth),
+                ("RESOLVED", true) => {}
+                _ => anyhow::bail!("inconsistent_authorization_resolution_state"),
+            }
+        }
+        Ok(current)
+    }
+
     pub(crate) fn history_boundary(&self, _pool: &str) -> Result<i64> {
         // Capture the indexed global committed sequence. Filtering the page by
         // group preserves its scope; arrivals in any group cannot expand this

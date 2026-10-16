@@ -1373,6 +1373,7 @@ impl Store {
             wallets.len() <= history::PAGE_SIZE && pending.len() <= history::PAGE_SIZE,
             "evidence page exceeds resource bound"
         );
+        let pending = self.pending_history(pool, pending)?;
         let wallets = wallets
             .into_iter()
             .map(|wallet| {

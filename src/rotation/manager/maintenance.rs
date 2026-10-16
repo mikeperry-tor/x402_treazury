@@ -388,6 +388,9 @@ impl ManagedPool {
                 })
                 .await?;
             drop(guard);
+            if query.wallets.is_empty() && query.pending.is_empty() {
+                return Ok(());
+            }
             let mut view = self.acquire_view(query, false).await?;
             let guard = Arc::new(self.gate.clone().lock_owned().await);
             let pool = self.pool.clone();
@@ -997,6 +1000,56 @@ mod tests {
             f.worker.await.unwrap();
             f.server.abort();
         }
+    }
+
+    #[tokio::test]
+    async fn buffered_resolved_history_skips_rpc_and_preserves_liabilities() {
+        let f = fixture(2).await;
+        let group = f.pool.pool.clone();
+        let row = f
+            .store
+            .call(move |s| Ok(s.history_page(&group, 0, 2, PAGE_SIZE)?.remove(1)))
+            .await
+            .unwrap();
+        let mut pass = Pass::new(0);
+        pass.queued.push_back(row.clone());
+        // The earlier pass finishes while a later page still holds this row.
+        f.pool
+            .read_one(Kind::History, row.1.id.clone(), Some(row.1))
+            .await
+            .result
+            .unwrap();
+        let reads = f.nonce_reads.load(Ordering::SeqCst);
+        let mut retries = HistoryRetries::default();
+        let auth = f
+            .pool
+            .next_admitted_history(
+                &mut pass,
+                true,
+                &mut retries,
+                &BTreeSet::new(),
+                Instant::now(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        f.pool
+            .read_one(Kind::History, auth.id.clone(), Some(auth))
+            .await
+            .result
+            .unwrap();
+        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), reads);
+        assert_eq!(unfinished(&f).await, 1);
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        let (exposure, repairs, proofs): (String, i64, i64) = db.query_row(
+            "SELECT unresolved_exposure,(SELECT COUNT(*) FROM wallets WHERE evidence_repair IS NOT NULL),(SELECT COUNT(*) FROM payment_resolutions) FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [],
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!((exposure.as_str(), repairs, proofs), ("1", 0, 1));
+        drop(db);
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+        f.server.abort();
     }
 
     #[test]
