@@ -46,8 +46,9 @@ contracts below record remaining inventory and endpoint-membership gaps.
 
 C12's narrow all-releases-reserved capacity contract is implemented in `f7ec2b0`,
 with the reviewed additive-index reopen fixup recorded below.
-Next: continue C11 initial-capacity eligibility, remaining C09–C10 obligations and
-C13–C22 in the recommended
+C11 initial-capacity eligibility is implemented in `8760345` with its reviewed
+readiness-publication ownership fixup recorded below.
+Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
 
@@ -898,8 +899,10 @@ continuation rerun passed. Version2 qualification ownership and four saved-payme
 evidence tests passed while preserving version1 semantics. The deployment identity/
 schema rejection regression passed. Independent review found a preparation
 race when strict balance publication establishes readiness and changes the captured
-role/claim. A separate fixup will bind preparation to post-publication ownership
-inside the same transaction, with target-reaching and already-active regressions.
+role/claim. The reviewed fixup binds preparation to post-publication ownership
+inside the same transaction. Both paid-call regressions passed: target-reaching
+ALLOCATED and already-ACTIVE claim holders each dispatch exactly one signature
+with correct journal ownership and a single claim-generation advance.
 All-target Clippy, formatting and diff checks passed for the core slice.
 
 ### Stage 1 — Minimal authority and dependency specification

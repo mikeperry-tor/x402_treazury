@@ -1631,9 +1631,15 @@ impl Store {
             .balances
             .get(&wallet)
             .context(AdmissionError::WalletNotReady("payer balance unavailable"))?;
-        // Evidence publication cannot allocate or consume a reserve. The immutable
-        // funded-role binding was checked before accepting the observation.
+        // Current evidence may fulfill this claim, but never allocates a successor.
+        // Payer identity and payment authority were checked before publication.
         let depleted = apply_payment_view(&tx, pool, &view, self.evidence_namespace)?;
+        // Strict current evidence may establish readiness and promote this
+        // wallet or detach its fulfilled claim. Bind signing to that resulting
+        // ownership in the same transaction, without changing payer or cap.
+        let ownership = capacity::payment_ownership(&tx, pool, &wallet)?.context(
+            AdmissionError::WalletNotReady("payment wallet no longer eligible"),
+        )?;
         let reserved = payment_exposure(&tx, &wallet)?;
         ensure!(
             balance.saturating_sub(reserved) >= cost,
