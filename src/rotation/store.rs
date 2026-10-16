@@ -1294,7 +1294,8 @@ fn admission_schema(db: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS wallet_role_sequence ON wallets(pool_id,role,sequence);
          CREATE INDEX IF NOT EXISTS wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
          CREATE INDEX IF NOT EXISTS funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
-         CREATE INDEX IF NOT EXISTS funding_recovery_job ON funding_recovery(job_id,operation_id);",
+         CREATE INDEX IF NOT EXISTS funding_recovery_job ON funding_recovery(job_id,operation_id);
+         CREATE INDEX IF NOT EXISTS payment_undisputed_wallet ON payment_attempts(wallet_id,id) WHERE state='RESOLVED' AND resolution_disputed=0;",
     )?;
     Ok(())
 }

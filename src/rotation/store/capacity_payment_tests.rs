@@ -224,3 +224,34 @@ async fn concurrent_resolution_or_checkpoint_change_prevents_signing() {
     }
     server.abort();
 }
+
+#[test]
+fn schema17_reopen_adds_capacity_lookup_without_changing_liabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _pool, wallet) = disputed_store(dir.path());
+    let identity = store.id().to_owned();
+    store
+        .db
+        .execute_batch("DROP INDEX payment_undisputed_wallet;")
+        .unwrap();
+    drop(store);
+    let store = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &identity,
+    )
+    .unwrap();
+    assert!(
+        store
+            .capture_payment_evidence(&wallet)
+            .unwrap()
+            .capacity_snapshot
+            .is_some()
+    );
+    assert_eq!(
+        evidence::exposure(&store.db, &wallet).unwrap(),
+        U256::from(1)
+    );
+    let original: (String, String, i64) = store.db.query_row("SELECT r.hash,r.support,a.resolution_disputed FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(original, ("disputed".into(), "immutable".into(), 1));
+}

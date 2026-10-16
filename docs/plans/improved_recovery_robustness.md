@@ -44,8 +44,10 @@ Since the reboot checkpoint, C10 resolution-only observation separation landed i
 authorizations now retain their full exposure and original audit proofs. The
 contracts below record remaining inventory and endpoint-membership gaps.
 
-Next: implement and validate C12's narrow all-releases-reserved capacity contract,
-then continue the remaining C09–C11 obligations and C13–C22 in the recommended
+C12's narrow all-releases-reserved capacity contract is implemented in `f7ec2b0`,
+with the reviewed additive-index reopen fixup recorded below.
+Next: continue C11 initial-capacity eligibility, remaining C09–C10 obligations and
+C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
 
@@ -860,7 +862,9 @@ expectation were corrected, and both focused regressions passed. The real
 PaidClient restart test also passed: $20 balance with $1 disputed exposure refuses
 $20 before signing and sends exactly one journaled $19 payment, without historical
 checkpoint RPC reads. Review identified the missing lookup index on existing
-schema17 reopen; a separate additive-index fixup follows this slice. Final
+schema17 reopen; the reviewed fixup adds it through existing additive lookup
+setup, without changing financial rows or format. Its dropped-index reopen
+regression passed and independent re-review cleared the finding. Final
 all-target Clippy, formatting and diff checks passed.
 
 ### Stage 1 — Minimal authority and dependency specification
