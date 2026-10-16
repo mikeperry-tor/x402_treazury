@@ -1241,7 +1241,7 @@ mod tests {
     }
 
     #[test]
-    fn reopening_schema16_adds_lookup_indexes_without_changing_inventory() {
+    fn reopening_supported_schema_adds_lookup_indexes_without_changing_inventory() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");

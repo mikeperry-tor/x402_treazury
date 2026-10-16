@@ -760,6 +760,26 @@ is malformed. A focused canonical-proof test resolves the valid attempt while
 leaving the malformed attempt outstanding and admission-blocking. Reports derive
 from journals; the old column remains only for schema compatibility.
 
+**C09 disputed-resolution membership contract (reviewed chain-conflict slice):**
+Schema17 adds `payment_attempts.resolution_disputed` with a partial `(wallet_id,id)`
+index. Runtime open and identity checks reject schema16 before mutation; historical
+read-only reports remain available, with schema16 no longer claiming current pool
+capacity fields. No private conversion or runtime migration is included.
+Chain/checkpoint invalidation conservatively marks all RESOLVED attempts for that
+wallet in the same transaction as generation invalidation. Amount-only conflicts
+leave nonce membership unchanged. Exposure is an exact checked sum of disjoint
+pending and disputed-resolved sets; missing resolution rows, ownership mismatches,
+malformed amounts and overflow remain failures. No full history scan is added to
+admission. A duplicate same-outcome nonce observation cannot clear membership.
+Exact historical repair includes the marker in its digest/exposure invariant and
+clears it only with the verified repair commit, with rollback on any failed guard.
+Original proof bytes remain immutable. Endpoint-derived membership, alternate
+canonical release and remaining-capacity admission are still pending; the capacity
+repair halt remains authoritative for this prerequisite slice. Validation: 259 rotation
+tests passed (four ignored subprocess helpers), including 31 evidence tests; the
+focused deployment schema/identity rejection regression also passed. Review found
+an old-schema retirement-report regression, addressed in the following fixup.
+
 **C09 funding inventory traversal contract (reviewed narrow slice):** Remove the
 `state != COMPLETE OR readiness_disputed` SQL filter. Traverse the existing funding
 job primary key in bounded 64-row pages under the captured insertion boundary;

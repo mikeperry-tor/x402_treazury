@@ -575,7 +575,7 @@ async fn resolved_history_is_rechecked_before_reacquisition_at_a_newer_head() {
 
 #[tokio::test]
 async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_order() {
-    for newer_first in [false, true] {
+    for (newer_first, disputed) in [(false, false), (true, false), (false, true), (true, true)] {
         let mut fixture = Fixture::new().await;
         let auth = fixture.authorization();
         let query = fixture
@@ -597,6 +597,20 @@ async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_
         let saved: (String,String,i64,String) = fixture.store.db.query_row(
             "SELECT outcome,hash,height,support FROM payment_resolutions WHERE attempt_id='proof'",[],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        if disputed {
+            fixture
+                .store
+                .invalidate_wallet_evidence(
+                    &fixture.wallets[0],
+                    &Anchor {
+                        height: saved.2.try_into().unwrap(),
+                        hash: saved.1.clone(),
+                    },
+                    true,
+                    false,
+                )
+                .unwrap();
+        }
         // Match the maintenance owner's ordinary exact-anchor recertification.
         let certificate = second.resolution_certificates["proof"].clone();
         let capture = fixture.store.capture_evidence(&fixture.wallets[0]).unwrap();
@@ -618,7 +632,7 @@ async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_
         assert_eq!(retained, saved);
         assert_eq!(
             exposure(&fixture.store.db, &fixture.wallets[0]).unwrap(),
-            U256::ZERO
+            if disputed { U256::from(7) } else { U256::ZERO }
         );
         let repair: Option<String> = fixture
             .store
@@ -629,7 +643,10 @@ async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(repair.is_none());
+        assert_eq!(
+            repair.as_deref(),
+            disputed.then_some("chain_repair_required")
+        );
         assert_eq!(
             checkpoint(&fixture.store.db, &fixture.wallets[0])
                 .unwrap()

@@ -70,12 +70,16 @@ pub struct BalanceSupport {
     pub checkpoint: Option<Anchor>,
 }
 
+const EXPOSURE_SQL: &str = "SELECT pool_id,amount,resolution_disputed=0 FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED' UNION ALL SELECT a.pool_id,a.amount,a.state='RESOLVED' AND EXISTS(SELECT 1 FROM payment_resolutions r WHERE r.attempt_id=a.id) FROM payment_attempts a INDEXED BY payment_disputed_wallet WHERE a.wallet_id=?1 AND a.resolution_disputed=1";
+
 pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
     let pool: String =
         db.query_row("SELECT pool_id FROM wallets WHERE id=?1", [wallet], |row| {
             row.get(0)
         })?;
-    let mut statement = db.prepare("SELECT pool_id,amount FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED'")?;
+    // Disjoint, wallet-indexed subsets: pending submissions and previously
+    // released authorizations whose canonical support is disputed.
+    let mut statement = db.prepare(EXPOSURE_SQL)?;
     let mut rows = statement.query([wallet])?;
     let mut total = U256::ZERO;
     while let Some(row) = rows.next()? {
@@ -83,7 +87,11 @@ pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
         let raw: String = row.get(1).map_err(|_| EvidenceFailure::MalformedExposure)?;
         let value = amount(&raw).map_err(|_| EvidenceFailure::MalformedExposure)?;
         ensure!(
-            owner == pool && value > U256::ZERO,
+            owner == pool
+                && value > U256::ZERO
+                && row
+                    .get::<_, bool>(2)
+                    .map_err(|_| EvidenceFailure::MalformedExposure)?,
             EvidenceFailure::MalformedExposure
         );
         total = total
@@ -788,9 +796,78 @@ mod tests {
         assert_eq!(exposure(&tx, &wallet).unwrap(), U256::from(17));
         tx.rollback().unwrap();
         assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
-        let plan: String = store.db.query_row("EXPLAIN QUERY PLAN SELECT pool_id,amount FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED'", [&wallet], |r| r.get(3)).unwrap();
+        let plan = store
+            .db
+            .prepare(&format!("EXPLAIN QUERY PLAN {EXPOSURE_SQL}"))
+            .unwrap()
+            .query_map([&wallet], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+            .join("\n");
         assert!(plan.contains("payment_wallet_state"));
-        assert!(plan.contains("state=?"));
+        assert!(plan.contains("payment_disputed_wallet"));
+        assert!(plan.contains("wallet_id=?"));
+    }
+    #[test]
+    fn disputed_membership_is_exact_durable_and_requires_original_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
+        let pool = crate::rotation::store::test_support::declare_two_reserves(
+            &mut store,
+            "disputes",
+            "1",
+            Some(U256::from(100)),
+            0,
+        )
+        .unwrap();
+        let wallet: String = store
+            .db
+            .query_row(
+                "SELECT id FROM wallets WHERE pool_id=?1 LIMIT 1",
+                [&pool],
+                |r| r.get(0),
+            )
+            .unwrap();
+        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('old',?1,?2,0,?3,'fixture','RESOLVED',1)", params![pool,wallet,U256::MAX.to_string()]).unwrap();
+        assert!(
+            exposure(&store.db, &wallet).is_err(),
+            "missing original proof never becomes a favorable release"
+        );
+        store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES('old','USED',1,'original',1,'immutable-fixture')", []).unwrap();
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::MAX);
+        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('pending',?1,?2,0,'1','fixture','POSSIBLY_SUBMITTED')", params![pool,wallet]).unwrap();
+        assert!(
+            exposure(&store.db, &wallet).is_err(),
+            "checked sum cannot wrap"
+        );
+        store
+            .db
+            .execute("UPDATE payment_attempts SET amount='9' WHERE id='old'", [])
+            .unwrap();
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(10));
+        let treasury = store.id().to_owned();
+        drop(store);
+        let store = Store::open(&state, &key, &treasury).unwrap();
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(10));
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT support FROM payment_resolutions WHERE attempt_id='old'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "immutable-fixture"
+        );
+        store.db.pragma_update(None, "user_version", 16).unwrap();
+        drop(store);
+        let before = std::fs::read(state.join("state.sqlite")).unwrap();
+        assert!(Store::open(&state, &key, &treasury).is_err());
+        assert_eq!(std::fs::read(state.join("state.sqlite")).unwrap(), before);
     }
 }
 
@@ -1381,6 +1458,12 @@ impl Store {
             tx.query_row("SELECT EXISTS(SELECT 1 FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.wallet_id=?1 AND r.hash=?2)",params![wallet,anchor.hash],|row|row.get(0))?
         };
         if financial_checkpoint || dependent {
+            if !amount_conflict {
+                // A failed checkpoint does not identify the fork's starting
+                // height. Restore every released liability for this wallet;
+                // the original proofs remain immutable audit evidence.
+                tx.execute("UPDATE payment_attempts SET resolution_disputed=1 WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0", [wallet])?;
+            }
             tx.execute(
                 "UPDATE wallets SET evidence_repair=?2 WHERE id=?1",
                 params![

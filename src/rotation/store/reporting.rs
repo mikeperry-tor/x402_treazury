@@ -56,10 +56,11 @@ impl RetirementAccounting {
             }
         }
         Ok(Self {
-            automatic_recorded_confirmed_atomic: (schema == 16).then(|| total.to_string()),
-            automatic_count: (schema == 16).then_some(automatic),
-            manual_recorded_confirmed_atomic: (schema == 16).then(|| "0".into()),
-            manual_count: (schema == 16).then_some(0),
+            automatic_recorded_confirmed_atomic: (matches!(schema, 16 | 17))
+                .then(|| total.to_string()),
+            automatic_count: (matches!(schema, 16 | 17)).then_some(automatic),
+            manual_recorded_confirmed_atomic: (matches!(schema, 16 | 17)).then(|| "0".into()),
+            manual_count: (matches!(schema, 16 | 17)).then_some(0),
             historical_unknown_count: unknown,
         })
     }
@@ -124,7 +125,7 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
     for row in rows {
         let mut pool = row?;
         pool.addresses = read_addresses(db, &pool.id)?;
-        if version == 16 {
+        if version == 17 {
             populate_current_pool(db, &mut pool)?;
         }
         pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses, version)?;

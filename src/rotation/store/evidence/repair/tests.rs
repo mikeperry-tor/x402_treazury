@@ -647,3 +647,105 @@ async fn independent_nonce_resolution_progresses_without_clearing_capacity_repai
         }
     }
 }
+
+#[tokio::test]
+async fn chain_invalidation_restores_exact_disputed_exposure_without_rewriting_proofs() {
+    for amount_conflict in [false, true] {
+        let f = Fixture::new().await;
+        let wallet = f.wallet.clone();
+        f.store
+            .call(move |s| {
+                let original: String = s.db.query_row(
+                    "SELECT support FROM payment_resolutions WHERE attempt_id='resolved'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let checkpoint = checkpoint(&s.db, &wallet)?.unwrap();
+                let capture = s.capture_evidence(&wallet)?;
+                for _ in 0..2 {
+                    s.invalidate_wallet_evidence(&wallet, &checkpoint, true, amount_conflict)?;
+                    assert_eq!(
+                        exposure(&s.db, &wallet)?,
+                        U256::from(if amount_conflict { 7 } else { 14 })
+                    );
+                }
+                assert_ne!(capture.generation, s.capture_evidence(&wallet)?.generation);
+                assert_eq!(
+                    s.db.query_row(
+                        "SELECT support FROM payment_resolutions WHERE attempt_id='resolved'",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )?,
+                    original
+                );
+                assert_eq!(
+                    s.db.query_row(
+                        "SELECT state FROM payment_attempts WHERE id='resolved'",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )?,
+                    "RESOLVED"
+                );
+                assert_eq!(
+                    s.db.query_row(
+                        "SELECT resolution_disputed FROM payment_attempts WHERE id='pending'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                let sibling: String = s.db.query_row(
+                    "SELECT id FROM wallets WHERE id!=?1 LIMIT 1",
+                    [&wallet],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(exposure(&s.db, &sibling)?, U256::ZERO);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn exact_repair_clears_disputed_membership_only_with_its_verified_commit() {
+    let f = Fixture::new().await;
+    let wallet = f.wallet.clone();
+    f.store
+        .call(move |s| {
+            s.db.execute(
+                "UPDATE payment_attempts SET resolution_disputed=1 WHERE id='resolved'",
+                [],
+            )?;
+            assert_eq!(exposure(&s.db, &wallet)?, U256::from(14));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let snapshot = f.snapshot().await;
+    let verified = verify_snapshot(&f.store, &f.base, snapshot).await.unwrap();
+    f.store.call(move |s| {
+        s.db.execute_batch("CREATE TEMP TRIGGER fail_repair_membership BEFORE INSERT ON wallet_evidence_repairs BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
+        assert!(s.commit_repair(verified).is_err());
+        assert_eq!(s.db.query_row("SELECT resolution_disputed FROM payment_attempts WHERE id='resolved'", [], |r|r.get::<_,i64>(0))?, 1);
+        s.db.execute_batch("DROP TRIGGER fail_repair_membership")?;
+        Ok(())
+    }).await.unwrap();
+    assert!(f.repair().await.unwrap());
+    let wallet = f.wallet.clone();
+    f.store
+        .call(move |s| {
+            assert_eq!(exposure(&s.db, &wallet)?, U256::from(7));
+            assert_eq!(
+                s.db.query_row(
+                    "SELECT resolution_disputed FROM payment_attempts WHERE id='resolved'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}

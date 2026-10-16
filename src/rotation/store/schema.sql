@@ -1,4 +1,4 @@
--- Fresh schema16 only. Legacy conversion has a separate strict preflight.
+-- Fresh schema17 only. Older state requires separately reviewed conversion.
 -- Older schema16 stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -8,7 +8,7 @@ CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(
 CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REFERENCES wallets(id),state TEXT NOT NULL CHECK(state IN ('QUEUED','COMPLETE')),target TEXT NOT NULL, readiness_operation TEXT, readiness_requirement TEXT, readiness_capacity TEXT, readiness_hash TEXT, readiness_height INTEGER, readiness_support TEXT, readiness_latest_hash TEXT, readiness_endpoint TEXT, readiness_checkpoint_hash TEXT, readiness_disputed TEXT, completion_outcome TEXT, pool_id TEXT NOT NULL REFERENCES pools(id), allocation_kind TEXT NOT NULL CHECK(allocation_kind IN ('small','large')), claim_generation INTEGER NOT NULL CHECK(claim_generation>=0));
 CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT REFERENCES pools(id),day INTEGER NOT NULL,original_day INTEGER NOT NULL,requested INTEGER NOT NULL CHECK(requested>0),reserved INTEGER NOT NULL CHECK(reserved>=0),consumed INTEGER NOT NULL CHECK(consumed>=0));
 CREATE TABLE outgoing(id TEXT PRIMARY KEY REFERENCES budget_entries(id),state TEXT NOT NULL CHECK(state IN ('PREPARED','RESOLVED')),raw BLOB NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
-CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER, reconciliation_sequence INTEGER,UNIQUE(wallet_id,nonce));
+CREATE TABLE payment_attempts(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),wallet_id TEXT NOT NULL REFERENCES wallets(id),generation INTEGER NOT NULL,amount TEXT NOT NULL,requirements_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('POSSIBLY_SUBMITTED','RESOLVED')),payer TEXT,payee TEXT,nonce TEXT,valid_after INTEGER,valid_before INTEGER, reconciliation_sequence INTEGER,resolution_disputed INTEGER NOT NULL DEFAULT 0 CHECK(resolution_disputed IN (0,1)) CHECK(resolution_disputed=0 OR state='RESOLVED'),UNIQUE(wallet_id,nonce));
 CREATE TABLE treasury_sync(singleton INTEGER PRIMARY KEY CHECK(singleton=1),observation TEXT NOT NULL);
 CREATE TABLE treasury_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),facts TEXT NOT NULL,submission TEXT NOT NULL CHECK(submission IN ('PREPARED','BROADCAST_REQUESTED','BROADCAST','UNKNOWN','CONFIRMED')),attempts INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE funding_progress(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),operation_id TEXT NOT NULL UNIQUE,phase TEXT NOT NULL,quote BLOB,attempts INTEGER NOT NULL DEFAULT 0,next_poll INTEGER NOT NULL DEFAULT 0,last_error TEXT, provider_success INTEGER NOT NULL DEFAULT 0, provider_failed INTEGER NOT NULL DEFAULT 0, provider_refunded INTEGER NOT NULL DEFAULT 0, provider_incomplete INTEGER NOT NULL DEFAULT 0, provider_observed_at INTEGER, quote_target TEXT, quote_ceiling TEXT, accepted_output TEXT, accepted_recipient TEXT);
@@ -53,6 +53,7 @@ CREATE UNIQUE INDEX one_outgoing ON outgoing((1)) WHERE state='PREPARED';
 CREATE UNIQUE INDEX payment_reconciliation_sequence ON payment_attempts(reconciliation_sequence);
 CREATE INDEX payment_pending_sequence ON payment_attempts(pool_id,state,reconciliation_sequence);
 CREATE INDEX payment_wallet_state ON payment_attempts(wallet_id,state);
+CREATE INDEX payment_disputed_wallet ON payment_attempts(wallet_id,id) WHERE resolution_disputed=1;
 CREATE INDEX admission_confirmed_support ON payment_admission_evidence(block_hash,attempt_id);
 CREATE INDEX admission_latest_support ON payment_admission_evidence(latest_hash,attempt_id);
 CREATE INDEX resolution_anchor_support ON payment_resolutions(hash,attempt_id);
@@ -73,7 +74,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=16;
+PRAGMA user_version=17;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
