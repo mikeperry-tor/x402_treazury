@@ -307,7 +307,7 @@ a local message, cannot select either recovery disposition. This slice deletes t
 `evidence_outcome` string interpreter; durable preparation provenance and the
 remaining job diagnostic-prefix interpreters still require subsequent C02 work.
 No new persisted facts or schema are needed for this error boundary. Implemented
-in the working tree. Five `treasury::recovery::tests` and
+in 6a79697. Five `treasury::recovery::tests` and
 `rotation::store::expiry::tests::expiry_release_is_revision_guarded_and_preserves_job_identity`
 pass in the default Zcash build. The latter verifies the typed exact-tip failure,
 retained pending operation, revision checks, later release and recovery restrictions.
@@ -326,6 +326,15 @@ Normal selection stays read-only; discovering a contradiction may invalidate
 support but cannot reserve, sign, change roles or start funding. No new persistent
 incident record is needed. A shared database failure still propagates. C09 remains
 responsible for authoritative exposure derivation; this slice supplies isolation.
+Implementation: 07529ca plus review fixup. The sub-agent review identified lost
+merge-failure metadata and a cached-hint fallback regression. The fixup retains
+typed failure through traversal exhaustion, scopes merge/invalidation to the captured
+group, and keeps unsigned hint fallback separate from admission. All 29 selection
+tests and the added uncached-hint regression passed. Tests include
+cache churn, repeated/reordered conflicting proofs, foreign-scope exclusion, all
+malformed exposures, shared SQL errors, cancellation and independent capacity.
+C01 and the typed-evidence C02 slice also received a read-only sub-agent review
+with no actionable findings.
 
 ### Stage 1 — Minimal authority and dependency specification
 

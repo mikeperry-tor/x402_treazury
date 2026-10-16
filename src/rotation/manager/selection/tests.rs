@@ -716,7 +716,15 @@ async fn cached_candidate_survives_eviction_between_evaluation_and_batched_selec
 
 async fn select_owned(f: &Fixture, view: ChainView, cost: u64) -> Option<SelectedCandidate> {
     f.manager
-        .select_completed_candidate(&f.bound.wallet, U256::from(cost), i64::MAX, &mut vec![view])
+        .select_completed_candidate(
+            &f.bound.wallet,
+            U256::from(cost),
+            i64::MAX,
+            &mut CandidateCompletions {
+                completed: vec![view],
+                ..Default::default()
+            },
+        )
         .await
         .unwrap()
 }
@@ -1922,5 +1930,152 @@ async fn malformed_exposure_isolated_in_cached_hinted_and_challenge_selection() 
     )
     .unwrap();
     assert!(f.manager.candidate_for(Some(U256::from(5))).await.is_err());
+    f.close().await;
+}
+
+#[tokio::test]
+async fn merged_conflict_survives_completion_consumption_without_hiding_independent_capacity() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    for sufficient in [false, true] {
+        let f = fixture(260).await;
+        f.balance(&f.bound.wallet, 10);
+        let (_, old) = f
+            .manager
+            .acquire_candidate_wallet(f.bound.wallet.clone())
+            .await
+            .unwrap();
+        let old = old.unwrap();
+        for wallet in &f.retained {
+            f.manager
+                .acquire_candidate_wallet(wallet.clone())
+                .await
+                .unwrap();
+        }
+        f.balance(&f.bound.wallet, 9);
+        let (_, new) = f
+            .manager
+            .acquire_candidate_wallet(f.bound.wallet.clone())
+            .await
+            .unwrap();
+        let new = new.unwrap();
+        f.balance(&f.small, if sufficient { 8 } else { 0 });
+        f.manager
+            .acquire_candidate_wallet(f.small.clone())
+            .await
+            .unwrap();
+        // Foreign completed/cache proofs neither invalidate this wallet nor
+        // manufacture an evidence failure for another group's negative result.
+        let foreign = old.clone();
+        assert!(
+            f.manager
+                .store
+                .call(move |s| s.payment_candidate_with_evidence(
+                    "unrelated-pool",
+                    U256::from(5),
+                    None,
+                    i64::MAX,
+                    &[foreign]
+                ))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            read_only_candidate(&f, 5, Some(f.bound.wallet.clone()), vec![]).await,
+            Some(f.bound.wallet.clone())
+        );
+        let proofs = if sufficient {
+            vec![new, old.clone(), old]
+        } else {
+            vec![old.clone(), old, new]
+        };
+        let mut completions = CandidateCompletions {
+            completed: proofs,
+            ..Default::default()
+        };
+        let selected = f
+            .manager
+            .select_completed_candidate(&f.bound.wallet, U256::from(5), i64::MAX, &mut completions)
+            .await
+            .unwrap();
+        if sufficient {
+            assert_eq!(selected.as_ref().unwrap().candidate.wallet, f.small);
+        } else {
+            assert!(selected.is_none());
+            assert!(completions.completed.is_empty());
+            let error = completions
+                .finish()
+                .err()
+                .expect("conflict cannot become CompleteNegative");
+            assert_eq!(
+                error.downcast_ref::<EvidenceFailure>(),
+                Some(&EvidenceFailure::AmountContradiction)
+            );
+        }
+        drop(selected);
+        f.close().await;
+    }
+}
+
+#[tokio::test]
+async fn all_malformed_exposures_retain_failure_instead_of_insufficient_funds() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    let f = fixture(0).await;
+    for wallet in [&f.bound.wallet, &f.small, &f.large] {
+        f.balance(wallet, 10);
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+    }
+    f.db()
+        .execute("UPDATE wallets SET unresolved_exposure='malformed'", [])
+        .unwrap();
+    let error = f
+        .manager
+        .acquire_candidate(&f.bound, U256::from(5))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedExposure)
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn malformed_cached_hint_still_reaches_uncached_independent_payer() {
+    let f = fixture(0).await;
+    f.balance(&f.bound.wallet, 10);
+    f.manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    f.balance(&f.small, 8);
+    f.db()
+        .execute(
+            "UPDATE wallets SET unresolved_exposure='malformed' WHERE id=?1",
+            [&f.bound.wallet],
+        )
+        .unwrap();
+    let hinted = f.manager.candidate_for(Some(U256::from(5))).await.unwrap();
+    let CandidatePassResult::Selected(selected) = f
+        .manager
+        .acquire_candidate(&hinted, U256::from(5))
+        .await
+        .unwrap()
+    else {
+        panic!("a cached hint failure cannot prevent acquisition for an independent payer");
+    };
+    assert_eq!(selected.candidate.wallet, f.small);
+    drop(selected);
+    assert_eq!(
+        f.db()
+            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
     f.close().await;
 }

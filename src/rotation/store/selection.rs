@@ -74,13 +74,29 @@ impl Store {
     ) -> Result<Option<(PaymentCandidateHandle, super::super::base::ChainView)>> {
         let now = super::super::base::now()?;
         let mut best: Option<(Rank, PaymentCandidateHandle, super::super::base::ChainView)> = None;
-        let certificates = self.merge_payment_certificates(completed, now)?;
+        let (certificates, mut failure) =
+            self.merge_payment_certificates(pool, through, completed, now)?;
         for (wallet, certificate) in certificates {
+            let eligible = match self.eligible_payment_evidence(
+                pool,
+                &wallet,
+                cost,
+                through,
+                &certificate,
+                now,
+            ) {
+                Ok(eligible) => eligible,
+                Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                    failure.get_or_insert(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let Some(EligiblePaymentEvidence {
                 ownership,
                 observation,
                 capacity,
-            }) = self.eligible_payment_evidence(pool, &wallet, cost, through, &certificate, now)?
+            }) = eligible
             else {
                 continue;
             };
@@ -102,22 +118,42 @@ impl Store {
                 best = Some((rank, candidate, view));
             }
         }
+        if best.is_none()
+            && let Some(error) = failure
+        {
+            return Err(error);
+        }
         Ok(best.map(|(_, candidate, view)| (candidate, view)))
     }
 
     fn merge_payment_certificates(
         &mut self,
+        pool: &str,
+        through: i64,
         completed: &[super::super::base::ChainView],
         now: u64,
-    ) -> Result<std::collections::BTreeMap<String, super::super::base::BalanceCertificate>> {
+    ) -> Result<(
+        std::collections::BTreeMap<String, super::super::base::BalanceCertificate>,
+        Option<anyhow::Error>,
+    )> {
         let mut certificates: std::collections::BTreeMap<_, _> = self
             .evidence_cache
             .iter()
             .map(|(wallet, (_, cert))| (wallet.clone(), cert.clone()))
             .collect();
+        // Scope before merging so a foreign group's conflict cannot change this
+        // caller's negative result or invalidate evidence outside its group gate.
+        let mut retained = std::collections::BTreeMap::new();
+        for (wallet, certificate) in certificates {
+            if self.candidate_within(pool, &wallet, through)? {
+                retained.insert(wallet, certificate);
+            }
+        }
+        certificates = retained;
+        let mut failure = None;
         let mut rejected = std::collections::BTreeSet::new();
         for (wallet, certificate) in completed.iter().flat_map(|view| &view.balance_certificates) {
-            if rejected.contains(wallet) {
+            if rejected.contains(wallet) || !self.candidate_within(pool, wallet, through)? {
                 continue;
             }
             if let Some(saved) = certificates.get(wallet) {
@@ -143,6 +179,7 @@ impl Store {
                             {
                                 tracing::warn!(category = %super::super::base::safe_diagnostic(&error), "candidate certificate conflict; checking independent capacity");
                                 certificates.remove(wallet);
+                                failure.get_or_insert(error);
                                 rejected.insert(wallet.clone());
                                 continue;
                             }
@@ -156,7 +193,15 @@ impl Store {
             }
             certificates.insert(wallet.clone(), certificate.clone());
         }
-        Ok(certificates)
+        Ok((certificates, failure))
+    }
+
+    fn candidate_within(&self, pool: &str, wallet: &str, through: i64) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
+            params![wallet, pool, through],
+            |row| row.get(0),
+        )?)
     }
 
     fn eligible_payment_evidence(
@@ -168,12 +213,7 @@ impl Store {
         certificate: &super::super::base::BalanceCertificate,
         now: u64,
     ) -> Result<Option<EligiblePaymentEvidence>> {
-        let within: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
-            params![wallet, pool, through],
-            |row| row.get(0),
-        )?;
-        if !within {
+        if !self.candidate_within(pool, wallet, through)? {
             return Ok(None);
         }
         let ownership = match payment_ownership(&self.db, pool, wallet) {
@@ -203,16 +243,7 @@ impl Store {
         if now > support.observation.valid_until {
             return Ok(None);
         }
-        let exposure = match evidence::exposure(&self.db, wallet) {
-            Ok(exposure) => exposure,
-            Err(error)
-                if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                    == Some(&super::super::base::evidence::EvidenceFailure::MalformedExposure) =>
-            {
-                return Ok(None);
-            }
-            Err(error) => return Err(error),
-        };
+        let exposure = evidence::exposure(&self.db, wallet)?;
         let capacity = available(support.observation.available(), exposure);
         if capacity < cost {
             return Ok(None);
