@@ -589,6 +589,9 @@ mod tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
         db.execute_batch(include_str!("schema.sql")).unwrap();
+        db.execute_batch(include_str!("funding_delivery_schema.sql"))
+            .unwrap();
+        evidence::initialize_runtime(&db).unwrap();
         db.execute("INSERT INTO pools(id,name,payment_limit,retirement_tolerance) VALUES ('pool','pool','100000000','0')",[]).unwrap();
         configure_reserves(&db, "pool", &reserves(true)).unwrap();
         db
