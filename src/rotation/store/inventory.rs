@@ -42,6 +42,9 @@ pub(crate) enum Read {
 
 #[cfg(test)]
 impl Store {
+    pub(crate) fn inventory_fault_pending(&self) -> bool {
+        self.inventory_failure.lock().unwrap().is_some()
+    }
     pub(crate) fn fail_next_inventory_read(&mut self, read: Read, code: i32) {
         *self.inventory_failure.lock().unwrap() = Some((read, code));
     }

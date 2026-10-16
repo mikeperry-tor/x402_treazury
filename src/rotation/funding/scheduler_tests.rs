@@ -2046,6 +2046,32 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                 wait_until(|| credits.load(Ordering::SeqCst) >= 2).await;
                 let observed = event(&mut status_events).await;
                 assert!(jobs.iter().any(|job| job.id == observed));
+                let before = credits.load(Ordering::SeqCst);
+                while status_events.try_recv().is_ok() {}
+                store
+                    .call(|s| {
+                        s.fail_next_inventory_read(
+                            Read::FundingBoundary,
+                            rusqlite::ffi::SQLITE_BUSY,
+                        );
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while store
+                        .call(|s| Ok(s.inventory_fault_pending()))
+                        .await
+                        .unwrap()
+                    {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                wait_until(|| credits.load(Ordering::SeqCst) >= before + 2).await;
+                let observed = event(&mut status_events).await;
+                assert!(jobs.iter().any(|job| job.id == observed));
                 assert!(worker.tick(1001).await.unwrap_err().is::<AlreadyOwned>());
                 assert!(source_events.try_recv().is_err());
                 stop.cancel();

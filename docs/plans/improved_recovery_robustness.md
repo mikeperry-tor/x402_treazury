@@ -469,8 +469,10 @@ Validation: all 17 funding scheduler tests and library Clippy pass. New fault ca
 cover both inventory read kinds in continuous and one-pass mode, independent
 credit/status progress, retained source lease through cancellation, unchanged signed
 bytes/attempt counts after reopen, and corruption propagation. Sub-agent review found
-no code defect; a separate test fixup will exercise the rolling-boundary retry after
-a source task is already held, beyond the initial-boundary regression.
+no code defect. Implementation: 201bebd plus a review fixup that injects the rolling
+boundary failure after the source task is held, confirms the fault is consumed,
+then requires new credit/status observations without a duplicate source. The
+expanded regression passes.
 
 ### Stage 1 — Minimal authority and dependency specification
 
