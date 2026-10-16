@@ -267,3 +267,82 @@ fn malformed_page_advances_without_releasing_or_replacing_jobs() {
         .unwrap();
     assert!(store.funding_work_page("", through).is_err());
 }
+
+#[test]
+fn malformed_health_is_scoped_without_normalizing_values_or_hiding_sql_errors() {
+    for (table, field, value) in [
+        ("funding_health", "started_at", "'bad'"),
+        ("funding_health", "started_at", "-1"),
+        ("funding_health", "error_streak", "'bad'"),
+        ("funding_health", "timed_out", "'bad'"),
+        ("funding_progress", "next_poll", "'bad'"),
+        ("funding_progress", "next_poll", "-1"),
+    ] {
+        let (dir, mut store) = fixture();
+        allocate(&mut store, "pool");
+        let job = store.funding_jobs().unwrap().remove(0);
+        let treasury = store.id().to_owned();
+        store
+            .db
+            .execute(
+                "INSERT OR IGNORE INTO funding_health(job_id) VALUES(?1)",
+                [&job.id],
+            )
+            .unwrap();
+        store
+            .db
+            .execute(
+                &format!("UPDATE {table} SET {field}={value} WHERE job_id=?1"),
+                [&job.id],
+            )
+            .unwrap();
+        let before: rusqlite::types::Value = store
+            .db
+            .query_row(
+                &format!("SELECT {field} FROM {table} WHERE job_id=?1"),
+                [&job.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        for reopen in [false, true] {
+            if reopen {
+                drop(store);
+                store = Store::open(
+                    &dir.path().join("state"),
+                    &dir.path().join("key"),
+                    &treasury,
+                )
+                .unwrap();
+            }
+            let page = store
+                .funding_work_page("", store.funding_work_boundary().unwrap())
+                .unwrap();
+            assert_eq!(page.len(), 2);
+            assert_eq!(page.iter().filter(|(_, entry)| entry.is_ok()).count(), 1);
+            let fault = page
+                .into_iter()
+                .find(|(id, _)| id == &job.id)
+                .unwrap()
+                .1
+                .err()
+                .unwrap();
+            assert_eq!(fault.operation, job.operation_id);
+            let after: rusqlite::types::Value = store
+                .db
+                .query_row(
+                    &format!("SELECT {field} FROM {table} WHERE job_id=?1"),
+                    [&job.id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(after, before);
+            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+        }
+        store.db.execute("DROP TABLE funding_health", []).unwrap();
+        assert!(
+            store
+                .funding_work_page("", store.funding_work_boundary().unwrap())
+                .is_err()
+        );
+    }
+}

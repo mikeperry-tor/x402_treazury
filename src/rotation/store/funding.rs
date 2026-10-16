@@ -1405,7 +1405,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
             r.get::<_, String>(6),
             r.get::<_, String>(7)?,
             r.get::<_, u32>(8)?,
-            r.get::<_, i64>(9)?,
+            r.get::<_, i64>(9),
             r.get::<_, Option<String>>(10)?,
         ))
     })?;
@@ -1424,7 +1424,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
             last_error,
         ) = r.context("missing or invalid funding operation journal")?;
         let (started_at,error_streak,timed_out): (Option<i64>,u32,bool) = if version >= 9 {
-            db.query_row("SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?.unwrap_or((None,0,false))
+            db.query_row("SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",[&id],|r|Ok((|| -> rusqlite::Result<(Option<i64>,u32,bool)> { Ok((r.get(0)?,r.get(1)?,r.get(2)?)) })())).optional()?.unwrap_or(Ok((None,0,false))).context(super::scheduling::FundingDecodeFailure)?
         } else {(None,0,false)};
         let phase = phase.context(super::scheduling::FundingDecodeFailure)?;
         let parsed_phase: FundingPhase = serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
@@ -1436,7 +1436,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         };
         let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
-            started_at: started_at.map(u64::try_from).transpose()?,
+            started_at: started_at.map(u64::try_from).transpose().context(super::scheduling::FundingDecodeFailure)?,
             error_streak: if parsed_phase == FundingPhase::Complete && last_error.is_none() { 0 } else { error_streak },
             timed_out,
             id,
@@ -1448,7 +1448,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
             phase: parsed_phase,
             operation_id,
             attempts,
-            next_poll: u64::try_from(next_poll)?,
+            next_poll: u64::try_from(next_poll.context(super::scheduling::FundingDecodeFailure)?).context(super::scheduling::FundingDecodeFailure)?,
             last_error,
         })
     })
