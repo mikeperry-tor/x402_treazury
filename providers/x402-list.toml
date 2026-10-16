@@ -5,7 +5,7 @@ prefix = "x402_list"
 probe_pricing = false
 include = [""]
 include_operations = ["GET /services", "GET /services/{slug}", "GET /best", "GET /categories", "GET /networks"]
-instructions_text = "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. When source-management tools are available, use x402_treazury_source_url_info to locate specification URLs and pass a returned or published OpenAPI URL directly to x402_treazury_source_add for server-side fetching and validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use tools_search after registration for relevant schemas. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL."
+instructions_text = "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. When source-management tools are available, use x402_treazury_source_url_info to locate specification URLs and pass a returned or published OpenAPI URL directly to x402_treazury_source_add for server-side fetching and validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL."
 
 help_url = "https://x402-list.com/llms.txt"
 

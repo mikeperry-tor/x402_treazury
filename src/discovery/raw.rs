@@ -36,11 +36,17 @@ pub fn schema(post: bool) -> Value {
 fn request(manager: &Manager, name: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
     let method = match name {
         GET => {
-            ensure!(!args.contains_key("body"), "raw_get does not accept a body");
+            ensure!(
+                !args.contains_key("body"),
+                "x402_treazury_raw_get does not accept a body"
+            );
             "GET"
         }
         POST => {
-            ensure!(args.contains_key("body"), "raw_post requires a JSON body");
+            ensure!(
+                args.contains_key("body"),
+                "x402_treazury_raw_post requires a JSON body"
+            );
             "POST"
         }
         _ => bail!("unknown raw request tool"),

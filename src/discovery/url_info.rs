@@ -48,7 +48,7 @@ impl Input {
 
 pub fn schema() -> Value {
     json!({"type":"object","properties":{
-        "slug":{"type":"string","minLength":1,"description":"x402 List service slug returned by sources_search; not a registered source_id or hostname."},
+        "slug":{"type":"string","minLength":1,"description":"x402 List service slug returned by x402_treazury_sources_search; not a registered source_id or hostname."},
         "base_url":{"type":"string","format":"uri","description":"Public HTTPS API base URL, optionally including a base path such as /v1. No query, fragment or URL credentials."}
     },"oneOf":[{"required":["slug"]},{"required":["base_url"]}],"additionalProperties":false})
 }
@@ -125,7 +125,7 @@ impl Manager {
             results.sort_by_key(|(index, _)| *index);
             Ok(json!({"website_status":website_status,"results":results.into_iter().map(|(_, value)| value).collect::<Vec<_>>(),
                 "directory_lookup":if input.slug.is_some() { "x402-list.com; ordinary payment policy applies" } else { "not_used" },
-                "note":"Provider probes are unsigned and never pay. OpenAPI verification checks document structure only; pass the URL directly to source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable. Redirects are reported without following them."}))
+                "note":"Provider probes are unsigned and never pay. OpenAPI verification checks document structure only; pass the URL directly to x402_treazury_source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable. Redirects are reported without following them."}))
         }).await?
     }
 }
