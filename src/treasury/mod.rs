@@ -6,6 +6,7 @@ mod expiry;
 mod freshness;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
+pub(crate) mod ownership;
 pub mod recovery;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
@@ -51,6 +52,7 @@ pub struct Treasury {
     network: TreasuryNetwork,
     _scratch: tempfile::TempDir,
     client: Option<LightClient>,
+    sync_owner: Option<ownership::SyncOwner>,
     store: StoreHandle,
     worker: tokio::task::JoinHandle<()>,
     revision: i64,
@@ -177,6 +179,7 @@ impl Treasury {
             network,
             _scratch: scratch,
             client: Some(client),
+            sync_owner: None,
             #[cfg(test)]
             final_checkpoint_test_hook: None,
             store,
@@ -246,10 +249,11 @@ impl Treasury {
             "offline treasury must not connect to an indexer"
         );
         let (store, worker) = StoreHandle::spawn(store);
-        Ok(OpenedTreasury::Ready(Box::new(Self {
+        let owner = Self {
             network,
             _scratch: scratch,
             client: Some(client),
+            sync_owner: None,
             #[cfg(test)]
             final_checkpoint_test_hook: None,
             store,
@@ -259,7 +263,9 @@ impl Treasury {
             sync_settings: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
-        })))
+        };
+        owner.finish_open_handoff().await?;
+        Ok(OpenedTreasury::Ready(Box::new(owner)))
     }
     pub(crate) fn store_handle(&self) -> StoreHandle {
         self.store.clone()
@@ -504,11 +510,13 @@ impl Treasury {
             // Upstream sync launches detached fetch/mempool tasks. Isolate each cycle
             // so cancellation/error cannot leave those tasks connected on the MCP runtime.
             let scan_settings = settings.clone();
-            let (session, mut observation, outcome) = tokio::task::spawn_blocking(move || {
-                session.run(scan_settings, observation, cancelled)
-            })
-            .await
-            .context("treasury sync worker failed")??;
+            self.sync_owner = Some(ownership::SyncOwner::start(
+                session,
+                scan_settings,
+                observation,
+                cancelled,
+            ));
+            let (session, mut observation, outcome) = self.finish_sync_owner().await?;
             self.revision = session.revision;
             let observation_start = session.observation_start;
             self.client = Some(session.client);
@@ -567,20 +575,19 @@ impl Treasury {
             .saturating_div(2)
             .clamp(1, 60);
         while !stop.is_cancelled() {
-            if let Err(error) = self.sync_once(&stop).await {
-                if !self.healthy {
-                    if let Some(client) = &mut self.client {
-                        client.go_offline().await;
-                    }
-                    stop.cancel();
-                    tracing::error!("treasury persistence failed; funding disabled until restart");
-                    // Persistence failure is fatal to treasury ownership, not Base payments.
-                    self.close().await?;
+            let reconstructing = !self.healthy;
+            let result = if reconstructing {
+                self.reconstruct_live(&stop).await
+            } else {
+                self.sync_once(&stop).await
+            };
+            if let Err(error) = result
+                && !stop.is_cancelled()
+            {
+                if reconstructing && !ownership::retryable_reconstruction(&error) {
                     return Err(error);
                 }
-                if !stop.is_cancelled() {
-                    diagnostics::warn_sync_failure(&error);
-                }
+                diagnostics::warn_sync_failure(&error);
             }
             tokio::select! {
                 _ = stop.cancelled() => break,
@@ -590,16 +597,7 @@ impl Treasury {
         self.close().await
     }
     pub async fn close(mut self) -> Result<()> {
-        if let Some(client) = &mut self.client {
-            client.go_offline().await;
-        }
-        // Serving can keep the serialized store alive for Base admission after
-        // funding stops. Release the poisoned wallet before waiting for it.
-        drop(self.client.take());
-        let result = self
-            .store
-            .call(|s| s.set_sync_phase(SyncPhase::Offline))
-            .await;
+        let result = self.retire_sdk().await.map(|_| ());
         drop(self.store);
         self.worker.await.context("store worker failed")?;
         result

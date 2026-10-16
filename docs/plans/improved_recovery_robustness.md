@@ -1152,6 +1152,26 @@ passed, proving a second observation/final checkpoint is required before fresh
 capacity and reuse. Independent review found and cleared missing shared-lease
 revocation on the atomic preparation commit; its held-clone regression passed.
 
+**C17 live SDK ownership recovery (implemented and reviewed):** Treasury retains
+and drains the sync worker handle across cancelled waiters before retiring the SDK
+and fencing accepted store jobs. Reconstruction reads the committed snapshot,
+checks its revision before publication, and preserves the same shared store and
+worker while Base consumers retain handles. Failed commands are not replayed;
+queued commands retain normal admission checks. Only typed snapshot reconstruction
+failures retry at the existing maintenance cadence; shared SQL/ownership failures
+remain scoped stops.
+
+The retired-owner capability binds the store namespace. Both live reconstruction
+and initial exclusive reopen close only eligible calculate-only preparation
+markers, traversing at most 64 physical rows per store job. Unknown contracts,
+changed revisions, committed bytes and unexplained effects retain their obligations.
+Nine ownership tests and two real SDK preparation/proving tests passed, including
+cancelled drain, accepted late commits, lost acknowledgement, refund mutation,
+retained Base handles, shutdown, reopen and physical paging. Independent review
+cleared the implementation. Actual deployment task-exit cancellation and funding
+scheduler restart handling remain a separate C17 followup; this slice recovers
+poisoned SDK state without exiting those owners.
+
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a
 stale derived phase says ALLOCATED, QUOTED or COMPLETE. Inventory and health use

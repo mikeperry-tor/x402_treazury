@@ -116,6 +116,56 @@ fn scoped_decode(error: rusqlite::Error) -> anyhow::Error {
 }
 
 impl Store {
+    /// Reconstruct contract-1 ownership only at the drained SDK handoff. Unknown
+    /// contracts, changed snapshots and contradictory effects retain liability.
+    #[cfg(feature = "zcash")]
+    pub(crate) fn close_retired_preparations_page(
+        &mut self,
+        retired: &crate::treasury::ownership::RetiredSdk,
+        after: String,
+    ) -> Result<Option<String>> {
+        ensure!(
+            retired.namespace() == self.evidence_namespace,
+            "retired SDK store binding changed"
+        );
+        let mut after = after;
+        let rows = self.db.prepare(
+            r#"SELECT t.operation_id,
+                t.closed=0 AND t.contract_version=1
+                AND typeof(t.base_revision)='integer'
+                AND t.base_revision=(SELECT MAX(revision) FROM snapshots)
+                AND typeof(t.token)='text'
+                AND (t.job_id IS NULL OR typeof(t.job_id)='text')
+                AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=t.operation_id)
+                AND NOT EXISTS(SELECT 1 FROM treasury_operations WHERE id=t.operation_id)
+                AND NOT EXISTS(SELECT 1 FROM expired_operations WHERE id=t.operation_id)
+                AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=t.operation_id AND consumed!=0)
+                AND ((t.job_id IS NULL AND NOT EXISTS(SELECT 1 FROM funding_progress WHERE operation_id=t.operation_id))
+                    OR EXISTS(SELECT 1 FROM funding_progress WHERE job_id=t.job_id AND operation_id=t.operation_id AND phase='"PREPARING"')),
+                t.job_id,t.base_revision,t.token
+                FROM treasury_preparations t WHERE t.operation_id>?1
+                ORDER BY t.operation_id LIMIT 64"#,
+        )?.query_map([&after], |r| {
+            let operation: String = r.get(0)?;
+            let owner = if r.get::<_,Option<bool>>(1)?.unwrap_or(false) {
+                Some(Preparation { operation:operation.clone(),job:r.get(2)?,revision:r.get(3)?,token:r.get(4)? })
+            } else { None };
+            Ok((operation,owner))
+        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        for (operation, owner) in rows {
+            after = operation;
+            if let Some(owner) = owner
+                && Uuid::parse_str(&owner.token).is_ok()
+            {
+                self.close_retired_preparation(&owner)?;
+            }
+        }
+        Ok(Some(after))
+    }
+
     /// Accept the reviewed SDK contract and exact starting committed snapshot in
     /// the same transaction that enters managed PREPARING.
     pub(crate) fn begin_owned_preparation(

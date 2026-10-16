@@ -196,6 +196,17 @@ async fn qualify_preparation(failure: Option<&str>) {
             db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
         }
         drop(db);
+        // Live replacement must not wait for Base admission to release the store.
+        let base = treasury.store_handle();
+        treasury
+            .reconstruct_live(&tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(treasury.healthy);
+        assert_eq!(treasury.revision, revision);
+        assert_eq!(treasury.addresses().await.unwrap(), addresses);
+        assert_eq!(base.call(|s| Ok(s.snapshot()?.0)).await.unwrap(), revision);
+        drop(base);
         treasury.close().await.unwrap();
         let restored = Treasury::open(state, key, treasury_id).await.unwrap();
         assert!(restored.healthy);
