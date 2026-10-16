@@ -127,7 +127,7 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
         let mut pool = row?;
         pool.addresses = read_addresses(db, &pool.id)?;
         if matches!(version, 19..=21) {
-            populate_current_pool(db, &mut pool)?;
+            populate_current_pool(db, &mut pool, version)?;
         } else if matches!(version, 16..=18) {
             // Historical accounting is independent of current admission fields.
             for wallet in &mut pool.addresses {
@@ -171,14 +171,21 @@ fn read_retirement(db: &Connection, wallet: &str) -> Result<Option<RetirementSta
         })).optional()?)
 }
 
-fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
+fn populate_current_pool(db: &Connection, pool: &mut PoolStatus, version: u32) -> Result<()> {
     (pool.payment_limit_atomic, pool.retirement_tolerance_atomic) = db.query_row(
         "SELECT payment_limit,retirement_tolerance FROM pools WHERE id=?1",
         [&pool.id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     for wallet in &mut pool.addresses {
-        wallet.signed_exposure_atomic = Some(evidence::exposure(db, &wallet.id)?.to_string());
+        wallet.signed_exposure_atomic = Some(
+            if version >= 21 {
+                evidence::exposure(db, &wallet.id)?
+            } else {
+                evidence::historical_exposure(db, &wallet.id)?
+            }
+            .to_string(),
+        );
         wallet.financial_repair = db.query_row(
             "SELECT evidence_repair FROM wallets WHERE id=?1",
             [&wallet.id],

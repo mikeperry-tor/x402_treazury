@@ -231,3 +231,32 @@ fn schema16_retirement_accounting_preserves_recorded_amounts_without_current_adm
     assert_eq!(store.db.total_changes(), before);
 }
 
+#[test]
+fn schema19_and_20_disputed_liabilities_remain_readable_without_new_wallet_fields() {
+    for version in [19, 20] {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../../../tests/fixtures/state/schema20.sql"))
+            .unwrap();
+        if version == 19 {
+            db.execute_batch("DROP TABLE treasury_preparations; PRAGMA user_version=19;")
+                .unwrap();
+        }
+        db.execute_batch("INSERT INTO pools(id,name,payment_limit) VALUES('pool','historical','100');
+            INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES('wallet','pool',1,'address',X'00','1','ACTIVE');
+            INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES('job','wallet','QUEUED','1','pool','small',0);
+            INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('old','pool','wallet',0,'7','fixture','RESOLVED',1),('pending','pool','wallet',0,'3','fixture','POSSIBLY_SUBMITTED',0);
+            INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES('old','USED',1,'original',1);
+            PRAGMA query_only=ON;").unwrap();
+        assert!(
+            db.prepare("SELECT payment_resolutions_disputed FROM wallets")
+                .is_err()
+        );
+        let changes = db.total_changes();
+        let report = reporting::read_pools(&db, version).unwrap();
+        assert_eq!(
+            report[0].addresses[0].signed_exposure_atomic.as_deref(),
+            Some("10")
+        );
+        assert_eq!(db.total_changes(), changes);
+    }
+}

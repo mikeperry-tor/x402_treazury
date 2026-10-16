@@ -77,6 +77,15 @@ pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
     exposure_from_rows(db, wallet, EXPOSURE_SQL)
 }
 
+// Historical read-only reporting retains its original row-level dispute contract.
+// Runtime ownership only opens the current schema and never calls this decoder.
+pub(super) fn historical_exposure(db: &Connection, wallet: &str) -> Result<U256> {
+    exposure_from_rows(
+        db,
+        wallet,
+        "SELECT pool_id,amount,resolution_disputed=0 FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED' UNION ALL SELECT a.pool_id,a.amount,a.state='RESOLVED' AND EXISTS(SELECT 1 FROM payment_resolutions r WHERE r.attempt_id=a.id) FROM payment_attempts a WHERE a.wallet_id=?1 AND a.resolution_disputed=1",
+    )
+}
 fn exposure_from_rows(db: &Connection, wallet: &str, sql: &str) -> Result<U256> {
     let pool: String =
         db.query_row("SELECT pool_id FROM wallets WHERE id=?1", [wallet], |row| {
