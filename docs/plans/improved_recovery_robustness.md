@@ -439,6 +439,22 @@ reopen with healthy-peer continuation and missing-table failure. The runtime
 pre/post-capture regression also passes for health streak and next-poll corruption.
 Library Clippy passes. Read-only sub-agent review found no actionable issues.
 
+**C05 / G15 Base inventory resumption contract (reviewed):** Retry only typed
+SQLite Busy/Locked failures at read-only priority, wallet and history inventory
+boundaries. Keep the same owner guard, captured cursor, active futures and history
+retry metadata. Use the existing five-second cadence; acquired independent reads
+continue while the failed inventory waits. A one-pass caller drains independent
+work then reports incomplete observation. Preserve existing handling of per-wallet
+RPC failures. SQL corruption, unknown ownership, channel/task failure and financial
+publication failures still propagate. Do not restart the whole owner, replay a
+mutation or add a deadline. Funding inventory resumption follows separately under
+the same audited-read restriction; treasury generation replacement remains C17.
+Validation: 19 inventory-focused tests and library Clippy pass, including injected
+Busy/Locked at all five Base boundaries, independent observations, retained owner,
+no duplicate active nonce, cancellation, incomplete one-pass and corruption controls.
+Review found no implementation defect; a separate test fixup will strengthen proof
+that a failed wallet page resumes beyond priority wallets.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

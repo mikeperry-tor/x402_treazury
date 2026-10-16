@@ -63,6 +63,8 @@ impl Store {
     }
 
     pub(crate) fn history_boundary(&self, _pool: &str) -> Result<i64> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::HistoryBoundary)?;
         // Capture the indexed global committed sequence. Filtering the page by
         // group preserves its scope; arrivals in any group cannot expand this
         // pass. Resolved rows retain their immutable sequence across reopen.
@@ -79,6 +81,8 @@ impl Store {
         through: i64,
         limit: usize,
     ) -> Result<Vec<(i64, HistoryPayload)>> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::HistoryPage)?;
         let mut statement = self.db.prepare(
             "SELECT a.reconciliation_sequence,a.id,a.wallet_id,a.payer,a.nonce,a.valid_before,EXISTS(SELECT 1 FROM wallets w WHERE w.id=a.wallet_id AND w.pool_id=a.pool_id) FROM payment_attempts a WHERE a.pool_id=?1 AND a.state='POSSIBLY_SUBMITTED' AND a.reconciliation_sequence>?2 AND a.reconciliation_sequence<=?3 ORDER BY a.reconciliation_sequence LIMIT ?4",
         )?;
@@ -113,6 +117,8 @@ impl Store {
         Ok(page)
     }
     pub(crate) fn wallet_boundary(&self, pool: &str) -> Result<i64> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::WalletBoundary)?;
         Ok(self.db.query_row(
             "SELECT COALESCE(MAX(sequence),-1) FROM wallets WHERE pool_id=?1",
             [pool],
@@ -126,6 +132,8 @@ impl Store {
         through: i64,
         limit: usize,
     ) -> Result<Vec<(i64, String, String)>> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::WalletPage)?;
         let mut statement = self.db.prepare(WALLET_PAGE_SQL)?;
         Ok(statement
             .query_map(params![pool, after, through, page_limit(limit)?], |row| {
@@ -140,6 +148,8 @@ impl Store {
         pool: &str,
         through: i64,
     ) -> Result<Vec<(i64, String, String)>> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::Priority)?;
         let mut statement = self.db.prepare(
             "SELECT sequence,id,address FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','READY') AND (role='ACTIVE' OR (role='READY' AND EXISTS(SELECT 1 FROM reserve_claims r WHERE r.pool_id=?1 AND r.wallet_id=wallets.id AND r.enabled=1))) AND sequence<=?2 ORDER BY CASE role WHEN 'ACTIVE' THEN 0 ELSE 1 END,sequence LIMIT 3",
         )?;

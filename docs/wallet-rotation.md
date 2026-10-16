@@ -578,3 +578,8 @@ The affected operation retains its original journals; independent jobs continue.
 One-pass recovery reports the incomplete inventory after draining healthy work.
 Unclassified source-accounting, ownership and storage failures still stop the shared
 owner. Diagnostic text is never substituted for a missing financial fact.
+
+Base background reconciliation retries transient SQLite busy/locked inventory reads
+on its existing cadence while retaining the owner, cursor and active observations.
+One-pass reconciliation reports an incomplete pass after independent work drains.
+This retry applies only to read-only inventory; it never replays a financial commit.
