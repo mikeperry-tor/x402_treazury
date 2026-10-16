@@ -174,7 +174,10 @@ fn historical_completed_status_does_not_require_current_obligation_columns() {
             report.funding_jobs[0].phase,
             funding::FundingPhase::Complete
         );
-        assert!(report.funding_jobs[0].last_error.is_none());
+        assert_eq!(
+            report.funding_jobs[0].last_error.as_deref(),
+            Some("funding_quote_failed; historical")
+        );
         assert!(report.outgoing_pending);
         assert_eq!(db.total_changes(), changes);
     }

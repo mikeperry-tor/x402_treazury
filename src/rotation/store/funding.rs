@@ -682,6 +682,18 @@ fn source_accounted(db: &Connection, operation: &str) -> Result<bool> {
     super::source_support::confirmed(db, operation)
 }
 
+// Saved diagnostics need only this operation's confirmation/support state.
+// Loading the complete runtime facts here would couple read-only reporting to
+// unrelated provider facts and process-local payment evidence generations.
+fn source_accounting_pending(db: &Connection, operation: &str) -> Result<bool> {
+    let confirmed: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1 AND submission='CONFIRMED')",
+        [operation],
+        |row| row.get(0),
+    )?;
+    Ok(confirmed && !super::source_support::confirmed(db, operation)?)
+}
+
 type ProviderFlags = (bool, bool, bool, bool);
 
 fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<ProviderFlags> {
@@ -961,9 +973,7 @@ pub(super) fn read_funding_facts(
     let phase: FundingPhase =
         serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    facts.source_accounting_pending = version >= 23
-        && facts.source_submission.as_deref() == Some("CONFIRMED")
-        && !super::source_support::confirmed(db, operation)?;
+    facts.source_accounting_pending = version >= 23 && source_accounting_pending(db, operation)?;
     facts.delivery_verified = super::funding_delivery::delivered(db, job, operation)?;
     facts.return_pending = super::funding_delivery::return_pending(db, operation)?;
     facts.hidden_prepared = facts.source_submission.as_deref() == Some("PREPARED")
@@ -1534,27 +1544,20 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         } else {(None,0,false)};
         let phase = phase.context(super::scheduling::FundingDecodeFailure)?;
         let parsed_phase: FundingPhase = serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
-        // Historical reports preserve saved diagnostics. Their old schemas do
-        // not contain today's runtime observation/ownership tables.
-        let completed_without_observations = version >= 22
-            && parsed_phase == FundingPhase::Complete
-            && !read_funding_facts(db, &id, &operation_id)?.observations_needed();
-        let last_error = if completed_without_observations {
-            completed_error(last_error.as_deref()).map(str::to_owned)
-        } else {
-            last_error
-        };
+        // Reports preserve committed diagnostics. Only the financial writer can
+        // clear them after checking all obligations; a saved completion label
+        // does not grant a read-only process current observation credentials.
         let last_error = if version >= 22 && super::funding_delivery::return_pending(db, &operation_id)? {
             Some("return_accounting_pending".to_owned())
         } else { last_error };
         let last_error = if version >= 23
-            && read_funding_facts(db, &id, &operation_id)?.source_accounting_pending
+            && source_accounting_pending(db, &operation_id)?
             && last_error.is_none()
         { Some("source_accounting_pending".to_owned()) } else { last_error };
         let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
             started_at: started_at.map(u64::try_from).transpose().context(super::scheduling::FundingDecodeFailure)?,
-            error_streak: if completed_without_observations && last_error.is_none() { 0 } else { error_streak },
+            error_streak,
             timed_out,
             id,
             pool_id,
