@@ -68,25 +68,31 @@ async fn qualify_preparation(failure: Option<&str>) {
             200_000
         );
     }
-    treasury
-        .checkpoint(SyncObservation {
-            phase: SyncPhase::Ready,
-            last_error: None,
-            snapshot_revision: treasury.revision,
-            checked_at: Some(now().unwrap()),
-            checkpoint_at: 0,
-            scanned_blocks: 1,
-            target_height: Some(TIP.into()),
-            observed_tip_height: Some(TIP.into()),
-            height: Some(TIP.into()),
-            confirmations: 1,
-            max_age_seconds: 300,
-            confirmed_pool_balances_zatoshis: None,
-            confirmed_shielded_zatoshis: 200_000,
-            spendable_shielded_zatoshis: 200_000,
-        })
-        .await
-        .unwrap();
+    let start = crate::rotation::store::SyncObservationStart::capture(300).unwrap();
+    assert!(
+        treasury
+            .checkpoint_observed(
+                SyncObservation {
+                    phase: SyncPhase::Ready,
+                    last_error: None,
+                    snapshot_revision: treasury.revision,
+                    checked_at: Some(start.checked_at()),
+                    checkpoint_at: 0,
+                    scanned_blocks: 1,
+                    target_height: Some(TIP.into()),
+                    observed_tip_height: Some(TIP.into()),
+                    height: Some(TIP.into()),
+                    confirmations: 1,
+                    max_age_seconds: 300,
+                    confirmed_pool_balances_zatoshis: None,
+                    confirmed_shielded_zatoshis: 200_000,
+                    spendable_shielded_zatoshis: 200_000,
+                },
+                start
+            )
+            .await
+            .unwrap()
+    );
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
     let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {

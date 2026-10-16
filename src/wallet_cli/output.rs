@@ -40,7 +40,7 @@ pub(super) fn status(status: &Status) -> String {
         writeln!(text, "\nSync state: {phase}").unwrap();
         writeln!(
             text,
-            "Sync observation fresh: {}",
+            "Saved sync observation within wall-age window: {}",
             if status.sync_fresh { "yes" } else { "no" }
         )
         .unwrap();

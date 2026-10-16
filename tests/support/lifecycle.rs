@@ -27,14 +27,15 @@ pub(super) fn synced(s: &mut Store) -> Result<()> {
 pub(super) fn synced_capacity(s: &mut Store, capacity: u64) -> Result<()> {
     let revision = s.snapshot()?.0;
     let instant = now()?;
-    s.save_sync_snapshot(
+    let start = x402_treazury::rotation::store::SyncObservationStart::capture(3600)?;
+    s.save_observed_sync_snapshot(
         revision,
         b"synced fixture",
-        Some(SyncObservation {
+        SyncObservation {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: revision,
-            checked_at: Some(instant),
+            checked_at: Some(start.checked_at()),
             checkpoint_at: instant,
             scanned_blocks: 1,
             target_height: Some(1),
@@ -45,7 +46,8 @@ pub(super) fn synced_capacity(s: &mut Store, capacity: u64) -> Result<()> {
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 10000,
             spendable_shielded_zatoshis: capacity,
-        }),
+        },
+        start,
     )?;
     Ok(())
 }

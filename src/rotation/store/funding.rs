@@ -511,16 +511,23 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        Ok(observation.fresh(now, revision))
+        self.runtime_sync_observation(observation)
+            .fresh(now, revision)
     }
 
-    pub(crate) fn funding_preparation_context(&self) -> Result<(String, i64, SyncObservation)> {
+    pub(crate) fn funding_preparation_context(
+        &self,
+    ) -> Result<(String, i64, RuntimeSyncObservation)> {
         let revision = self.db.query_row(
             "SELECT revision FROM snapshots ORDER BY revision DESC LIMIT 1",
             [],
             |r| r.get(0),
         )?;
-        Ok((self.id.clone(), revision, self.funding_sync_observation()?))
+        Ok((
+            self.id.clone(),
+            revision,
+            self.runtime_sync_observation(self.funding_sync_observation()?),
+        ))
     }
 
     /// Snapshot current configuration at a proven-clean quote boundary. This is

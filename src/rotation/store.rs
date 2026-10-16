@@ -4,6 +4,9 @@ mod capacity;
 #[cfg(test)]
 mod io_failure_tests;
 mod preflight;
+mod sync_freshness;
+pub(crate) use sync_freshness::RuntimeSyncObservation;
+pub use sync_freshness::SyncObservationStart;
 pub(crate) mod preparation;
 #[cfg(test)]
 mod query_tests;
@@ -61,6 +64,7 @@ pub struct Status {
     pub pools: Vec<PoolStatus>,
     pub sync: Option<SyncObservation>,
     pub outgoing_pending: bool,
+    /// Wall-age diagnostic for the persisted report, not runtime spending proof.
     pub sync_fresh: bool,
     pub treasury_operations: Vec<OperationStatus>,
     pub funding_jobs: Vec<funding::FundingJob>,
@@ -108,7 +112,7 @@ impl SyncObservation {
         self.height.is_some() && self.height == self.observed_tip_height
     }
 
-    pub fn fresh(&self, now: u64, revision: i64) -> bool {
+    pub fn wall_fresh_for_reporting(&self, now: u64, revision: i64) -> bool {
         self.phase == SyncPhase::Ready
             && self.snapshot_revision == revision
             && self
@@ -212,6 +216,7 @@ pub struct Store {
     #[cfg(test)]
     inventory_failure: std::sync::Mutex<Option<(inventory::Read, i32)>>,
     funding_restriction: super::restriction::FundingRestriction,
+    sync_certificate: Option<sync_freshness::SyncCertificate>,
     funding_permits: Option<std::sync::Arc<dyn super::restriction::FundingPermits>>,
     network: TreasuryNetwork,
     evidence_namespace: Uuid,
@@ -408,6 +413,7 @@ impl Store {
         Ok(Self {
             funding_restriction: Default::default(),
             funding_permits: None,
+            sync_certificate: None,
             evidence_namespace: Uuid::new_v4(),
             evidence_cache: Default::default(),
             evidence_order: 0,
@@ -476,6 +482,7 @@ impl Store {
         let store = Self {
             funding_restriction: Default::default(),
             funding_permits: None,
+            sync_certificate: None,
             evidence_namespace: Uuid::new_v4(),
             evidence_cache: Default::default(),
             evidence_order: 0,
@@ -571,9 +578,11 @@ impl Store {
             )?;
         }
         tx.commit()?;
+        self.revoke_sync_certificate();
         Ok(revision)
     }
     pub fn set_sync_phase(&mut self, phase: SyncPhase) -> Result<()> {
+        self.revoke_sync_certificate();
         let observation: Option<String> = self
             .db
             .query_row(
@@ -685,7 +694,11 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        ensure!(observation.fresh(now, revision), "treasury_sync_stale");
+        ensure!(
+            self.runtime_sync_observation(observation.clone())
+                .fresh(now, revision)?,
+            "treasury_sync_stale"
+        );
         if input_zatoshis > observation.spendable_shielded_zatoshis {
             tracing::warn!(
                 category = "treasury_insufficient_spendable_funds",
@@ -978,6 +991,7 @@ impl Store {
         }
         tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
         tx.commit()?;
+        self.revoke_sync_certificate();
         Ok(next)
     }
     /// Proof for the pre-preparation path only; historical effects forbid deferral.
@@ -1173,7 +1187,8 @@ fn read_status(db: &Connection) -> Result<Status> {
         |r| r.get(0),
     )?;
     let sync_fresh = sync.as_ref().is_some_and(|observation| {
-        crate::rotation::base::now().is_ok_and(|now| observation.fresh(now, revision))
+        crate::rotation::base::now()
+            .is_ok_and(|now| observation.wall_fresh_for_reporting(now, revision))
     });
     let treasury_operations = reporting::read_operations(db, version)?;
     let funding_jobs = if version >= 4 {

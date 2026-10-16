@@ -1,5 +1,5 @@
 //! Bounded sync observations for a treasury exclusively spent by this application.
-use crate::rotation::store::SyncObservation;
+use crate::rotation::store::{RuntimeSyncObservation, SyncObservation};
 use anyhow::{Result, ensure};
 use std::time::Duration;
 
@@ -53,13 +53,13 @@ pub(super) fn validate(
 
 /// Ordinary spending shares sync's bounded lag; a new observation may not regress.
 pub(super) fn spending_ready(
-    sync: &SyncObservation,
+    sync: &RuntimeSyncObservation,
     revision: i64,
     tip: u64,
     now: u64,
 ) -> Result<()> {
     ensure!(
-        sync.fresh(now, revision),
+        sync.fresh(now, revision)?,
         "treasury requires a fresh sync before calculation"
     );
     let height = sync

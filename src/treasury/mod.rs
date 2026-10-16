@@ -46,6 +46,8 @@ use zingolib::{
 };
 
 pub struct Treasury {
+    #[cfg(test)]
+    final_checkpoint_test_hook: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     network: TreasuryNetwork,
     _scratch: tempfile::TempDir,
     client: Option<LightClient>,
@@ -175,6 +177,8 @@ impl Treasury {
             network,
             _scratch: scratch,
             client: Some(client),
+            #[cfg(test)]
+            final_checkpoint_test_hook: None,
             store,
             worker,
             revision: 1,
@@ -246,6 +250,8 @@ impl Treasury {
             network,
             _scratch: scratch,
             client: Some(client),
+            #[cfg(test)]
+            final_checkpoint_test_hook: None,
             store,
             worker,
             revision,
@@ -401,6 +407,36 @@ impl Treasury {
             .await?;
         Ok(())
     }
+    async fn checkpoint_observed(
+        &mut self,
+        observation: SyncObservation,
+        start: crate::rotation::store::SyncObservationStart,
+    ) -> Result<bool> {
+        let bytes = snapshot(
+            self.client
+                .as_ref()
+                .context("treasury client unavailable")?,
+        )
+        .await?;
+        let expected = self.revision;
+        #[cfg(test)]
+        if let Some(hook) = &self.final_checkpoint_test_hook
+            && hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0
+        {
+            start.expire_for_test();
+        }
+        self.revision = self
+            .store
+            .call(move |s| s.save_observed_sync_snapshot(expected, &bytes, observation, start))
+            .await?;
+        let current = self.store.call(|s| s.treasury_sync_state()).await?;
+        Ok(current
+            .sync
+            .as_ref()
+            .map(|sync| sync.fresh(now()?, current.snapshot_revision))
+            .transpose()?
+            .unwrap_or(false))
+    }
     /// Cancellation must be requested through `stop`, then this future awaited.
     /// Adapter errors are sanitized; endpoints are not persisted in status.
     pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
@@ -422,81 +458,104 @@ impl Treasury {
             .await
             .wallet_settings
             .min_confirmations = settings.confirmations;
-        let mut observation = self
-            .store
-            .call(|s| s.treasury_sync_state())
-            .await?
-            .sync
-            .unwrap_or(SyncObservation {
-                phase: SyncPhase::Syncing,
-                last_error: None,
-                snapshot_revision: self.revision,
-                checked_at: None,
-                checkpoint_at: 0,
-                scanned_blocks: 0,
-                target_height: None,
-                observed_tip_height: None,
-                height: None,
-                confirmations: settings.confirmations.get(),
-                max_age_seconds: settings.max_age_seconds,
-                confirmed_pool_balances_zatoshis: None,
-                confirmed_shielded_zatoshis: 0,
-                spendable_shielded_zatoshis: 0,
-            });
-        observation.phase = SyncPhase::Syncing;
-        observation.confirmations = settings.confirmations.get();
-        observation.max_age_seconds = settings.max_age_seconds;
-        tracing::info!("treasury sync: synchronizing wallet with indexer");
-        self.checkpoint(observation.clone()).await?;
-        let session = SyncSession {
-            identity: crate::network::IsolationId::treasury(
-                &self.store.call(|s| Ok(s.id().to_owned())).await?,
-            ),
-            network: self.network,
-            client: self
-                .client
-                .take()
-                .context("treasury sync interrupted; reopen required")?,
-            store: self.store.clone(),
-            revision: self.revision,
-        };
-        let cancelled = stop.child_token();
-        let _cancel_on_drop = cancelled.clone().drop_guard();
-        // Upstream sync launches detached fetch/mempool tasks. Isolate each cycle
-        // so cancellation/error cannot leave those tasks connected on the MCP runtime.
-        let (session, mut observation, outcome) =
-            tokio::task::spawn_blocking(move || session.run(settings, observation, cancelled))
-                .await
-                .context("treasury sync worker failed")??;
-        self.revision = session.revision;
-        self.client = Some(session.client);
-        observation.phase = if stop.is_cancelled() {
-            SyncPhase::Offline
-        } else if outcome.is_ok() {
-            SyncPhase::Ready
-        } else {
-            SyncPhase::Failed
-        };
-        observation.last_error = outcome.as_ref().err().map(|e| e.to_string());
-        tracing::debug!("treasury sync: saving final wallet checkpoint");
-        let height = observation.height;
-        let observed_tip_height = observation.observed_tip_height;
-        let scanned_blocks = observation.scanned_blocks;
-        self.checkpoint(observation).await?;
-        self.healthy = true;
-        if outcome.is_ok() && !stop.is_cancelled() {
-            self.reusable_sync_revision = Some(self.revision);
-            self.last_completed_sync = Some(tokio::time::Instant::now());
-            tracing::info!(
-                height,
-                observed_tip_height,
-                scanned_blocks,
-                "treasury sync: synchronization completed; wallet checkpoint saved"
-            );
-        } else {
-            tracing::debug!("treasury sync: wallet checkpoint saved after interruption or failure");
+        loop {
+            let mut observation = self
+                .store
+                .call(|s| s.treasury_sync_state())
+                .await?
+                .sync
+                .map(|sync| sync.into_observation())
+                .unwrap_or(SyncObservation {
+                    phase: SyncPhase::Syncing,
+                    last_error: None,
+                    snapshot_revision: self.revision,
+                    checked_at: None,
+                    checkpoint_at: 0,
+                    scanned_blocks: 0,
+                    target_height: None,
+                    observed_tip_height: None,
+                    height: None,
+                    confirmations: settings.confirmations.get(),
+                    max_age_seconds: settings.max_age_seconds,
+                    confirmed_pool_balances_zatoshis: None,
+                    confirmed_shielded_zatoshis: 0,
+                    spendable_shielded_zatoshis: 0,
+                });
+            observation.phase = SyncPhase::Syncing;
+            observation.confirmations = settings.confirmations.get();
+            observation.max_age_seconds = settings.max_age_seconds;
+            tracing::info!("treasury sync: synchronizing wallet with indexer");
+            self.checkpoint(observation.clone()).await?;
+            let session = SyncSession {
+                identity: crate::network::IsolationId::treasury(
+                    &self.store.call(|s| Ok(s.id().to_owned())).await?,
+                ),
+                network: self.network,
+                client: self
+                    .client
+                    .take()
+                    .context("treasury sync interrupted; reopen required")?,
+                store: self.store.clone(),
+                revision: self.revision,
+                observation_start: None,
+            };
+            let cancelled = stop.child_token();
+            let _cancel_on_drop = cancelled.clone().drop_guard();
+            // Upstream sync launches detached fetch/mempool tasks. Isolate each cycle
+            // so cancellation/error cannot leave those tasks connected on the MCP runtime.
+            let scan_settings = settings.clone();
+            let (session, mut observation, outcome) = tokio::task::spawn_blocking(move || {
+                session.run(scan_settings, observation, cancelled)
+            })
+            .await
+            .context("treasury sync worker failed")??;
+            self.revision = session.revision;
+            let observation_start = session.observation_start;
+            self.client = Some(session.client);
+            observation.phase = if stop.is_cancelled() {
+                SyncPhase::Offline
+            } else if outcome.is_ok() {
+                SyncPhase::Ready
+            } else {
+                SyncPhase::Failed
+            };
+            observation.last_error = outcome.as_ref().err().map(|e| e.to_string());
+            tracing::debug!("treasury sync: saving final wallet checkpoint");
+            let height = observation.height;
+            let observed_tip_height = observation.observed_tip_height;
+            let scanned_blocks = observation.scanned_blocks;
+            if observation.phase == SyncPhase::Ready {
+                let start =
+                    observation_start.context("successful sync lacks observation origin")?;
+                let fresh = self.checkpoint_observed(observation, start).await?;
+                if !fresh && !stop.is_cancelled() {
+                    tracing::info!(
+                        stage = "freshness_catch_up",
+                        "Treasury checkpoint retained; acquiring fresh spending evidence"
+                    );
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+            } else {
+                self.checkpoint(observation).await?;
+            }
+            self.healthy = true;
+            if outcome.is_ok() && !stop.is_cancelled() {
+                self.reusable_sync_revision = Some(self.revision);
+                self.last_completed_sync = Some(tokio::time::Instant::now());
+                tracing::info!(
+                    height,
+                    observed_tip_height,
+                    scanned_blocks,
+                    "treasury sync: synchronization completed; wallet checkpoint saved"
+                );
+            } else {
+                tracing::debug!(
+                    "treasury sync: wallet checkpoint saved after interruption or failure"
+                );
+            }
+            return outcome;
         }
-        outcome
     }
     /// One owner periodically syncs while Base payment admission remains independent.
     pub async fn run_sync(mut self, stop: CancellationToken) -> Result<()> {
@@ -548,6 +607,7 @@ impl Treasury {
 }
 
 struct SyncSession {
+    observation_start: Option<crate::rotation::store::SyncObservationStart>,
     identity: crate::network::IsolationId,
     network: TreasuryNetwork,
     client: LightClient,
@@ -624,6 +684,9 @@ impl SyncSession {
             .context("indexer connection failed")?;
         tracing::debug!("treasury sync: indexer connected; checking network and chain tip");
         self.client.set_indexer(indexer.clone());
+        let started =
+            crate::rotation::store::SyncObservationStart::capture(settings.max_age_seconds)?;
+        self.observation_start = None;
         let info = indexer
             .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
             .await
@@ -633,8 +696,7 @@ impl SyncSession {
             "indexer is not on mainnet"
         );
         let target_height = info.block_height;
-        let checked_at = now()?;
-        let started = std::time::Instant::now();
+        let checked_at = started.checked_at();
         tracing::debug!(
             target_height,
             "treasury sync: network and chain tip verified; checking indexer capabilities"
@@ -661,7 +723,7 @@ impl SyncSession {
                 result = self.client.await_sync() => break result.map_err(|error| {
                     diagnostics::client_failure(error, false).context(diagnostics::SyncProgress {
                         phase: "scan",
-                        elapsed_ms: started.elapsed().as_millis() as u64,
+                        elapsed_ms: started.elapsed().unwrap_or_default().as_millis() as u64,
                         target_height,
                         scanned_blocks: self.client.latest_sync_status().map_or(0, |p| u64::from(p.total_blocks_scanned)),
                     })
@@ -674,7 +736,7 @@ impl SyncSession {
                     tracing::info!(
                         target_height,
                         scanned_blocks = observation.scanned_blocks,
-                        elapsed_seconds = started.elapsed().as_secs(),
+                        elapsed_seconds = started.elapsed()?.as_secs(),
                         "treasury sync: scan in progress; wallet checkpoint saved"
                     );
                 }
@@ -704,7 +766,7 @@ impl SyncSession {
             target_height,
             height,
             info.block_height,
-            started.elapsed(),
+            started.elapsed()?,
             settings.max_age_seconds,
         )?;
         server::check_endpoint(
@@ -809,7 +871,7 @@ impl SyncSession {
             target_height,
             height,
             info.block_height,
-            started.elapsed(),
+            started.elapsed()?,
             settings.max_age_seconds,
         )?;
         if lag > 0 {
@@ -821,6 +883,10 @@ impl SyncSession {
                 "treasury sync accepted with bounded tip lag; background sync will continue"
             );
         }
+        if !started.fresh(now()?)? {
+            return Err(freshness::FreshObservationRequired.into());
+        }
+        self.observation_start = Some(started);
         observation.checked_at = Some(checked_at);
         observation.height = Some(height);
         Ok(())

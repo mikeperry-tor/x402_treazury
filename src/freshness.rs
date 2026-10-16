@@ -27,6 +27,16 @@ impl ObservationClock {
         Ok(Self { wall, elapsed })
     }
 
+    pub(crate) fn wall_seconds(self) -> u64 {
+        self.wall.as_secs()
+    }
+
+    pub(crate) fn elapsed(self) -> Result<Duration> {
+        elapsed_now()?
+            .checked_sub(self.elapsed)
+            .context("elapsed clock regressed")
+    }
+
     fn deadline(self, valid_until: u64) -> Duration {
         // Existing wall checks accept the entire valid_until second.
         let end = Duration::from_secs(valid_until).saturating_add(Duration::from_secs(1));
@@ -61,6 +71,16 @@ impl FreshnessLease {
                 elapsed_override: None,
             })),
         }
+    }
+
+    pub(crate) fn from_observation_window(origin: ObservationClock, window: Duration) -> Self {
+        let lease = Self::from_observation(origin, u64::MAX);
+        // Sync's existing elapsed contract accepts equality at the exact window.
+        lease.state.lock().expect("new lease").deadline = origin
+            .elapsed
+            .saturating_add(window)
+            .saturating_add(Duration::from_nanos(1));
+        lease
     }
 
     pub(crate) fn is_fresh(&self, wall_now: u64, valid_until: u64) -> Result<bool> {

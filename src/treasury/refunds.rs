@@ -325,7 +325,9 @@ impl Treasury {
             status
                 .sync
                 .as_ref()
-                .is_some_and(|s| now().is_ok_and(|at| s.fresh(at, status.snapshot_revision)))
+                .map(|s| s.fresh(now()?, status.snapshot_revision))
+                .transpose()?
+                .unwrap_or(false)
                 && !status.outgoing_pending,
             "treasury not ready for shielding"
         );

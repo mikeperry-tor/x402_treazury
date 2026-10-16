@@ -30,7 +30,10 @@ impl Store {
             |row| row.get(0),
         )?;
         ensure!(
-            current_revision == revision && sync.fresh(instant, revision),
+            current_revision == revision
+                && self
+                    .runtime_sync_observation(sync.clone())
+                    .fresh(instant, revision)?,
             "expiry recovery requires fresh unchanged snapshot"
         );
         ensure!(
@@ -123,11 +126,13 @@ mod tests {
         assert!(!s.funding_facts(&job.id, &job.operation_id)?.status_needed());
         s.request_broadcast(&job.operation_id, 1, 1, false)?;
         assert!(s.funding_facts(&job.id, &job.operation_id)?.status_needed());
+        let start = SyncObservationStart::capture(300)?;
+        let instant = start.checked_at();
         let observation = SyncObservation {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: 2,
-            checked_at: Some(100),
+            checked_at: Some(instant),
             checkpoint_at: 100,
             scanned_blocks: 22,
             target_height: Some(22),
@@ -141,16 +146,16 @@ mod tests {
         };
         let mut shallow = observation.clone();
         shallow.height = Some(21);
-        s.save_sync_snapshot(2, b"shallow", Some(shallow))?;
-        assert!(s.resolve_expired(&job.operation_id, 3, 100).is_err());
+        s.save_observed_sync_snapshot(2, b"shallow", shallow, start.clone())?;
+        assert!(s.resolve_expired(&job.operation_id, 3, instant).is_err());
         assert!(s.operation_pending(&job.operation_id)?);
         let mut revision = 3;
         for tip in [None, Some(23)] {
             let mut lagged = observation.clone();
             lagged.observed_tip_height = tip;
-            revision = s.save_sync_snapshot(revision, b"lagged", Some(lagged))?;
+            revision = s.save_observed_sync_snapshot(revision, b"lagged", lagged, start.clone())?;
             let error = s
-                .resolve_expired(&job.operation_id, revision, 100)
+                .resolve_expired(&job.operation_id, revision, instant)
                 .unwrap_err();
             assert_eq!(
                 error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>(),
@@ -158,10 +163,19 @@ mod tests {
             );
             assert!(s.operation_pending(&job.operation_id)?);
         }
-        revision = s.save_sync_snapshot(revision, b"synced", Some(observation))?;
-        assert!(s.resolve_expired(&job.operation_id, 2, 100).is_err());
-        assert!(s.resolve_expired(&job.operation_id, revision, 401).is_err());
-        s.resolve_expired(&job.operation_id, revision, 100)?;
+        revision =
+            s.save_observed_sync_snapshot(revision, b"synced", observation.clone(), start.clone())?;
+        assert!(s.resolve_expired(&job.operation_id, 2, instant).is_err());
+        assert!(
+            s.resolve_expired(&job.operation_id, revision, instant + 301)
+                .is_err()
+        );
+        let start = SyncObservationStart::capture(300)?;
+        let mut renewed = observation;
+        let instant = start.checked_at();
+        renewed.checked_at = Some(instant);
+        revision = s.save_observed_sync_snapshot(revision, b"renewed", renewed, start)?;
+        s.resolve_expired(&job.operation_id, revision, instant)?;
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         let facts = s.funding_facts(&job.id, &job.operation_id)?;
         assert!(facts.archived && facts.accepted_quote && facts.source_attempts == 1);
@@ -189,7 +203,7 @@ mod tests {
             job.operation_id
         );
         assert_eq!(s.funding_recovery_count(&job.id)?, 1);
-        s.resolve_expired(&job.operation_id, revision, 100)?;
+        s.resolve_expired(&job.operation_id, revision, instant)?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         assert!(s.confirm_spend(&job.operation_id, 100, 1).is_err());
         let treasury = s.id().to_owned();

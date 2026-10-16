@@ -452,11 +452,13 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
     use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
+    let origin = x402_treazury::rotation::store::SyncObservationStart::capture(10).unwrap();
+    let instant = origin.checked_at();
     let ready = SyncObservation {
         phase: SyncPhase::Ready,
         last_error: None,
         snapshot_revision: 0,
-        checked_at: Some(100),
+        checked_at: Some(instant),
         checkpoint_at: 0,
         scanned_blocks: 1,
         target_height: Some(2_000_000),
@@ -468,13 +470,18 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
         confirmed_shielded_zatoshis: 1_000,
         spendable_shielded_zatoshis: 500,
     };
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_spend_ready(instant, 1).is_err());
     let revision = s
-        .save_sync_snapshot(1, b"synced-wallet", Some(ready.clone()))
+        .save_observed_sync_snapshot(1, b"synced-wallet", ready.clone(), origin)
         .unwrap();
     assert_eq!(revision, 2);
-    s.require_spend_ready(110, 500).unwrap();
-    for (now, amount) in [(111, 1), (99, 1), (100, 501), (100, 0)] {
+    s.require_spend_ready(instant + 10, 500).unwrap();
+    for (now, amount) in [
+        (instant + 11, 1),
+        (instant - 1, 1),
+        (instant, 501),
+        (instant, 0),
+    ] {
         assert!(s.require_spend_ready(now, amount).is_err());
     }
     let mut stale = ready.clone();
@@ -486,28 +493,33 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
     assert_eq!(s.snapshot().unwrap().1.as_slice(), b"synced-wallet");
     assert_eq!(s.status().unwrap().sync.unwrap().phase, SyncPhase::Ready);
     s.save_snapshot(2, b"derived-address").unwrap();
-    assert!(s.require_spend_ready(100, 1).is_err());
-    s.save_sync_snapshot(3, b"resynced", Some(ready.clone()))
+    assert!(s.require_spend_ready(instant, 1).is_err());
+    let origin = x402_treazury::rotation::store::SyncObservationStart::capture(10).unwrap();
+    let mut ready = ready;
+    ready.checked_at = Some(origin.checked_at());
+    s.save_observed_sync_snapshot(3, b"resynced", ready.clone(), origin)
         .unwrap();
     s.reserve("outgoing", None, 1, 100).unwrap();
     s.prepare("outgoing", 4, b"calculated", b"signed-transaction")
         .unwrap();
-    s.save_sync_snapshot(5, b"still-pending", Some(ready))
+    let origin = x402_treazury::rotation::store::SyncObservationStart::capture(10).unwrap();
+    ready.checked_at = Some(origin.checked_at());
+    s.save_observed_sync_snapshot(5, b"still-pending", ready, origin)
         .unwrap();
     assert_eq!(
-        s.require_spend_ready(100, 1).unwrap_err().to_string(),
+        s.require_spend_ready(instant, 1).unwrap_err().to_string(),
         "treasury_send_pending"
     );
     s.confirm_spend("outgoing", 100, 1).unwrap();
     s.set_sync_phase(SyncPhase::Offline).unwrap();
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_spend_ready(instant, 1).is_err());
     let snapshot = s.snapshot().unwrap();
     let id = s.id().to_owned();
     drop(s);
     let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(s.snapshot().unwrap().0, snapshot.0);
     assert_eq!(s.snapshot().unwrap().1, snapshot.1);
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_spend_ready(instant, 1).is_err());
 }
 
 #[test]
@@ -911,12 +923,14 @@ fn actual_spendable_capacity_and_journals_survive_gross_totals_rollover_and_rest
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
-    let fresh = |s: &mut Store, instant: u64| {
+    let fresh = |s: &mut Store, _accounting_time: u64| {
+        let origin = x402_treazury::rotation::store::SyncObservationStart::capture(300).unwrap();
+        let instant = origin.checked_at();
         let revision = s.snapshot().unwrap().0;
-        s.save_sync_snapshot(
+        s.save_observed_sync_snapshot(
             revision,
             b"fresh",
-            Some(SyncObservation {
+            SyncObservation {
                 phase: SyncPhase::Ready,
                 last_error: None,
                 snapshot_revision: revision,
@@ -931,7 +945,8 @@ fn actual_spendable_capacity_and_journals_survive_gross_totals_rollover_and_rest
                 confirmed_pool_balances_zatoshis: None,
                 confirmed_shielded_zatoshis: 1000,
                 spendable_shielded_zatoshis: 1000,
-            }),
+            },
+            origin,
         )
         .unwrap();
     };
@@ -940,26 +955,42 @@ fn actual_spendable_capacity_and_journals_survive_gross_totals_rollover_and_rest
     for day in [1u32, 2] {
         let instant = u64::from(day) * 86400 + 10;
         fresh(&mut s, instant);
-        assert!(s.check_funding_capacity(instant, 1000).is_ok());
-        assert!(s.check_funding_capacity(instant, 1001).is_err());
+        assert!(
+            s.check_funding_capacity(x402_treazury::rotation::base::now().unwrap(), 1000)
+                .is_ok()
+        );
+        assert!(
+            s.check_funding_capacity(x402_treazury::rotation::base::now().unwrap(), 1001)
+                .is_err()
+        );
     }
     let revision = s.snapshot().unwrap().0;
     s.prepare("pending", revision, b"prepared", b"signed")
         .unwrap();
     assert!(
-        s.check_funding_capacity(172810, 1).is_err(),
+        s.check_funding_capacity(x402_treazury::rotation::base::now().unwrap(), 1)
+            .is_err(),
         "unresolved outgoing still owns the treasury"
     );
     s.confirm_spend("pending", 80, 2).unwrap();
     s.confirm_spend("pending", 80, 2).unwrap();
     fresh(&mut s, 172810);
     s.reserve("unprepared", None, 2, 20).unwrap();
-    assert!(s.check_funding_capacity(172810, 1000).is_ok());
+    assert!(
+        s.check_funding_capacity(x402_treazury::rotation::base::now().unwrap(), 1000)
+            .is_ok()
+    );
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     fresh(&mut s, 259210);
-    assert!(s.check_funding_capacity(259210, 1000).is_ok());
-    assert!(s.check_funding_capacity(259210, 1001).is_err());
+    assert!(
+        s.check_funding_capacity(x402_treazury::rotation::base::now().unwrap(), 1000)
+            .is_ok()
+    );
+    assert!(
+        s.check_funding_capacity(x402_treazury::rotation::base::now().unwrap(), 1001)
+            .is_err()
+    );
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     let accounted: (i64, i64, i64, i64) = db
         .query_row(
@@ -1123,11 +1154,13 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     let _guard = tracing::subscriber::set_default(subscriber);
     let dir = tempfile::tempdir().unwrap();
     let mut store = create(dir.path());
+    let origin = x402_treazury::rotation::store::SyncObservationStart::capture(10).unwrap();
+    let instant = origin.checked_at();
     let observation = SyncObservation {
         phase: SyncPhase::Ready,
         last_error: None,
         snapshot_revision: 0,
-        checked_at: Some(100),
+        checked_at: Some(instant),
         checkpoint_at: 0,
         scanned_blocks: 1,
         target_height: Some(2_000_000),
@@ -1140,15 +1173,28 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
         spendable_shielded_zatoshis: 0,
     };
     store
-        .save_sync_snapshot(1, b"empty", Some(observation))
+        .save_observed_sync_snapshot(1, b"empty", observation.clone(), origin)
         .unwrap();
     assert_eq!(
-        store.require_spend_ready(111, 1).unwrap_err().to_string(),
+        store
+            .require_spend_ready(instant + 11, 1)
+            .unwrap_err()
+            .to_string(),
         "treasury_sync_stale"
     );
     assert!(capture.0.lock().unwrap().is_empty());
+    let origin = x402_treazury::rotation::store::SyncObservationStart::capture(10).unwrap();
+    let instant = origin.checked_at();
+    let mut observation = observation;
+    observation.checked_at = Some(instant);
+    store
+        .save_observed_sync_snapshot(2, b"empty-new", observation, origin)
+        .unwrap();
     assert_eq!(
-        store.require_spend_ready(100, 10).unwrap_err().to_string(),
+        store
+            .require_spend_ready(instant, 10)
+            .unwrap_err()
+            .to_string(),
         "treasury_insufficient_spendable_funds"
     );
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();

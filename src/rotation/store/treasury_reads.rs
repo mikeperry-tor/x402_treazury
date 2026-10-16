@@ -3,7 +3,7 @@ use super::*;
 
 pub(crate) struct TreasurySyncState {
     pub snapshot_revision: i64,
-    pub sync: Option<SyncObservation>,
+    pub sync: Option<RuntimeSyncObservation>,
     pub outgoing_pending: bool,
 }
 impl Store {
@@ -30,7 +30,7 @@ impl Store {
         )?;
         Ok(TreasurySyncState {
             snapshot_revision,
-            sync,
+            sync: sync.map(|observation| self.runtime_sync_observation(observation)),
             outgoing_pending,
         })
     }

@@ -221,14 +221,15 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
     let now = x402_treazury::rotation::base::now().unwrap();
-    s.save_sync_snapshot(
+    let start = x402_treazury::rotation::store::SyncObservationStart::capture(300).unwrap();
+    s.save_observed_sync_snapshot(
         1,
         b"ready",
-        Some(SyncObservation {
+        SyncObservation {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: 1,
-            checked_at: Some(now),
+            checked_at: Some(start.checked_at()),
             checkpoint_at: now,
             scanned_blocks: 0,
             target_height: Some(1),
@@ -239,7 +240,8 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 1000,
             spendable_shielded_zatoshis: 1000,
-        }),
+        },
+        start,
     )
     .unwrap();
     let (store, task) = StoreHandle::spawn(s);
@@ -425,14 +427,15 @@ async fn fixture() -> (
     s.defer_funding(&jobs[1].id, i64::MAX as u64, None, false)
         .unwrap();
     let now = x402_treazury::rotation::base::now().unwrap();
-    s.save_sync_snapshot(
+    let start = x402_treazury::rotation::store::SyncObservationStart::capture(3600).unwrap();
+    s.save_observed_sync_snapshot(
         1,
         b"ready",
-        Some(SyncObservation {
+        SyncObservation {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: 1,
-            checked_at: Some(now),
+            checked_at: Some(start.checked_at()),
             checkpoint_at: now,
             scanned_blocks: 1,
             target_height: Some(1),
@@ -443,7 +446,8 @@ async fn fixture() -> (
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 1000,
             spendable_shielded_zatoshis: 1000,
-        }),
+        },
+        start,
     )
     .unwrap();
     let (store, task) = StoreHandle::spawn(s);

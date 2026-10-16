@@ -1044,11 +1044,11 @@ async fn moving_tip_accepts_bounded_lag_and_rejects_excess_or_regression() {
             assert_eq!(observation.height, Some(TIP));
             assert_eq!(observation.confirmations, 7);
             assert!(observation.checked_at.unwrap() >= before);
-            assert!(observation.fresh(
+            assert!(observation.wall_fresh_for_reporting(
                 observation.checked_at.unwrap() + 300,
                 status.snapshot_revision
             ));
-            assert!(!observation.fresh(
+            assert!(!observation.wall_fresh_for_reporting(
                 observation.checked_at.unwrap() + 301,
                 status.snapshot_revision
             ));

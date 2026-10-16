@@ -59,13 +59,18 @@ fairness work remains explicit below. C21's Base freshness lease landed in
 C21 funding authority time is separated from scheduling in `06af797`; C10
 malformed ownership isolation is committed as `e559f28`. C16 preparation
 provenance is committed as `d4d5407` after focused tests and independent review.
+C09 hidden prepared-obligation observation is committed as `1ef6616` with 27
+funding tests passing. C21 treasury freshness, C17 live SDK reconstruction and
+C19 durable observation ownership are now in implementation/review.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
 
 Continue independent reviews at commit gates and land findings as separate fixup
 commits. Full `scripts/check.sh` and final acceptance closure remain outstanding.
-Preserve unrelated untracked user files (`TODO`, local deployment overrides,
+The resumed work also passed all 35 Python tooling tests and both vendor
+provenance verifiers; these do not substitute for the remaining Rust acceptance
+checks. Preserve unrelated untracked user files (`TODO`, local deployment overrides,
 `run_servers.sh`, `similar_projects.md`, and `slow_bootstrap_log.txt`).
 
 ## Recommendation and scope
@@ -1129,6 +1134,23 @@ helper exercised three process-death boundaries. Independent review cleared the
 qualification-retirement and generic-abandonment guards. All-target/all-feature
 Clippy, formatting and diff checks passed. Fresh schema20 adds the
 provenance boundary; there is no automatic state conversion.
+
+**C21 treasury observation lease (implemented and reviewed):** Capture the
+suspend-inclusive elapsed origin before the starting tip RPC and carry the same
+lease through scan, teardown and final snapshot publication. Only the exact
+committed observation/revision receives process-local freshness. Plain persisted
+JSON, reopen and phase restoration cannot mint it; snapshot and phase mutations
+revoke even held preflight clones. Saved `sync_fresh` remains an explicitly labeled
+wall-age diagnostic. Ordinary three-block lag and exact-tip expiry checks remain
+unchanged. A final checkpoint that outlives the original window retains the scan
+and continues incremental catch-up before reporting successful fresh completion.
+
+Validation passed: eight store freshness tests, one expiry regression, 18 rotation
+integration tests, 24 funding tests and 18 treasury-sync tests (one public-network
+test ignored). The actual synthetic-chain final-checkpoint expiry regression also
+passed, proving a second observation/final checkpoint is required before fresh
+capacity and reuse. Independent review found and cleared missing shared-lease
+revocation on the atomic preparation commit; its held-clone regression passed.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a

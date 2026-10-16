@@ -154,7 +154,7 @@ impl Treasury {
         self.sync_for_command(stop).await?;
         let (_, revision, observation) =
             self.store.call(|s| s.funding_preparation_context()).await?;
-        ensure!(observation.fresh(now()?, revision), "treasury_sync_stale");
+        ensure!(observation.fresh(now()?, revision)?, "treasury_sync_stale");
         let height = observation.height.context("missing sync height")?;
         let operation = id.clone();
         let durable = self
@@ -238,7 +238,7 @@ impl Treasury {
             self.store
                 .call(move |s| {
                     let (_, revision, observation) = s.funding_preparation_context()?;
-                    ensure!(observation.fresh(instant, revision), "treasury_sync_stale");
+                    ensure!(observation.fresh(instant, revision)?, "treasury_sync_stale");
                     ensure!(
                         height > 0
                             && observation.height.is_some_and(|tip| tip >= height
@@ -282,14 +282,15 @@ mod tests {
         treasury.revision = treasury
             .store
             .call(move |s| {
-                s.save_sync_snapshot(
+                let start = crate::rotation::store::SyncObservationStart::capture(300)?;
+                s.save_observed_sync_snapshot(
                     1,
                     &bytes,
-                    Some(SyncObservation {
+                    SyncObservation {
                         phase: SyncPhase::Ready,
                         last_error: None,
                         snapshot_revision: 1,
-                        checked_at: Some(now()?),
+                        checked_at: Some(start.checked_at()),
                         checkpoint_at: 0,
                         scanned_blocks: 1,
                         target_height: Some(2_000_000),
@@ -300,7 +301,8 @@ mod tests {
                         confirmed_pool_balances_zatoshis: None,
                         confirmed_shielded_zatoshis: 1_000_000,
                         spendable_shielded_zatoshis: 1_000_000,
-                    }),
+                    },
+                    start,
                 )
             })
             .await

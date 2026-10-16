@@ -738,3 +738,36 @@ fn source_authority_expiry_requires_nonzero_buried_height() {
     assert!(source_expiry_buried(100, 102, 2));
     assert!(!source_expiry_buried(u32::MAX, u64::from(u32::MAX), 2));
 }
+
+#[tokio::test]
+async fn expired_final_checkpoint_retains_scan_and_observes_again_before_success() {
+    let (_dir, _net, mut owner, _endpoint) = funded_fixture(2).await;
+    let before = owner.status().await.unwrap();
+    let hook = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    owner.final_checkpoint_test_hook = Some(hook.clone());
+    owner.sync_once(&CancellationToken::new()).await.unwrap();
+    assert_eq!(
+        hook.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the expired final checkpoint must be retained and followed by a new successful observation"
+    );
+    let after = owner.status().await.unwrap();
+    assert!(after.snapshot_revision >= before.snapshot_revision + 4);
+    assert_eq!(
+        after.sync.as_ref().unwrap().height,
+        before.sync.as_ref().unwrap().height
+    );
+    assert_eq!(
+        after.sync.as_ref().unwrap().spendable_shielded_zatoshis,
+        before.sync.as_ref().unwrap().spendable_shielded_zatoshis
+    );
+    assert!(!after.outgoing_pending);
+    assert!(after.treasury_operations.is_empty());
+    owner
+        .store
+        .call(|s| s.require_spend_ready(now()?, 1))
+        .await
+        .unwrap();
+    assert_eq!(owner.reusable_sync_revision, Some(after.snapshot_revision));
+    owner.close().await.unwrap();
+}

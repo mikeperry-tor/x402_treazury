@@ -92,7 +92,7 @@ impl Treasury {
         freshness::require_current_tip(&sync)?;
         let height = sync.height.context("missing sync height")?;
         ensure!(
-            sync.fresh(now()?, status.snapshot_revision),
+            sync.fresh(now()?, status.snapshot_revision)?,
             crate::rotation::transaction::RecoveryEvidenceError::StaleSync
         );
         let facts = prepared.facts().context("operation facts missing")?;
@@ -118,7 +118,7 @@ impl Treasury {
         freshness::require_current_tip(&sync)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
-            sync.fresh(now()?, status.snapshot_revision)
+            sync.fresh(now()?, status.snapshot_revision)?
                 && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ChainChanged
         );

@@ -487,9 +487,12 @@ impl FundingBackend for Backend {
         // drives confirmation; another waiting quote must not duplicate scans.
         let instant = now()?;
         if !state.outgoing_pending
-            && state
+            && !state
                 .sync
-                .is_none_or(|sync| !sync.fresh(instant, state.snapshot_revision))
+                .as_ref()
+                .map(|sync| sync.fresh(instant, state.snapshot_revision))
+                .transpose()?
+                .unwrap_or(false)
         {
             self.treasury.sync().await?;
         }
