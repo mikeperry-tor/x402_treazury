@@ -593,6 +593,19 @@ credential failure with immediate treasury reopen. Independent listener service 
 deferred publication remain pending; this change removes only the spending-before-bind
 ordering hazard.
 
+**C08 retained-catalog continuation prerequisite (reviewed contract):** Split
+catalog loading into an unsigned cache/origin phase and an owned relay continuation.
+The unsigned phase retains fresh relay-cache precedence and performs the original
+origin load once. Only remote failures with a configured relay become continuations;
+local and no-relay failures stay immediate. A continuation captures the original typed
+failure, immutable request configuration, same shared relay and exact cache slot.
+Resumption performs relay fetch, parse and cache publication without origin I/O or
+validator refresh. The strict loader composes both phases once, preserving inspection
+and qualification behavior. The HTTP-status/parse-failure fixture matrix verifies zero
+relay calls during preparation, concurrent resumptions sharing one payment, no repeat
+origin requests, immutable caller configuration and relay-only cache provenance.
+Deferred startup scheduling and dependency notifications remain pending.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
