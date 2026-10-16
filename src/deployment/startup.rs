@@ -28,10 +28,48 @@ type DownloadKey = (
 type Document = Arc<serde_json::Value>;
 
 #[derive(Clone)]
-struct DeferredDocument(Arc<catalog::RelayContinuation>);
+struct DeferredDocument(Arc<DeferredLoad>);
+struct DeferredLoad {
+    config: catalog::Config,
+    http: reqwest::Client,
+    prepared: OnceCell<std::result::Result<PreparedDocument, SharedFailure>>,
+}
+enum PreparedDocument {
+    Ready(Document),
+    Relay(Box<catalog::RelayContinuation>),
+}
+impl DeferredDocument {
+    async fn resume(&self, gate: Arc<tokio::sync::Semaphore>) -> Result<Document> {
+        let prepared = self
+            .0
+            .prepared
+            .get_or_init(|| async {
+                let _permit = gate.acquire().await.expect("owned catalog gate");
+                catalog::prepare_json_discovery(&self.0.config, &self.0.http)
+                    .await
+                    .map(|prepared| match prepared {
+                        catalog::CatalogLoad::Ready(document) => {
+                            PreparedDocument::Ready(Arc::new(document))
+                        }
+                        catalog::CatalogLoad::RelayPending(pending) => {
+                            PreparedDocument::Relay(pending)
+                        }
+                    })
+                    .map_err(|error| SharedFailure(Arc::new(error)))
+            })
+            .await;
+        match prepared {
+            Ok(PreparedDocument::Ready(document)) => Ok(document.clone()),
+            Ok(PreparedDocument::Relay(pending)) => {
+                Ok(Arc::new(pending.resume_when_ready(gate).await?))
+            }
+            Err(error) => Err(anyhow::Error::new(error.clone())),
+        }
+    }
+}
 impl std::fmt::Debug for DeferredDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("deferred relay catalog")
+        f.write_str("deferred remote catalog")
     }
 }
 impl std::fmt::Display for DeferredDocument {
@@ -47,13 +85,13 @@ pub(super) struct PendingSource {
 }
 impl std::fmt::Display for PendingSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("source awaiting relay catalog")
+        f.write_str("source awaiting remote catalog")
     }
 }
 impl std::error::Error for PendingSource {}
 impl PendingSource {
     pub async fn resume(&self, id: &str, gate: Arc<tokio::sync::Semaphore>) -> Result<Source> {
-        let document = Arc::new(self.document.0.resume_when_ready(gate).await?);
+        let document = self.document.resume(gate).await?;
         Source::from_document(id, self.config.clone(), document)
     }
 }
@@ -119,13 +157,12 @@ impl Downloads {
         // No detached tasks: cancellation drops the initializer and its HTTP request.
         cell.get_or_init(|| async {
             let result = if self.defer {
-                match catalog::prepare_json_discovery(cfg, http).await {
-                    Ok(catalog::CatalogLoad::Ready(doc)) => Ok(doc),
-                    Ok(catalog::CatalogLoad::RelayPending(pending)) => {
-                        Err(DeferredDocument(Arc::from(pending)).into())
-                    }
-                    Err(error) => Err(error),
-                }
+                Err(DeferredDocument(Arc::new(DeferredLoad {
+                    config: cfg.clone(),
+                    http: http.clone(),
+                    prepared: OnceCell::new(),
+                }))
+                .into())
             } else {
                 catalog::load_json_discovery(cfg, http).await
             };
@@ -639,3 +676,80 @@ pub(super) async fn warm(
 
 #[cfg(test)]
 mod warm_tests;
+
+#[cfg(test)]
+mod deferred_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn remote_aliases_defer_io_and_share_one_origin_request() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let cfg = catalog::Config {
+            spec: format!("http://{}/spec", listener.local_addr().unwrap()),
+            http_cache_enabled: false,
+            ..Default::default()
+        };
+        let downloads = Downloads {
+            defer: true,
+            ..Default::default()
+        };
+        let http = reqwest::Client::new();
+        let pending = |error: anyhow::Error| {
+            error
+                .downcast_ref::<SharedFailure>()
+                .unwrap()
+                .0
+                .downcast_ref::<DeferredDocument>()
+                .unwrap()
+                .clone()
+        };
+        let first = pending(downloads.load("a", &cfg, &http).await.unwrap_err());
+        let second = pending(downloads.load("b", &cfg, &http).await.unwrap_err());
+        assert!(Arc::ptr_eq(&first.0, &second.0));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+        let (accepted, observed) = tokio::sync::oneshot::channel();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let origin = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(stream.read(&mut bytes).await.unwrap() > 0);
+            accepted.send(()).unwrap();
+            wait.await.unwrap();
+            let body = r#"{"operations":[]}"#;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            listener
+        });
+        let gate = Arc::new(tokio::sync::Semaphore::new(1));
+        let task_gate = gate.clone();
+        let resumes = tokio::spawn(async move {
+            tokio::join!(first.resume(task_gate.clone()), second.resume(task_gate))
+        });
+        observed.await.unwrap();
+        assert_eq!(gate.available_permits(), 0);
+        release.send(()).unwrap();
+        let (a, b) = resumes.await.unwrap();
+        assert!(Arc::ptr_eq(&a.unwrap(), &b.unwrap()));
+        assert_eq!(gate.available_permits(), 1);
+        let listener = origin.await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+}
