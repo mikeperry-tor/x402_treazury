@@ -33,6 +33,7 @@ pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvid
 pub mod refunds;
 pub(crate) mod scheduling;
 pub(crate) mod selection;
+pub(crate) mod shielding;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
 use alloy_primitives::U256;
@@ -858,7 +859,7 @@ impl Store {
             snapshot,
             raw,
             Some(facts),
-            Some(owner),
+            Some((owner, None)),
         )
     }
     fn prepare_bound(
@@ -868,8 +869,19 @@ impl Store {
         snapshot: &[u8],
         raw: &[u8],
         facts: Option<TransactionFacts>,
-        owner: Option<&preparation::Preparation>,
+        owned: Option<(&preparation::Preparation, Option<&shielding::Binding>)>,
     ) -> Result<i64> {
+        let owner = owned.map(|(owner, _)| owner);
+        let shielding = owned.and_then(|(_, binding)| binding);
+        if let Some(binding) = shielding {
+            binding.check(
+                &self.db,
+                id,
+                facts.as_ref().context("shielding facts missing")?,
+            )?;
+            #[cfg(feature = "zcash")]
+            binding.check_transaction(raw, facts.as_ref().unwrap())?;
+        }
         preparation::check_commit(&self.db, id, expected_revision, owner)?;
         ensure!(
             !raw.is_empty() && !snapshot.is_empty(),
@@ -909,6 +921,9 @@ impl Store {
             );
             if let Some(facts) = facts {
                 ensure!(self.operation(id)?.facts == facts, "operation_conflict");
+            }
+            if let Some(binding) = shielding {
+                binding.check_saved(&self.db, &self.key, &self.id, self.network.name(), id)?;
             }
             return Ok(revision);
         }
@@ -991,6 +1006,9 @@ impl Store {
                 "UPDATE budget_entries SET reserved=?1 WHERE id=?2",
                 params![i64::try_from(cost)?, id],
             )?;
+        }
+        if let Some(binding) = shielding {
+            binding.insert(&tx, &self.key, &self.id, self.network.name(), id)?;
         }
         tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
         tx.commit()?;

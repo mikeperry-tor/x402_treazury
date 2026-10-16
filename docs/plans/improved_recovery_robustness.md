@@ -76,8 +76,9 @@ as `55d5b3b`, with cleanup ownership fixup `0f36e2f` and historical reporting fi
 `110f2e0`. Its final manager gate passed 72 tests with one ignored helper. The remaining
 exact-revalidation fallback was removed in `525069f` after six repair and 17
 replacement tests passed. C18 validated provider observations (`891f848`) and canonical Base delivery verification
-(`63354df`) are committed prerequisites; durable delivery publication and C20 automatic
-shielding remain under implementation with reviewed contracts below.
+(`63354df`) are committed prerequisites; durable delivery publication is committed
+as `4585782`. C20 owned manual-shielding calculation is implemented below; automatic
+shielding and canonical source/return support remain under implementation.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
@@ -1452,6 +1453,25 @@ free its original inputs for reselection while its old signed bytes could still 
 valid: immutable input ownership survives outgoing RESOLVED until canonical closure
 or expiry proves reassignment safe. These are implementation requirements, not new
 spending ceilings or reasons to require completed provider attribution.
+
+**C20 owned shielding calculation (implemented and reviewed):** Schema22 stores
+immutable operation/policy/address and exact outpoint/value/script bindings beside
+the existing outgoing journal. Manual shielding now uses C16 calculate-only ownership
+and atomic publication of these bindings, signed bytes, facts, snapshot and fee-only
+reservation. It checks SDK ownership, confirmation, unspent status, one original
+address, exact raw inputs, no transparent outputs and owned shielded output/value
+balance. Original transparent principal is not charged again. Input claims survive
+confirmation and reopen; only canonical expiry can release them. Qualification
+permits, including positive source-funding permits, cannot authorize shielding.
+Failure retires the SDK before proven owner cleanup; accepted commits remain intact.
+
+Independent review is clear. Four store tests passed, and a real synthetic-chain
+proving test passed both injected commit rollback and successful fee-only publication
+with exact-byte reopen. This gate retains the existing manual attribution check and
+one-day submission deadline. Next gates replace that invented internal-transfer
+deadline with typed expiry-only authority, implement canonical source/input reorg
+support, and activate automatic owned-input maintenance under explicit serving policy.
+No automatic shielding or full T30 acceptance is claimed yet.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a
