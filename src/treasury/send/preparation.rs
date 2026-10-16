@@ -139,7 +139,7 @@ impl Treasury {
                 expiry_height: transaction.expiry_height().into(),
                 amount_zatoshis: request.amount_zatoshis,
                 fee_zatoshis: fee,
-                deadline: request.deadline,
+                deadline: Some(request.deadline),
             };
             ensure!(facts.expiry_height > 0, "unbounded transaction expiry");
             (raw, facts)

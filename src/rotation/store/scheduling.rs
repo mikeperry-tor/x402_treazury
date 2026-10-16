@@ -164,6 +164,7 @@ impl Store {
             self.operation(operation)?
                 .facts
                 .deadline
+                .context("source delivery deadline missing")?
                 .saturating_sub(instant)
                 < super::super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
             "prepared quote window remains usable"

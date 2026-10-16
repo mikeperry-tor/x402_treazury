@@ -240,7 +240,7 @@ mod tests {
                 expiry_height: 20,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )?;
         s.confirm_spend(&job.operation_id, 100, 1)?;
@@ -320,7 +320,7 @@ mod tests {
                 expiry_height: 20,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )?;
         let refund = RefundStatus {

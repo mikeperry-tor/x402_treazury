@@ -90,6 +90,7 @@ pub struct PreparedTransaction {
     recipient_identity: Option<String>,
     raw: Zeroizing<Vec<u8>>,
     facts: Option<TransactionFacts>,
+    window: Option<SubmissionWindow>,
 }
 impl PreparedTransaction {
     pub fn load(store: &Store, operation_id: &str) -> Result<Self> {
@@ -97,17 +98,29 @@ impl PreparedTransaction {
             store.operation_pending(operation_id)?,
             "transaction is not pending"
         );
+        let facts = store.operation_facts(operation_id)?;
+        let window = facts
+            .as_ref()
+            .map(|facts| SubmissionWindow::load(store, operation_id, facts))
+            .transpose()?;
         Ok(Self {
             operation_id: operation_id.into(),
             recipient_identity: store.operation_recipient(operation_id)?,
             raw: store.prepared_bytes(operation_id)?,
-            facts: store.operation_facts(operation_id)?,
+            facts,
+            window,
         })
     }
     pub fn network_identity(&self) -> Result<crate::network::IsolationId> {
         crate::network::IsolationId::evm(self.recipient_identity.as_deref().ok_or_else(|| {
             anyhow::anyhow!("network_identity_missing: durable operation recipient")
         })?)
+    }
+    pub(crate) fn check_submission_window(&self, now: u64, first: bool) -> Result<()> {
+        self.window
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("durable transaction metadata missing"))?
+            .check(now, first)
     }
     pub fn facts(&self) -> Option<&TransactionFacts> {
         self.facts.as_ref()
@@ -117,6 +130,31 @@ impl PreparedTransaction {
     }
     pub fn bytes(&self) -> &[u8] {
         &self.raw
+    }
+}
+
+/// Derived from the immutable journal, never caller-provided transaction facts.
+/// Only a validated internal shielding header removes the delivery deadline.
+pub(crate) struct SubmissionWindow(Option<u64>);
+impl SubmissionWindow {
+    pub(crate) fn load(store: &Store, id: &str, facts: &TransactionFacts) -> Result<Self> {
+        if store.validated_internal_shielding(id, facts)? {
+            Ok(Self(None))
+        } else {
+            Ok(Self(Some(facts.deadline.ok_or_else(|| {
+                anyhow::anyhow!("source delivery deadline missing")
+            })?)))
+        }
+    }
+    pub(crate) fn check(&self, now: u64, first: bool) -> Result<()> {
+        if let Some(deadline) = self.0 {
+            ensure!(now < deadline, "funding_deadline_expired");
+            ensure!(
+                !first || deadline - now >= MIN_QUOTE_VALIDITY_SECONDS,
+                "funding_deadline_too_close"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -203,7 +241,8 @@ pub struct TransactionFacts {
     pub expiry_height: u32,
     pub amount_zatoshis: u64,
     pub fee_zatoshis: u64,
-    pub deadline: u64,
+    /// External delivery deadline; internal shielding is governed by block expiry.
+    pub deadline: Option<u64>,
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OperationStatus {

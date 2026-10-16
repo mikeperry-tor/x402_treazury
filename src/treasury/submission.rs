@@ -101,18 +101,7 @@ impl TransactionSubmission for GrpcSubmission {
             tip.height < u64::from(facts.expiry_height),
             "transaction_expired"
         );
-        ensure!(
-            facts
-                .deadline
-                .checked_sub(crate::rotation::base::now()?)
-                .is_some_and(|remaining| remaining
-                    >= if rebroadcast {
-                        1
-                    } else {
-                        crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS
-                    }),
-            "funding_deadline_expired"
-        );
+        transaction.check_submission_window(crate::rotation::base::now()?, !rebroadcast)?;
         self.ready = Some((transaction.operation_id().to_owned(), client, tip.height));
         Ok(())
     }
@@ -144,18 +133,7 @@ impl TransactionSubmission for GrpcSubmission {
             // Network readiness completed before durable intent. A second unsigned
             // tip read here could strand a never-sent operation as UNKNOWN.
             // Retain immediate local expiry checks without new I/O.
-            ensure!(
-                facts
-                    .deadline
-                    .checked_sub(crate::rotation::base::now()?)
-                    .is_some_and(|remaining| remaining
-                        >= if first_attempt {
-                            crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS
-                        } else {
-                            1
-                        }),
-                "funding_deadline_expired"
-            );
+            transaction.check_submission_window(crate::rotation::base::now()?, first_attempt)?;
             client
                 .send_transaction(
                     RawTransaction {

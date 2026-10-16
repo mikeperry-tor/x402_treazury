@@ -89,7 +89,7 @@ mod tests {
             expiry_height: 10,
             amount_zatoshis: 1,
             fee_zatoshis: 1,
-            deadline: 100,
+            deadline: Some(100),
         })
         .unwrap();
         let insert = |id: &str, submission: &str, facts: &str| {

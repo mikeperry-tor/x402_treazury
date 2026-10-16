@@ -152,7 +152,7 @@ impl FundingBackend for Fake {
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
-                        deadline,
+                        deadline: Some(deadline),
                     }),
                 )?;
                 Ok(())
@@ -358,7 +358,7 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
             expiry_height: 100,
             amount_zatoshis: 50,
             fee_zatoshis: 10,
-            deadline: u64::MAX,
+            deadline: Some(u64::MAX),
         }),
     )
     .unwrap();

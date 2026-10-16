@@ -45,7 +45,7 @@ fn populated(dir: &Path) -> Store {
                 expiry_height: 100,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )
         .unwrap();
@@ -460,7 +460,7 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
                     expiry_height: 100,
                     amount_zatoshis: 70,
                     fee_zatoshis: 20,
-                    deadline: 1000
+                    deadline: Some(1000)
                 })
             )
             .is_err()
@@ -482,7 +482,7 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
                 expiry_height: 100,
                 amount_zatoshis: 70,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )
         .unwrap();

@@ -119,7 +119,7 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
         expiry_height: 100,
         amount_zatoshis: 80,
         fee_zatoshis: 20,
-        deadline: 1000,
+        deadline: Some(1000),
     };
     s.prepare_with_facts("accepted", 1, b"saved", b"saved bytes", Some(facts.clone()))
         .unwrap();

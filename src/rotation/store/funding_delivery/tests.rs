@@ -60,7 +60,7 @@ impl Fixture {
             expiry_height: 100,
             amount_zatoshis: 100000,
             fee_zatoshis: 1000,
-            deadline: 1893456000,
+            deadline: Some(1893456000),
         };
         store
             .db

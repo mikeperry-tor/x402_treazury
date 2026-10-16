@@ -158,7 +158,7 @@ impl FundingBackend for Funding {
                         expiry_height: 100,
                         amount_zatoshis: 80,
                         fee_zatoshis: 20,
-                        deadline: u64::MAX,
+                        deadline: Some(u64::MAX),
                     }),
                 )?;
                 Ok(())

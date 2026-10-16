@@ -292,7 +292,13 @@ impl<B: FundingBackend> FundingWorker<B> {
                 let id = current.operation_id.clone();
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
                 let authority_now = now()?;
-                if !quote_window_available(operation.facts.deadline, authority_now) {
+                if !quote_window_available(
+                    operation
+                        .facts
+                        .deadline
+                        .context("source delivery deadline missing")?,
+                    authority_now,
+                ) {
                     let error = anyhow::anyhow!("prepared_quote_window_exhausted");
                     let diagnostic = safe_error(&error, &current.phase);
                     let (id, operation) = (current.id.clone(), current.operation_id.clone());

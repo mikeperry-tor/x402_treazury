@@ -26,7 +26,7 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
                 expiry_height: 20,
                 amount_zatoshis: 150,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )
         .unwrap();
@@ -251,7 +251,7 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
                         expiry_height: 100,
                         amount_zatoshis: 80,
                         fee_zatoshis: 20,
-                        deadline: 1000,
+                        deadline: Some(1000),
                     }),
                 )?;
                 s.confirm_spend(&job.operation_id, 100, 1)?;

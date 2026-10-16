@@ -1833,7 +1833,7 @@ mod completion_tests {
                             expiry_height: 100,
                             amount_zatoshis: 50,
                             fee_zatoshis: 10,
-                            deadline: u64::MAX,
+                            deadline: Some(u64::MAX),
                         }),
                     )
                     .unwrap();
@@ -2397,7 +2397,7 @@ mod completion_tests {
             expiry_height: 100,
             amount_zatoshis: 90,
             fee_zatoshis: 10,
-            deadline: u64::MAX,
+            deadline: Some(u64::MAX),
         };
         store.db.execute("INSERT INTO treasury_operations(id,facts,submission,attempts) VALUES(?1,?2,'CONFIRMED',1)",params![job.operation_id,serde_json::to_string(&facts).unwrap()]).unwrap();
         // A confirmation label alone cannot bypass gross expenditure accounting.
@@ -2462,7 +2462,7 @@ mod completion_tests {
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
-                    deadline: u64::MAX,
+                    deadline: Some(u64::MAX),
                 }),
             )
             .unwrap();

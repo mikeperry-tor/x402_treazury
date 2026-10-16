@@ -142,6 +142,8 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
         } else {
             let prepared = result.unwrap();
             assert_eq!(prepared.facts().unwrap().amount_zatoshis, 0);
+            assert_eq!(prepared.facts().unwrap().deadline, None);
+            prepared.check_submission_window(u64::MAX, true).unwrap();
             let fee = prepared.facts().unwrap().fee_zatoshis;
             assert!(fee > 0 && fee < 100_000);
             assert_eq!(
@@ -173,7 +175,7 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
             );
             let id = treasury.status().await.unwrap().treasury_id;
             let raw = prepared.bytes().to_vec();
-            drop(treasury);
+            treasury.close().await.unwrap();
             let reopened = Treasury::open(state, key, id).await.unwrap();
             let bytes = reopened
                 .store
@@ -181,6 +183,35 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
                 .await
                 .unwrap();
             assert_eq!(&*bytes, &raw);
+            // Historical internal facts may still carry the old numeric timer;
+            // the exact immutable header, inputs and bytes govern their lifetime.
+            let expiry = prepared.facts().unwrap().expiry_height;
+            let mut historical = prepared.facts().unwrap().clone();
+            historical.deadline = Some(1);
+            db.execute(
+                "UPDATE treasury_operations SET facts=?1 WHERE id='shield'",
+                [serde_json::to_string(&historical).unwrap()],
+            )
+            .unwrap();
+            reopened
+                .store
+                .call(move |s| {
+                    let restored = PreparedTransaction::load(s, "shield")?;
+                    restored.check_submission_window(u64::MAX, true)?;
+                    assert!(
+                        s.request_broadcast("shield", u64::MAX, u64::from(expiry), false)
+                            .is_err()
+                    );
+                    assert_eq!(s.operation("shield")?.attempts, 0);
+                    // No RPC occurs: mint intent only, with a still-live block expiry.
+                    assert_eq!(
+                        s.request_broadcast("shield", 100_000, u64::from(expiry) - 1, false)?,
+                        1
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
         }
     }
 }

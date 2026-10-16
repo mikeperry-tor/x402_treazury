@@ -205,7 +205,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
                     expiry_height: 100,
                     amount_zatoshis: 100000,
                     fee_zatoshis: 10000,
-                    deadline: u64::MAX,
+                    deadline: Some(u64::MAX),
                 }),
             )?;
             Ok(())

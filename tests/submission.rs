@@ -193,7 +193,7 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
         expiry_height: 500,
         amount_zatoshis: 50,
         fee_zatoshis: 10,
-        deadline: now().unwrap() + 600,
+        deadline: Some(now().unwrap() + 600),
     };
     store
         .prepare_with_facts("op", 1, b"calculated", &raw, Some(facts))

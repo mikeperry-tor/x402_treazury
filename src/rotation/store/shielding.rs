@@ -192,6 +192,44 @@ impl Binding {
     }
 }
 impl Store {
+    /// Reconstruct the immutable internal transfer contract before granting
+    /// expiry-only submission. An absent deadline or zero amount alone is never authority.
+    pub(crate) fn validated_internal_shielding(
+        &self,
+        operation: &str,
+        facts: &TransactionFacts,
+    ) -> Result<bool> {
+        let header: Option<(String, String, Vec<u8>, i64)> = self.db.query_row(
+            "SELECT policy_pool_id,policy_wallet_id,address,max_fee FROM shielding_operations WHERE operation_id=?1",
+            [operation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        ).optional()?;
+        let Some((pool, wallet, address, max_fee)) = header else {
+            return Ok(false);
+        };
+        let address = unseal(
+            &self.key,
+            &format!(
+                "v1:{}:{}:shielding:{operation}",
+                self.id,
+                self.network.name()
+            ),
+            &address,
+        )?;
+        let policy = Policy {
+            pool,
+            wallet,
+            address: std::str::from_utf8(&address)?.into(),
+            max_fee: u64::try_from(max_fee)?,
+        };
+        let inputs = self.db.prepare("SELECT txid,output_index,amount,script FROM shielding_inputs WHERE operation_id=?1")?
+            .query_map([operation], |r| Ok(Input { txid: r.get(0)?, output_index: r.get(1)?, amount: sql_u64(r,2)?, script: r.get(3)? }))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let binding = Binding::new(policy, inputs, facts.fee_zatoshis)?;
+        binding.check(&self.db, operation, facts)?;
+        #[cfg(feature = "zcash")]
+        binding.check_transaction(&self.prepared_bytes(operation)?, facts)?;
+        Ok(true)
+    }
     /// Explicit CLI preparation only. Automatic policy is a separate capability;
     /// neither generic sync nor a positive source-funding permit grants it.
     pub(crate) fn begin_manual_shielding(

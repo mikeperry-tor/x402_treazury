@@ -21,7 +21,7 @@ fn facts() -> TransactionFacts {
         expiry_height: 200,
         amount_zatoshis: 70,
         fee_zatoshis: 10,
-        deadline: 1000,
+        deadline: Some(1000),
     }
 }
 fn reserve(store: &mut Store, owner: &Preparation) {

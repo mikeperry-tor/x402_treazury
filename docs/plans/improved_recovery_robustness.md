@@ -1467,11 +1467,25 @@ Failure retires the SDK before proven owner cleanup; accepted commits remain int
 
 Independent review is clear. Four store tests passed, and a real synthetic-chain
 proving test passed both injected commit rollback and successful fee-only publication
-with exact-byte reopen. This gate retains the existing manual attribution check and
-one-day submission deadline. Next gates replace that invented internal-transfer
-deadline with typed expiry-only authority, implement canonical source/input reorg
-support, and activate automatic owned-input maintenance under explicit serving policy.
+with exact-byte reopen. This gate retains the existing manual attribution check. The following gate removes
+the invented internal-transfer deadline; canonical source/input reorg support and
+automatic owned-input maintenance under explicit serving policy remain.
 No automatic shielding or full T30 acceptance is claimed yet.
+
+**C20 internal submission constraint (implemented and reviewed):** Transaction facts
+now distinguish an external deadline from no external deadline. Historical numeric
+deadlines remain readable. Only an opaque constraint reconstructed from the immutable
+shielding header, exact inputs, decrypted original address, signed bytes and fee
+permits expiry-only submission. A missing deadline or zero amount alone grants no
+such authority. New manual shielding omits the invented one-day timer. Source funding
+still requires its accepted deadline and shared first-submission margin. The Store,
+gRPC preflight and final local check share that calculation; consensus block expiry
+continues to reject every expired transaction. Automatic shielding is not activated.
+
+Six Store tests passed, and the real synthetic SDK proof/reopen test passed with
+expiry-only submission, legacy header-bound numeric facts and block-expiry rejection.
+The fixture now awaits production owner close before reopening. Independent review
+is clear; no live-funded work was run.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a

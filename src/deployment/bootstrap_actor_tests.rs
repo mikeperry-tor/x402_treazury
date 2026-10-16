@@ -142,7 +142,7 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
                     expiry_height: 3_000_000,
                     amount_zatoshis: 100_000,
                     fee_zatoshis: 10_000,
-                    deadline: instant + 7200,
+                    deadline: Some(instant + 7200),
                 }),
             )?;
             let attempt = s.request_broadcast(&original.operation_id, instant, 2_000_000, false)?;

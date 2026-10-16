@@ -42,7 +42,7 @@ fn facts(fee: u64) -> TransactionFacts {
         expiry_height: 100,
         amount_zatoshis: 0,
         fee_zatoshis: fee,
-        deadline: 1000,
+        deadline: Some(1000),
     }
 }
 fn outgoing(store: &mut Store, operation: &str) {
@@ -265,4 +265,74 @@ fn positive_qualification_permit_does_not_authorize_shielding_mutation() {
             .unwrap(),
         0
     );
+}
+
+#[test]
+fn absent_delivery_deadline_never_grants_source_submission_authority() {
+    let (_dir, mut store, _job, _) = fixture();
+    let mut operation_facts = facts(10);
+    operation_facts.deadline = None;
+    store.reserve("source", None, 0, 10).unwrap();
+    let revision = store.snapshot().unwrap().0;
+    assert!(
+        store
+            .prepare_with_facts(
+                "source",
+                revision,
+                b"next",
+                b"raw",
+                Some(operation_facts.clone())
+            )
+            .is_err()
+    );
+    assert!(!store.operation_pending("source").unwrap());
+    operation_facts.deadline = Some(400);
+    store
+        .prepare_with_facts(
+            "source",
+            revision,
+            b"next",
+            b"raw",
+            Some(operation_facts.clone()),
+        )
+        .unwrap();
+    assert!(store.request_broadcast("source", 101, 99, false).is_err());
+    assert!(store.request_broadcast("source", 100, 100, false).is_err());
+    assert_eq!(store.operation("source").unwrap().attempts, 0);
+    operation_facts.deadline = None;
+    store
+        .db
+        .execute(
+            "UPDATE treasury_operations SET facts=?1 WHERE id='source'",
+            [serde_json::to_string(&operation_facts).unwrap()],
+        )
+        .unwrap();
+    assert!(crate::rotation::transaction::PreparedTransaction::load(&store, "source").is_err());
+    assert!(store.request_broadcast("source", 100, 99, false).is_err());
+    operation_facts.deadline = Some(400);
+    store
+        .db
+        .execute(
+            "UPDATE treasury_operations SET facts=?1 WHERE id='source'",
+            [serde_json::to_string(&operation_facts).unwrap()],
+        )
+        .unwrap();
+    assert_eq!(
+        store.request_broadcast("source", 100, 99, false).unwrap(),
+        1
+    );
+}
+
+#[test]
+fn historical_numeric_deadlines_decode_without_reinterpreting_source_authority() {
+    let historical = r#"{"txid":"old","expiry_height":100,"amount_zatoshis":0,"fee_zatoshis":10,"deadline":200}"#;
+    let decoded: TransactionFacts = serde_json::from_str(historical).unwrap();
+    assert_eq!(decoded.deadline, Some(200));
+    let (_dir, store, _, _) = fixture();
+    let window =
+        crate::rotation::transaction::SubmissionWindow::load(&store, "not-internal", &decoded)
+            .unwrap();
+    assert!(window.check(200, false).is_err());
+    assert!(window.check(199, false).is_ok());
+    assert!(window.check(1, true).is_err());
 }

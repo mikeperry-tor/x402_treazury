@@ -632,9 +632,7 @@ impl Treasury {
                 expiry_height: transaction.expiry_height().into(),
                 amount_zatoshis: 0,
                 fee_zatoshis: fee,
-                deadline: now()?
-                    .checked_add(86400)
-                    .context("shielding deadline overflow")?,
+                deadline: None,
             };
             binding.check_transaction(&raw, &facts)?;
             (raw, facts, binding)

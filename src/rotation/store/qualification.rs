@@ -533,7 +533,7 @@ mod tests {
             expiry_height: 200,
             amount_zatoshis: 90,
             fee_zatoshis: 10,
-            deadline: 5000,
+            deadline: Some(5000),
         };
         store
             .prepare_with_facts(

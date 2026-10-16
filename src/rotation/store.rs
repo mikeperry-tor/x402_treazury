@@ -873,6 +873,10 @@ impl Store {
     ) -> Result<i64> {
         let owner = owned.map(|(owner, _)| owner);
         let shielding = owned.and_then(|(_, binding)| binding);
+        ensure!(
+            shielding.is_some() || facts.as_ref().is_none_or(|facts| facts.deadline.is_some()),
+            "source delivery deadline missing"
+        );
         if let Some(binding) = shielding {
             binding.check(
                 &self.db,
@@ -1990,7 +1994,8 @@ impl Store {
     ) -> Result<i64> {
         ensure!(self.operation_pending(id)?, "transaction is not pending");
         let operation = self.operation(id)?;
-        ensure!(now < operation.facts.deadline, "funding_deadline_expired");
+        super::transaction::SubmissionWindow::load(self, id, &operation.facts)?
+            .check(now, operation.attempts == 0)?;
         ensure!(
             height < u64::from(operation.facts.expiry_height),
             "transaction_expired"
@@ -2006,10 +2011,6 @@ impl Store {
             ensure!(
                 candidate.unwrap_or(true),
                 "funding candidate no longer needs deposit"
-            );
-            ensure!(
-                operation.facts.deadline - now >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
-                "funding_deadline_too_close"
             );
         }
         let attempt = operation

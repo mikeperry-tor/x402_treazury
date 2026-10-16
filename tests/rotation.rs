@@ -608,7 +608,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
         expiry_height: 500,
         amount_zatoshis: 50,
         fee_zatoshis: 10,
-        deadline: 1000,
+        deadline: Some(1000),
     };
     s.reserve("op", None, 0, 100).unwrap();
     let mut too_large = facts.clone();
@@ -862,7 +862,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
             expiry_height: 100,
             amount_zatoshis: 80,
             fee_zatoshis: 20,
-            deadline: 1000,
+            deadline: Some(1000),
         }),
     )
     .unwrap();

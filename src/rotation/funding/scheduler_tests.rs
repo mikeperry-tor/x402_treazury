@@ -519,7 +519,7 @@ fn prepared(store: &mut Store, job: &FundingJob) {
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
-                deadline: u64::MAX,
+                deadline: Some(u64::MAX),
             }),
         )
         .unwrap();
