@@ -76,9 +76,11 @@ further relay spending across all wallets after a possibly submitted payment fai
 or returns an invalid envelope. Waiter cancellation retains serialized ownership
 through terminal outcome publication. Proven pre-submission failures retain bounded retry/backoff and
 do not disable unrelated targets. Local bootstrap metadata avoids
-a catalog dependency cycle. `deployment/bootstrap.rs` supervises initial funding
-and confirmation before ordinary managed serving loads catalogs, and also powers
-`wallet bootstrap`. It retains the same treasury actor and funding worker into serving;
+a catalog dependency cycle. No-relay serving binds listeners before starting funding.
+Enabled-relay serving first reserves every listener socket, then uses
+`deployment/bootstrap.rs` for initial managed funding and confirmation. Explicit
+`wallet bootstrap` remains catalog-free. The relay bootstrap retains the same treasury
+actor and funding worker into serving;
 reserve vacancies follow their exact current claims; there is no separate initial allocation. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#paid-discovery-relay).
@@ -96,8 +98,13 @@ its route, output policy and payer binding so a concurrent catalog replacement
 cannot redirect an in-flight call. Listener filters constrain invocation as well
 as listing. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
-Independent background startup of static sources is still
-[deferred](plans/deferred/independent_provider_startup.md).
+Enabled-relay serving publishes available tools before running retained relay
+catalog continuations and startup pricing. Late sources publish complete listener
+views through the same mutation boundary as dynamic registrations. Instructions
+report pending or unavailable sources; unsigned dependency waits add no timer or
+spending authority. Shutdown drains accepted relay work before financial owners.
+Initial unsigned catalog loading and enabled-relay funding bootstrap still precede
+serving.
 
 ## MCP and output boundaries
 

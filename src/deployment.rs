@@ -97,6 +97,7 @@ pub struct ListenerConfig {
     pub exclude_tools: Vec<String>,
     pub max_response_chars: Option<usize>,
 }
+#[derive(Clone)]
 struct Source {
     config: Config,
     document: std::sync::Arc<serde_json::Value>,
@@ -125,7 +126,9 @@ pub struct InventoryTool {
 }
 pub struct Deployment {
     prebound: BTreeMap<String, TcpListener>,
-    unavailable_sources: BTreeSet<String>,
+    unavailable_sources: BTreeMap<String, String>,
+    pending_sources: BTreeMap<String, startup::PendingSource>,
+    defer_discovery: bool,
     initialized: Option<InitializedWallets>,
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
@@ -535,7 +538,12 @@ impl Deployment {
         crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut deployment = Self {
             prebound: BTreeMap::new(),
-            unavailable_sources: BTreeSet::new(),
+            unavailable_sources: BTreeMap::new(),
+            pending_sources: BTreeMap::new(),
+            defer_discovery: relay_env.is_some()
+                && !crate::qualification::active()
+                && !catalog_evidence::collecting()
+                && config.discovery_relay.as_ref().is_some_and(|p| p.serve),
             initialized: None,
             config,
             wallet_resolution,
@@ -588,14 +596,16 @@ impl Deployment {
                 .await?;
             let config = &deployment.config;
             let wallet_resolution = &deployment.wallet_resolution;
-            let (sources, unavailable_sources) = startup::load(config, path, warn, relay).await?;
+            let (sources, unavailable_sources, pending_sources) =
+                startup::load(config, path, warn, relay, deployment.defer_discovery).await?;
             let mut selected = BTreeMap::new();
             for (name, server) in &config.servers {
                 let tools = select_listener_tools(name, server, &sources, &unavailable_sources)?;
                 selected.insert(name.clone(), tools);
             }
             validate_selected_cover(wallet_resolution, &sources, &selected)?;
-            deployment.unavailable_sources = unavailable_sources.into_keys().collect();
+            deployment.unavailable_sources = unavailable_sources;
+            deployment.pending_sources = pending_sources;
             deployment.sources = sources;
             deployment.selected = selected;
             Ok(())
@@ -632,7 +642,7 @@ impl Deployment {
                 unavailable_sources: s
                     .sources
                     .iter()
-                    .filter(|id| self.unavailable_sources.contains(*id))
+                    .filter(|id| self.unavailable_sources.contains_key(*id))
                     .cloned()
                     .collect(),
                 server: name.clone(),
@@ -689,6 +699,20 @@ impl Deployment {
         Ok(())
     }
 
+    fn pending_wallets(&self) -> BTreeSet<String> {
+        self.config
+            .servers
+            .iter()
+            .flat_map(|(name, listener)| {
+                listener
+                    .sources
+                    .iter()
+                    .filter(|id| self.pending_sources.contains_key(*id))
+                    .map(|id| self.wallet_resolution.bindings[name][id].wallet.clone())
+            })
+            .collect()
+    }
+
     fn static_wallets(
         &self,
         env: &BTreeMap<String, String>,
@@ -709,6 +733,7 @@ impl Deployment {
                 })
             })
             .collect();
+        used_wallets.extend(self.pending_wallets());
         used_wallets.extend(crate::discovery::policy::wallets(&self.config));
         used_wallets.extend(relay_wallets.iter().cloned());
         used_wallets.retain(|name| only_wallets.is_none_or(|selected| selected.contains(name)));
@@ -1102,8 +1127,12 @@ impl Deployment {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             for id in &cfg.sources {
-                if self.unavailable_sources.contains(id) {
-                    instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (remote catalog failed at startup). Its tools are unavailable, not intentionally empty. Restart to retry; no automatic retry is scheduled."));
+                if self.unavailable_sources.contains_key(id) {
+                    if self.pending_sources.contains_key(id) {
+                        instructions.push_str(&format!("\n\nSource {id}: PENDING (catalog discovery is waiting). Its tools will appear when discovery succeeds."));
+                    } else {
+                        instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (catalog discovery failed). Its tools are unavailable, not intentionally empty. Restart to retry."));
+                    }
                 }
             }
             let mut server = Server::from_bindings(
@@ -1232,6 +1261,7 @@ impl Deployment {
         restriction: crate::rotation::restriction::FundingRestriction,
     ) -> Result<()> {
         let secret = |key: &str| required_secret(env, key);
+        let pending_wallets = self.pending_wallets();
         let initialized = self
             .initialized
             .as_mut()
@@ -1275,7 +1305,7 @@ impl Deployment {
                 })
             })
             .collect();
-        for name in needed {
+        for name in needed.into_iter().chain(pending_wallets) {
             if !initialized.wallets.contains_key(&name)
                 && let WalletConfig::Static {
                     private_key_env,
@@ -1298,7 +1328,9 @@ impl Deployment {
         wallets: BTreeMap<String, PaidClient>,
         mut tokens: BTreeMap<String, Option<String>>,
     ) -> Result<BoundListeners> {
-        self.discover_prices().await?;
+        if !self.defer_discovery {
+            self.discover_prices().await?;
+        }
         let mut servers = self.build_servers(&wallets);
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
@@ -1314,6 +1346,9 @@ impl Deployment {
                     "static tool uses reserved namespace"
                 );
             }
+            snapshot
+                .instructions
+                .insert(name.clone(), server.instructions.clone());
             snapshot.views.insert(name.clone(), tools);
         }
         let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
@@ -1375,6 +1410,8 @@ impl Deployment {
         Ok(BoundListeners {
             listeners,
             accepted_work,
+            catalog,
+            manager,
         })
     }
 
@@ -1409,13 +1446,17 @@ impl Deployment {
         let supervisor = initialized.supervisor;
         #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
+        let deferred_wallets = wallets.clone();
         let bound = self.bind_catalog_listeners(wallets, tokens).await;
         let BoundListeners {
             listeners,
             accepted_work,
+            catalog,
+            manager,
         } = match bound {
             Ok(bound) => bound,
             Err(error) => {
+                drop(deferred_wallets);
                 #[cfg(feature = "zcash")]
                 {
                     drop(funding_runtime);
@@ -1434,7 +1475,11 @@ impl Deployment {
                 return Err(error);
             }
         };
+        let deferred = self
+            .defer_discovery
+            .then(|| deferred::Runtime::new(self, deferred_wallets, catalog, manager));
         Ok(RunningDeployment {
+            deferred,
             listeners,
             accepted_work,
             #[cfg(test)]
@@ -1500,7 +1545,7 @@ fn select_listener_tools(
                             "Tool pattern matches nothing"
                         );
                     } else if selector_has_unavailable_owner(text, server, sources, unavailable) {
-                        tracing::warn!(server = name, selector = text, "Tool selector belongs to an unavailable optional source; validate after restart");
+                        tracing::warn!(server = name, selector = text, "Tool selector belongs to an unavailable source; validate when its catalog becomes available");
                     } else {
                         bail!("server {name}: unknown tool selector {text}");
                     }
@@ -1561,6 +1606,8 @@ fn required_secret(env: &BTreeMap<String, String>, key: &str) -> Result<String> 
 }
 
 struct BoundListeners {
+    catalog: std::sync::Arc<crate::catalog_state::CatalogState>,
+    manager: Option<std::sync::Arc<crate::discovery::Manager>>,
     listeners: Vec<(String, TcpListener, axum::Router)>,
     accepted_work: Vec<crate::server::work::Work>,
 }
@@ -1609,6 +1656,7 @@ type FundingRuntime = (
     crate::rotation::funding::FundingWorker<crate::rotation::funding::Backend>,
 );
 pub struct RunningDeployment {
+    deferred: Option<deferred::Runtime>,
     accepted_work: Vec<crate::server::work::Work>,
     #[cfg(test)]
     listener_failure: Option<(String, tokio::sync::oneshot::Receiver<()>)>,
@@ -1730,6 +1778,16 @@ impl RunningDeployment {
                     .with_context(|| format!("server {name} stopped unexpectedly"))
             });
         }
+        let deferred_stop = CancellationToken::new();
+        let _deferred_on_drop = deferred_stop.clone().drop_guard();
+        let deferred_relays = self
+            .deferred
+            .as_ref()
+            .map(|runtime| runtime.relays())
+            .unwrap_or_default();
+        let deferred_task = self
+            .deferred
+            .map(|runtime| tokio::spawn(runtime.run(deferred_stop.clone())));
         let mut funding_stopped = false;
         let result = loop {
             tokio::select! {
@@ -1746,6 +1804,7 @@ impl RunningDeployment {
                 }
             }
         };
+        deferred_stop.cancel();
         crate::server::log_http_shutdown();
         for work in &self.accepted_work {
             work.close();
@@ -1766,6 +1825,20 @@ impl RunningDeployment {
                 }
             }
         );
+        let (deferred_owner, deferred_result) = match deferred_task {
+            Some(task) => match task.await {
+                Ok(owner) => (Some(owner), Ok(())),
+                Err(error) => (
+                    None,
+                    Err(anyhow::Error::new(error).context("deferred discovery worker failed")),
+                ),
+            },
+            None => (None, Ok(())),
+        };
+        for relay in deferred_relays {
+            relay.drain().await;
+        }
+        drop(deferred_owner);
         stop.cancel();
         reconciliation_stop.cancel();
         #[cfg(feature = "zcash")]
@@ -1793,7 +1866,7 @@ impl RunningDeployment {
         if let Some(engine) = &crate::network::global().cover {
             engine.emit_summary();
         }
-        result
+        result.and(deferred_result)
     }
 }
 
@@ -2119,3 +2192,5 @@ mod store_only_tests;
 
 #[cfg(all(test, feature = "zcash"))]
 mod prebind_tests;
+
+mod deferred;

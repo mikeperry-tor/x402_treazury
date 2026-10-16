@@ -58,6 +58,7 @@ impl Server {
             discovery: None,
             discover_on_demand: false,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
+                instructions: Default::default(),
                 generation: 0,
                 views: BTreeMap::from([("default".into(), catalog_state::bind(tools))]),
             })),
@@ -197,9 +198,17 @@ impl Server {
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
-        let mut instructions = pricing_instructions(self.instructions.as_deref());
+        let snapshot = self.catalog.read();
+        let authored = snapshot
+            .instructions
+            .get(&self.catalog_server)
+            .unwrap_or(&self.instructions);
+        let mut instructions = pricing_instructions(authored.as_deref());
         if self.discover_on_demand {
             instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a small limit (default 5) to read complete descriptions and input schemas, then pass the returned tool_ref and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
+        }
+        if self.catalog.publication_failed() {
+            instructions.push_str("\n\nDeferred catalog publication has stopped. Sources listed as PENDING are unavailable until restart.");
         }
         info.instructions = Some(instructions);
         info.server_info = Implementation::new(self.name.clone(), env!("CARGO_PKG_VERSION"));

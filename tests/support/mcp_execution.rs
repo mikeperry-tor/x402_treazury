@@ -57,6 +57,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
         vendor,
     )]);
     m.catalog.publish(CatalogSnapshot {
+        instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([("writer".into(), bound)]),
     });

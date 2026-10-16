@@ -332,3 +332,70 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     task.abort();
 }
+
+#[tokio::test]
+async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = serde_json::from_value(json!({"small":{"funding_amount_usdc":"5"}})).unwrap();
+    let pool = state
+        .ensure_capacity_group("waiting", &reserves, None, 0)
+        .unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let manager = Arc::new(
+        ManagedPool::new(
+            store.clone(),
+            pool,
+            BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
+            crate::payment::SpendPolicy::dollars("1").unwrap(),
+        )
+        .unwrap(),
+    );
+    let (mut waiting, empty, empty_task) = fixture(envelope(TARGET), false, false).await;
+    Arc::get_mut(&mut waiting).unwrap().client = PaidClient::managed(manager.clone());
+    let (mut ready, paid, paid_task) = fixture(envelope(TARGET), false, false).await;
+    let ready_inner = Arc::get_mut(&mut ready).unwrap();
+    ready_inner.key = "independent".into();
+    ready_inner.state = waiting.state.clone();
+    let gate = Arc::new(tokio::sync::Semaphore::new(1));
+    let mut waiters = Vec::new();
+    for _ in 0..140 {
+        let relay = waiting.clone();
+        let gate = gate.clone();
+        waiters.push(tokio::spawn(async move {
+            relay
+                .fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate))
+                .await
+        }));
+    }
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        ready.fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(waiters.iter().all(|waiter| !waiter.is_finished()));
+    assert_eq!(empty.signed.load(Ordering::SeqCst), 0);
+    assert_eq!(paid.signed.load(Ordering::SeqCst), 1);
+    for waiter in waiters {
+        waiter.abort();
+        let _ = waiter.await;
+    }
+    waiting.drain().await;
+    ready.drain().await;
+    assert!(store.call(|s| s.funding_jobs()).await.unwrap().is_empty());
+    drop(waiting);
+    drop(ready);
+    drop(manager);
+    drop(store);
+    worker.await.unwrap();
+    empty_task.abort();
+    paid_task.abort();
+}

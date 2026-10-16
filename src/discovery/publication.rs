@@ -20,8 +20,9 @@ impl Manager {
         let permit = self
             .mutations
             .clone()
-            .try_acquire_owned()
-            .context("mutation_queue_full")?;
+            .acquire_owned()
+            .await
+            .context("mutation_queue_closed")?;
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;

@@ -87,9 +87,11 @@ impl BoundTool {
 #[derive(Clone, Default)]
 pub struct CatalogSnapshot {
     pub generation: u64,
+    pub instructions: BTreeMap<String, Option<String>>,
     pub views: BTreeMap<String, Vec<BoundTool>>,
 }
 pub struct CatalogState {
+    publication_failed: std::sync::atomic::AtomicBool,
     snapshot: RwLock<Arc<CatalogSnapshot>>,
     instance: String,
 }
@@ -101,15 +103,40 @@ impl Default for CatalogState {
 impl CatalogState {
     pub fn new(snapshot: CatalogSnapshot) -> Self {
         Self {
+            publication_failed: Default::default(),
             snapshot: RwLock::new(Arc::new(snapshot)),
             instance: uuid::Uuid::new_v4().to_string(),
         }
+    }
+    pub(crate) fn mark_publication_failed(&self) {
+        self.publication_failed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    pub(crate) fn publication_failed(&self) -> bool {
+        self.publication_failed
+            .load(std::sync::atomic::Ordering::Acquire)
     }
     pub fn instance(&self) -> &str {
         &self.instance
     }
     pub fn read(&self) -> Arc<CatalogSnapshot> {
         self.snapshot.read().expect("catalog lock poisoned").clone()
+    }
+    pub(crate) fn replace_static(
+        &self,
+        expected: u64,
+        mut snapshot: CatalogSnapshot,
+    ) -> Result<u64> {
+        let mut current = self.snapshot.write().expect("catalog lock poisoned");
+        anyhow::ensure!(current.generation == expected, "static_revision_changed");
+        anyhow::ensure!(
+            current.views.keys().eq(snapshot.views.keys()),
+            "static_listener_views_changed"
+        );
+        snapshot.generation = expected.checked_add(1).context("generation exhausted")?;
+        let revision = snapshot.generation;
+        *current = Arc::new(snapshot);
+        Ok(revision)
     }
     pub fn publish(&self, snapshot: CatalogSnapshot) {
         *self.snapshot.write().expect("catalog lock poisoned") = Arc::new(snapshot);
