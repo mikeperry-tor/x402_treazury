@@ -15,9 +15,23 @@ pub(super) struct Runtime {
     can_allocate: bool,
 }
 enum Event {
-    OperatorStatus(String, bool),
+    OperatorStatus(String, Option<bool>, tokio::sync::watch::Receiver<bool>),
     Catalog(String, Result<Box<Source>>),
     Pricing(String, Result<BTreeMap<String, ToolSpec>>),
+}
+fn status_change(
+    id: String,
+    mut receiver: tokio::sync::watch::Receiver<bool>,
+) -> futures_util::future::BoxFuture<'static, Event> {
+    async move {
+        let value = receiver
+            .changed()
+            .await
+            .ok()
+            .map(|()| *receiver.borrow_and_update());
+        Event::OperatorStatus(id, value, receiver)
+    }
+    .boxed()
 }
 impl Runtime {
     pub fn new(
@@ -219,11 +233,9 @@ impl Runtime {
             let pending = pending.clone();
             let gate = gate.clone();
             let can_allocate = self.can_allocate;
-            let (status, changed) = tokio::sync::oneshot::channel();
+            let (status, changed) = tokio::sync::watch::channel(false);
             let status_id = id.clone();
-            work.push(
-                async move { Event::OperatorStatus(status_id, changed.await.is_ok()) }.boxed(),
-            );
+            work.push(status_change(status_id, changed));
             work.push(
                 async move {
                     let result = pending
@@ -247,14 +259,15 @@ impl Runtime {
             };
             let Some(event) = event else { continue };
             match event {
-                Event::OperatorStatus(id, required) => {
-                    if !required {
+                Event::OperatorStatus(id, required, receiver) => {
+                    let Some(required) = required else {
                         continue;
-                    }
+                    };
                     let Some(pending) = self.deployment.pending_sources.get_mut(&id) else {
                         continue;
                     };
-                    pending.operator_required = true;
+                    pending.operator_required = required;
+                    work.push(status_change(id, receiver));
                 }
                 Event::Catalog(id, result) => {
                     self.deployment.pending_sources.remove(&id);
@@ -653,6 +666,25 @@ sources=['healthy','late']
                     .await
                     .unwrap()
                     .unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while catalog.read().instructions["one"]
+                        .as_ref()
+                        .unwrap()
+                        .contains("OPERATOR_REQUIRED")
+                    {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert_eq!(catalog.read().views["one"].len(), 1);
+                assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+                assert!(
+                    catalog.read().instructions["one"]
+                        .as_ref()
+                        .unwrap()
+                        .contains("PENDING")
+                );
             } else {
                 assert!(
                     !catalog.read().instructions["one"]

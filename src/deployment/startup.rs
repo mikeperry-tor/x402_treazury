@@ -43,7 +43,7 @@ impl DeferredDocument {
         &self,
         gate: Arc<tokio::sync::Semaphore>,
         can_allocate: bool,
-        operator_status: Option<tokio::sync::oneshot::Sender<()>>,
+        operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<Document> {
         let prepared = self
             .0
@@ -65,22 +65,11 @@ impl DeferredDocument {
             .await;
         match prepared {
             Ok(PreparedDocument::Ready(document)) => Ok(document.clone()),
-            Ok(PreparedDocument::Relay(pending)) => {
-                if !can_allocate
-                    && self
-                        .0
-                        .config
-                        .discovery_relay
-                        .as_ref()
-                        .expect("prepared relay")
-                        .requires_payer_creation()
-                        .await?
-                    && let Some(status) = operator_status
-                {
-                    let _ = status.send(());
-                }
-                Ok(Arc::new(pending.resume_when_ready(gate).await?))
-            }
+            Ok(PreparedDocument::Relay(pending)) => Ok(Arc::new(
+                pending
+                    .resume_when_ready(gate, if can_allocate { None } else { operator_status })
+                    .await?,
+            )),
             Err(error) => Err(anyhow::Error::new(error.clone())),
         }
     }
@@ -114,7 +103,7 @@ impl PendingSource {
         id: &str,
         gate: Arc<tokio::sync::Semaphore>,
         can_allocate: bool,
-        status: tokio::sync::oneshot::Sender<()>,
+        status: tokio::sync::watch::Sender<bool>,
     ) -> Result<Source> {
         let document = self
             .document

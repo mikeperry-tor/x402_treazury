@@ -376,17 +376,19 @@ pub(crate) struct RelayContinuation {
 }
 impl RelayContinuation {
     pub(crate) async fn resume(&self) -> Result<Value> {
-        self.resume_mode(None).await
+        self.resume_mode(None, None).await
     }
     pub(crate) async fn resume_when_ready(
         &self,
         gate: std::sync::Arc<tokio::sync::Semaphore>,
+        operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<Value> {
-        self.resume_mode(Some(gate)).await
+        self.resume_mode(Some(gate), operator_status).await
     }
     async fn resume_mode(
         &self,
         gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+        operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<Value> {
         let cfg = &self.config;
         let error = &self.origin_error;
@@ -424,6 +426,7 @@ impl RelayContinuation {
                     cfg.max_spec_bytes,
                     "max_spec_bytes",
                     Some(gate),
+                    operator_status,
                 )
                 .await
         } else {

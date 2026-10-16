@@ -359,11 +359,8 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_when_ready_bounded(url, expected, limit, setting, None)
+        self.fetch_when_ready_bounded(url, expected, limit, setting, None, None)
             .await
-    }
-    pub(crate) async fn requires_payer_creation(&self) -> Result<bool> {
-        self.client.discovery_requires_creation().await
     }
     pub(crate) async fn fetch_when_ready_bounded(
         &self,
@@ -372,6 +369,7 @@ impl Relay {
         limit: usize,
         setting: &'static str,
         gate: Option<Arc<tokio::sync::Semaphore>>,
+        operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<Arc<Response>> {
         let capacity = self.client.discovery_changes().await?;
         let relay_changes = self.state.lock().await.changes.clone();
@@ -388,6 +386,14 @@ impl Relay {
             let mut capacity_notice = capacity_notice.map(Box::pin);
             if let Some(notice) = &mut capacity_notice {
                 notice.as_mut().enable();
+            }
+            if let Some(status) = &operator_status {
+                let required = self.client.discovery_requires_creation().await?;
+                status.send_if_modified(|old| {
+                    let changed = *old != required;
+                    *old = required;
+                    changed
+                });
             }
             let permit = match &gate {
                 Some(gate) => Some(gate.clone().acquire_owned().await?),

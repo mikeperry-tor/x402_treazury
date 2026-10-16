@@ -363,6 +363,7 @@ impl Store {
         )?;
         ensure!(tx.execute("UPDATE reserve_claims SET wallet_id=?4 WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND wallet_id IS NULL AND enabled=1",params![pool,slot,generation,wallet])?==1,"reserve_claim_conflict");
         tx.commit()?;
+        self.notify_capacity_changed(pool);
         Ok(Some(job))
     }
 }
