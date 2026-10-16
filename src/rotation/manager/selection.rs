@@ -261,8 +261,13 @@ impl ManagedPool {
         let state = match state {
             Ok(state) => state,
             Err(error)
-                if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                    == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) =>
+                if matches!(
+                    error.downcast_ref::<super::super::base::evidence::EvidenceFailure>(),
+                    Some(
+                        super::super::base::evidence::EvidenceFailure::MalformedSupport
+                            | super::super::base::evidence::EvidenceFailure::MalformedExposure
+                    )
+                ) =>
             {
                 completions.record(Err(error))?;
                 (CandidateEvidenceState::Ineligible, None)
@@ -373,6 +378,7 @@ fn completion_is_incomplete(
                             | EvidenceFailure::EvidenceRepairRequired
                             | EvidenceFailure::ResolutionConflict
                             | EvidenceFailure::MalformedSupport
+                            | EvidenceFailure::MalformedExposure
                     )
                 )
             {

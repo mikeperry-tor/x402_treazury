@@ -76,7 +76,7 @@ pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
         [wallet],
         |row| row.get(0),
     )?;
-    amount(&value)
+    amount(&value).map_err(|_| EvidenceFailure::MalformedExposure.into())
 }
 pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
     let total = exposure(db, wallet)?
@@ -1203,7 +1203,7 @@ impl Store {
     }
 
     /// Cached contradictions invalidate only the anchor supporting the failure.
-    fn compare_cached_balance_or_invalidate(
+    pub(super) fn compare_cached_balance_or_invalidate(
         &mut self,
         wallet: &str,
         observation: &BalanceObservation,

@@ -314,6 +314,19 @@ retained pending operation, revision checks, later release and recovery restrict
 C02/G01 remains partial: this does not remove durable diagnostic-prefix authority
 or establish preparation provenance.
 
+**C03 / G22 contract:** A decimal exposure parse failure is wallet-local only
+when the wallet row was successfully read by exact ID; SQLite and ownership errors
+remain shared failures. Reject that payer without treating exposure as zero, retain
+its malformed value and report the fixed category through candidate traversal.
+Cached, hinted and challenge-time selection must continue with independent payers.
+Certificate merging compares complete proofs before ranking. A conflict invalidates
+only the affected wallet/anchor through the existing generation/dispute mechanism,
+excludes that wallet for the whole merge and retains independent certificates.
+Normal selection stays read-only; discovering a contradiction may invalidate
+support but cannot reserve, sign, change roles or start funding. No new persistent
+incident record is needed. A shared database failure still propagates. C09 remains
+responsible for authoritative exposure derivation; this slice supplies isolation.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

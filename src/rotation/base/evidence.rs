@@ -19,6 +19,7 @@ pub enum EvidenceFailure {
     EvidenceRepairRequired,
     ResolutionConflict,
     MalformedSupport,
+    MalformedExposure,
 }
 impl std::fmt::Display for EvidenceFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,6 +37,7 @@ impl std::fmt::Display for EvidenceFailure {
             Self::EvidenceRepairRequired => "evidence_repair_required",
             Self::ResolutionConflict => "conflicting_authorization_resolution",
             Self::MalformedSupport => "malformed_durable_evidence_support",
+            Self::MalformedExposure => "malformed_wallet_exposure",
         })
     }
 }

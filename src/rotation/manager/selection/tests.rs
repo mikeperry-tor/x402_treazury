@@ -1792,8 +1792,8 @@ async fn verified_cached_candidate_ranking_preserves_capacity_role_slot_identity
 }
 
 #[tokio::test]
-async fn contradictory_same_anchor_completed_proof_propagates_without_fallback_or_mutation() {
-    use crate::rotation::base::evidence::EvidenceFailure;
+async fn contradictory_completed_proof_invalidates_only_its_wallet_and_selects_independent_capacity()
+ {
     let f = fixture(0).await;
     f.balance(&f.bound.wallet, 10);
     f.balance(&f.small, 8);
@@ -1821,7 +1821,7 @@ async fn contradictory_same_anchor_completed_proof_propagates_without_fallback_o
         .unwrap();
     let calls = f.calls.lock().unwrap().clone();
     let pool = f.manager.pool.clone();
-    let error = f
+    let selected = f
         .manager
         .store
         .call(move |store| {
@@ -1833,25 +1833,94 @@ async fn contradictory_same_anchor_completed_proof_propagates_without_fallback_o
                     i64::MAX,
                     &[contradictory],
                 )
-                .map(|_| ())
+                .map(|selected| selected.map(|(candidate, _)| candidate.wallet))
         })
         .await
-        .unwrap_err();
-    assert_eq!(
-        error.downcast_ref::<EvidenceFailure>(),
-        Some(&EvidenceFailure::AmountContradiction)
-    );
+        .unwrap();
+    assert_eq!(selected, Some(f.small.clone()));
     assert_eq!(
         db.pragma_query_value(None, "data_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        version
+        version,
+        "a cache-only conflict invalidates its process generation without financial writes"
     );
     assert_eq!(*f.calls.lock().unwrap(), calls);
-    // The rejected comparison neither invalidates usable cache entries nor
-    // silently falls back to the independent sufficient small payer above.
+    // The conflict remains excluded on subsequent calls, including a bound hint.
     assert_eq!(
         read_only_candidate(&f, 5, Some(f.bound.wallet.clone()), vec![]).await,
-        Some(f.bound.wallet.clone())
+        Some(f.small.clone())
     );
+    let attempts: i64 = db
+        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(attempts, 0);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn malformed_exposure_isolated_in_cached_hinted_and_challenge_selection() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    let f = fixture(0).await;
+    for wallet in [&f.bound.wallet, &f.small] {
+        f.balance(wallet, 10);
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+    }
+    let db = f.db();
+    db.execute(
+        "UPDATE wallets SET unresolved_exposure='malformed' WHERE id=?1",
+        [&f.bound.wallet],
+    )
+    .unwrap();
+    assert_eq!(
+        read_only_candidate(&f, 5, Some(f.bound.wallet.clone()), vec![]).await,
+        Some(f.small.clone())
+    );
+    assert_eq!(
+        f.manager
+            .candidate_for(Some(U256::from(5)))
+            .await
+            .unwrap()
+            .wallet,
+        f.small
+    );
+    let CandidatePassResult::Selected(selected) = select(&f).await else {
+        panic!("independent wallet must remain available");
+    };
+    assert_eq!(selected.candidate.wallet, f.small);
+    drop(selected);
+    let error = f
+        .manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedExposure)
+    );
+    let exposure: String = db
+        .query_row(
+            "SELECT unresolved_exposure FROM wallets WHERE id=?1",
+            [&f.bound.wallet],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(exposure, "malformed");
+    let attempts: i64 = db
+        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        attempts, 0,
+        "selection cannot sign or reserve on either wallet"
+    );
+    // A shared SQL failure must not be mistaken for wallet-local unavailability.
+    db.execute_batch(
+        "ALTER TABLE wallets RENAME COLUMN unresolved_exposure TO unavailable_exposure",
+    )
+    .unwrap();
+    assert!(f.manager.candidate_for(Some(U256::from(5))).await.is_err());
     f.close().await;
 }
