@@ -1180,8 +1180,44 @@ configuration and state are required; scoped inspection and qualification do not
 inherit unrelated journals. Observation owners cannot sign, allocate or fund, and
 retired wallets remain excluded from payment capacity. Shutdown drops observer
 handles before joining the shared store. Independent review cleared this slice;
-all 55 deployment tests and 17 maintenance tests passed. Repair scheduling for
+all 55 deployment tests and 17 maintenance tests passed. C11 fixture corrections
+also passed independent review, preserving captured-claim obstruction checks while
+allowing initial-capacity serving. Repair scheduling for
 already-disputed retired liabilities remains a separate followup.
+
+**C18 external-satisfaction closure (implemented and reviewed):** An exact
+unstarted source closure or already proved signed expiry, together with undisputed
+independent destination readiness, may finish EXTERNAL/RECOVERED despite historical
+provider status flags. This does not claim provider delivery. Keep every status
+flag and original operation, and prevent later status ingestion from turning this
+proven disposition into a provider-review phase. The unsigned closure proof also
+excludes orphan source-operation or expiry records, not just bytes and reservations.
+Open/unknown preparation provenance, unexplained source effects and disputed
+readiness still prohibit closure. The SUCCESS path remains strict pending exact
+operation-correlated canonical delivery evidence. This narrow contract and implementation passed independent review. All 21
+completion tests passed, including reopen, retained status flags, mismatched or
+missing archives, malformed accepted terms, unexplained source effects and disputed
+readiness negatives. External readiness validates exact archived operation identity
+without treating retained accepted terms as a new delivery claim.
+
+**C18 provider-proof assessment (implementation pending):** The official
+[1Click status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
+was inspected on 2026-10-16. It correlates status by the original deposit address
+and echoed quote, and exposes origin/destination transaction hashes and actual
+swap/refund amounts. The inspected contract does not establish that a later
+terminal label supersedes an earlier contradictory label. Do not invent that rule.
+The current adapter validates the deposit and quote echo but discards transaction
+correlations; current destination readiness uses a balance checkpoint. Neither a
+balance change nor a provider label alone proves exact delivery after funds have
+already been spent.
+
+The remaining implementation must retain validated original-operation settlement
+correlations and independently acquire canonical transfer evidence for the accepted
+Base USDC recipient/amount. Existing source accounting and any return obligations
+remain separate. Persisted provider observations remain audit facts; closure may
+ignore a historical status veto only after every relevant obligation is actually
+proved discharged. Missing hashes, ambiguous attribution and unavailable proofs
+remain scoped incomplete outcomes, without replay or replacement authority.
 
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a

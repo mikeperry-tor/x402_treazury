@@ -211,7 +211,7 @@ pub fn applicable_requirement(db: &Connection, job: &str) -> Result<DestinationR
     );
     let (recorded_operation, recorded_amount, original, operation, accepted, output, recipient, address):
         RequirementRow = db.query_row(
-        "SELECT f.readiness_operation,f.readiness_requirement,f.target,j.operation_id,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.accepted_output,j.accepted_recipient,w.address FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id WHERE f.id=?1",
+        "SELECT f.readiness_operation,f.readiness_requirement,f.target,j.operation_id,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.accepted_output,j.accepted_recipient,w.address FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id WHERE f.id=?1",
         [job], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?)))?;
     if let Some(amount) = recorded_amount {
         return Ok(DestinationRequirement {
@@ -308,7 +308,7 @@ pub fn dispute_endpoint_support(db: &Connection, endpoint: &str) -> Result<()> {
 
 fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
     let (_, owner_unclosed) = super::preparation::source_state(db, operation)?;
-    Ok(db.query_row("SELECT (NOT ?2 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",params![operation,owner_unclosed],|r|r.get(0))?)
+    Ok(db.query_row("SELECT (NOT ?2 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",params![operation,owner_unclosed],|r|r.get(0))?)
 }
 
 impl Store {
@@ -686,7 +686,7 @@ fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<Pro
 pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> Result<bool> {
     let (ready, correlation, quote, flags, confirmed, gross):
             (bool, Option<String>, bool, rusqlite::Result<ProviderFlags>, bool, bool) = tx.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
+            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
     let (success, failed, refunded, incomplete) =
         flags.context(super::scheduling::FundingDecodeFailure)?;
     let wallet: String = tx.query_row(
@@ -695,13 +695,10 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
         |r| r.get(0),
     )?;
     let ready = ready && !destination_obligation_pending(tx, &wallet)?;
-    let outcome = if ready
-        && !quote
-        && !failed
-        && !refunded
-        && !incomplete
-        && correlation.as_deref().is_none_or(|id| id == operation)
-    {
+    // External destination satisfaction does not claim provider delivery. Exact
+    // source closure supplies the independent proof; historical status labels
+    // cannot revive an already closed source obligation.
+    let outcome = if ready && !quote && correlation.as_deref().is_none_or(|id| id == operation) {
         ensure!(
             source_attempt_closed(tx, operation)?,
             "destination satisfaction has unresolved source effects"
@@ -758,8 +755,8 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
         |r| r.get(0),
     )?;
     ensure!(matched, "funding operation correlation mismatch");
-    db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_integrity_conflict; contradictory completed provider outcome' WHERE job_id=?1 AND operation_id=?2 AND (provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1))) AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE')",params![job,operation])?;
-    db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN '\"RECOVERY_REQUIRED\"' WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_success=1 THEN '\"VERIFYING_CREDIT\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN phase='\"PREPARED\"' AND EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.attempts>0) THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase NOT IN ('\"RECOVERY_REQUIRED\"','\"COMPLETE\"')", params![job,operation])?;
+    db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_integrity_conflict; contradictory completed provider outcome' WHERE job_id=?1 AND operation_id=?2 AND (provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1))) AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE' AND (f.completion_outcome IS NULL OR f.completion_outcome NOT IN ('EXTERNAL','RECOVERED')))",params![job,operation])?;
+    db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN '\"RECOVERY_REQUIRED\"' WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_success=1 THEN '\"VERIFYING_CREDIT\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN phase='\"PREPARED\"' AND EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.attempts>0) THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase NOT IN ('\"RECOVERY_REQUIRED\"','\"COMPLETE\"') AND NOT EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE' AND f.completion_outcome IN ('EXTERNAL','RECOVERED'))", params![job,operation])?;
     Ok(())
 }
 
@@ -823,6 +820,12 @@ pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<
     else {
         return Ok(false);
     };
+    // Match applicable_requirement: an archived quote retains its accepted
+    // terms for audit, while later external readiness uses the original target.
+    let (quote_present, archived): (bool, bool) = db.query_row(
+        "SELECT j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.job_id=j.job_id AND r.operation_id=j.operation_id) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1",
+        [wallet], |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     (|| -> Result<bool> {
         let support: super::evidence::BalanceSupport = serde_json::from_str(&support)?;
         support.observation.validate()?;
@@ -858,7 +861,7 @@ pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<
             );
         } else {
             ensure!(
-                requirement == original && accepted.is_none(),
+                requirement == original && (archived || (!quote_present && accepted.is_none())),
                 "external readiness requirement mismatch"
             );
         }
@@ -886,8 +889,8 @@ pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<b
     );
     let (ready, support, disputed, correlation, operation, accepted, archived, success, failed, refunded, incomplete):
         DispositionRow = db.query_row(
-        "SELECT f.readiness_requirement IS NOT NULL,f.readiness_support,f.readiness_disputed IS NOT NULL,f.readiness_operation,j.operation_id,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?)))?;
-    if !ready || support.is_none() || disputed || failed || refunded || incomplete {
+        "SELECT f.readiness_requirement IS NOT NULL,f.readiness_support,f.readiness_disputed IS NOT NULL,f.readiness_operation,j.operation_id,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?)))?;
+    if !ready || support.is_none() || disputed {
         return Ok(true);
     }
     if !readiness_supported(db, wallet)? {
@@ -897,13 +900,15 @@ pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<b
         correlation.as_deref().is_none_or(|id| id == operation),
         "readiness operation correlation mismatch"
     );
-    if success && correlation.as_deref() == Some(operation.as_str()) {
-        return Ok(false);
+    // Closed source work and external destination satisfaction do not depend
+    // on provider status. Share this proof with completion and retirement.
+    if !accepted || archived {
+        return Ok(!source_attempt_closed(db, &operation)?);
     }
-    if accepted && !archived {
+    if failed || refunded || incomplete {
         return Ok(true);
     }
-    Ok(!source_attempt_closed(db, &operation)?)
+    Ok(!(success && correlation.as_deref() == Some(operation.as_str())))
 }
 
 pub(super) fn read_funding_facts(
@@ -2502,6 +2507,232 @@ mod completion_tests {
                 FundingPhase::RecoveryRequired
             );
             assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+        }
+    }
+
+    #[cfg(feature = "zcash")]
+    fn closed_source_with_provider_history() -> (tempfile::TempDir, Store, FundingJob) {
+        use crate::rotation::near::SwapStatus;
+        let (dir, mut store, job) = fixture();
+        store
+            .save_funding_quote(
+                &job.id,
+                &serde_json::to_vec(
+                    &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        store.close_unprepared_funding(&job.id).unwrap();
+        for (index, status) in [
+            SwapStatus::Success,
+            SwapStatus::Failed,
+            SwapStatus::Refunded,
+            SwapStatus::IncompleteDeposit,
+        ]
+        .iter()
+        .enumerate()
+        {
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, status, index as u64 + 1)
+                .unwrap();
+        }
+        (dir, store, job)
+    }
+
+    #[cfg(feature = "zcash")]
+    #[test]
+    fn provider_history_cannot_reopen_proven_external_source_closure() {
+        use crate::rotation::near::SwapStatus;
+        let (dir, mut store, job) = closed_source_with_provider_history();
+        store
+            .record_destination_readiness(&job.id, "10", "block", 1)
+            .unwrap();
+        assert!(
+            store
+                .finish_funding_if_proven(&job.id, &job.operation_id)
+                .unwrap()
+        );
+        let treasury = store.id().to_owned();
+        drop(store);
+        let mut store = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &treasury,
+        )
+        .unwrap();
+        for stale_phase in [FundingPhase::Complete, FundingPhase::Quoted] {
+            store
+                .db
+                .execute(
+                    "UPDATE funding_progress SET phase=?2 WHERE job_id=?1",
+                    params![job.id, serde_json::to_string(&stale_phase).unwrap()],
+                )
+                .unwrap();
+            store
+                .record_provider_outcome(
+                    &job.id,
+                    &job.operation_id,
+                    &SwapStatus::IncompleteDeposit,
+                    20,
+                )
+                .unwrap();
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().phase,
+                stale_phase
+            );
+            assert!(
+                store
+                    .finish_funding_if_proven(&job.id, &job.operation_id)
+                    .unwrap()
+            );
+        }
+        let facts = store.funding_facts(&job.id, &job.operation_id).unwrap();
+        assert!(
+            facts.provider_success
+                && facts.provider_failed
+                && facts.provider_refunded
+                && facts.provider_incomplete
+        );
+        assert!(facts.source_closed);
+        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().operation_id,
+            job.operation_id
+        );
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT completion_outcome FROM funding_jobs WHERE id=?1",
+                    [&job.id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "EXTERNAL"
+        );
+        for table in ["outgoing", "budget_entries", "treasury_operations"] {
+            assert_eq!(
+                store
+                    .db
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    #[cfg(feature = "zcash")]
+    #[test]
+    fn provider_history_never_substitutes_for_source_or_destination_proof() {
+        for cause in [
+            "open_owner",
+            "unknown_contract",
+            "signed",
+            "consumed",
+            "orphan_operation",
+            "orphan_expiry",
+            "mismatched_archive",
+            "missing_archive",
+            "missing_accepted_output",
+            "disputed_readiness",
+        ] {
+            let (_dir, mut store, job) = closed_source_with_provider_history();
+            store
+                .record_destination_readiness(&job.id, "10", "block", 1)
+                .unwrap();
+            match cause {
+                "open_owner" | "unknown_contract" => {
+                    store.db.execute("INSERT INTO treasury_preparations(operation_id,job_id,base_revision,contract_version,token,closed) VALUES(?1,?2,1,?3,?4,?5)",params![job.operation_id,job.id,if cause=="unknown_contract" {999} else {1},Uuid::new_v4().to_string(),i64::from(cause=="unknown_contract")]).unwrap();
+                }
+                "signed" | "consumed" => {
+                    store
+                        .db
+                        .execute(
+                            "INSERT INTO budget_entries VALUES(?1,?2,0,0,10,?3,?4)",
+                            params![
+                                job.operation_id,
+                                job.pool_id,
+                                if cause == "signed" { 10 } else { 0 },
+                                if cause == "consumed" { 10 } else { 0 }
+                            ],
+                        )
+                        .unwrap();
+                    if cause == "signed" {
+                        store
+                            .db
+                            .execute(
+                                "INSERT INTO outgoing VALUES(?1,'PREPARED',X'00',1)",
+                                [&job.operation_id],
+                            )
+                            .unwrap();
+                    }
+                }
+                "missing_archive" | "missing_accepted_output" => {
+                    if cause == "missing_accepted_output" {
+                        store
+                            .db
+                            .execute(
+                                "UPDATE funding_progress SET accepted_output=NULL WHERE job_id=?1",
+                                [&job.id],
+                            )
+                            .unwrap();
+                    }
+                    store
+                        .db
+                        .execute(
+                            "DELETE FROM funding_recovery WHERE operation_id=?1",
+                            [&job.operation_id],
+                        )
+                        .unwrap();
+                    assert!(readiness_recorded_valid(&store.db, &job.wallet_id).is_err());
+                }
+                "mismatched_archive" => {
+                    store.db.execute("UPDATE funding_recovery SET job_id=(SELECT id FROM funding_jobs WHERE id!=?1 LIMIT 1) WHERE operation_id=?2", params![job.id,job.operation_id]).unwrap();
+                }
+                "orphan_operation" | "orphan_expiry" => {
+                    // Model malformed historical authoritative rows, not a
+                    // production path that bypasses foreign-key enforcement.
+                    store.db.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+                    if cause == "orphan_operation" {
+                        store.db.execute("INSERT INTO treasury_operations(id,facts,submission,attempts) VALUES(?1,'{}','CONFIRMED',1)",[&job.operation_id]).unwrap();
+                    } else {
+                        store
+                            .db
+                            .execute(
+                                "INSERT INTO expired_operations VALUES(?1,100,1)",
+                                [&job.operation_id],
+                            )
+                            .unwrap();
+                    }
+                    store.db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+                }
+                _ => {
+                    store.db.execute("UPDATE funding_jobs SET readiness_disputed='fixture dispute' WHERE id=?1",[&job.id]).unwrap();
+                }
+            }
+            assert!(
+                !matches!(
+                    store.finish_funding_if_proven(&job.id, &job.operation_id),
+                    Ok(true)
+                ),
+                "{cause}"
+            );
+            assert_ne!(
+                store
+                    .db
+                    .query_row(
+                        "SELECT state FROM funding_jobs WHERE id=?1",
+                        [&job.id],
+                        |r| r.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                "COMPLETE",
+                "{cause}"
+            );
+            let flags: (bool,bool,bool,bool) = store.db.query_row("SELECT provider_success,provider_failed,provider_refunded,provider_incomplete FROM funding_progress WHERE job_id=?1",[&job.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+            assert_eq!(flags, (true, true, true, true));
         }
     }
 
