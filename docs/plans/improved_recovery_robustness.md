@@ -767,8 +767,16 @@ coherent operation facts select actual credit, provider and submitted-source lan
 A stale completion projection must not hide those observations, including after
 restart. No new ledger, financial authority, preparation or submission is introduced.
 This does not yet cover prepared-but-unsubmitted bytes hidden by a stale phase or
-historical operations replaced in the current progress row. Health bookkeeping and
-reporting of newly exposed work require the separate review fixup.
+historical operations replaced in the current progress row. The review fixup skips timeout bookkeeping only for inert completed history,
+retaining timeout-triggered recovery for other phases. Shared obligation facts keep
+active observation errors, streaks and polling diagnostics visible despite stale
+completion labels. Historical schema reports retain their existing read-only
+projection without querying newer fact columns. `29bc0d2` implements traversal;
+the accompanying fixup addresses both review findings. Validation: 18 scheduler
+tests and 129 store tests passed (two ignored subprocess helpers), including stale
+completion across reopen, preserved signed bytes, provider-outage diagnostics,
+multi-page traversal, and historical completed schema reports. Final focused
+health/late-result regressions, formatting checks and all-target Clippy passed.
 
 **C10 current-capacity historical-dependency deletion contract (reviewed):**
 Current balance captures retain financial checkpoint/debit support and namespace,
@@ -1643,6 +1651,26 @@ incomplete affected-authorization inventory, missing ownership or incompatible
 balance/debit evidence still require a justified dependent-action stop. Distinguish
 inability to release a liability from inability to admit any payment. Resolve this
 option before designing residual historical repair solely to unblock that capacity.
+
+C09/C12 membership review (2026-10-16): the existing resolution rows have no
+individual dispute membership. A checkpoint mismatch does not reveal the fork's
+starting height, so marking only its hash or later heights is insufficient. The
+next prerequisite should retain original immutable resolution proofs, mark affected
+resolved authorizations conservatively in the existing journal, and derive exposure
+from disjoint pending/disputed sets with exact checked amounts. Membership changes
+must commit with generation invalidation. Admission still requires a separate
+current-evidence path that does not depend on the disproven checkpoint while
+preserving debit constraints; removing the store repair flag alone cannot provide it.
+The reviewed placement is `payment_attempts.resolution_disputed`, with an indexed
+wallet-scoped disputed subset. Ordinary pending and disputed RESOLVED sets must be
+disjoint; invalidation and generation changes are atomic. Exact historical repair
+must include membership in its revision digest and clear it only in the verified
+repair transaction, rolling back on failure. Endpoint invalidation needs a separate
+provenance audit because its current implementation only marks funding/retirement
+support; the chain-conflict slice must not claim endpoint completeness.
+A durable format change requires a new single supported schema and rejection of
+incompatible versions, never implicit conversion of existing private state. This
+review is a proposed contract, not an implemented release or admission mechanism.
 
 ### Facts, assessments and actions
 

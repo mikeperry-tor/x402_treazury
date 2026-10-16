@@ -198,11 +198,20 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN 'funding_integrity_conflict; contradictory provider outcome' WHEN phase='\"COMPLETE\"' THEN NULL ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
-        if changed == 1 {
-            tx.execute("INSERT INTO funding_health(job_id,error_streak) SELECT ?1,CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?2 END FROM funding_progress WHERE job_id=?1 ON CONFLICT(job_id) DO UPDATE SET error_streak=excluded.error_streak",params![job,streak])?;
+        let current: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_progress WHERE job_id=?1 AND operation_id=?2)",
+            params![job, operation],
+            |r| r.get(0),
+        )?;
+        if !current {
+            return Ok(());
         }
-        tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs WHERE id=?1 AND state='COMPLETE')",[job])?;
+        let observations = funding::read_funding_facts(&tx, job, operation)?.observations_needed();
+        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' AND ?5=0 THEN 0 ELSE ?3 END,last_error=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN 'funding_integrity_conflict; contradictory provider outcome' WHEN phase='\"COMPLETE\"' AND ?5=0 THEN NULL ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error,observations])?;
+        if changed == 1 {
+            tx.execute("INSERT INTO funding_health(job_id,error_streak) SELECT ?1,CASE WHEN phase='\"COMPLETE\"' AND ?3=0 THEN 0 ELSE ?2 END FROM funding_progress WHERE job_id=?1 ON CONFLICT(job_id) DO UPDATE SET error_streak=excluded.error_streak",params![job,streak,observations])?;
+        }
+        tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND ?2=0 AND EXISTS(SELECT 1 FROM funding_jobs WHERE id=?1 AND state='COMPLETE')",params![job,observations])?;
         tx.commit()?;
         Ok(())
     }

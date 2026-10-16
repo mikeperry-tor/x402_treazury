@@ -30,6 +30,11 @@ fn pages_keep_bounds_order_and_matching_facts_without_mutation() {
     for i in 0..35 {
         allocate(&mut store, &format!("pool{i}"));
     }
+    // A derived completion label must not remove records from bounded traversal.
+    store
+        .db
+        .execute("UPDATE funding_jobs SET state='COMPLETE'", [])
+        .unwrap();
     let through = store.funding_work_boundary().unwrap();
     let expected: Vec<_> = store
         .funding_jobs()

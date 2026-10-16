@@ -2173,7 +2173,7 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
                 credit_calls: credits.clone(),
                 statuses,
                 status_gates: Default::default(),
-                failed_job: Default::default(),
+                failed_job: Arc::new(std::sync::Mutex::new(Some(jobs[0].id.clone()))),
                 processing: true,
                 quotes: None,
             },
@@ -2182,10 +2182,13 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
         },
         1,
     );
-    tokio::time::timeout(std::time::Duration::from_secs(5), worker.tick(1000))
-        .await
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        worker.tick(now().unwrap() + 10_000),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(credits.load(Ordering::SeqCst), jobs.len());
     let expected: BTreeSet<_> = jobs.iter().map(|job| job.id.clone()).collect();
     let mut sources = BTreeSet::new();
@@ -2208,6 +2211,13 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
     )
     .unwrap();
     assert_eq!(reopened.funding_jobs().unwrap().len(), jobs.len());
+    let failed = reopened.funding_job(&jobs[0].id).unwrap().unwrap();
+    assert_eq!(failed.phase, FundingPhase::Complete);
+    assert!(failed.last_error.is_some());
+    assert!(failed.error_streak > 0);
+    assert!(failed.next_poll > 0);
+    assert!(failed.timed_out);
+
     for job in &jobs {
         assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
         assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);

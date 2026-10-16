@@ -418,6 +418,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         continue;
                     }
                 };
+                if job.phase == FundingPhase::Complete
+                    && !applicable_work(&job, &facts)
+                        .into_iter()
+                        .any(|needed| needed)
+                {
+                    continue;
+                }
                 if job
                     .started_at
                     .is_some_and(|started| clock.now().saturating_sub(started) >= health_after)

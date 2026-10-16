@@ -113,6 +113,12 @@ impl FundingFacts {
             && !self.provider_success
             && !self.provider_refunded
     }
+    pub(crate) fn observations_needed(&self) -> bool {
+        !self.readiness_recorded
+            || self.readiness_disputed
+            || self.status_needed()
+            || self.source_reconciliation_needed()
+    }
     pub fn source_reconciliation_needed(&self) -> bool {
         self.source_attempts > 0
             && self
@@ -317,22 +323,7 @@ impl Store {
     }
 
     pub fn funding_facts(&self, job: &str, operation: &str) -> Result<FundingFacts> {
-        let (mut facts, flags) = self.db.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
-            params![job,operation], |r| Ok((FundingFacts {
-                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false,
-                provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
-            }, provider_flags(r, 4))),
-        ).context("funding operation binding changed")?;
-        (
-            facts.provider_success,
-            facts.provider_failed,
-            facts.provider_refunded,
-            facts.provider_incomplete,
-        ) = flags.context(super::scheduling::FundingDecodeFailure)?;
-        facts.source_closed = facts.archived && source_attempt_closed(&self.db, operation)?;
-        Ok(facts)
+        read_funding_facts(&self.db, job, operation)
     }
 
     pub fn require_funding_attempt(&self, job: &str, max_attempts: u32) -> Result<()> {
@@ -892,6 +883,29 @@ pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<b
     Ok(!source_attempt_closed(db, &operation)?)
 }
 
+pub(super) fn read_funding_facts(
+    db: &Connection,
+    job: &str,
+    operation: &str,
+) -> Result<FundingFacts> {
+    let (mut facts, flags) = db.query_row(
+            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
+            params![job,operation], |r| Ok((FundingFacts {
+                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false,
+                provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
+                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
+            }, provider_flags(r, 4))),
+        ).context("funding operation binding changed")?;
+    (
+        facts.provider_success,
+        facts.provider_failed,
+        facts.provider_refunded,
+        facts.provider_incomplete,
+    ) = flags.context(super::scheduling::FundingDecodeFailure)?;
+    facts.source_closed = facts.archived && source_attempt_closed(db, operation)?;
+    Ok(facts)
+}
+
 fn completed_error(error: Option<&str>) -> Option<&str> {
     // Destination credit does not establish source confirmation.
     error.filter(|e| {
@@ -1328,7 +1342,16 @@ impl Store {
         id: &str,
         operation: &str,
     ) -> Result<()> {
-        self.db.execute("INSERT INTO funding_health(job_id,timed_out) SELECT ?1,1 WHERE EXISTS(SELECT 1 FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE') ON CONFLICT(job_id) DO UPDATE SET timed_out=1",params![id,operation])?;
+        let current: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_progress WHERE job_id=?1 AND operation_id=?2)",
+            params![id, operation],
+            |r| r.get(0),
+        )?;
+        if !current {
+            return Ok(());
+        }
+        let observations = read_funding_facts(&self.db, id, operation)?.observations_needed();
+        self.db.execute("INSERT INTO funding_health(job_id,timed_out) SELECT ?1,1 WHERE EXISTS(SELECT 1 FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2 AND (f.state!='COMPLETE' OR ?3)) ON CONFLICT(job_id) DO UPDATE SET timed_out=1",params![id,operation,observations])?;
         Ok(())
     }
     /// Check before advancing to PREPARING; the owner still rechecks at reserve.
@@ -1368,6 +1391,16 @@ impl Store {
             [id],
             |r| r.get(0),
         )?;
+        let complete = if complete {
+            let current: String = tx.query_row(
+                "SELECT operation_id FROM funding_progress WHERE job_id=?1",
+                [id],
+                |r| r.get(0),
+            )?;
+            !read_funding_facts(&tx, id, &current)?.observations_needed()
+        } else {
+            false
+        };
         let error = if complete {
             completed_error(error)
         } else {
@@ -1375,7 +1408,7 @@ impl Store {
         };
         ensure!(tx.execute("UPDATE funding_progress SET next_poll=?2,last_error=?3,attempts=attempts+?4 WHERE job_id=?1",params![id,i64::try_from(next_poll)?,error,u32::from(quote_attempt)])? == 1, "unknown funding job");
         tx.execute("INSERT INTO funding_health(job_id,error_streak) VALUES (?1,?2) ON CONFLICT(job_id) DO UPDATE SET error_streak=CASE WHEN excluded.error_streak=0 THEN 0 ELSE MIN(error_streak+1,32) END",params![id,u32::from(error.is_some())])?;
-        tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND f.state='COMPLETE' AND o.submission='CONFIRMED')",[id])?;
+        tx.execute("UPDATE funding_health SET timed_out=0 WHERE job_id=?1 AND ?2 AND EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND f.state='COMPLETE' AND o.submission='CONFIRMED')",params![id,complete])?;
         tx.commit()?;
         Ok(())
     }
@@ -1429,7 +1462,9 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         let phase = phase.context(super::scheduling::FundingDecodeFailure)?;
         let parsed_phase: FundingPhase = serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
         // Also normalize historical completed rows for read-only wallet status.
-        let last_error = if parsed_phase == FundingPhase::Complete {
+        let completed_without_observations = parsed_phase == FundingPhase::Complete
+            && (version < 16 || !read_funding_facts(db, &id, &operation_id)?.observations_needed());
+        let last_error = if completed_without_observations {
             completed_error(last_error.as_deref()).map(str::to_owned)
         } else {
             last_error
@@ -1437,7 +1472,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
             started_at: started_at.map(u64::try_from).transpose().context(super::scheduling::FundingDecodeFailure)?,
-            error_streak: if parsed_phase == FundingPhase::Complete && last_error.is_none() { 0 } else { error_streak },
+            error_streak: if completed_without_observations && last_error.is_none() { 0 } else { error_streak },
             timed_out,
             id,
             pool_id,

@@ -154,3 +154,28 @@ fn malformed_status_observations_and_operation_facts_fail_without_repair() {
         assert_eq!(db.total_changes(), changes);
     }
 }
+
+#[test]
+fn historical_completed_status_does_not_require_current_obligation_columns() {
+    for version in 4..=12 {
+        let db = historical(version);
+        db.execute("UPDATE funding_jobs SET state='COMPLETE'", [])
+            .unwrap();
+        db.execute(
+            "UPDATE funding_progress SET last_error='funding_quote_failed; historical'",
+            [],
+        )
+        .unwrap();
+        db.execute_batch("PRAGMA query_only=ON").unwrap();
+        let changes = db.total_changes();
+        let report =
+            read_status(&db).unwrap_or_else(|error| panic!("version {version}: {error:#}"));
+        assert_eq!(
+            report.funding_jobs[0].phase,
+            funding::FundingPhase::Complete
+        );
+        assert!(report.funding_jobs[0].last_error.is_none());
+        assert!(report.outgoing_pending);
+        assert_eq!(db.total_changes(), changes);
+    }
+}
