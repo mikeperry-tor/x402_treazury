@@ -754,7 +754,7 @@ pub(crate) mod tests {
     }
     #[derive(Clone)]
     pub(crate) struct Fixture {
-        pub(super) calls: Arc<AtomicUsize>,
+        pub(crate) calls: Arc<AtomicUsize>,
         pub(crate) signed: Arc<AtomicUsize>,
         payers: Arc<std::sync::Mutex<Vec<String>>>,
         body: Value,
@@ -837,6 +837,11 @@ pub(crate) mod tests {
             f,
             task,
         )
+    }
+    pub(crate) fn set_client(relay: &mut Arc<Relay>, client: PaidClient) {
+        Arc::get_mut(relay)
+            .expect("fixture relay is unshared")
+            .client = client;
     }
     pub(crate) fn is_idle(relay: &Relay) -> bool {
         relay.state.try_lock().is_ok()
@@ -1423,4 +1428,4 @@ pub(crate) mod tests {
 
 #[cfg(all(test, feature = "zcash"))]
 #[path = "discovery_relay/readiness_tests.rs"]
-mod readiness_tests;
+pub(crate) mod readiness_tests;
