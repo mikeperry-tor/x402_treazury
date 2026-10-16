@@ -174,6 +174,12 @@ impl ManagedPool {
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
         self.candidate_for(None).await
     }
+    pub(crate) async fn discovery_ready(&self) -> Result<bool> {
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| s.payment_identity_available(&pool))
+            .await
+    }
     pub(crate) async fn candidate_for(&self, hint: Option<U256>) -> Result<PaymentCandidateHandle> {
         let pool = self.pool.clone();
         let guard = Arc::new(self.gate.clone().lock_owned().await);

@@ -564,6 +564,21 @@ this prerequisite alone does not enable deferred discovery. Tests cover overlapp
 registration/publication, stale pricing after removal, view/binding/name/overflow
 failures without partial publication, and accepted-work cancellation.
 
+**C08 relay-readiness and drain prerequisite (reviewed contract):** Check existing
+unsigned identity availability using the same read-only default-identity calculation,
+without payment's retained-role promotion. Only an absent identity becomes typed
+dependency waiting; unavailable configuration, malformed/shared evidence, exhausted
+target attempts and a stopped breaker remain errors. Waiting consumes no relay
+attempt or provider I/O. Every actual request still resolves identity and validates
+fresh payment admission; readiness is not authority. Typed retry dispositions retain
+the existing one-second backoff and three actual pre-submission attempts. Paid
+uncertainty still closes the shared run-wide breaker. Relay drain delegates to the
+existing shared PaidClient owner and is for final deployment shutdown only, never
+an individual target completion. Tests cover repeated empty-payer waits, same-owner
+resumption after canonical fixture evidence, no readiness role mutation, attempt
+exhaustion/backoff, terminal immutable/malformed state, and cancelled paid-waiter
+drain. Deferred scheduling and shutdown wiring remain pending C08.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
