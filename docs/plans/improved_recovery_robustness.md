@@ -3027,3 +3027,15 @@ expiry/freshness policy merely from the use of different clocks. Prove that elap
 time cannot substitute for canonical expiry, old evidence cannot become fresh
 again, and temporary clock conditions cannot strand recovery after valid evidence
 returns. Add no timer, deadline or permanent repair flag to address this test gap.
+
+
+**T44 / T04 paid HTTP acceptance (implemented and reviewed):** The existing
+remaining-capacity test now holds the production canonical repair on its nonce
+read while an actual PaidClient call proceeds. With $20 current balance and a
+$1 disputed release, a $20 challenge fails unsigned and a $19 payment succeeds.
+Repair then adopts EXPIRED_UNUSED while retaining the concurrent $19 pending
+authorization and immutable original USED proof. After Store/manager reopen,
+a separate $1 payment succeeds with a distinct nonce; both new pending
+authorizations total $20, and no funding job is added. The fixture uses an owned
+ACTIVE payer without synthetic readiness support. The focused default-build
+test passed and independent review found no issues.

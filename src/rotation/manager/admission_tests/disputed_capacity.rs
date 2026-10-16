@@ -1,7 +1,20 @@
 use super::*;
 use crate::{catalog::RoutedRequest, payment::PaidClient, rotation::store::Store};
 
-async fn current_rpc(state: State<Fixture>, request: Json<Value>) -> Json<Value> {
+#[derive(Clone)]
+struct RepairFixture {
+    payment: Fixture,
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Semaphore>,
+}
+async fn current_rpc(State(state): State<RepairFixture>, request: Json<Value>) -> Json<Value> {
+    if request.0["method"] == "eth_call" {
+        let data = request.0["params"][0]["data"].as_str().unwrap();
+        if !data.starts_with("0x70a08231") && data.ends_with(&format!("{:064x}", 1)) {
+            state.started.notify_one();
+            state.release.acquire().await.unwrap().forget();
+        }
+    }
     if request.0["method"] == "eth_getBlockByNumber" {
         let tag = request.0["params"][0].as_str().unwrap();
         assert!(
@@ -9,11 +22,11 @@ async fn current_rpc(state: State<Fixture>, request: Json<Value>) -> Json<Value>
             "payment must not read the disputed historical checkpoint"
         );
     }
-    rpc(state, request).await
+    rpc(State(state.payment), request).await
 }
 
 async fn journal_checked_seller(
-    state: State<Fixture>,
+    State(state): State<RepairFixture>,
     headers: HeaderMap,
 ) -> axum::response::Response {
     if let Some(signature) = headers.get("payment-signature") {
@@ -22,18 +35,22 @@ async fn journal_checked_seller(
         let nonce = payload["payload"]["authorization"]["nonce"]
             .as_str()
             .unwrap();
-        let db = rusqlite::Connection::open(&state.0.db).unwrap();
+        let db = rusqlite::Connection::open(&state.payment.db).unwrap();
         let admission: (String, String, String) = db.query_row("SELECT a.amount,e.balance,e.reserved_before FROM payment_attempts a JOIN payment_admission_evidence e ON e.attempt_id=a.id WHERE a.nonce=?1 AND a.state='POSSIBLY_SUBMITTED'", [nonce], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(
             admission,
-            ("19000000".into(), "20000000".into(), "1000000".into())
+            (
+                state.payment.price.load(Ordering::SeqCst).to_string(),
+                "20000000".into(),
+                (20_000_000 - state.payment.price.load(Ordering::SeqCst)).to_string()
+            )
         );
     }
-    seller(state, headers).await
+    seller(State(state.payment), headers).await
 }
 
 #[tokio::test]
-async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
+async fn restarted_disputed_wallet_pays_during_repair_then_reopens_without_replay() {
     let dir = tempfile::tempdir().unwrap();
     let state_path = dir.path().join("state");
     let key_path = dir.path().join("key");
@@ -52,13 +69,15 @@ async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
         .unwrap()
         .unwrap();
     let wallet = state.funding_job(&job).unwrap().unwrap().wallet_id;
-    state
-        .record_credit(&wallet, "20000000", &format!("0x{:064x}", 88), 88)
-        .unwrap();
     let db_path = state_path.join("state.sqlite");
     let db = rusqlite::Connection::open(&db_path).unwrap();
-    db.execute("UPDATE wallets SET evidence_repair='chain_repair_required',financial_height=80,financial_hash='disputed',debit_height=80,debit_hash='disputed' WHERE id=?1", [&wallet]).unwrap();
-    db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('old',?1,?2,0,'1000000','fixture','RESOLVED')", rusqlite::params![pool,wallet]).unwrap();
+    db.execute("UPDATE wallets SET role='ACTIVE',evidence_repair='chain_repair_required',financial_height=80,financial_hash='disputed',debit_height=80,debit_hash='disputed' WHERE id=?1", [&wallet]).unwrap();
+    let payer: String = db
+        .query_row("SELECT address FROM wallets WHERE id=?1", [&wallet], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES('old',?1,?2,0,'1000000','fixture','RESOLVED',?3,?3,?4,0,1,1)", rusqlite::params![pool,wallet,payer,format!("0x{:064x}",1)]).unwrap();
     db.execute(
         "UPDATE wallets SET payment_resolutions_disputed=1 WHERE id=?1",
         [&wallet],
@@ -81,17 +100,22 @@ async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
         used: Arc::default(),
         db: db_path,
     };
+    let repair_fixture = RepairFixture {
+        payment: fixture.clone(),
+        started: Arc::default(),
+        release: Arc::new(tokio::sync::Semaphore::new(0)),
+    };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let app = Router::new()
         .route("/rpc", post(current_rpc))
         .route("/pay", get(journal_checked_seller))
-        .with_state(fixture.clone());
+        .with_state(repair_fixture.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (store, owner) = StoreHandle::spawn(state);
     let mut manager = ManagedPool::new(
         store.clone(),
-        pool,
+        pool.clone(),
         BaseRpc::new(&format!("{url}/rpc"), 12, 120).unwrap(),
         SpendPolicy::dollars("20").unwrap(),
     )
@@ -106,6 +130,19 @@ async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
             async {}.boxed()
         }
     }));
+    let repair = tokio::spawn({
+        let store = store.clone();
+        let pool = pool.clone();
+        let wallet = wallet.clone();
+        let base = BaseRpc::new(&format!("{url}/rpc"), 12, 120).unwrap();
+        async move { crate::rotation::store::repair_wallet(store, base, pool, wallet).await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        repair_fixture.started.notified(),
+    )
+    .await
+    .unwrap();
     let client = PaidClient::managed(Arc::new(manager));
     let route = || RoutedRequest {
         method: "GET".into(),
@@ -129,6 +166,67 @@ async fn restarted_disputed_wallet_signs_only_its_remaining_capacity() {
     assert_eq!(fixture.unsigned.load(Ordering::SeqCst), 2);
     let retained: (i64, String, String) = db.query_row("SELECT (SELECT payment_resolutions_disputed FROM wallets WHERE id=a.wallet_id),r.hash,r.support FROM payment_attempts a JOIN payment_resolutions r ON r.attempt_id=a.id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(retained, (1, "disputed".into(), "original-proof".into()));
+    assert!(
+        !repair.is_finished(),
+        "payment must complete while historical repair stays owned"
+    );
+    repair_fixture.release.add_permits(1);
+    assert!(repair.await.unwrap().unwrap());
+    let audit: (String,String,String) = db.query_row("SELECT r.outcome,r.support,e.outcome FROM payment_resolutions r JOIN effective_payment_resolutions e USING(attempt_id) WHERE r.attempt_id='old'", [], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(
+        audit,
+        (
+            "USED".into(),
+            "original-proof".into(),
+            "EXPIRED_UNUSED".into()
+        )
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT payment_resolutions_disputed FROM wallets WHERE id=?1",
+            [&wallet],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(client);
+    drop(store);
+    owner.await.unwrap();
+    let reopened = Store::open(&state_path, &key_path, &identity).unwrap();
+    let (store, owner) = StoreHandle::spawn(reopened);
+    let manager = ManagedPool::new(
+        store.clone(),
+        pool,
+        BaseRpc::new(&format!("{url}/rpc"), 12, 120).unwrap(),
+        SpendPolicy::dollars("20").unwrap(),
+    )
+    .unwrap();
+    let client = PaidClient::managed(Arc::new(manager));
+    fixture.price.store(1_000_000, Ordering::SeqCst);
+    assert_eq!(client.execute(route()).await.unwrap(), "paid");
+    let sent = fixture.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 2);
+    assert_ne!(
+        sent[0], sent[1],
+        "restart must create a distinct new authorization, never replay"
+    );
+    assert_eq!(db.query_row("SELECT COUNT(*),COUNT(DISTINCT nonce),SUM(CAST(amount AS INTEGER)) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).unwrap(),(2,2,20_000_000));
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM funding_jobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT support FROM payment_resolutions WHERE attempt_id='old'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "original-proof"
+    );
     drop(client);
     drop(store);
     owner.await.unwrap();
