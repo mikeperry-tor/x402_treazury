@@ -26,6 +26,7 @@ pub enum RecoveryEvidenceError {
     IndexerInclusion,
     TransactionMismatch,
     ConfirmationMismatch,
+    ConfirmationPending,
 }
 
 impl std::fmt::Display for RecoveryEvidenceError {
@@ -42,6 +43,7 @@ impl std::fmt::Display for RecoveryEvidenceError {
             Self::IndexerInclusion => "expiry recovery contradicts indexer inclusion",
             Self::TransactionMismatch => "confirmed transaction bytes mismatch",
             Self::ConfirmationMismatch => "confirmation disagrees with wallet sync",
+            Self::ConfirmationPending => "treasury_confirmation_pending",
         })
     }
 }

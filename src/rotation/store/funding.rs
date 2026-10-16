@@ -3,28 +3,17 @@
 pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)";
 
 use super::*;
-// Missing bytes are not proof that an interrupted preparer did no work.
-pub(crate) fn safely_unprepared(job: &FundingJob) -> bool {
-    matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-        || (job.phase == FundingPhase::RecoveryRequired
-            && job.last_error.as_deref().is_some_and(|e| {
-                e.starts_with("quote_refresh_exhausted;")
-                    || e.starts_with("funding_quote_failed;")
-                    || e.starts_with("funding_attempt_closed;")
-            }))
+// Absence of bytes never proves that an interrupted preparer did no work.
+// Only untouched phases or an exactly bound, already committed closure suffice.
+pub(crate) fn safely_unprepared(job: &FundingJob, facts: &FundingFacts) -> bool {
+    matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted) || facts.source_closed
 }
 
 pub(crate) fn can_recover_facts(
     job: &FundingJob,
     operation: Option<&crate::rotation::transaction::OperationStatus>,
+    facts: &FundingFacts,
 ) -> bool {
-    if job
-        .last_error
-        .as_deref()
-        .is_some_and(|e| e.starts_with("funding_recovery_requires_operator;"))
-    {
-        return false;
-    }
     if job.phase == FundingPhase::RefundPending {
         return false;
     }
@@ -33,7 +22,7 @@ pub(crate) fn can_recover_facts(
     }
     operation
         .map(|op| op.submission != "CONFIRMED")
-        .unwrap_or_else(|| safely_unprepared(job))
+        .unwrap_or_else(|| safely_unprepared(job, facts))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,6 +92,8 @@ pub struct FundingFacts {
     pub readiness_disputed: bool,
     pub accepted_quote: bool,
     pub archived: bool,
+    /// Exact operation/job archive plus zero remaining source liability.
+    pub source_closed: bool,
     pub provider_success: bool,
     pub provider_failed: bool,
     pub provider_refunded: bool,
@@ -326,14 +317,16 @@ impl Store {
     }
 
     pub fn funding_facts(&self, job: &str, operation: &str) -> Result<FundingFacts> {
-        self.db.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
+        let mut facts = self.db.query_row(
+            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok(FundingFacts {
-                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?,
+                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false,
                 provider_success:r.get(4)?, provider_failed:r.get(5)?, provider_refunded:r.get(6)?, provider_incomplete:r.get(7)?,
                 source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
             }),
-        ).context("funding operation binding changed")
+        ).context("funding operation binding changed")?;
+        facts.source_closed = facts.archived && source_attempt_closed(&self.db, operation)?;
+        Ok(facts)
     }
 
     pub fn require_funding_attempt(&self, job: &str, max_attempts: u32) -> Result<()> {
@@ -951,10 +944,10 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let (operation, phase, error): (String, String, Option<String>) = tx.query_row(
-            "SELECT operation_id,phase,last_error FROM funding_progress WHERE job_id=?1 AND operation_id=?2",
-            params![job,expected_operation],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        let (operation, phase): (String, String) = tx.query_row(
+            "SELECT operation_id,phase FROM funding_progress WHERE job_id=?1 AND operation_id=?2",
+            params![job, expected_operation],
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         let archived: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE operation_id=?1 AND job_id=?2)",
@@ -970,12 +963,7 @@ impl Store {
         }
         let phase: FundingPhase = serde_json::from_str(&phase)?;
         ensure!(
-            matches!(phase, FundingPhase::Allocated | FundingPhase::Quoted)
-                || (phase == FundingPhase::RecoveryRequired
-                    && error
-                        .as_deref()
-                        .is_some_and(|e| e.starts_with("quote_refresh_exhausted;")
-                            || e.starts_with("funding_quote_failed;"))),
+            matches!(phase, FundingPhase::Allocated | FundingPhase::Quoted),
             "preparation outcome unknown"
         );
         let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",[&operation],|r|r.get(0))?;
@@ -2415,5 +2403,110 @@ mod completion_tests {
                 .record_provider_outcome(&job.id, "another-operation", &SwapStatus::Success, 4)
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod recovery_classification_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_eligibility_uses_bound_closure_not_mutable_diagnostics() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let mut store = Store::create(&state, &key, 1, b"fixture")?;
+        let identity = store.id().to_owned();
+        super::super::test_support::declare_two_reserves(
+            &mut store,
+            "recovery",
+            "1",
+            Some(U256::from(10)),
+            0,
+        )?;
+        let jobs = store.funding_jobs()?;
+        let unknown = &jobs[0];
+        store.advance_funding(
+            &unknown.id,
+            FundingPhase::Allocated,
+            FundingPhase::RecoveryRequired,
+        )?;
+        for diagnostic in [
+            None,
+            Some("quote_refresh_exhausted; no preparation started"),
+            Some("funding_quote_failed; forged"),
+            Some("funding_attempt_closed; forged"),
+        ] {
+            store.defer_funding(&unknown.id, 0, diagnostic, false)?;
+            let job = store.funding_job(&unknown.id)?.unwrap();
+            let facts = store.funding_facts(&job.id, &job.operation_id)?;
+            assert!(!can_recover_facts(&job, None, &facts));
+            assert!(store.close_unprepared_funding(&job.id).is_err());
+            assert_eq!(store.funding_recovery_count(&job.id)?, 0);
+            assert_eq!(
+                store.funding_job(&job.id)?.unwrap().operation_id,
+                job.operation_id
+            );
+        }
+        let closed = &jobs[1];
+        store.close_unprepared_funding(&closed.id)?;
+        for diagnostic in [
+            None,
+            Some("funding_recovery_requires_operator; conflicting_transaction_or_input_evidence"),
+            Some("arbitrary annotation"),
+        ] {
+            store.db.execute(
+                "UPDATE funding_progress SET last_error=?2 WHERE job_id=?1",
+                params![closed.id, diagnostic],
+            )?;
+            let job = store.funding_job(&closed.id)?.unwrap();
+            let facts = store.funding_facts(&job.id, &job.operation_id)?;
+            assert!(facts.source_closed && can_recover_facts(&job, None, &facts));
+            store.close_unprepared_funding(&job.id)?;
+            assert_eq!(store.funding_recovery_count(&job.id)?, 1);
+        }
+        drop(store);
+        let mut store = Store::open(&state, &key, &identity)?;
+        let job = store.funding_job(&closed.id)?.unwrap();
+        assert!(
+            store
+                .funding_facts(&job.id, &job.operation_id)?
+                .source_closed
+        );
+        store.db.execute("INSERT INTO budget_entries(id,pool_id,day,original_day,requested,reserved,consumed) VALUES (?1,?2,1,1,10,10,0)", params![job.operation_id, job.pool_id])?;
+        assert!(
+            !store
+                .funding_facts(&job.id, &job.operation_id)?
+                .source_closed
+        );
+        assert!(store.close_unprepared_funding(&job.id).is_err());
+        assert!(store.reauthorize_closed_funding(&job.id, 3).is_err());
+        assert_eq!(
+            store.funding_job(&job.id)?.unwrap().operation_id,
+            job.operation_id
+        );
+        store.db.execute(
+            "DELETE FROM budget_entries WHERE id=?1",
+            [&job.operation_id],
+        )?;
+        store.deny_new_funding();
+        assert!(store.reauthorize_closed_funding(&job.id, 3).is_err());
+        assert_eq!(
+            store.funding_job(&job.id)?.unwrap().operation_id,
+            job.operation_id
+        );
+        assert_eq!(store.funding_recovery_count(&job.id)?, 1);
+        // An archive under a different job is not provenance for this operation.
+        store.db.execute(
+            "UPDATE funding_recovery SET job_id=?2 WHERE operation_id=?1",
+            params![job.operation_id, unknown.id],
+        )?;
+        assert!(
+            !store
+                .funding_facts(&job.id, &job.operation_id)?
+                .source_closed
+        );
+        assert!(store.close_unprepared_funding(&job.id).is_err());
+        Ok(())
     }
 }

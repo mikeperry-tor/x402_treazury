@@ -34,6 +34,7 @@ pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
 fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
     use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
     Some(match error.downcast_ref::<Evidence>()? {
+        Evidence::ConfirmationPending => RecoveryOutcome::Waiting("zcash_confirmations_pending"),
         Evidence::ExpiryNotBuried | Evidence::ExpiryNotInvalidated => {
             RecoveryOutcome::Waiting("waiting_for_transaction_expiry")
         }
@@ -54,31 +55,7 @@ fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
 fn early_job_disposition(job: &FundingJob) -> Option<RecoveryOutcome> {
     use RecoveryOutcome::*;
     if !needs_recovery(job) {
-        if job.last_error.as_deref().is_some_and(|reason| {
-            [
-                "treasury_insufficient_spendable_funds",
-                "funding_cost_limit_exceeded",
-                "funding_amount_limit_exceeded",
-                "qualification_funding_denied",
-                "near_authentication_required",
-            ]
-            .iter()
-            .any(|prefix| reason.starts_with(prefix))
-        }) {
-            return Some(OperatorRequired(
-                "funding_balance_budget_or_configuration_required",
-            ));
-        }
         return Some(Waiting("funding_in_progress"));
-    }
-    if job.last_error.as_deref().is_some_and(|reason| {
-        reason.starts_with(
-            "funding_recovery_requires_operator; conflicting_transaction_or_input_evidence",
-        )
-    }) {
-        return Some(OperatorRequired(
-            "conflicting_transaction_or_input_evidence",
-        ));
     }
     if job.phase == FundingPhase::RefundPending {
         return Some(OperatorRequired("refund_requires_review"));
@@ -229,7 +206,12 @@ impl Treasury {
         allow_new_attempt: bool,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
-        if !safely_unprepared(job) {
+        let (id, operation) = (job.id.clone(), job.operation_id.clone());
+        let facts = self
+            .store
+            .call(move |s| s.funding_facts(&id, &operation))
+            .await?;
+        if !safely_unprepared(job, &facts) {
             return Ok(OperatorRequired("preparation_outcome_unknown"));
         }
         let id = job.id.clone();
@@ -300,9 +282,10 @@ impl Treasury {
                 .reconcile_prepared(operation_id.clone(), sender, stop)
                 .await
             {
-                if error
-                    .chain()
-                    .any(|cause| cause.to_string() == "treasury_confirmation_pending")
+                if error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>()
+                    == Some(
+                        &crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending,
+                    )
                 {
                     return Ok(Some(Waiting("zcash_confirmations_pending")));
                 }
@@ -385,6 +368,7 @@ mod tests {
             Evidence::IndexerInclusion,
             Evidence::TransactionMismatch,
             Evidence::ConfirmationMismatch,
+            Evidence::ConfirmationPending,
         ] {
             let prose = evidence.to_string();
             assert!(evidence_outcome(&anyhow::anyhow!(prose)).is_none());
@@ -449,6 +433,27 @@ mod tests {
                 .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
                 .await
                 .unwrap(),
+            RecoveryOutcome::OperatorRequired("preparation_outcome_unknown")
+        );
+        let job = owner
+            .status()
+            .await
+            .unwrap()
+            .funding_jobs
+            .into_iter()
+            .find(|other| other.id != job.id)
+            .unwrap();
+        let id = job.id.clone();
+        owner
+            .store
+            .call(move |s| s.close_unprepared_funding(&id))
+            .await
+            .unwrap();
+        assert_eq!(
+            owner
+                .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
+                .await
+                .unwrap(),
             RecoveryOutcome::OperatorRequired("funding_disabled")
         );
         let closed = owner
@@ -477,15 +482,7 @@ mod tests {
         let id = job.id.clone();
         owner
             .store
-            .call(move |s| {
-                s.advance_funding(&id, FundingPhase::Allocated, FundingPhase::RecoveryRequired)?;
-                s.defer_funding(
-                    &id,
-                    0,
-                    Some("quote_refresh_exhausted; no preparation started"),
-                    false,
-                )
-            })
+            .call(move |s| s.close_unprepared_funding(&id))
             .await
             .unwrap();
         let treasury_id = owner.status().await.unwrap().treasury_id;
@@ -608,33 +605,23 @@ mod tests {
             ),
             (
                 Some("treasury_insufficient_spendable_funds; detail"),
-                RecoveryOutcome::OperatorRequired(
-                    "funding_balance_budget_or_configuration_required",
-                ),
+                RecoveryOutcome::Waiting("funding_in_progress"),
             ),
             (
                 Some("funding_cost_limit_exceeded; detail"),
-                RecoveryOutcome::OperatorRequired(
-                    "funding_balance_budget_or_configuration_required",
-                ),
+                RecoveryOutcome::Waiting("funding_in_progress"),
             ),
             (
                 Some("funding_amount_limit_exceeded; detail"),
-                RecoveryOutcome::OperatorRequired(
-                    "funding_balance_budget_or_configuration_required",
-                ),
+                RecoveryOutcome::Waiting("funding_in_progress"),
             ),
             (
                 Some("qualification_funding_denied; detail"),
-                RecoveryOutcome::OperatorRequired(
-                    "funding_balance_budget_or_configuration_required",
-                ),
+                RecoveryOutcome::Waiting("funding_in_progress"),
             ),
             (
                 Some("near_authentication_required; detail"),
-                RecoveryOutcome::OperatorRequired(
-                    "funding_balance_budget_or_configuration_required",
-                ),
+                RecoveryOutcome::Waiting("funding_in_progress"),
             ),
         ] {
             let id = jobs[0].id.clone();
@@ -679,7 +666,7 @@ mod tests {
             .await
             .unwrap();
         for (job, reason) in [
-            (&jobs[0], "conflicting_transaction_or_input_evidence"),
+            (&jobs[0], "preparation_outcome_unknown"),
             (&jobs[1], "refund_requires_review"),
         ] {
             let before = recovery_rows(dir.path(), false);
@@ -705,19 +692,7 @@ mod tests {
         let id = job.id.clone();
         owner
             .store
-            .call(move |store| {
-                store.advance_funding(
-                    &id,
-                    FundingPhase::Allocated,
-                    FundingPhase::RecoveryRequired,
-                )?;
-                store.defer_funding(
-                    &id,
-                    0,
-                    Some("funding_quote_failed; no preparation started"),
-                    false,
-                )
-            })
+            .call(move |store| store.close_unprepared_funding(&id))
             .await
             .unwrap();
         let financial_before = recovery_rows(dir.path(), true);
