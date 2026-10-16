@@ -1,7 +1,10 @@
 //! One resumable reconciliation owner per store/group. Runtime cursors enumerate
 //! committed work; only separately verified SQL commits resolve liabilities.
 use super::*;
-use crate::rotation::{base::PendingAuthorization, store::history::PAGE_SIZE};
+use crate::rotation::{
+    base::PendingAuthorization,
+    store::history::{HistoryPayload, PAGE_SIZE},
+};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
@@ -39,6 +42,8 @@ struct Pass<T> {
     queued: VecDeque<(i64, T)>,
     due: Instant,
     completed: bool,
+    yielded: bool,
+    decode_failure: Option<crate::rotation::store::history::MalformedHistory>,
 }
 impl<T> Pass<T> {
     fn new(cursor: i64) -> Self {
@@ -48,6 +53,8 @@ impl<T> Pass<T> {
             queued: VecDeque::new(),
             due: Instant::now(),
             completed: false,
+            yielded: false,
+            decode_failure: None,
         }
     }
     fn finish(&mut self, delay: Duration) {
@@ -153,7 +160,7 @@ impl ManagedPool {
 
     async fn maintenance(&self, stop: CancellationToken, one_pass: bool) -> Result<()> {
         let mut balances = Pass::<String>::new(-1);
-        let mut history = Pass::<PendingAuthorization>::new(0);
+        let mut history = Pass::<HistoryPayload>::new(0);
         let mut priority = VecDeque::<String>::new();
         let mut priority_ids = BTreeSet::new();
         let mut priority_due = Instant::now();
@@ -217,6 +224,11 @@ impl ManagedPool {
                         .boxed(),
                 );
             }
+            if let Some(error) = history.decode_failure.take()
+                && first_error.is_none()
+            {
+                first_error = Some(error.into());
+            }
             if !qualification_active
                 && instant >= qualification_due
                 && (!one_pass || !qualification_completed)
@@ -242,7 +254,9 @@ impl ManagedPool {
                 .min(history.due);
             // Active passes may have an old due time. They are driven by
             // completions; the cadence prevents an empty/all-owned busy loop.
-            let wake = if wake <= Instant::now() {
+            let wake = if history.yielded {
+                Instant::now()
+            } else if wake <= Instant::now() {
                 Instant::now() + CADENCE
             } else {
                 wake
@@ -313,13 +327,33 @@ impl ManagedPool {
     }
     async fn next_admitted_history(
         &self,
-        pass: &mut Pass<PendingAuthorization>,
+        pass: &mut Pass<HistoryPayload>,
         one_pass: bool,
         retries: &mut HistoryRetries,
         active: &BTreeSet<String>,
         now: Instant,
     ) -> Result<Option<PendingAuthorization>> {
-        while let Some(auth) = self.next_history(pass, one_pass).await? {
+        pass.yielded = false;
+        // Bound acquisition work before polling already-owned reads/cancellation.
+        // Exhausting this slice resumes immediately, without resetting the pass.
+        for _ in 0..PAGE_SIZE {
+            let Some(payload) = self.next_history(pass, one_pass).await? else {
+                return Ok(None);
+            };
+            let auth = match payload {
+                Ok(auth) => auth,
+                Err(error) => {
+                    tracing::warn!(
+                        category = "malformed_authorization_history",
+                        "authorization history unavailable; original obligation retained"
+                    );
+                    tracing::debug!(attempt=%error.id, wallet=%error.wallet, "malformed history ownership");
+                    if pass.decode_failure.is_none() {
+                        pass.decode_failure = Some(error);
+                    }
+                    continue;
+                }
+            };
             match retries.admit(&auth.id, now, active) {
                 HistoryAdmission::Ready => return Ok(Some(auth)),
                 HistoryAdmission::Skip => {}
@@ -327,18 +361,19 @@ impl ManagedPool {
                     // Retain this row in the existing bounded page. Restarting
                     // traversal would let earlier failures renew every backoff
                     // before this authorization could claim a retry record.
-                    pass.queued.push_front((pass.cursor, auth));
+                    pass.queued.push_front((pass.cursor, Ok(auth)));
                     return Ok(None);
                 }
             }
         }
+        pass.yielded = true;
         Ok(None)
     }
     async fn next_history(
         &self,
-        pass: &mut Pass<PendingAuthorization>,
+        pass: &mut Pass<HistoryPayload>,
         one_pass: bool,
-    ) -> Result<Option<PendingAuthorization>> {
+    ) -> Result<Option<HistoryPayload>> {
         if let Some((sequence, auth)) = pass.queued.pop_front() {
             pass.cursor = sequence;
             return Ok(Some(auth));
@@ -684,6 +719,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn malformed_history_page_retains_liabilities_and_drains_independent_work() {
+        let f = fixture(PAGE_SIZE * 4 + 7).await;
+        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+        db.execute(
+            "UPDATE payment_attempts SET valid_before=-1 WHERE reconciliation_sequence<=256",
+            [],
+        )
+        .unwrap();
+        let mut pass = Pass::new(0);
+        let mut retries = HistoryRetries::default();
+        assert!(
+            f.pool
+                .next_admitted_history(
+                    &mut pass,
+                    true,
+                    &mut retries,
+                    &BTreeSet::new(),
+                    Instant::now()
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(pass.cursor, PAGE_SIZE as i64);
+        assert!(pass.yielded && !pass.completed);
+        assert!(retries.0.is_empty());
+        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 0);
+        let error = tokio::time::timeout(Duration::from_secs(3), f.pool.reconcile())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::rotation::store::history::MalformedHistory>()
+                .is_some()
+        );
+        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 7);
+        assert!(f.balance_reads.load(Ordering::SeqCst) >= 2);
+        assert_eq!(unfinished(&f).await, PAGE_SIZE);
+        let exposure: String = db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get(0)).unwrap();
+        assert_eq!(exposure, (PAGE_SIZE * 4).to_string());
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE valid_before=-1 AND state='POSSIBLY_SUBMITTED'", [], |r| r.get::<_, i64>(0)).unwrap(), (PAGE_SIZE * 4) as i64);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM payment_resolutions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            7
+        );
+        drop(db);
+        drop(f.pool);
+        drop(f.store);
+        f.worker.await.unwrap();
+        f.server.abort();
+    }
+
+    #[tokio::test]
     async fn slow_history_keeps_rolling_across_pages_and_does_not_block_balance_cadence() {
         let f = fixture(PAGE_SIZE + 7).await;
         let stop = CancellationToken::new();
@@ -728,7 +819,7 @@ mod tests {
             .history_page(&id, 0, reopened.history_boundary(&id).unwrap(), PAGE_SIZE)
             .unwrap();
         assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].1.id, "attempt-1");
+        assert_eq!(remaining[0].1.as_ref().unwrap().id, "attempt-1");
     }
 
     #[tokio::test]
@@ -1035,7 +1126,11 @@ mod tests {
         pass.queued.push_back(row.clone());
         // The earlier pass finishes while a later page still holds this row.
         f.pool
-            .read_one(Kind::History, row.1.id.clone(), Some(row.1))
+            .read_one(
+                Kind::History,
+                row.1.as_ref().unwrap().id.clone(),
+                Some(row.1.unwrap()),
+            )
             .await
             .result
             .unwrap();
