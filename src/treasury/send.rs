@@ -354,7 +354,7 @@ impl Treasury {
                         height > 0
                             && observation.height.is_some_and(|tip| tip >= height
                                 && tip - height + 1 >= u64::from(observation.confirmations)),
-                        "treasury_confirmation_pending"
+                        crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending
                     );
                     let facts = s.operation(&id)?.facts;
                     let cost = facts

@@ -872,9 +872,8 @@ fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'stati
     if matches!(
         phase,
         FundingPhase::DepositPending | FundingPhase::Complete | FundingPhase::RecoveryRequired
-    ) && error
-        .chain()
-        .any(|cause| cause.to_string() == "treasury_confirmation_pending")
+    ) && error.downcast_ref::<super::transaction::RecoveryEvidenceError>()
+        == Some(&super::transaction::RecoveryEvidenceError::ConfirmationPending)
     {
         return Some("zcash_confirmations_pending");
     }

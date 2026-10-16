@@ -174,6 +174,9 @@ impl FundingBackend for Fake {
     async fn reconcile(&mut self, j: &FundingJob) -> Result<bool> {
         self.reconcile_calls += 1;
         if let Some(error) = self.reconcile_error {
+            if error == "treasury_confirmation_pending" {
+                return Err(x402_treazury::rotation::transaction::RecoveryEvidenceError::ConfirmationPending.into());
+            }
             anyhow::bail!(error);
         }
         let id = j.operation_id.clone();

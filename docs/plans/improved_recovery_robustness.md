@@ -336,6 +336,27 @@ malformed exposures, shared SQL errors, cancellation and independent capacity.
 C01 and the typed-evidence C02 slice also received a read-only sub-agent review
 with no actionable findings.
 
+**C02 / G01 closure contract (reviewed):** Real unsigned quote failures retain
+`Allocated`; refreshes archive their exact operation then return to `Allocated`.
+A `RecoveryRequired` row plus quote-error prose is not a production proof of an
+unstarted preparer. Delete those exceptions in `safely_unprepared` and transactional
+closure. Safe closure uses `Allocated`/`Quoted`, or the exact job/operation archive
+joined with `source_attempt_closed`; absence of bytes alone remains insufficient.
+Remove generic operator-prefix and historical conflict-prefix vetoes. Current
+contradictions are rechecked against original inputs/exact bytes by canonical
+confirmation or two-sync expiry recovery; every failed proof retains ownership,
+bytes and reservations. A fresh full proof may discharge the original obligation.
+The sub-agent audit found no distinct invariant requiring a new sticky conflict
+field. New-work permission and durable recovery count remain separate checks.
+Fixtures must create real archive provenance rather than simulate it with prose.
+The remaining startup/health diagnostic interpreters are a separate C02 sub-slice;
+C16 still owns safe cleanup of interrupted `Preparing` work.
+Validation: nine focused `recovery_` tests, the extended archive/liability regression,
+and the normal-library `confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn`
+test pass. A sub-agent review found no code defects; its archive-plus-reservation
+negative control was added and passes. This slice does not claim the full signed
+conflict/canonical-replacement lifecycle acceptance, which remains pending.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

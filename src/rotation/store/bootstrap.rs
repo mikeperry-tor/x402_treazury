@@ -90,6 +90,7 @@ impl StartupPath {
             && !crate::rotation::store::funding::can_recover_facts(
                 &self.job,
                 self.operation.as_ref(),
+                &self.facts,
             )
         {
             return Obstructed("preparation_or_swap_requires_review");
