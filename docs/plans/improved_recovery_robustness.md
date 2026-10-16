@@ -678,6 +678,15 @@ metadata, so status is readable without reinitialization. The response captures
 one snapshot for definitions and instructions. Operator-required readiness
 classification remains pending rather than inferred from a false identity lookup.
 
+**C08 ordinary deferred-discovery scope:** The same serving publisher now owns
+remote unsigned discovery and pricing for ordinary deployments with or without a
+relay. It retains local authored validation and strict inspection/qualification
+completeness. A real load/bind/serve fixture holds an unsigned origin response
+open while independent tools remain callable, then publishes the late catalog.
+All ordinary listener binding still precedes funding-worker start. This removes
+the initial remote-catalog barrier without introducing another scheduler or
+changing signed relay retry policy.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
