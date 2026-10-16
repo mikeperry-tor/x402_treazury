@@ -1177,6 +1177,21 @@ async fn identity_ignores_archival_readiness_but_bootstrap_inventory_validates_i
         let groups = startup.unwrap();
         assert!(groups[0].serving_ready);
         assert_eq!(groups[0].inventory_ready, corrupt == "active");
+        let status = f.manager.store.call(|s| s.status()).await.unwrap();
+        let pool = status
+            .pools
+            .iter()
+            .find(|p| p.id == f.manager.pool)
+            .unwrap();
+        assert!(pool.serving_ready);
+        assert_eq!(pool.inventory_ready, groups[0].inventory_ready);
+        for claim in &pool.reserve_claims {
+            let malformed = corrupt == "all"
+                || corrupt == claim.slot
+                || (corrupt == "active_and_small" && claim.slot == "small");
+            assert_eq!(claim.destination_ready, !malformed);
+        }
+
         let after: Vec<(String, String)> = f
             .db()
             .prepare("SELECT id,role FROM wallets ORDER BY id")

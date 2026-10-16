@@ -169,7 +169,8 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
             [&wallet.id],
             |r| r.get(0),
         )?;
-        wallet.destination_recorded = funding::readiness_recorded_valid(db, &wallet.id)?;
+        wallet.destination_recorded =
+            reported_readiness(funding::readiness_recorded_valid(db, &wallet.id))?;
         wallet.destination_disputed = db.query_row(
             "SELECT readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
             [&wallet.id],
@@ -198,12 +199,15 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
         .collect::<rusqlite::Result<_>>()?;
     for claim in &mut pool.reserve_claims {
         if let Some(wallet) = &claim.wallet_id {
-            claim.destination_ready = capacity::payment_ownership(db, &pool.id, wallet)?
-                .is_some_and(|ownership| {
-                    ownership.role == "READY"
-                        && ownership.slot.as_deref() == Some(&claim.slot)
-                        && ownership.claim_generation == Some(claim.generation)
-                });
+            claim.destination_ready = reported_readiness(
+                capacity::inventory_ownership(db, &pool.id, wallet).map(|owner| {
+                    owner.is_some_and(|ownership| {
+                        ownership.role == "READY"
+                            && ownership.slot.as_deref() == Some(&claim.slot)
+                            && ownership.claim_generation == Some(claim.generation)
+                    })
+                }),
+            )?;
         }
     }
     pool.inventory_ready = pool.enabled
@@ -214,6 +218,33 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
             .filter(|c| c.enabled)
             .all(|c| c.destination_ready);
     Ok(())
+}
+
+// Malformed archival proof means incomplete inventory, while shared store
+// failures remain errors. This does not change current payment eligibility.
+fn reported_readiness(result: Result<bool>) -> Result<bool> {
+    match result {
+        Err(error)
+            if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
+                == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) =>
+        {
+            tracing::warn!(
+                category = "malformed_durable_evidence_support",
+                "Historical destination readiness is malformed; inventory completion is unavailable"
+            );
+            Ok(false)
+        }
+        other => other,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn readiness_reporting_preserves_shared_store_failures() {
+    let db = Connection::open_in_memory().unwrap();
+    let failure = funding::readiness_recorded_valid(&db, "wallet");
+    let error = reported_readiness(failure).unwrap_err();
+    assert!(error.downcast_ref::<rusqlite::Error>().is_some());
 }
 
 pub(super) fn read_operations(db: &Connection, version: u32) -> Result<Vec<OperationStatus>> {

@@ -78,6 +78,19 @@ pub(super) fn payment_ownership(
     }))
 }
 
+/// Explicit inventory completion additionally requires the original funding proof.
+pub(super) fn inventory_ownership(
+    db: &Connection,
+    pool: &str,
+    wallet: &str,
+) -> Result<Option<PaymentOwnership>> {
+    let owner = payment_ownership(db, pool, wallet)?;
+    if owner.is_some() && !funding::readiness_recorded_valid(db, wallet)? {
+        return Ok(None);
+    }
+    Ok(owner)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct ConsumedReserve {
     pub slot: String,

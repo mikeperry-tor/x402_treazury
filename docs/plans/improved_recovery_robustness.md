@@ -5,6 +5,50 @@ Working sections: [gate inventory](#gate-inventory-and-implementation-evidence),
 The [target design](#target-design) and [findings](#supporting-review-findings)
 provide supporting context.
 
+## Reboot checkpoint — 2026-10-16
+
+Paused at the user's request for a laptop reboot after the C10 review fixup.
+There is no implementation blocker. Branch: `improved_recovery_robustness_impl`.
+Resume from the committed checkout; do not restart or replay completed work.
+
+- C01–C08 implementation slices and their independent review fixups are committed;
+  the contracts below describe their exact scope and remaining acceptance gaps.
+  Ordinary serving now binds before funding and remote discovery, isolates unusable
+  dependencies, and publishes deferred catalogs without restarting. The gate table
+  is not a blanket completion claim.
+- C09's payment-exposure slice is committed as `2229598` and review fixup `8384e4e`.
+  Outstanding payment journals are authoritative; production no longer reads or
+  updates the obsolete wallet aggregate for admission. Validation: 252 rotation
+  tests passed (four ignored subprocess helpers), payment-saturation regression,
+  and all-target Clippy. Disputed-release membership and funding-obligation
+  inventory still need implementation.
+- C10's archival-dependency slice is committed as `ff9db28`. Current captures no
+  longer require historical funding/retirement balances, while current checkpoint,
+  debit, generation and dispute protections remain. Thirty selection tests passed;
+  the added current-header assertion and migrated historical retirement regression
+  passed. The store run passed 125 tests with two ignored helpers and one obsolete
+  retirement expectation; that expectation was migrated and its focused rerun passed.
+  All-target Clippy passed for the main slice.
+- The accompanying C10 review fixup shares explicit inventory ownership between
+  bootstrap and status. Malformed archival support reports incomplete inventory
+  with a fixed warning; current serving identity stays independent. Shared SQL
+  errors propagate. Independent review found no remaining issues in this fixup.
+  Validation: startup/status parity and shared SQL-error regressions passed,
+  all-target Clippy passed, and formatting/diff checks passed.
+
+Next: finish C09/C10's remaining obligation membership and decision-specific
+observation/admission contract before broadening initial capacity in C11 or disputed
+exposure service in C12. Do not simply delete the repair veto: invalidated RESOLVED
+authorizations are not yet included in pending exposure. Then continue C13–C22 in
+the recommended sequence, including treasury provenance/ownership, closure,
+refund shielding, clocks and final integrated checks. No live-funded qualification
+or private-state repair has been performed or authorized by these changes.
+
+Continue independent reviews at commit gates and land findings as separate fixup
+commits. Full `scripts/check.sh` and final acceptance closure remain outstanding.
+Preserve unrelated untracked user files (`TODO`, local deployment overrides,
+`run_servers.sh`, `similar_projects.md`, and `slow_bootstrap_log.txt`).
+
 ## Recommendation and scope
 
 Simplify recovery around minimal authoritative state, current canonical evidence,
@@ -133,7 +177,7 @@ This is the initial inventory, not a completed proof specification. Stage 1 expa
 grouped entries into individual predicates/fields and records their exact release
 conditions. “Proposed” dispositions require that proof before implementation;
 “decide” is an unresolved design gate. Add newly discovered predicates here rather
-than creating a separate deletion list. All evidence entries are pending; record
+than creating a separate deletion list. Evidence entries are partial unless explicitly completed; record
 commit, removed predicates, retained invariants and executed tests as work lands.
 
 | ID | Source predicate or field; finding | Live obligation / authority | Disposition and release rule | Owning stages | Acceptance | Evidence |
@@ -141,7 +185,7 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G01 | `funding.rs` recovery prefixes, `recovery.rs::evidence_outcome`, `bootstrap.rs::disposition`, scheduling diagnostics; F1/F5 | Exact preparation/submission facts and current policy | Delete prose-based authority; derive consumer-specific assessments from shared typed facts | 2 | T15, T21, T34 | Pending |
 | G02 | `Treasury::prepare`, PREPARING phase, sync/refund-address mutation, owner health, `Treasury::close` and supervisor cancellation; F2/F6 | Snapshot, address binding, reservation, bytes and possible submission; exclusive SDK/store ownership | Replace ambiguous phase inference with minimal boundary provenance; separate SDK retirement from shared-store shutdown and recoverable worker exit from process shutdown; retain exact commit/owner checks | 3, 6 | T08–T12, T23, T35 | Pending |
 | G03 | `evidence.rs::check_capture`, wallet repair flag and invalidation generation; F4/F8 | Affected resolution/debit support | Proposed removal of blanket observation veto; retain only decision-specific disputes until sufficient release evidence commits | 2, 4 | T01, T02, T04, T19, T27 | Pending |
-| G04 | `capture_evidence`, original readiness anchors and `capacity.rs` role publication; F8/F15 | Current owned capacity, exposure and debit floor | Proposed derivation from current canonical support; retire obsolete readiness dependencies without rewriting audit | 2, 4 | T05, T17, T18, T26, T32 | Pending |
+| G04 | `capture_evidence`, original readiness anchors and `capacity.rs` role publication; F8/F15 | Current owned capacity, exposure and debit floor | Proposed derivation from current canonical support; retire obsolete readiness dependencies without rewriting audit | 2, 4 | T05, T17, T18, T26, T32 | Partial: `ff9db28` removes archival funding/retirement anchors from current captures; role publication remains pending. See C10 contract and reboot checkpoint |
 | G05 | `repair_snapshot` ACTIVE/RETAINED, completed-job and undisputed-readiness exclusions; F10 | Role/claim ownership and unresolved funding obligations | Delete exclusions lacking a live dependency; separate current capacity from swap completion | 2, 4 | T18, T26, T27 | Pending |
 | G06 | `base.rs::original_endpoint`, historical verifier selection; F9 | Approved chain/transport trust and exact support | Decide sufficient current replacement or approved alternate verification; retain original provenance | 4 | T06, T17, T19 | Pending |
 | G07 | `treasury::sync` source-history checks and `source_recheck_page`; F13 | Affected inputs, reservations and source accounting | Proposed removal of whole-sync historical veto; retain scoped live obligations | 2, 4 | T24, T27, T32 | Pending |
@@ -151,7 +195,7 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G11 | `require_spend_ready`, outgoing commit checks and funding refresh `outgoing_pending`; F16 | SDK input/snapshot ownership and exact pending bytes | Decide required scope; remove only proven redundant global waiting, retain commit race checks | 2, 3 | T29 | Pending |
 | G12 | Repair snapshot/commit scans, maintenance balance lane, treasury wallet read guard and process-wide Base RPC resources; F3 | Coherent final commit and exclusive mutation owner | Remove avoidable actor/lock occupancy; retain CAS and ownership | 5 | T03, T04, T07, T33 | Pending |
 | G13 | Disabled/removed pool and listener scheduling, retired-wallet observation selection; ownership audit | Durable unresolved obligations independent of service demand | Audit/derive observation eligibility; retain prohibitions on new funding and retired capacity | 7 | T16, T31 | Pending |
-| G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Pending |
+| G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Partial: `2229598`, `8384e4e` derive pending payment exposure; disputed-release membership and funding inventory remain pending |
 | G15 | Base maintenance inventory-read error propagation and deployment log-only exit; funding-scheduler exit audit; F17 | Observation ownership and durable unresolved obligations | Resume recoverable observation work under existing ownership/backoff; justify stops for corruption or lost ownership | 6 | T37 | Pending |
 | G16 | `history_page` whole-page decoding and failure propagation; F18 | Malformed live authority and identifiable affected scope | Keep affected liability blocked; allow independent wallets in the same pool to progress when scope is provable | 2, 6 | T38 | Pending |
 | G17 | `TreasuryConfig::runtime_id`, `validate_static_identities`, full `store::status` reporting; F19 | Treasury identity, supported schema and managed/static ownership binding | Replace operational full-report reads with narrow identity/ownership queries; unrelated report decoding cannot gate opening or recovery | 2, 8 | T32, T38, T40 | C01 implemented in b4a3b48; see implementation contracts and evidence below |
@@ -723,7 +767,8 @@ enabled pool, configured cap, existing eligible role and exact READY claim bindi
 historical funding support remains validated by explicit bootstrap inventory and
 accounting. Same-anchor contradictions and disputed resolution repair restrictions
 remain enforced in this slice; their decision-specific separation is subsequent
-work. ALLOCATED and RETIRED wallets remain excluded until C11's separate contract.
+work. ALLOCATED eligibility awaits C11's separate contract; RETIRED wallets remain
+excluded from serving capacity.
 
 ### Stage 1 — Minimal authority and dependency specification
 
