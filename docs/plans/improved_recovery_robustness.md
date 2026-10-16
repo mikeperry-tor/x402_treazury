@@ -787,6 +787,13 @@ tests passed (four ignored subprocess helpers), including 31 evidence tests; the
 focused deployment schema/identity rejection regression also passed. Review found
 an old-schema retirement-report regression, addressed in the following fixup.
 
+**C09 qualification exposure followup:** Explicit qualification snapshots now use
+the same pending/disputed exposure authority as payment admission, enumerating
+wallets by actual pool ownership and emitting only positive totals. Corrupted
+journal pool bindings cannot hide a sole obligation. Missing original resolution
+proofs and malformed amounts fail for the affected pool; unrelated wallet amounts
+are not decoded. Focused regression passed; independent review found no findings.
+
 **C09 funding inventory traversal contract (reviewed narrow slice):** Remove the
 `state != COMPLETE OR readiness_disputed` SQL filter. Traverse the existing funding
 job primary key in bounded 64-row pages under the captured insertion boundary;

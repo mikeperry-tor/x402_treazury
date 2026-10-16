@@ -5,25 +5,18 @@ use serde_json::{Value, json};
 impl Store {
     /// Unresolved exposure after applying a fresh chain view, while the pool gate is held.
     pub(crate) fn qualification_exposure(&self, pool: &str) -> Result<Value> {
-        let mut query = self.db.prepare(
-            "SELECT wallet_id,amount FROM payment_attempts WHERE pool_id=?1 AND state!='RESOLVED'",
-        )?;
-        let mut totals = std::collections::BTreeMap::<String, U256>::new();
-        for row in query.query_map([pool], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })? {
-            let (wallet, value) = row?;
-            let sum = totals.entry(wallet).or_default();
-            *sum = sum
-                .checked_add(amount(&value)?)
-                .context("pool observation exposure overflow")?;
+        // This explicit pool snapshot visits its owned wallets. Each amount
+        // comes from the indexed outstanding subsets, never resolved history.
+        let mut query = self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1")?;
+        let mut totals = std::collections::BTreeMap::new();
+        for wallet in query.query_map([pool], |r| r.get::<_, String>(0))? {
+            let wallet = wallet?;
+            let exposure = evidence::exposure(&self.db, &wallet)?;
+            if exposure > U256::ZERO {
+                totals.insert(wallet, exposure.to_string());
+            }
         }
-        Ok(json!(
-            totals
-                .into_iter()
-                .map(|(w, a)| (w, a.to_string()))
-                .collect::<std::collections::BTreeMap<_, _>>()
-        ))
+        Ok(json!(totals))
     }
     pub fn qualification_payment(&self, attempt: &str) -> Result<Value> {
         payment_evidence(&self.db, attempt)
@@ -231,6 +224,88 @@ mod tests {
         assert!(log.contains("limit=10000"));
         assert!(log.contains("qualification snapshot exceeds row limit"));
     }
+    #[test]
+    fn qualification_exposure_includes_disputed_journal_without_reading_sibling_amounts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let mut owners = Vec::new();
+        for name in ["subject", "sibling"] {
+            let pool = crate::rotation::test_capacity::declare_and_allocate!(
+                store,
+                name,
+                crate::rotation::test_capacity::two_reserves("100"),
+                Some(U256::from(100000000u64)),
+                0
+            )
+            .unwrap();
+            let wallet: String = store
+                .db
+                .query_row(
+                    "SELECT id FROM wallets WHERE pool_id=?1 LIMIT 1",
+                    [&pool],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            owners.push((pool, wallet));
+        }
+        let (pool, wallet) = &owners[0];
+        assert_eq!(store.qualification_exposure(pool).unwrap(), json!({}));
+        for (id, owner, value, state, disputed) in [
+            ("pending", &owners[0], "7", "POSSIBLY_SUBMITTED", 0),
+            ("disputed", &owners[0], "11", "RESOLVED", 1),
+            ("sibling", &owners[1], "malformed", "POSSIBLY_SUBMITTED", 0),
+        ] {
+            store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES(?1,?2,?3,0,?4,'fixture',?5,?6)",params![id,owner.0,owner.1,value,state,disputed]).unwrap();
+        }
+        assert!(store.qualification_exposure(pool).is_err());
+        store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES('disputed','USED',1,'original',1)",[]).unwrap();
+        assert_eq!(
+            store.qualification_exposure(pool).unwrap(),
+            json!({wallet:"18"})
+        );
+        assert!(store.qualification_exposure(&owners[1].0).is_err());
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET resolution_disputed=0 WHERE id='disputed'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.qualification_exposure(pool).unwrap()[wallet], "7");
+        // The wallet owns this liability even if its journal pool binding is
+        // corrupted. Enumerating only attempts bearing `pool` would omit it.
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET pool_id=?1 WHERE id='pending'",
+                [&owners[1].0],
+            )
+            .unwrap();
+        assert!(store.qualification_exposure(pool).is_err());
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET pool_id=?1 WHERE id='pending'",
+                [pool],
+            )
+            .unwrap();
+
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET state='RESOLVED' WHERE id='pending'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.qualification_exposure(pool).unwrap(), json!({}));
+    }
+
     #[test]
     fn admission_evidence_pins_original_exposure_balance_and_ownership() {
         let dir = tempfile::tempdir().unwrap();
