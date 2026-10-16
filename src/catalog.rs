@@ -363,8 +363,94 @@ pub async fn load_json_with_limit(
 ) -> Result<Value> {
     load_json_cached(source, http, limit, None).await
 }
-#[tracing::instrument(name = "catalog", skip_all, fields(source = cfg.discovery_source.as_deref().unwrap_or("standalone")))]
+/// An unsigned load can retain its exact relay continuation without repeating
+/// origin I/O. The continuation owns its configuration and shared relay state.
+pub(crate) enum CatalogLoad {
+    Ready(Value),
+    RelayPending(Box<RelayContinuation>),
+}
+pub(crate) struct RelayContinuation {
+    config: Config,
+    origin_error: anyhow::Error,
+    relay_slot: Option<crate::http_cache::Slot>,
+}
+impl RelayContinuation {
+    pub(crate) async fn resume(&self) -> Result<Value> {
+        let cfg = &self.config;
+        let error = &self.origin_error;
+        let http_error = error.downcast_ref::<reqwest::Error>();
+        let reason = if http_error.is_some_and(|e| e.is_timeout() && e.is_connect()) {
+            "connection_timeout"
+        } else if http_error.is_some_and(reqwest::Error::is_timeout) {
+            "read_inactivity"
+        } else if http_error.is_some_and(reqwest::Error::is_connect) {
+            "connection"
+        } else if http_error.and_then(reqwest::Error::status).is_some() {
+            "http_status"
+        } else if http_error.is_some() {
+            "transport"
+        } else {
+            error
+                .downcast_ref::<LoadStage>()
+                .map(|s| s.label())
+                .unwrap_or("fetch")
+        };
+        crate::discovery_relay::log_fallback(
+            cfg,
+            "catalog",
+            reason,
+            http_error
+                .and_then(reqwest::Error::status)
+                .map(|s| s.as_u16()),
+        );
+        let relay = cfg.discovery_relay.as_ref().expect("captured relay");
+        let response = relay
+            .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
+            .await
+            .inspect_err(|error| {
+                crate::discovery_relay::log_failure(cfg, "catalog", error);
+            })?;
+        // The relay has already validated complete JSON before caching the response.
+        let document = parse_document(&response.body)?;
+        if let Some(slot) = &self.relay_slot {
+            let metadata = crate::http_cache::Metadata::from_relay_headers(
+                &response.headers,
+                response.catalog_cache_age(),
+                Some(cfg.catalog_cache_ttl_seconds),
+            );
+            tracing::info!(
+                cache = "relay_response",
+                cache_policy =
+                    crate::http_cache::Metadata::policy_label(&response.headers, metadata.as_ref()),
+                persist = metadata.as_ref().is_some_and(|m| m.fresh()),
+                "Catalog relay response cache policy"
+            );
+            slot.write(
+                metadata
+                    .filter(|m| m.fresh())
+                    .map(|metadata| crate::http_cache::Entry {
+                        metadata,
+                        data: response.body.clone(),
+                    }),
+            )
+            .await;
+        }
+        Ok(document)
+    }
+}
+
 pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) -> Result<Value> {
+    match prepare_json_discovery(cfg, http).await? {
+        CatalogLoad::Ready(document) => Ok(document),
+        CatalogLoad::RelayPending(pending) => pending.resume().await,
+    }
+}
+
+#[tracing::instrument(name = "catalog", skip_all, fields(source = cfg.discovery_source.as_deref().unwrap_or("standalone")))]
+pub(crate) async fn prepare_json_discovery(
+    cfg: &Config,
+    http: &reqwest::Client,
+) -> Result<CatalogLoad> {
     tracing::info!(
         cache = crate::http_cache::Slot::availability(cfg, "catalog"),
         "Catalog disk cache configuration"
@@ -378,7 +464,7 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
                 cache = "relay_disk_hit",
                 "Catalog loaded from fresh relay cache; content supplied by configured relay"
             );
-            return Ok(document);
+            return Ok(CatalogLoad::Ready(document));
         }
         slot.write(None).await;
     }
@@ -390,72 +476,20 @@ pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) ->
     )
     .await;
     let error = match result {
-        Ok(doc) => return Ok(doc),
+        Ok(doc) => return Ok(CatalogLoad::Ready(doc)),
         Err(e) => e,
     };
-    let Some(relay) = &cfg.discovery_relay else {
+    let Some(_) = &cfg.discovery_relay else {
         return Err(error);
     };
     if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {
         return Err(error);
     }
-    let http_error = error.downcast_ref::<reqwest::Error>();
-    let reason = if http_error.is_some_and(|e| e.is_timeout() && e.is_connect()) {
-        "connection_timeout"
-    } else if http_error.is_some_and(reqwest::Error::is_timeout) {
-        "read_inactivity"
-    } else if http_error.is_some_and(reqwest::Error::is_connect) {
-        "connection"
-    } else if http_error.and_then(reqwest::Error::status).is_some() {
-        "http_status"
-    } else if http_error.is_some() {
-        "transport"
-    } else {
-        error
-            .downcast_ref::<LoadStage>()
-            .map(|s| s.label())
-            .unwrap_or("fetch")
-    };
-    crate::discovery_relay::log_fallback(
-        cfg,
-        "catalog",
-        reason,
-        http_error
-            .and_then(reqwest::Error::status)
-            .map(|s| s.as_u16()),
-    );
-    let response = relay
-        .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
-        .await
-        .inspect_err(|error| {
-            crate::discovery_relay::log_failure(cfg, "catalog", error);
-        })?;
-    // The relay has already validated complete JSON before caching the response.
-    let document = parse_document(&response.body)?;
-    if let Some(slot) = relay_slot {
-        let metadata = crate::http_cache::Metadata::from_relay_headers(
-            &response.headers,
-            response.catalog_cache_age(),
-            Some(cfg.catalog_cache_ttl_seconds),
-        );
-        tracing::info!(
-            cache = "relay_response",
-            cache_policy =
-                crate::http_cache::Metadata::policy_label(&response.headers, metadata.as_ref()),
-            persist = metadata.as_ref().is_some_and(|m| m.fresh()),
-            "Catalog relay response cache policy"
-        );
-        slot.write(
-            metadata
-                .filter(|m| m.fresh())
-                .map(|metadata| crate::http_cache::Entry {
-                    metadata,
-                    data: response.body.clone(),
-                }),
-        )
-        .await;
-    }
-    Ok(document)
+    Ok(CatalogLoad::RelayPending(Box::new(RelayContinuation {
+        config: cfg.clone(),
+        origin_error: error,
+        relay_slot,
+    })))
 }
 
 pub(crate) async fn load_json_cached(

@@ -1266,19 +1266,36 @@ pub(crate) mod tests {
                 .unwrap();
             let (relay, f, task) = fixture(envelope(&url), false, false).await;
             let dir = tempfile::tempdir().unwrap();
-            let cfg = Config {
+            let mut cfg = Config {
                 spec: url.clone(),
                 discovery_source: Some("test_provider".into()),
                 discovery_relay: Some(relay),
                 http_cache_directory: Some(dir.path().join("http-cache")),
                 ..Default::default()
             };
-            crate::catalog::load_json_discovery(&cfg, &http)
+            let pending = match crate::catalog::prepare_json_discovery(&cfg, &http)
                 .await
-                .unwrap();
-            crate::catalog::load_json_discovery(&cfg, &http)
-                .await
-                .unwrap();
+                .unwrap()
+            {
+                crate::catalog::CatalogLoad::RelayPending(pending) => pending,
+                crate::catalog::CatalogLoad::Ready(_) => panic!("blocked origin must defer relay"),
+            };
+            assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(f.calls.load(Ordering::SeqCst), 0);
+            // The continuation retains its original target/cache/relay after the
+            // caller changes its configuration. Concurrent aliases share paid work.
+            let original = cfg.clone();
+            cfg.spec = "https://other.example/spec".into();
+            cfg.discovery_relay = None;
+            let (a, b) = tokio::join!(pending.resume(), pending.resume());
+            assert_eq!(a.unwrap(), b.unwrap());
+            cfg = original;
+            assert!(matches!(
+                crate::catalog::prepare_json_discovery(&cfg, &http)
+                    .await
+                    .unwrap(),
+                crate::catalog::CatalogLoad::Ready(_)
+            ));
             assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
             assert_eq!(f.signed.load(Ordering::SeqCst), 1);
             assert!(
