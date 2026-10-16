@@ -521,21 +521,9 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     )
     .unwrap();
     let recovery_job = store.funding_jobs().unwrap().remove(0);
-    store
-        .advance_funding(
-            &recovery_job.id,
-            FundingPhase::Allocated,
-            FundingPhase::RecoveryRequired,
-        )
-        .unwrap();
-    store
-        .defer_funding(
-            &recovery_job.id,
-            0,
-            Some("quote_refresh_exhausted; no preparation started"),
-            false,
-        )
-        .unwrap();
+    // Persist the production closure proof while the operation is still
+    // provably unprepared; diagnostic prose is never recovery authority.
+    store.close_unprepared_funding(&recovery_job.id).unwrap();
     drop(store);
     // Recovery works with auto_fund=false and unavailable catalog/RPC URLs;
     // Safe unprepared closure requires no network, listener token or new transfer.
