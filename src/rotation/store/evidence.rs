@@ -1115,7 +1115,7 @@ impl Store {
         &mut self,
         attempt: &str,
         certificate: &crate::rotation::base::ResolutionCertificate,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         check_resolution(&self.db, self.evidence_namespace, certificate)?;
         let existing:Option<(String,i64,String,u64)> = self.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
         if let Some((outcome, height, hash, block_time)) = existing {
@@ -1125,6 +1125,21 @@ impl Store {
                 } else {
                     "EXPIRED_UNUSED"
                 };
+            // A second canonical observation is not a second disposition. Its
+            // height is an observation anchor, not the transaction's inclusion
+            // height. Preserve the first proof and never release exposure twice.
+            let resolved: bool = self.db.query_row(
+                "SELECT state='RESOLVED' FROM payment_attempts WHERE id=?1",
+                [attempt],
+                |r| r.get(0),
+            )?;
+            if resolved
+                && outcome == expected
+                && height != i64::try_from(certificate.anchor().height)?
+                && hash != certificate.anchor().hash
+            {
+                return Ok(true);
+            }
             if outcome != expected
                 || height != i64::try_from(certificate.anchor().height)?
                 || hash != certificate.anchor().hash
@@ -1142,7 +1157,7 @@ impl Store {
                 anyhow::bail!(EvidenceFailure::ResolutionConflict);
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     fn check_journal_support_or_invalidate(
@@ -1237,8 +1252,32 @@ impl Store {
         &mut self,
         mut view: crate::rotation::base::ChainView,
     ) -> Result<crate::rotation::base::ChainView> {
+        // Validate all cross-map bindings before any contradiction can invalidate
+        // durable evidence. A malformed view is not proof of a chain conflict.
         for (attempt, certificate) in &view.resolution_certificates {
-            self.check_resolution_or_invalidate(attempt, certificate)?;
+            let resolution = view
+                .resolutions
+                .get(attempt)
+                .context("resolution_certificate_binding_mismatch")?;
+            ensure!(
+                certificate.authorization().id == *attempt
+                    && view.released.iter().filter(|id| *id == attempt).count() == 1
+                    && certificate.anchor() == resolution.anchor.as_ref().unwrap_or(&view.anchor)
+                    && certificate.outcome() == &resolution.outcome
+                    && certificate.block_time() == resolution.block_time,
+                "resolution_certificate_binding_mismatch"
+            );
+        }
+        let mut redundant = Vec::new();
+        for (attempt, certificate) in &view.resolution_certificates {
+            if self.check_resolution_or_invalidate(attempt, certificate)? {
+                redundant.push(attempt.clone());
+            }
+        }
+        for attempt in redundant {
+            view.resolution_certificates.remove(&attempt);
+            view.resolutions.remove(&attempt);
+            view.released.retain(|id| id != &attempt);
         }
         for (wallet, incoming) in &mut view.balance_certificates {
             let observation = view

@@ -509,3 +509,117 @@ async fn resolved_history_is_rechecked_before_reacquisition_at_a_newer_head() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_order() {
+    for newer_first in [false, true] {
+        let mut fixture = Fixture::new().await;
+        let auth = fixture.authorization();
+        let query = fixture
+            .store
+            .scoped_chain_query(&fixture.pool, vec![], vec![auth])
+            .unwrap();
+        let older = fixture.rpc.view(query.clone()).await.unwrap();
+        fixture.chain.lock().unwrap().0 = 101;
+        let newer = fixture.rpc.view(query).await.unwrap();
+        let (first, mut second) = if newer_first {
+            (newer, older)
+        } else {
+            (older, newer)
+        };
+        fixture
+            .store
+            .publish_scoped_evidence(&fixture.pool, first)
+            .unwrap();
+        let saved: (String,String,i64,String) = fixture.store.db.query_row(
+            "SELECT outcome,hash,height,support FROM payment_resolutions WHERE attempt_id='proof'",[],
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        // Match the maintenance owner's ordinary exact-anchor recertification.
+        let certificate = second.resolution_certificates["proof"].clone();
+        let capture = fixture.store.capture_evidence(&fixture.wallets[0]).unwrap();
+        second.resolution_certificates.insert(
+            "proof".into(),
+            fixture
+                .rpc
+                .recheck_resolution(certificate, capture)
+                .await
+                .unwrap(),
+        );
+        fixture
+            .store
+            .publish_scoped_evidence(&fixture.pool, second)
+            .unwrap();
+        let retained: (String,String,i64,String) = fixture.store.db.query_row(
+            "SELECT outcome,hash,height,support FROM payment_resolutions WHERE attempt_id='proof'",[],
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(retained, saved);
+        assert_eq!(
+            exposure(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+            U256::ZERO
+        );
+        let repair: Option<String> = fixture
+            .store
+            .db
+            .query_row(
+                "SELECT evidence_repair FROM wallets WHERE id=?1",
+                [&fixture.wallets[0]],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(repair.is_none());
+        assert_eq!(
+            checkpoint(&fixture.store.db, &fixture.wallets[0])
+                .unwrap()
+                .unwrap()
+                .height,
+            saved.2 as u64
+        );
+    }
+}
+
+#[tokio::test]
+async fn malformed_resolution_bindings_cannot_invalidate_financial_evidence() {
+    for mutation in ["id", "outcome", "time", "anchor", "missing", "duplicate"] {
+        let mut fixture = Fixture::new().await;
+        let auth = fixture.authorization();
+        let query = fixture
+            .store
+            .scoped_chain_query(&fixture.pool, vec![], vec![auth])
+            .unwrap();
+        let mut view = fixture.rpc.view(query).await.unwrap();
+        match mutation {
+            "id" => {
+                let cert = view.resolution_certificates.remove("proof").unwrap();
+                view.resolution_certificates.insert("other".into(), cert);
+            }
+            "outcome" => {
+                view.resolutions.get_mut("proof").unwrap().outcome =
+                    crate::rotation::base::AuthorizationOutcome::ExpiredUnused
+            }
+            "time" => view.resolutions.get_mut("proof").unwrap().block_time += 1,
+            "anchor" => {
+                view.resolutions
+                    .get_mut("proof")
+                    .unwrap()
+                    .anchor
+                    .as_mut()
+                    .unwrap()
+                    .height += 1
+            }
+            "missing" => view.released.clear(),
+            _ => view.released.push("proof".into()),
+        }
+        assert!(
+            fixture
+                .store
+                .publish_scoped_evidence(&fixture.pool, view)
+                .is_err()
+        );
+        assert_eq!(
+            exposure(&fixture.store.db, &fixture.wallets[0]).unwrap(),
+            U256::from(7)
+        );
+        let (proofs, repairs): (i64,i64) = fixture.store.db.query_row("SELECT (SELECT COUNT(*) FROM payment_resolutions),(SELECT COUNT(*) FROM wallets WHERE evidence_repair IS NOT NULL)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!((proofs, repairs), (0, 0));
+    }
+}
