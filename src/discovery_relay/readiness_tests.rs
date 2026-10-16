@@ -9,7 +9,7 @@ use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 use std::{sync::atomic::Ordering, time::Duration};
 
-async fn rpc(Json(v): Json<Value>) -> Json<Value> {
+pub(crate) async fn rpc(Json(v): Json<Value>) -> Json<Value> {
     let result = match v["method"].as_str().unwrap() {
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {

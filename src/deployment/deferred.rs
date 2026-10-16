@@ -295,6 +295,7 @@ mod tests {
     async fn prepared(
         stall: bool,
         invalid_first: bool,
+        payer: Option<PaidClient>,
     ) -> (
         tempfile::TempDir,
         RunningDeployment,
@@ -367,6 +368,9 @@ discover_on_demand=true
         let envelope = json!({"url":target,"method":"GET","statusCode":200,"headers":{},"body":r#"{"operations":[{"method":"GET","path":"/read"}]}"#,"redirectChain":[],"error":null});
         let (mut relay, fixture, relay_task) =
             crate::discovery_relay::tests::fixture(envelope, false, stall).await;
+        if let Some(payer) = payer {
+            crate::discovery_relay::tests::set_client(&mut relay, payer);
+        }
         if stall {
             // Only the existing response-inactivity policy ends accepted paid work.
             crate::discovery_relay::tests::set_timeout(&mut relay, Duration::from_millis(200));
@@ -415,11 +419,115 @@ discover_on_demand=true
         (dir, running, catalog, fixture, relay_task, api_task)
     }
 
+    #[cfg(feature = "zcash")]
+    #[tokio::test]
+    async fn canonical_capacity_wakes_deferred_publication_in_same_serving_process() {
+        use crate::rotation::{
+            base::BaseRpc,
+            manager::ManagedPool,
+            store::{AllocationKind, Store, StoreHandle},
+        };
+        let state_dir = tempfile::tempdir().unwrap();
+        let state_path = state_dir.path().join("state");
+        let key = state_dir.path().join("key");
+        let mut state = Store::create(&state_path, &key, 1, b"fixture").unwrap();
+        let snapshot = state.snapshot().unwrap();
+        let treasury_id = state.status().unwrap().treasury_id;
+        let reserves =
+            serde_json::from_value(json!({"small":{"funding_amount_usdc":"5"}})).unwrap();
+        let pool = state
+            .ensure_capacity_group("relay", &reserves, None, 0)
+            .unwrap();
+        // Existing allocation, not authority for the serving path to allocate.
+        state
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let rpc = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route(
+                    "/",
+                    axum::routing::post(crate::discovery_relay::readiness_tests::rpc),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let manager = Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool,
+                BaseRpc::new(&base, 12, 120).unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        );
+        let (_dir, running, catalog, fixture, relay, api) =
+            prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
+        let relay_owner = running.deferred.as_ref().unwrap().relays()[0].clone();
+        let waiting = crate::discovery_relay::tests::dependency_wait_signal(&relay_owner).await;
+        drop(relay_owner);
+        let initial = catalog.read();
+        let healthy = initial.views["one"][0].clone();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(running.serve(stop.clone()));
+        assert_eq!(
+            healthy.invoke(&Default::default()).await.unwrap(),
+            "healthy"
+        );
+        // The pending source cannot sign with an allocated but unobserved payer.
+        tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+            .await
+            .unwrap();
+        assert_eq!(catalog.read().views["one"].len(), 1);
+        assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(store.call(|s| s.funding_jobs()).await.unwrap().len(), 1);
+        manager.reconcile().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if catalog.read().views["one"].len() == 2 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let published = catalog.read();
+        let late = published.views["one"]
+            .iter()
+            .find(|t| t.tool.name.starts_with("late_"))
+            .unwrap();
+        assert_eq!(late.invoke(&Default::default()).await.unwrap(), "healthy");
+        assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+        assert_eq!(initial.views["one"].len(), 1);
+        assert_eq!(store.call(|s| s.snapshot()).await.unwrap(), snapshot);
+        assert_eq!(store.call(|s| s.funding_jobs()).await.unwrap().len(), 1);
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(manager);
+        drop(store);
+        worker.await.unwrap();
+        let reopened = Store::open(&state_path, &key, &treasury_id).unwrap();
+        assert_eq!(reopened.funding_jobs().unwrap().len(), 1);
+        rpc.abort();
+        relay.abort();
+        api.abort();
+    }
+
     #[tokio::test]
     async fn invalid_late_source_does_not_stop_alias_publication_or_existing_calls() {
         for invalid_first in [false, true] {
             let (_dir, running, catalog, fixture, relay, api) =
-                prepared(false, invalid_first).await;
+                prepared(false, invalid_first, None).await;
             let captured = catalog.read();
             let healthy = captured.views["one"][0].clone();
             let stop = CancellationToken::new();
@@ -476,7 +584,7 @@ discover_on_demand=true
 
     #[tokio::test]
     async fn available_calls_and_shutdown_do_not_abandon_accepted_deferred_payment() {
-        let (_dir, running, catalog, fixture, relay, api) = prepared(true, false).await;
+        let (_dir, running, catalog, fixture, relay, api) = prepared(true, false, None).await;
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -508,7 +616,8 @@ discover_on_demand=true
     #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn worker_panic_still_drains_relay_and_closes_store_before_returning() {
-        let (dir, mut running, catalog, fixture, relay_task, api) = prepared(true, false).await;
+        let (dir, mut running, catalog, fixture, relay_task, api) =
+            prepared(true, false, None).await;
         let state = dir.path().join("state");
         let key = dir.path().join("key");
         let store = crate::rotation::store::Store::create(&state, &key, 1, b"fixture").unwrap();
@@ -555,7 +664,7 @@ discover_on_demand=true
     }
     #[tokio::test]
     async fn late_source_keeps_already_published_price_descriptions() {
-        let (_dir, mut running, _catalog, _fixture, relay, api) = prepared(false, true).await;
+        let (_dir, mut running, _catalog, _fixture, relay, api) = prepared(false, true, None).await;
         let runtime = running.deferred.as_mut().unwrap();
         let healthy = runtime
             .deployment
