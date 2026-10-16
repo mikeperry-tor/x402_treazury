@@ -579,6 +579,20 @@ resumption after canonical fixture evidence, no readiness role mutation, attempt
 exhaustion/backoff, terminal immutable/malformed state, and cancelled paid-waiter
 drain. Deferred scheduling and shutdown wiring remain pending C08.
 
+**C08 relay listener-ordering prerequisite (reviewed):** Ordinary enabled-relay
+serving validates listener credentials and authored provider composition, then
+reserves every configured socket before opening relay wallets, bootstrapping or
+performing paid discovery. Static payers and `DenyNewFunding` use the same order.
+Binding later consumes the exact sockets, including ephemeral ports, and rejects
+an incomplete listener map. A failed bind releases earlier sockets; later setup
+failure releases sockets and accepted financial owners. Bound sockets are not yet
+serving MCP. Inspection and explicit wallet bootstrap retain their existing scope.
+Tests cover second-socket failure before any wallet can open, both funding policies
+and payer modes, ephemeral socket reuse, later catalog failure, and post-initialization
+credential failure with immediate treasury reopen. Independent listener service and
+deferred publication remain pending; this change removes only the spending-before-bind
+ordering hazard.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

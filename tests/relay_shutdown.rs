@@ -55,7 +55,11 @@ bearer_token_env="TOKEN"
 wallet="research"
 sources=["api"]
 "#,
-            occupied.local_addr().unwrap()
+            if missing_token {
+                "127.0.0.1:0".parse().unwrap()
+            } else {
+                occupied.local_addr().unwrap()
+            }
         );
         let path = dir.path().join("deployment.toml");
         std::fs::write(&path, config).unwrap();
@@ -65,33 +69,32 @@ sources=["api"]
             ("SUBMIT".into(), "http://127.0.0.1:1".into()),
             ("TOKEN".into(), "fixture-token".into()),
         ]);
-        let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
-            .await
-            .unwrap();
         let mut bind_env = env.clone();
         if missing_token {
             bind_env.remove("TOKEN");
         }
-        let result =
-            tokio::time::timeout(Duration::from_secs(10), deployment.bind(&bind_env)).await;
-        assert!(result.is_ok(), "bind error shutdown hung: relay={relay}");
-        let error = result.unwrap().err().expect("startup must fail");
-        let text = format!("{error:#}");
-        assert!(
-            text.contains(if missing_token {
-                "TOKEN"
-            } else {
-                "cannot bind"
-            }),
-            "unexpected error: {text}"
-        );
-        // The failed deployment must also release exclusive state ownership.
-        let reopened = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
-            .await
-            .unwrap();
-        let repeated =
-            tokio::time::timeout(Duration::from_secs(10), reopened.bind(&bind_env)).await;
-        assert!(repeated.expect("reopened shutdown hung").is_err());
+        for _ in 0..2 {
+            let result = tokio::time::timeout(Duration::from_secs(10), async {
+                let deployment =
+                    Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+                        .await?;
+                deployment.bind(&bind_env).await
+            })
+            .await;
+            let error = result
+                .expect("startup error shutdown hung")
+                .err()
+                .expect("startup must fail");
+            let text = format!("{error:#}");
+            assert!(
+                text.contains(if missing_token {
+                    "TOKEN"
+                } else {
+                    "cannot bind"
+                }),
+                "unexpected error: {text}"
+            );
+        }
         let owner = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
             .await
             .unwrap();

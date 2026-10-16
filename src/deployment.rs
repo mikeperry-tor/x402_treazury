@@ -124,6 +124,7 @@ pub struct InventoryTool {
     pub tool: ToolSpec,
 }
 pub struct Deployment {
+    prebound: BTreeMap<String, TcpListener>,
     unavailable_sources: BTreeSet<String>,
     initialized: Option<InitializedWallets>,
     config: MetaConfig,
@@ -436,7 +437,6 @@ impl Deployment {
         Ok(())
     }
 
-    #[cfg(feature = "zcash")]
     async fn validate_bootstrap_inputs(
         &self,
         path: &Path,
@@ -447,6 +447,18 @@ impl Deployment {
         for source in self.config.sources.values() {
             crate::config::resolve(source.provider.clone(), path).await?;
         }
+        Ok(())
+    }
+
+    async fn prebind_listeners(&mut self) -> Result<()> {
+        let mut sockets = BTreeMap::new();
+        for (name, cfg) in &self.config.servers {
+            let socket = TcpListener::bind(cfg.listen)
+                .await
+                .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
+            sockets.insert(name.clone(), socket);
+        }
+        self.prebound = sockets;
         Ok(())
     }
 
@@ -522,6 +534,7 @@ impl Deployment {
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
         let mut deployment = Self {
+            prebound: BTreeMap::new(),
             unavailable_sources: BTreeSet::new(),
             initialized: None,
             config,
@@ -530,6 +543,20 @@ impl Deployment {
             selected: BTreeMap::new(),
             config_path: path.to_owned(),
         };
+        if let Some((env, _)) = relay_env
+            && deployment
+                .config
+                .discovery_relay
+                .as_ref()
+                .is_some_and(|p| p.serve)
+        {
+            ensure!(
+                !crate::qualification::active() && !catalog_evidence::collecting(),
+                "paid discovery relay is unavailable during qualification"
+            );
+            deployment.validate_bootstrap_inputs(path, env).await?;
+            deployment.prebind_listeners().await?;
+        }
         #[cfg(feature = "zcash")]
         if let Some((env, restriction)) = relay_env
             && restriction != crate::rotation::restriction::FundingRestriction::DenyNewFunding
@@ -542,7 +569,9 @@ impl Deployment {
                 .values()
                 .any(WalletConfig::managed)
         {
-            deployment.validate_bootstrap_inputs(path, env).await?;
+            if deployment.prebound.is_empty() {
+                deployment.validate_bootstrap_inputs(path, env).await?;
+            }
             if deployment
                 .config
                 .discovery_relay
@@ -1303,6 +1332,12 @@ impl Deployment {
         } else {
             None
         };
+        let mut prebound = std::mem::take(&mut self.prebound);
+        let reuse_sockets = !prebound.is_empty();
+        ensure!(
+            !reuse_sockets || prebound.keys().eq(self.config.servers.keys()),
+            "prebound listener inventory changed"
+        );
         let mut listeners = Vec::new();
         let mut accepted_work = Vec::new();
         for (name, cfg) in &self.config.servers {
@@ -1323,9 +1358,13 @@ impl Deployment {
                     })?;
             }
             server.discovery = manager.clone();
-            let listener = TcpListener::bind(cfg.listen)
-                .await
-                .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
+            let listener = if reuse_sockets {
+                prebound.remove(name).context("prebound listener missing")?
+            } else {
+                TcpListener::bind(cfg.listen)
+                    .await
+                    .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?
+            };
             accepted_work.push(server.work.clone());
             listeners.push((
                 name.clone(),
@@ -2077,3 +2116,6 @@ mod validation_tests;
 #[cfg(all(test, feature = "zcash"))]
 #[path = "deployment/store_only_tests.rs"]
 mod store_only_tests;
+
+#[cfg(all(test, feature = "zcash"))]
+mod prebind_tests;

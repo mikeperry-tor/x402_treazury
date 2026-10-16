@@ -84,6 +84,7 @@ pub async fn bootstrap_wallets(path: &Path) -> Result<BootstrapSummary> {
     }
     crate::discovery::policy::validate_registry_path(&config, path)?;
     let deployment = Deployment {
+        prebound: BTreeMap::new(),
         unavailable_sources: Default::default(),
         config,
         wallet_resolution,
