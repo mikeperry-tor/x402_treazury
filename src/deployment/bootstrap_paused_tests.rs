@@ -105,13 +105,6 @@ sources=["api"]
     assert!(!serving.is_finished(), "accepted observation must drain");
     release.send(()).unwrap();
     rpc.await.unwrap();
-    let after = store.call(|s| s.status()).await.unwrap();
-    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
-    for (original, current) in before.funding_jobs.iter().zip(&after.funding_jobs) {
-        assert_eq!(current.operation_id, original.operation_id);
-        assert_eq!(current.phase, FundingPhase::Allocated);
-    }
-    assert!(after.treasury_operations.is_empty());
     assert!(
         store
             .call(
@@ -137,4 +130,9 @@ sources=["api"]
         .unwrap();
     let reopened = crate::rotation::store::status(&state).unwrap();
     assert_eq!(reopened.funding_jobs.len(), before.funding_jobs.len());
+    for (original, current) in before.funding_jobs.iter().zip(&reopened.funding_jobs) {
+        assert_eq!(current.operation_id, original.operation_id);
+        assert_eq!(current.phase, FundingPhase::Allocated);
+    }
+    assert!(reopened.treasury_operations.is_empty());
 }
