@@ -859,6 +859,16 @@ remaining C09/C12 obligations still prevent blanket repair-gate deletion.
 Validation: all 28 evidence/repair tests and all-target Clippy passed; independent
 review found no actionable findings.
 
+**C10 wallet-local ownership decode followup:** Ownership row-conversion failures
+for the bound wallet's role/claim fields now produce the existing typed malformed
+support result. Pool authority decoding and shared SQL failures retain their wider
+scope. Candidate selection retains that failure for an all-malformed result while
+still selecting an independent healthy payer, including cached, hinted and
+challenge-time selection. No ownership checks, liabilities or payment limits are
+removed. All 36 selection tests passed, including both candidate orderings,
+malformed joined claim generations, all-malformed diagnostics, shared failures and
+absence of journal side effects. Independent commit review found no issues.
+
 **C09 schema17 historical-report review fixup:** Independent review found that
 schema16 retirement totals lost their per-wallet records when current admission
 reporting moved to schema17. Historical reporting now reads exact retained

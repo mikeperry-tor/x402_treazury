@@ -54,13 +54,32 @@ pub(super) fn payment_ownership(
     pool: &str,
     wallet: &str,
 ) -> Result<Option<PaymentOwnership>> {
-    type OwnershipRow = (bool, Option<String>, String, Option<String>, Option<i64>);
+    type WalletFields = (String, Option<String>, Option<i64>);
+    type OwnershipRow = (bool, Option<String>, rusqlite::Result<WalletFields>);
     let row: Option<OwnershipRow> = db.query_row(
         "SELECT p.enabled,p.payment_limit,w.role,c.slot,c.generation FROM wallets w JOIN pools p ON p.id=w.pool_id LEFT JOIN funding_jobs f ON f.wallet_id=w.id LEFT JOIN reserve_claims c ON c.pool_id=w.pool_id AND c.wallet_id=w.id AND c.enabled=1 AND c.slot=f.allocation_kind AND c.generation=f.claim_generation WHERE w.id=?1 AND p.id=?2",
-        params![wallet,pool], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
-    let Some((enabled, limit, role, slot, generation)) = row else {
+        params![wallet,pool], |r| {
+            // Pool authority and SQL access retain their wider failure scope.
+            // Only the already-bound wallet/claim fields can be isolated.
+            let fields = (|| Ok((r.get(2)?,r.get(3)?,r.get(4)?)))();
+            Ok((r.get(0)?,r.get(1)?,fields))
+        }).optional()?;
+    let Some((enabled, limit, fields)) = row else {
         return Ok(None);
     };
+    let (role, slot, generation) = fields.map_err(|error| {
+        if matches!(
+            error,
+            rusqlite::Error::InvalidColumnType(..)
+                | rusqlite::Error::FromSqlConversionFailure(..)
+                | rusqlite::Error::IntegralValueOutOfRange(..)
+        ) {
+            anyhow::Error::new(error)
+                .context(crate::rotation::base::evidence::EvidenceFailure::MalformedSupport)
+        } else {
+            error.into()
+        }
+    })?;
     let Some(limit) = limit else { return Ok(None) };
     if !enabled
         || !matches!(role.as_str(), "ACTIVE" | "RETAINED" | "READY" | "ALLOCATED")

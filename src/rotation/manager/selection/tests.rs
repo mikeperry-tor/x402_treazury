@@ -2210,3 +2210,212 @@ async fn elapsed_expiration_rejects_journal(at_commit: bool) {
     );
     f.close().await;
 }
+
+fn corrupt_wallet_role(f: &Fixture, wallet: &str) {
+    let db = f.db();
+    // Simulate a damaged wallet-local field without relaxing runtime validation.
+    db.execute_batch("PRAGMA ignore_check_constraints=ON")
+        .unwrap();
+    db.execute("UPDATE wallets SET role=X'ff' WHERE id=?1", [wallet])
+        .unwrap();
+}
+
+#[tokio::test]
+async fn malformed_wallet_ownership_isolated_in_both_cached_and_completion_orders() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    for reverse in [false, true] {
+        let f = fixture(0).await;
+        let mut wallets = [f.bound.wallet.clone(), f.small.clone()];
+        wallets.sort();
+        if reverse {
+            wallets.reverse();
+        }
+        let (bad, healthy) = (&wallets[0], &wallets[1]);
+        let mut views = vec![];
+        for wallet in &wallets {
+            f.balance(wallet, 10);
+            views.push(
+                f.manager
+                    .acquire_candidate_wallet(wallet.clone())
+                    .await
+                    .unwrap()
+                    .1
+                    .unwrap(),
+            );
+        }
+        corrupt_wallet_role(&f, bad);
+        for completed in [vec![], views.clone(), views.into_iter().rev().collect()] {
+            assert_eq!(
+                read_only_candidate(&f, 5, Some(bad.clone()), completed).await,
+                Some(healthy.clone())
+            );
+        }
+        assert_eq!(
+            f.manager
+                .candidate_for(Some(U256::from(5)))
+                .await
+                .unwrap()
+                .wallet,
+            *healthy
+        );
+        let CandidatePassResult::Selected(selected) = select(&f).await else {
+            panic!("healthy ownership must remain selectable")
+        };
+        assert_eq!(selected.candidate.wallet, *healthy);
+        drop(selected);
+        let error = f
+            .manager
+            .acquire_candidate_wallet(bad.clone())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.downcast_ref::<EvidenceFailure>(),
+            Some(&EvidenceFailure::MalformedSupport)
+        );
+        let db = f.db();
+        let role: Vec<u8> = db
+            .query_row("SELECT role FROM wallets WHERE id=?1", [bad], |r| r.get(0))
+            .unwrap();
+        assert_eq!(role, vec![255]);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        f.close().await;
+    }
+}
+
+#[tokio::test]
+async fn all_malformed_wallet_ownership_retains_cached_and_challenge_failure() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    let f = fixture(0).await;
+    for wallet in [&f.bound.wallet, &f.small, &f.large] {
+        f.balance(wallet, 10);
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+        corrupt_wallet_role(&f, wallet);
+    }
+    let pool = f.manager.pool.clone();
+    let error = f
+        .manager
+        .store
+        .call(move |s| s.cached_payment_candidate(&pool, U256::from(5), None))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedSupport)
+    );
+    let error = f
+        .manager
+        .acquire_candidate(&f.bound, U256::from(5))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedSupport)
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn ownership_decoder_preserves_shared_pool_and_sql_failures() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    for shared_sql in [false, true] {
+        let f = fixture(0).await;
+        for wallet in [&f.bound.wallet, &f.small] {
+            f.balance(wallet, 10);
+            f.manager
+                .acquire_candidate_wallet(wallet.clone())
+                .await
+                .unwrap();
+        }
+        let db = f.db();
+        if shared_sql {
+            db.execute_batch(
+                "ALTER TABLE reserve_claims RENAME COLUMN generation TO unavailable_generation",
+            )
+            .unwrap();
+        } else {
+            db.execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            db.execute(
+                "UPDATE pools SET enabled=X'ff' WHERE id=?1",
+                [&f.manager.pool],
+            )
+            .unwrap();
+        }
+        let error = f
+            .manager
+            .candidate_for(Some(U256::from(5)))
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            !error.is::<EvidenceFailure>(),
+            "shared authority/schema failure cannot become wallet-local absence"
+        );
+        drop(db);
+        f.close().await;
+    }
+}
+
+#[tokio::test]
+async fn malformed_joined_claim_generation_does_not_hide_independent_active_payer() {
+    use crate::rotation::base::evidence::EvidenceFailure;
+    let f = fixture(0).await;
+    for wallet in [&f.bound.wallet, &f.small] {
+        f.balance(wallet, 10);
+        f.manager
+            .acquire_candidate_wallet(wallet.clone())
+            .await
+            .unwrap();
+    }
+    let db = f.db();
+    // Simulated damaged persisted claim: preserve the exact join while making
+    // its generation undecodable. Production immutable-allocation guards stay.
+    db.execute_batch("PRAGMA ignore_check_constraints=ON; DROP TRIGGER immutable_allocation")
+        .unwrap();
+    db.execute(
+        "UPDATE funding_jobs SET claim_generation=X'ff' WHERE wallet_id=?1",
+        [&f.small],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE reserve_claims SET generation=X'ff' WHERE wallet_id=?1",
+        [&f.small],
+    )
+    .unwrap();
+    assert_eq!(
+        read_only_candidate(&f, 5, Some(f.small.clone()), vec![]).await,
+        Some(f.bound.wallet.clone())
+    );
+    assert_eq!(
+        f.manager
+            .candidate_for(Some(U256::from(5)))
+            .await
+            .unwrap()
+            .wallet,
+        f.bound.wallet
+    );
+    let error = f
+        .manager
+        .acquire_candidate_wallet(f.small.clone())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<EvidenceFailure>(),
+        Some(&EvidenceFailure::MalformedSupport)
+    );
+    drop(db);
+    f.close().await;
+}
