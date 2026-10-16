@@ -8,6 +8,9 @@ exclude = ["/v1/whoami", "/v1/balance", "/v1/ask", "/v1/monitors", "/v1/webhook-
 exclude_tags = ["Auth", "Monitors", "System"]
 pricing_key = "x-socialfetch-credits-pricing"
 probe_pricing = false
+# API-origin catalog/help ignored byte ranges in the 2026-10-16 probe; HTTP/2
+# cover requires 206 responses. Canonical docs use a different origin.
+cover_traffic_enabled = false
 instructions_text = "SocialFetch social and web data via x402 USDC on Base. Select platforms using OpenAPI tags (for example Twitter, YouTube, LinkedIn). Prices are quoted in credits, approximately $0.014 USDC per credit; follow each tool description for base costs and usage-dependent surcharges. The payment challenge is authoritative. LinkedIn includes both API versions: tools with socialfetch_linkedin_ use v1, and socialfetch_v2_linkedin_ use v2. Parameter names and HTTP paths preserve their original casing. Slow transcript/search requests may need a 90-second timeout."
 
 help_url = "https://www.socialfetch.dev/llms.txt"

@@ -258,31 +258,59 @@ impl crate::catalog::Config {
         }
         if self.cover_traffic.is_none() {
             let origin = reqwest::Url::parse(base)?;
-            let eligible = |value: &str| {
-                reqwest::Url::parse(value)
-                    .ok()
-                    .filter(|u| {
-                        u.scheme() == "https"
-                            && u.origin() == origin.origin()
-                            && u.username().is_empty()
-                            && u.password().is_none()
-                            && u.fragment().is_none()
-                    })
-                    .map(|u| u.to_string())
-            };
-            let catalog = eligible(&self.spec);
-            let help = self.help_url.as_deref().and_then(eligible);
+            let (catalog_url, catalog_reason) = automatic_candidate(Some(&self.spec), &origin);
+            let (help_url, help_reason) = automatic_candidate(self.help_url.as_deref(), &origin);
+            let catalog = catalog_url
+                .as_ref()
+                .filter(|_| catalog_reason == "eligible")
+                .map(ToString::to_string);
+            let help = help_url
+                .as_ref()
+                .filter(|_| help_reason == "eligible")
+                .map(ToString::to_string);
             if let Some(url) = catalog.clone().or_else(|| help.clone()) {
                 let mut profile = Config::catalog_default(url.clone());
                 profile.fallback_url = help.filter(|h| *h != url);
                 self.cover_traffic = Some(profile);
             } else {
-                tracing::warn!(code = "cover_no_same_origin_resource", source = ?self.prefix,
-                    "Cover unavailable: configure a same-origin HTTPS catalog/help/cover URL or disable cover for this provider");
+                tracing::warn!(
+                    code = "cover_no_same_origin_resource", source = ?self.prefix,
+                    api_origin = %origin.origin().ascii_serialization(),
+                    catalog_origin = ?catalog_url.as_ref().map(|u| u.origin().ascii_serialization()),
+                    catalog_reason,
+                    help_origin = ?help_url.as_ref().map(|u| u.origin().ascii_serialization()),
+                    help_reason,
+                    "HTTP/2 cover traffic unavailable: no eligible catalog/help resource; origins must match scheme, host and port. Configure a same-origin HTTPS resource supporting unsigned byte ranges (HTTP 206), or set cover_traffic_enabled=false for this provider/source. API calls continue under the configured network policy without cover traffic"
+                );
             }
         }
         Ok(())
     }
+}
+
+/// Keep parsed URLs for origin-only diagnostics, never log paths or credentials.
+fn automatic_candidate(
+    value: Option<&str>,
+    api: &reqwest::Url,
+) -> (Option<reqwest::Url>, &'static str) {
+    let Some(value) = value else {
+        return (None, "not_configured");
+    };
+    let Ok(url) = reqwest::Url::parse(value) else {
+        return (None, "not_absolute_url");
+    };
+    let reason = if url.scheme() != "https" {
+        "not_https"
+    } else if !url.username().is_empty() || url.password().is_some() {
+        "credentials_present"
+    } else if url.fragment().is_some() {
+        "fragment_present"
+    } else if url.origin() != api.origin() {
+        "origin_mismatch"
+    } else {
+        "eligible"
+    };
+    (Some(url), reason)
 }
 
 impl Config {

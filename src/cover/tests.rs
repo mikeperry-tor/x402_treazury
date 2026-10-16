@@ -263,3 +263,65 @@ fn fallback_is_same_origin_and_automatic_help_is_reviewed() {
     );
     assert!(cfg.cover_traffic.as_ref().unwrap().fallback_url.is_none());
 }
+
+#[test]
+fn unavailable_cover_warning_explains_origins_without_private_url_parts() {
+    use std::sync::{Arc, Mutex};
+    #[derive(Clone)]
+    struct Writer(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let logs = Writer(Arc::default());
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let mut cfg = crate::catalog::Config {
+        prefix: Some("example".into()),
+        spec: "https://docs.example.com/private-catalog?token=secret-query".into(),
+        help_url: Some(
+            "https://secret-user:secret-password@api.example.com/private-help#secret-fragment"
+                .into(),
+        ),
+        ..Default::default()
+    };
+    cfg.resolve_cover("https://api.example.com/v1", true)
+        .unwrap();
+    assert!(cfg.cover_traffic.is_none());
+    cfg.spec = "private-local-file.json".into();
+    cfg.help_url = None;
+    cfg.resolve_cover("https://api.example.com/v1", true)
+        .unwrap();
+    cfg.spec = "http://api.example.com/catalog".into();
+    cfg.help_url = Some("https://api.example.com/help#secret-fragment".into());
+    cfg.resolve_cover("https://api.example.com/v1", true)
+        .unwrap();
+    let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    for expected in [
+        "HTTP/2 cover traffic unavailable",
+        "https://api.example.com",
+        "https://docs.example.com",
+        "origin_mismatch",
+        "credentials_present",
+        "not_absolute_url",
+        "not_configured",
+        "not_https",
+        "fragment_present",
+        "HTTP 206",
+        "cover_traffic_enabled=false",
+    ] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+    for private in ["secret-", "private-", "token="] {
+        assert!(!text.contains(private), "leaked private URL component");
+    }
+}

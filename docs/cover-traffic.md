@@ -24,8 +24,12 @@ For authored static sources without a `[cover_traffic]` table, the default uses 
 same-origin HTTPS catalog URL, with the same-origin `help_url` (often `llms.txt`)
 as fallback. If only help qualifies as a candidate, it becomes the primary. Local
 files, cross-origin documents, credentials and fragments are not candidates. When
-neither URL is suitable, startup logs `cover_no_same_origin_resource`; set an
-explicit profile or disable cover for that provider. No `/llms.txt` path is guessed.
+neither URL is suitable, startup logs `cover_no_same_origin_resource`, identifying
+HTTP/2 cover traffic, the API/catalog/help origins and each candidate's rejection
+reason (missing or non-absolute URL, non-HTTPS, credentials, fragment or origin
+mismatch). Diagnostics omit URL paths, queries, credentials and fragments. Set an
+explicit profile or disable cover for that provider; ordinary API calls retain
+their configured network policy. No `/llms.txt` path is guessed.
 Candidate selection does not prove range support: runtime qualification is still
 mandatory. Inspection/listing does not send cover requests. Agent-added sources
 remain outside automatic cover; remote document contents never authorize it.
