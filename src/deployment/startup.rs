@@ -32,7 +32,11 @@ struct DeferredDocument(Arc<DeferredLoad>);
 struct DeferredLoad {
     config: catalog::Config,
     http: reqwest::Client,
-    prepared: OnceCell<std::result::Result<catalog::CatalogLoad, SharedFailure>>,
+    prepared: OnceCell<std::result::Result<PreparedDocument, SharedFailure>>,
+}
+enum PreparedDocument {
+    Ready(Document),
+    Relay(Box<catalog::RelayContinuation>),
 }
 impl DeferredDocument {
     async fn resume(&self, gate: Arc<tokio::sync::Semaphore>) -> Result<Document> {
@@ -43,12 +47,20 @@ impl DeferredDocument {
                 let _permit = gate.acquire().await.expect("owned catalog gate");
                 catalog::prepare_json_discovery(&self.0.config, &self.0.http)
                     .await
+                    .map(|prepared| match prepared {
+                        catalog::CatalogLoad::Ready(document) => {
+                            PreparedDocument::Ready(Arc::new(document))
+                        }
+                        catalog::CatalogLoad::RelayPending(pending) => {
+                            PreparedDocument::Relay(pending)
+                        }
+                    })
                     .map_err(|error| SharedFailure(Arc::new(error)))
             })
             .await;
         match prepared {
-            Ok(catalog::CatalogLoad::Ready(document)) => Ok(Arc::new(document.clone())),
-            Ok(catalog::CatalogLoad::RelayPending(pending)) => {
+            Ok(PreparedDocument::Ready(document)) => Ok(document.clone()),
+            Ok(PreparedDocument::Relay(pending)) => {
                 Ok(Arc::new(pending.resume_when_ready(gate).await?))
             }
             Err(error) => Err(anyhow::Error::new(error.clone())),
@@ -731,7 +743,7 @@ mod deferred_tests {
         assert_eq!(gate.available_permits(), 0);
         release.send(()).unwrap();
         let (a, b) = resumes.await.unwrap();
-        assert_eq!(a.unwrap(), b.unwrap());
+        assert!(Arc::ptr_eq(&a.unwrap(), &b.unwrap()));
         assert_eq!(gate.available_permits(), 1);
         let listener = origin.await.unwrap();
         assert!(
