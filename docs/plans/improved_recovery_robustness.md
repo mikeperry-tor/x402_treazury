@@ -484,6 +484,17 @@ failure. No new state, schema, owner generation or financial authority is introd
 This narrow prerequisite supplies C06's preflight ordering and C07's live Base store;
 it does not yet publish degraded serving or claim those startup acceptance gates.
 
+**C08 no-relay startup contract (reviewed narrow prerequisite):** With no enabled
+serving discovery relay, retain authored-provider and listener-credential preflight,
+load catalogs, initialize dormant managed owners and bind all listeners before
+starting funding. Pool declaration establishes configured claims without allocating
+wallets. Existing managed admission returns typed WalletNotReady before provider I/O
+for empty pools; no new readiness gate or wait is required. Explicit bootstrap is
+unchanged. Enabled relay bootstrap/deferred publication remains pending C08, as do
+C06/C07 capability-local initialization failures. Entry-point fixtures cover enabled
+auto-funding with an empty treasury, no bootstrap wait, typed no-payer failure,
+zero provider requests/allocations/jobs and second-listener rollback.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
