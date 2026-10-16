@@ -155,12 +155,7 @@ impl ManagedPool {
             // This is the actual gated selection, not a provisional winner.
             // Recompute all completed cached candidates, liabilities, and roles.
             if let Some(selected) = self
-                .select_completed_candidate(
-                    &bound.wallet,
-                    cost,
-                    through,
-                    &mut completions.completed,
-                )
+                .select_completed_candidate(&bound.wallet, cost, through, &mut completions)
                 .await?
             {
                 // `reads` is dropped now, without waiting for unrelated EOF.
@@ -186,12 +181,7 @@ impl ManagedPool {
                 // rescanning the same cache for every unchanged inventory row.
                 if read_completed || evaluated_since_selection == PAGE_SIZE {
                     if let Some(selected) = self
-                        .select_completed_candidate(
-                            &bound.wallet,
-                            cost,
-                            through,
-                            &mut completions.completed,
-                        )
+                        .select_completed_candidate(&bound.wallet, cost, through, &mut completions)
                         .await?
                     {
                         return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -204,12 +194,7 @@ impl ManagedPool {
             if evaluated_since_selection > 0
                 && !reads.is_empty()
                 && let Some(selected) = self
-                    .select_completed_candidate(
-                        &bound.wallet,
-                        cost,
-                        through,
-                        &mut completions.completed,
-                    )
+                    .select_completed_candidate(&bound.wallet, cost, through, &mut completions)
                     .await?
             {
                 return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -229,12 +214,7 @@ impl ManagedPool {
                 // A final gated recheck may see independently completed evidence;
                 // this does not reopen the captured pass or acquire another row.
                 if let Some(selected) = self
-                    .select_completed_candidate(
-                        &bound.wallet,
-                        cost,
-                        through,
-                        &mut completions.completed,
-                    )
+                    .select_completed_candidate(&bound.wallet, cost, through, &mut completions)
                     .await?
                 {
                     return Ok(CandidatePassResult::Selected(Box::new(selected)));
@@ -261,8 +241,13 @@ impl ManagedPool {
         let state = match state {
             Ok(state) => state,
             Err(error)
-                if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                    == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) =>
+                if matches!(
+                    error.downcast_ref::<super::super::base::evidence::EvidenceFailure>(),
+                    Some(
+                        super::super::base::evidence::EvidenceFailure::MalformedSupport
+                            | super::super::base::evidence::EvidenceFailure::MalformedExposure
+                    )
+                ) =>
             {
                 completions.record(Err(error))?;
                 (CandidateEvidenceState::Ineligible, None)
@@ -294,21 +279,29 @@ impl ManagedPool {
         bound: &str,
         cost: U256,
         through: i64,
-        completed: &mut Vec<ChainView>,
+        completions: &mut CandidateCompletions,
     ) -> Result<Option<SelectedCandidate>> {
         #[cfg(test)]
         self.admission_test_stage(AdmissionTestStage::CandidateScan)
             .await;
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         let (pool, bound) = (self.pool.clone(), bound.to_owned());
-        debug_assert!(completed.len() <= PAGE_SIZE + READS);
-        let completed = std::mem::take(completed);
+        debug_assert!(completions.completed.len() <= PAGE_SIZE + READS);
+        let completed = std::mem::take(&mut completions.completed);
         let selected = self
             .store
             .call_with_guard(guard.clone(), move |s| {
                 s.payment_candidate_with_evidence(&pool, cost, Some(&bound), through, &completed)
             })
-            .await?;
+            .await;
+        let selected = match selected {
+            Ok(selected) => selected,
+            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                completions.record(Err(error))?;
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
         Ok(selected.map(|(candidate, view)| SelectedCandidate {
             candidate,
             view,
@@ -373,6 +366,7 @@ fn completion_is_incomplete(
                             | EvidenceFailure::EvidenceRepairRequired
                             | EvidenceFailure::ResolutionConflict
                             | EvidenceFailure::MalformedSupport
+                            | EvidenceFailure::MalformedExposure
                     )
                 )
             {

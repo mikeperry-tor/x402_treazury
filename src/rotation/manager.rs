@@ -179,10 +179,16 @@ impl ManagedPool {
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         self.store
             .call_with_guard(guard, move |s| {
-                if let Some(cost) = hint
-                    && let Some(candidate) = s.cached_payment_candidate(&pool, cost, None)?
-                {
-                    return Ok(candidate);
+                if let Some(cost) = hint {
+                    match s.cached_payment_candidate(&pool, cost, None) {
+                        Ok(Some(candidate)) => return Ok(candidate),
+                        Ok(None) => {}
+                        // This is only an unsigned identity hint. A wallet-local
+                        // cache rejection must not prevent challenge-time traversal
+                        // from acquiring an independent payer's uncached evidence.
+                        Err(error) if error.is::<super::base::evidence::EvidenceFailure>() => {}
+                        Err(error) => return Err(error),
+                    }
                 }
                 s.payment_candidate(&pool)
             })

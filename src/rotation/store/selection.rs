@@ -41,7 +41,7 @@ impl Store {
     /// keeps a sufficient bound payer and otherwise uses the identical ranking.
     /// Call under the group gate when selecting for actual signing or handoff.
     pub(crate) fn cached_payment_candidate(
-        &self,
+        &mut self,
         pool: &str,
         cost: U256,
         bound: Option<&str>,
@@ -50,7 +50,7 @@ impl Store {
     }
 
     pub(crate) fn cached_payment_candidate_at_boundary(
-        &self,
+        &mut self,
         pool: &str,
         cost: U256,
         bound: Option<&str>,
@@ -65,7 +65,7 @@ impl Store {
     /// observations are compared by chain version; all proofs still require fresh
     /// ownership, lineage, expiry and liability checks under the group gate.
     pub(crate) fn payment_candidate_with_evidence(
-        &self,
+        &mut self,
         pool: &str,
         cost: U256,
         bound: Option<&str>,
@@ -74,13 +74,29 @@ impl Store {
     ) -> Result<Option<(PaymentCandidateHandle, super::super::base::ChainView)>> {
         let now = super::super::base::now()?;
         let mut best: Option<(Rank, PaymentCandidateHandle, super::super::base::ChainView)> = None;
-        let certificates = self.merge_payment_certificates(completed, now)?;
+        let (certificates, mut failure) =
+            self.merge_payment_certificates(pool, through, completed, now)?;
         for (wallet, certificate) in certificates {
+            let eligible = match self.eligible_payment_evidence(
+                pool,
+                &wallet,
+                cost,
+                through,
+                &certificate,
+                now,
+            ) {
+                Ok(eligible) => eligible,
+                Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                    failure.get_or_insert(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let Some(EligiblePaymentEvidence {
                 ownership,
                 observation,
                 capacity,
-            }) = self.eligible_payment_evidence(pool, wallet, cost, through, certificate, now)?
+            }) = eligible
             else {
                 continue;
             };
@@ -88,33 +104,58 @@ impl Store {
                 wallet: wallet.clone(),
                 address: observation.address.clone(),
             };
-            let view = payment_view(wallet, certificate, observation);
+            let view = payment_view(&wallet, &certificate, observation);
             if bound == Some(wallet.as_str()) {
                 return Ok(Some((candidate, view)));
             }
-            let rank = Rank::new(capacity, &ownership.role, ownership.slot.as_deref(), wallet);
+            let rank = Rank::new(
+                capacity,
+                &ownership.role,
+                ownership.slot.as_deref(),
+                &wallet,
+            );
             if best.as_ref().is_none_or(|(current, _, _)| rank < *current) {
                 best = Some((rank, candidate, view));
             }
         }
+        if best.is_none()
+            && let Some(error) = failure
+        {
+            return Err(error);
+        }
         Ok(best.map(|(_, candidate, view)| (candidate, view)))
     }
 
-    fn merge_payment_certificates<'a>(
-        &'a self,
-        completed: &'a [super::super::base::ChainView],
+    fn merge_payment_certificates(
+        &mut self,
+        pool: &str,
+        through: i64,
+        completed: &[super::super::base::ChainView],
         now: u64,
-    ) -> Result<std::collections::BTreeMap<&'a String, &'a super::super::base::BalanceCertificate>>
-    {
+    ) -> Result<(
+        std::collections::BTreeMap<String, super::super::base::BalanceCertificate>,
+        Option<anyhow::Error>,
+    )> {
         let mut certificates: std::collections::BTreeMap<_, _> = self
             .evidence_cache
             .iter()
-            .map(|(wallet, (_, cert))| (wallet, cert))
+            .map(|(wallet, (_, cert))| (wallet.clone(), cert.clone()))
             .collect();
+        // Scope before merging so a foreign group's conflict cannot change this
+        // caller's negative result or invalidate evidence outside its group gate.
+        let mut retained = std::collections::BTreeMap::new();
+        for (wallet, certificate) in certificates {
+            if self.candidate_within(pool, &wallet, through)? {
+                retained.insert(wallet, certificate);
+            }
+        }
+        certificates = retained;
+        let mut failure = None;
+        let mut rejected = std::collections::BTreeSet::new();
         for (wallet, certificate) in completed.iter().flat_map(|view| &view.balance_certificates) {
-            // Eviction can let an older in-flight read populate the cache after
-            // our newer completion. Ignore invalid owned proofs before comparing
-            // versions, and never let publication order replace chain order.
+            if rejected.contains(wallet) || !self.candidate_within(pool, wallet, through)? {
+                continue;
+            }
             if let Some(saved) = certificates.get(wallet) {
                 match evidence::check_balance(&self.db, self.evidence_namespace, certificate) {
                     Ok(support) if now <= support.observation.valid_until => {}
@@ -126,10 +167,23 @@ impl Store {
                 }
                 match evidence::check_balance(&self.db, self.evidence_namespace, saved) {
                     Ok(support) if now <= support.observation.valid_until => {
-                        if certificate.observation().compare(saved.observation())?
-                            != std::cmp::Ordering::Greater
-                        {
-                            continue;
+                        match self.compare_cached_balance_or_invalidate(
+                            wallet,
+                            certificate.observation(),
+                            saved.observation(),
+                        ) {
+                            Ok(std::cmp::Ordering::Greater) => {}
+                            Ok(_) => continue,
+                            Err(error)
+                                if error.is::<super::super::base::evidence::EvidenceFailure>() =>
+                            {
+                                tracing::warn!(category = %super::super::base::safe_diagnostic(&error), "candidate certificate conflict; checking independent capacity");
+                                certificates.remove(wallet);
+                                failure.get_or_insert(error);
+                                rejected.insert(wallet.clone());
+                                continue;
+                            }
+                            Err(error) => return Err(error),
                         }
                     }
                     Ok(_) => {}
@@ -137,9 +191,17 @@ impl Store {
                     Err(error) => return Err(error),
                 }
             }
-            certificates.insert(wallet, certificate);
+            certificates.insert(wallet.clone(), certificate.clone());
         }
-        Ok(certificates)
+        Ok((certificates, failure))
+    }
+
+    fn candidate_within(&self, pool: &str, wallet: &str, through: i64) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
+            params![wallet, pool, through],
+            |row| row.get(0),
+        )?)
     }
 
     fn eligible_payment_evidence(
@@ -151,12 +213,7 @@ impl Store {
         certificate: &super::super::base::BalanceCertificate,
         now: u64,
     ) -> Result<Option<EligiblePaymentEvidence>> {
-        let within: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2 AND sequence<=?3)",
-            params![wallet, pool, through],
-            |row| row.get(0),
-        )?;
-        if !within {
+        if !self.candidate_within(pool, wallet, through)? {
             return Ok(None);
         }
         let ownership = match payment_ownership(&self.db, pool, wallet) {
@@ -186,10 +243,8 @@ impl Store {
         if now > support.observation.valid_until {
             return Ok(None);
         }
-        let capacity = available(
-            support.observation.available(),
-            evidence::exposure(&self.db, wallet)?,
-        );
+        let exposure = evidence::exposure(&self.db, wallet)?;
+        let capacity = available(support.observation.available(), exposure);
         if capacity < cost {
             return Ok(None);
         }
@@ -238,6 +293,9 @@ impl Store {
         if payment_ownership(&self.db, pool, wallet)?.is_none() {
             return Ok((CandidateEvidenceState::Ineligible, None));
         }
+        // Preserve the precise wallet-local failure for traversal diagnostics;
+        // an unreadable exposure can never become a usable zero-liability view.
+        evidence::exposure(&self.db, wallet)?;
         let missing = (CandidateEvidenceState::Missing, None);
         let Some((_, certificate)) = self.evidence_cache.get(wallet) else {
             return Ok(missing);
