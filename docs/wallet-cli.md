@@ -369,7 +369,9 @@ recovery or `wallet recover --config servers.toml`. For an individual shielding
 operation, the advanced `wallet recover-expired --config servers.toml --operation-id UUID`
 remains available with serving stopped. Expiry recovery requires a fresh tip beyond expiry by the configured confirmation
 count, no positive indexer inclusion, synced invalidation, and confirmed unspent inputs
-matched against the immutable preparation snapshot. It then releases the reservation
+matched against the immutable preparation snapshot. Shielding also requires every
+journaled outpoint, value and address script to match a confirmed unspent owned input;
+a surviving subset that covers the fee is insufficient. It then releases the reservation
 and resets any unfinished funding job with a new operation ID. Signed bytes and
 recovery evidence remain archived; the old operation cannot be broadcast again.
 Missing or conflicting evidence keeps the reservation. A later contradictory reorg

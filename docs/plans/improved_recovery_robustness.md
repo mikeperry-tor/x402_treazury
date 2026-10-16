@@ -1547,6 +1547,21 @@ paused to qualify lost-acknowledgement handling.
 Ten focused Store cases and the real SDK shielding regression passed; independent
 review is clear. No automatic scheduling or live-funded qualification was run.
 
+**C20 exact shielding expiry inputs (implemented and reviewed):**
+The ordinary two-sync expiry path additionally reloads the validated immutable
+shielding binding and checks every journaled outpoint against the current SDK wallet.
+Value, original address, locking script, confirmation depth and unspent status must
+all match. A subset covering the fee-only reservation is insufficient. The original
+snapshot proof, zero-lag scans, buried block expiry, indexer observation and final
+snapshot revision check remain required. This check adds no release transition for
+an orphaned previously confirmed transaction; that accounting recovery remains a
+separate source-support gate.
+
+The focused synthetic-wallet test passed exact success and missing, changed,
+duplicate, insufficiently confirmed and spent-input controls, including a remaining
+input worth more than the fee. The real SDK shielding proof/reopen test also passed
+after the shared immutable-binding loader refactor. Independent review is clear.
+
 **C22 declared restoration contract (implemented and reviewed):** Ordinary reopen
 cannot detect an undeclared filesystem rollback. The explicit offline
 `wallet mark-restored` command declares a manually restored working copy before

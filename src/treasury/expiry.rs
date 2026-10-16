@@ -7,6 +7,7 @@ use pepper_sync::wallet::{
     IronwoodNote, OrchardNote, OutputInterface, SaplingNote, TransparentCoin,
 };
 use zingolib::wallet::LightWallet;
+mod shielding;
 
 /// Match every owned input from the immutable calculation snapshot against the
 /// fully synced wallet. Failed transaction markers alone are insufficient: its
@@ -78,13 +79,15 @@ impl Treasury {
     ) -> Result<()> {
         self.sync_once(stop).await?;
         let lookup = id.clone();
-        let (prepared, original) = self
+        let (prepared, original, shielding_inputs) = self
             .store
             .call(move |s| {
-                Ok((
-                    PreparedTransaction::load(s, &lookup)?,
-                    s.prepared_snapshot(&lookup)?,
-                ))
+                let prepared = PreparedTransaction::load(s, &lookup)?;
+                let inputs = s.shielding_expiry_inputs(
+                    &lookup,
+                    prepared.facts().context("operation facts missing")?,
+                )?;
+                Ok((prepared, s.prepared_snapshot(&lookup)?, inputs))
             })
             .await?;
         let status = self.store.call(|s| s.treasury_sync_state()).await?;
@@ -145,6 +148,16 @@ impl Treasury {
                 .is_some_and(|r| r.status().is_failed()),
             crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotInvalidated
         );
+        if let Some((address, inputs)) = shielding_inputs {
+            shielding::check(
+                &current,
+                self.network,
+                &address,
+                &inputs,
+                height,
+                sync.confirmations,
+            )?;
+        }
         let input = [
             check_inputs::<TransparentCoin>(
                 &original,

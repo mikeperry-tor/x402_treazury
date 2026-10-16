@@ -216,12 +216,31 @@ impl Store {
         operation: &str,
         facts: &TransactionFacts,
     ) -> Result<bool> {
+        Ok(self.owned_shielding_binding(operation, facts)?.is_some())
+    }
+
+    #[cfg(feature = "zcash")]
+    pub(crate) fn shielding_expiry_inputs(
+        &self,
+        operation: &str,
+        facts: &TransactionFacts,
+    ) -> Result<Option<(String, Vec<Input>)>> {
+        Ok(self
+            .owned_shielding_binding(operation, facts)?
+            .map(|binding| (binding.policy.address, binding.inputs)))
+    }
+
+    fn owned_shielding_binding(
+        &self,
+        operation: &str,
+        facts: &TransactionFacts,
+    ) -> Result<Option<Binding>> {
         let header: Option<(String, String, Vec<u8>, i64, bool)> = self.db.query_row(
             "SELECT policy_pool_id,policy_wallet_id,address,max_fee,automatic FROM shielding_operations WHERE operation_id=?1",
             [operation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         ).optional()?;
         let Some((pool, wallet, address, max_fee, automatic)) = header else {
-            return Ok(false);
+            return Ok(None);
         };
         let address = unseal(
             &self.key,
@@ -246,7 +265,7 @@ impl Store {
         binding.check(&self.db, operation, facts)?;
         #[cfg(feature = "zcash")]
         binding.check_transaction(&self.prepared_bytes(operation)?, facts)?;
-        Ok(true)
+        Ok(Some(binding))
     }
     /// Installed only by managed serving after all listeners are bound. The
     /// caller supplies current configured profiles, never historical job policy.
