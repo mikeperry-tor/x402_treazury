@@ -19,6 +19,18 @@ pub trait FundingObservations: Clone + Send + Sync + 'static {
     fn quote(&self, request: Self::QuoteRequest) -> impl Future<Output = Result<Quote>> + Send;
     fn status(&self, quote: Quote) -> impl Future<Output = Result<SwapStatus>> + Send;
     fn credit(&self, job: FundingJob) -> impl Future<Output = Result<()>> + Send;
+    /// Preserve typed correlations from the same unsigned status request.
+    fn status_observation(
+        &self,
+        quote: Quote,
+    ) -> impl Future<Output = Result<(SwapStatus, Option<super::near::StatusObservation>)>> + Send
+    {
+        async move { self.status(quote).await.map(|status| (status, None)) }
+    }
+    /// Independent canonical observation; never prepares or submits funds.
+    fn delivery(&self, _job: FundingJob) -> impl Future<Output = Result<()>> + Send {
+        async { Ok(()) }
+    }
 }
 
 pub trait FundingBackend: Send + 'static {
@@ -754,6 +766,46 @@ impl FundingObservations for Observations {
     }
     async fn status(&self, quote: Quote) -> Result<SwapStatus> {
         self.near.status(&quote).await
+    }
+    async fn status_observation(
+        &self,
+        quote: Quote,
+    ) -> Result<(SwapStatus, Option<super::near::StatusObservation>)> {
+        let observation = self.near.status_observation(&quote).await?;
+        Ok((observation.status().clone(), Some(observation)))
+    }
+    async fn delivery(&self, job: FundingJob) -> Result<()> {
+        let (id, operation) = (job.id.clone(), job.operation_id.clone());
+        let read = self
+            .store
+            .call(move |s| s.capture_funding_delivery(&id, &operation))
+            .await?;
+        let Some(read) = read else { return Ok(()) };
+        match self
+            .base
+            .verify_funding_delivery(&read.expected, read.capture.clone())
+            .await
+        {
+            Ok(Some(proof)) => {
+                self.store
+                    .call(move |s| s.commit_funding_delivery(&read, &proof))
+                    .await
+            }
+            Ok(None) => {
+                self.store
+                    .call(move |s| s.finish_delivery_read(&read))
+                    .await
+            }
+            Err(error) => {
+                self.store
+                    .call(move |s| {
+                        s.record_base_failure(&error)?;
+                        s.finish_delivery_read(&read)?;
+                        Err(error)
+                    })
+                    .await
+            }
+        }
     }
     async fn credit(&self, job: FundingJob) -> Result<()> {
         let pool = job.pool_id.clone();

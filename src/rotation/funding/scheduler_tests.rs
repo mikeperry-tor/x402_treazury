@@ -16,6 +16,7 @@ struct Reads {
     failed_job: Arc<std::sync::Mutex<Option<String>>>,
     processing: bool,
     quotes: Option<mpsc::UnboundedSender<QuoteRead>>,
+    deliveries: Option<(Arc<Semaphore>, Arc<AtomicUsize>)>,
 }
 impl FundingObservations for Reads {
     type QuoteRequest = Quote;
@@ -31,6 +32,13 @@ impl FundingObservations for Reads {
             completed.await.unwrap()?;
         }
         Ok(quote)
+    }
+    async fn delivery(&self, _: FundingJob) -> Result<()> {
+        if let Some((gate, calls)) = &self.deliveries {
+            calls.fetch_add(1, Ordering::SeqCst);
+            gate.acquire().await.unwrap().forget();
+        }
+        Ok(())
     }
     async fn credit(&self, _: FundingJob) -> Result<()> {
         self.credit_calls.fetch_add(1, Ordering::SeqCst);
@@ -145,15 +153,15 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
     );
     state.complete(&job, Kind::Credit, 101, 10, None, None);
     assert_eq!(
-        state.condition(&job.operation_id, [true; 4]),
+        state.condition(&job.operation_id, [true; 5]),
         Some(FundingCondition::InsufficientFunds)
     );
-    let mut applicable = [true; 4];
+    let mut applicable = [true; 5];
     applicable[Kind::Source as usize] = false;
     assert_eq!(state.condition(&job.operation_id, applicable), None);
-    assert_eq!(state.condition("another-operation", [true; 4]), None);
+    assert_eq!(state.condition("another-operation", [true; 5]), None);
     state.complete(&job, Kind::Source, 200, 10, None, None);
-    assert_eq!(state.condition(&job.operation_id, [true; 4]), None);
+    assert_eq!(state.condition(&job.operation_id, [true; 5]), None);
 }
 
 #[test]
@@ -284,6 +292,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
                 failed_job: Default::default(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: Arc::new(Semaphore::new(0)),
             started,
@@ -382,6 +391,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                         failed_job: Default::default(),
                         processing: false,
                         quotes: None,
+                        deliveries: None,
                     },
                     gate: Arc::new(Semaphore::new(64)),
                     started,
@@ -589,6 +599,7 @@ async fn malformed_readiness_is_local_while_independent_source_work_drains() {
                 failed_job: Default::default(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: gate.clone(),
             started,
@@ -751,6 +762,7 @@ async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fat
                     failed_job: Default::default(),
                     processing: false,
                     quotes: None,
+                    deliveries: None,
                 },
                 gate: Arc::new(Semaphore::new(0)),
                 started,
@@ -890,6 +902,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
                 failed_job: Default::default(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: source_gate.clone(),
             started: source_tx,
@@ -979,7 +992,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
         .unwrap();
     assert!(facts.provider_success);
     assert_eq!(facts.source_attempts, 1);
-    assert!(!facts.status_needed());
+    assert!(facts.status_needed());
     let (store, actor) = StoreHandle::spawn(reopened);
     let (statuses, mut observed_status) = mpsc::unbounded_channel();
     let (started, _source_events) = mpsc::unbounded_channel();
@@ -996,6 +1009,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
                 failed_job: Default::default(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: Arc::new(Semaphore::new(jobs.len())),
             started,
@@ -1004,6 +1018,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     );
     reopened_worker.tick(1001).await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), jobs.len());
+    assert_eq!(observed_status.try_recv().unwrap(), target.id);
     assert!(observed_status.try_recv().is_err());
     let facts = store
         .call(move |s| s.funding_facts(&target.id, &target.operation_id))
@@ -1064,6 +1079,7 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
                 failed_job: fail.clone(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: source_gate.clone(),
             started: source_tx,
@@ -1116,12 +1132,19 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
     task.await.unwrap().unwrap();
     // The failure backs off only its status observation. It neither retries at
     // the immediate tick nor prevents other source/credit work from advancing.
-    worker.tick(1001).await.unwrap();
+    worker.tick(1000).await.unwrap();
     assert!(status_rx.try_recv().is_err());
     *fail.lock().unwrap() = None;
-    gates[&jobs[0].id].add_permits(1);
+    // A SUCCESS label without canonical delivery still needs correlation
+    // observation. Both independent status lanes may run after their backoff.
+    for job in &jobs {
+        gates[&job.id].add_permits(1);
+    }
     worker.tick(2000).await.unwrap();
-    assert_eq!(status_rx.try_recv().unwrap(), jobs[0].id);
+    let observed: BTreeSet<_> = [status_rx.try_recv().unwrap(), status_rx.try_recv().unwrap()]
+        .into_iter()
+        .collect();
+    assert_eq!(observed, jobs.iter().map(|job| job.id.clone()).collect());
     assert!(status_rx.try_recv().is_err());
     for job in jobs {
         let facts = store
@@ -1176,6 +1199,7 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
                 failed_job: Default::default(),
                 processing: true,
                 quotes: None,
+                deliveries: None,
             },
             gate: source_gate.clone(),
             started: source_tx,
@@ -1273,6 +1297,7 @@ async fn quote_saturation_releases_failed_slot_and_single_pass_drains_all_reads(
                 failed_job: Default::default(),
                 processing: false,
                 quotes: Some(quotes),
+                deliveries: None,
             },
             gate: Arc::new(Semaphore::new(jobs.len())),
             started,
@@ -1391,6 +1416,7 @@ async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_s
                     failed_job: Default::default(),
                     processing: false,
                     quotes: Some(quotes),
+                    deliveries: None,
                 },
                 gate: source_gate.clone(),
                 started,
@@ -1511,6 +1537,7 @@ async fn fatal_store_error_retains_active_source_lease_and_signed_liability() {
                 failed_job: Default::default(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: source_gate.clone(),
             started,
@@ -1604,6 +1631,7 @@ async fn cancellation_drops_unsigned_quotes_without_accepting_or_retrying_them()
                 failed_job: Default::default(),
                 processing: false,
                 quotes: Some(quotes),
+                deliveries: None,
             },
             gate: Arc::new(Semaphore::new(jobs.len())),
             started,
@@ -1703,6 +1731,7 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
                     failed_job: Default::default(),
                     processing: true,
                     quotes: None,
+                    deliveries: None,
                 },
                 gate: source_gate.clone(),
                 started,
@@ -1912,6 +1941,7 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
                         failed_job: Default::default(),
                         processing: true,
                         quotes: None,
+                        deliveries: None,
                     },
                     gate: Arc::new(Semaphore::new(64)),
                     started,
@@ -2039,6 +2069,7 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                         failed_job: Default::default(),
                         processing: true,
                         quotes: None,
+                        deliveries: None,
                     },
                     gate: gate.clone(),
                     started,
@@ -2190,6 +2221,8 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
     let (statuses, mut status_events) = mpsc::unbounded_channel();
     let (started, mut source_events) = mpsc::unbounded_channel();
     let credits = Arc::new(AtomicUsize::new(0));
+    let delivery_gate = Arc::new(Semaphore::new(0));
+    let delivery_calls = Arc::new(AtomicUsize::new(0));
     let worker = FundingWorker::new(
         store.clone(),
         Source {
@@ -2202,23 +2235,37 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
                 failed_job: Arc::new(std::sync::Mutex::new(Some(jobs[0].id.clone()))),
                 processing: true,
                 quotes: None,
+                deliveries: Some((delivery_gate.clone(), delivery_calls.clone())),
             },
             gate: Arc::new(Semaphore::new(2)),
             started,
         },
         1,
     );
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        worker.tick(now().unwrap() + 10_000),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let running = tokio::spawn({
+        let worker = worker.clone();
+        async move { worker.tick(now().unwrap() + 10_000).await }
+    });
+    wait_until(|| delivery_calls.load(Ordering::SeqCst) == jobs.len()).await;
+    wait_until(|| credits.load(Ordering::SeqCst) == jobs.len()).await;
+    // Canonical delivery reads retain their own slots. Provider and source
+    // observations must finish while every delivery read remains blocked.
+    let first_status = event(&mut status_events).await;
+    let second_status = event(&mut status_events).await;
+    let source = event(&mut source_events).await;
+    assert_ne!(first_status, second_status);
+    assert_eq!(source, jobs[1].id);
+    assert!(!running.is_finished());
+    delivery_gate.add_permits(jobs.len());
+    tokio::time::timeout(std::time::Duration::from_secs(5), running)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     assert_eq!(credits.load(Ordering::SeqCst), jobs.len());
     let expected: BTreeSet<_> = jobs.iter().map(|job| job.id.clone()).collect();
-    let mut sources = BTreeSet::new();
-    let mut statuses = BTreeSet::new();
+    let mut sources = BTreeSet::from([source]);
+    let mut statuses = BTreeSet::from([first_status, second_status]);
     while let Ok(id) = source_events.try_recv() {
         sources.insert(id);
     }
@@ -2355,6 +2402,7 @@ async fn hidden_prepared_bytes_remain_observable_without_new_work_after_reopen()
                         failed_job: Arc::new(std::sync::Mutex::new(None)),
                         processing: true,
                         quotes: None,
+                        deliveries: None,
                     },
                     calls: calls.clone(),
                 },
@@ -2367,8 +2415,14 @@ async fn hidden_prepared_bytes_remain_observable_without_new_work_after_reopen()
                 epoch: now().unwrap(),
                 started: std::time::Instant::now(),
             };
-            let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
-                .map(|kind| LaneInventory::new(kind, boundary, clock.schedule_now()));
+            let mut inventory = [
+                Kind::Credit,
+                Kind::Status,
+                Kind::Source,
+                Kind::Quote,
+                Kind::Delivery,
+            ]
+            .map(|kind| LaneInventory::new(kind, boundary, clock.schedule_now()));
             let mut pending = VecDeque::new();
             worker
                 .collect_inventory(&mut inventory, &mut pending, &clock, 1800, true)
@@ -2480,6 +2534,7 @@ async fn completion_read_contention_retains_exact_observations_without_replay() 
                         failed_job: Default::default(),
                         processing: false,
                         quotes: Some(quotes),
+                        deliveries: None,
                     },
                     gate: Arc::new(Semaphore::new(2)),
                     started,
@@ -2598,6 +2653,7 @@ async fn completion_read_corruption_stops_without_retry_or_financial_publication
                 failed_job: Default::default(),
                 processing: false,
                 quotes: None,
+                deliveries: None,
             },
             gate: gate.clone(),
             started,

@@ -41,6 +41,7 @@ pub struct StatusObservation {
     quote_digest: [u8; 32],
     settlement: Option<UnverifiedSettlement>,
     issues: Vec<SettlementIssue>,
+    reported_refund: Option<U256>,
 }
 impl StatusObservation {
     pub fn status(&self) -> &SwapStatus {
@@ -57,6 +58,11 @@ impl StatusObservation {
     /// or either chain correlation is absent. These remain unverified candidates.
     pub fn settlement(&self) -> Option<&UnverifiedSettlement> {
         self.settlement.as_ref()
+    }
+    /// An unverified provider return claim, independent of delivery-candidate
+    /// completeness. Never credit it or infer zero from an absent amount.
+    pub fn reported_refund(&self) -> Option<U256> {
+        self.reported_refund
     }
     pub fn issues(&self) -> &[SettlementIssue] {
         &self.issues
@@ -89,6 +95,7 @@ pub(super) fn parse(quote: &Quote, value: &Value) -> Result<StatusObservation> {
         quote_digest,
         settlement: None,
         issues: vec![],
+        reported_refund: None,
     };
     // Hash encoding is interpreted only for our accepted Zcash -> Base route.
     if quote.request["originAsset"] != ZEC
@@ -122,6 +129,7 @@ pub(super) fn parse(quote: &Quote, value: &Value) -> Result<StatusObservation> {
             return Ok(observation);
         }
     };
+    observation.reported_refund = atomic_amount(details.get("refundedAmount")).ok().flatten();
     let origin = transactions(details.get("originChainTxHashes"), false);
     let destination = transactions(details.get("destinationChainTxHashes"), true);
     let origins = evidence_field(

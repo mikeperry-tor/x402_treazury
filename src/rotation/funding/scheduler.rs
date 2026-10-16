@@ -14,6 +14,7 @@ use std::{
 const CREDIT_READS: usize = 4;
 const STATUS_READS: usize = 4;
 const QUOTE_READS: usize = 4;
+const DELIVERY_READS: usize = 4;
 // Bounds only cached scheduling metadata. Expired, inactive records can be
 // forgotten; in-flight ownership and an unelapsed backoff cannot be evicted.
 const RECORDS: usize = 256;
@@ -24,6 +25,7 @@ pub(super) enum Kind {
     Status,
     Source,
     Quote,
+    Delivery,
 }
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Key {
@@ -63,6 +65,7 @@ impl std::error::Error for AlreadyOwned {}
 enum Observation<Q> {
     None,
     Status(SwapStatus),
+    StatusDetails(super::super::near::StatusObservation),
     Prerequisite(Q),
     Quote(Quote),
 }
@@ -73,7 +76,7 @@ struct Completion<Q> {
 }
 // Scheduling and health reporting evaluate the same current facts. The source
 // step includes quote prerequisites; the Quote kind is the subsequent HTTP read.
-fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
+fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 5] {
     [
         !facts.readiness_recorded || facts.readiness_disputed,
         facts.status_needed(),
@@ -87,6 +90,7 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
             && facts.enabled
             && !facts.readiness_recorded
             && !facts.accepted_quote,
+        facts.accepted_quote && !facts.archived && facts.source_attempts > 0,
     ]
 }
 
@@ -140,6 +144,7 @@ struct InFlight<Q> {
     credit_active: usize,
     status_active: usize,
     quote_active: usize,
+    delivery_active: usize,
     quote_pending: Option<(FundingJob, Q)>,
 }
 impl<Q> InFlight<Q> {
@@ -152,6 +157,7 @@ impl<Q> InFlight<Q> {
             credit_active: 0,
             status_active: 0,
             quote_active: 0,
+            delivery_active: 0,
             quote_pending: None,
         }
     }
@@ -162,6 +168,7 @@ impl<Q> InFlight<Q> {
             Kind::Status => self.status_active -= 1,
             Kind::Source => self.source_active = false,
             Kind::Quote => self.quote_active -= 1,
+            Kind::Delivery => self.delivery_active -= 1,
         }
         self.active.remove(&Key {
             operation: completion.job.operation_id.clone(),
@@ -271,8 +278,14 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
         };
         let pass_due = clock.schedule_now();
-        let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
-            .map(|kind| LaneInventory::new(kind, boundary, pass_due));
+        let mut inventory = [
+            Kind::Credit,
+            Kind::Status,
+            Kind::Source,
+            Kind::Quote,
+            Kind::Delivery,
+        ]
+        .map(|kind| LaneInventory::new(kind, boundary, pass_due));
         let mut stopping = false;
         loop {
             stopping |= stop.is_cancelled();
@@ -405,7 +418,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
 
     async fn collect_inventory(
         &self,
-        inventory: &mut [LaneInventory; 4],
+        inventory: &mut [LaneInventory; 5],
         pending: &mut VecDeque<Pending>,
         clock: &TickClock,
         health_after: u64,
@@ -487,11 +500,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         .await?;
                     job.timed_out = true;
                 }
-                let [credit, status, source, _] = applicable_work(&job, &facts);
+                let [credit, status, source, _, delivery] = applicable_work(&job, &facts);
                 let prerequisite = job.phase == FundingPhase::Allocated && !facts.hidden_prepared;
                 let wanted = match kind {
                     Kind::Credit => credit,
                     Kind::Status => status,
+                    Kind::Delivery => delivery,
                     Kind::Source => !prerequisite && source,
                     Kind::Quote => prerequisite && source,
                 };
@@ -548,6 +562,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             if (kind == Kind::Credit && flight.credit_active == CREDIT_READS)
                 || (kind == Kind::Status && flight.status_active == STATUS_READS)
+                || (kind == Kind::Delivery && flight.delivery_active == DELIVERY_READS)
             {
                 pending.push_back(item);
                 continue;
@@ -579,6 +594,20 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         .boxed(),
                     );
                 }
+                Kind::Delivery => {
+                    flight.delivery_active += 1;
+                    let reader = reader.clone();
+                    flight.reads.push(
+                        async move {
+                            let result = reader
+                                .delivery(job.clone())
+                                .await
+                                .map(|()| Observation::None);
+                            Completion { job, kind, result }
+                        }
+                        .boxed(),
+                    );
+                }
                 Kind::Status => {
                     flight.status_active += 1;
                     let reader = reader.clone();
@@ -594,7 +623,14 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                                         )?)
                                     })
                                     .await?;
-                                reader.status(quote).await.map(Observation::Status)
+                                reader
+                                    .status_observation(quote)
+                                    .await
+                                    .map(|(status, details)| {
+                                        details
+                                            .map(Observation::StatusDetails)
+                                            .unwrap_or(Observation::Status(status))
+                                    })
                             }
                             .await;
                             Completion { job, kind, result }
@@ -738,6 +774,14 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     .call(move |s| s.record_provider_outcome(&id, &operation, &status, instant))
                     .await
             }
+            Ok(Observation::StatusDetails(observation)) => {
+                let (id, operation) = (job.id.clone(), job.operation_id.clone());
+                self.store
+                    .call(move |s| {
+                        s.record_delivery_observation(&id, &operation, &observation, instant)
+                    })
+                    .await
+            }
             Ok(Observation::None) => Ok(()),
             Ok(Observation::Prerequisite(request)) => {
                 prerequisite = Some((job.clone(), request));
@@ -764,7 +808,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             Err(error) => Err(error),
         };
         let phase = match kind {
-            Kind::Credit => FundingPhase::VerifyingCredit,
+            Kind::Credit | Kind::Delivery => FundingPhase::VerifyingCredit,
             Kind::Status => FundingPhase::Swapping,
             Kind::Source => job.phase.clone(),
             Kind::Quote => FundingPhase::Allocated,
@@ -978,25 +1022,31 @@ impl State {
     fn condition(
         &self,
         operation: &str,
-        applicable: [bool; 4],
+        applicable: [bool; 5],
     ) -> Option<super::super::error::FundingCondition> {
-        [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit]
-            .into_iter()
-            .filter(|kind| applicable[*kind as usize])
-            .find_map(|kind| {
-                self.records
-                    .get(&Key {
-                        operation: operation.to_owned(),
-                        kind,
-                    })
-                    .and_then(|record| record.condition)
-            })
+        [
+            Kind::Source,
+            Kind::Quote,
+            Kind::Status,
+            Kind::Credit,
+            Kind::Delivery,
+        ]
+        .into_iter()
+        .filter(|kind| applicable[*kind as usize])
+        .find_map(|kind| {
+            self.records
+                .get(&Key {
+                    operation: operation.to_owned(),
+                    kind,
+                })
+                .and_then(|record| record.condition)
+        })
     }
     fn health(
         &self,
         operation: &str,
         now: u64,
-        applicable: [bool; 4],
+        applicable: [bool; 5],
     ) -> (u64, u32, Option<String>) {
         let entries: Vec<_> = self
             .records
@@ -1026,14 +1076,20 @@ impl State {
                 .cloned()
         });
         let error = integrity.or_else(|| {
-            [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit]
-                .into_iter()
-                .find_map(|kind| {
-                    entries
-                        .iter()
-                        .find(|(key, record)| key.kind == kind && record.error.is_some())
-                        .and_then(|(_, record)| record.error.clone())
-                })
+            [
+                Kind::Source,
+                Kind::Quote,
+                Kind::Status,
+                Kind::Credit,
+                Kind::Delivery,
+            ]
+            .into_iter()
+            .find_map(|kind| {
+                entries
+                    .iter()
+                    .find(|(key, record)| key.kind == kind && record.error.is_some())
+                    .and_then(|(_, record)| record.error.clone())
+            })
         });
         (due, streak, error)
     }

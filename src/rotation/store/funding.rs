@@ -98,6 +98,8 @@ pub struct FundingFacts {
     pub readiness_recorded: bool,
     pub readiness_disputed: bool,
     pub accepted_quote: bool,
+    pub delivery_verified: bool,
+    pub return_pending: bool,
     pub archived: bool,
     /// Exact operation/job archive plus zero remaining source liability.
     pub source_closed: bool,
@@ -121,11 +123,13 @@ impl FundingFacts {
         self.accepted_quote
             && !self.archived
             && self.source_attempts > 0
-            && !self.provider_success
-            && !self.provider_refunded
+            && (self.return_pending
+                || !self.delivery_verified
+                || (!self.provider_success && !self.provider_refunded))
     }
     pub(crate) fn observations_needed(&self) -> bool {
         !self.readiness_recorded
+            || self.return_pending
             || self.readiness_disputed
             || self.status_needed()
             || self.source_reconciliation_needed()
@@ -306,7 +310,7 @@ pub fn dispute_endpoint_support(db: &Connection, endpoint: &str) -> Result<()> {
     Ok(())
 }
 
-fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
+pub(super) fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
     let (_, owner_unclosed) = super::preparation::source_state(db, operation)?;
     Ok(db.query_row("SELECT (NOT ?2 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",params![operation,owner_unclosed],|r|r.get(0))?)
 }
@@ -718,6 +722,7 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
         && confirmed
         && gross
         && source_accounted(tx, operation)?
+        && !super::funding_delivery::return_pending(tx, operation)?
     {
         Some("SUCCESS")
     } else {
@@ -748,7 +753,7 @@ pub(crate) fn publish_destination_readiness(db: &Connection, wallet: &str) -> Re
     Ok(())
 }
 
-fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result<()> {
+pub(super) fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result<()> {
     let matched: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM funding_progress WHERE job_id=?1 AND operation_id=?2)",
         params![job, operation],
@@ -757,6 +762,12 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
     ensure!(matched, "funding operation correlation mismatch");
     db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_integrity_conflict; contradictory completed provider outcome' WHERE job_id=?1 AND operation_id=?2 AND (provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1))) AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE' AND (f.completion_outcome IS NULL OR f.completion_outcome NOT IN ('EXTERNAL','RECOVERED')))",params![job,operation])?;
     db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN '\"RECOVERY_REQUIRED\"' WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_success=1 THEN '\"VERIFYING_CREDIT\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN phase='\"PREPARED\"' AND EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.attempts>0) THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase NOT IN ('\"RECOVERY_REQUIRED\"','\"COMPLETE\"') AND NOT EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE' AND f.completion_outcome IN ('EXTERNAL','RECOVERED'))", params![job,operation])?;
+    if super::funding_delivery::return_pending(db, operation)? {
+        // Completion outcome remains historical audit. New exact-operation
+        // return evidence makes current accounting incomplete independently
+        // of the provider's status label or destination spending capacity.
+        db.execute("UPDATE funding_progress SET phase='\"REFUND_PENDING\"',last_error='return_accounting_pending' WHERE job_id=?1 AND operation_id=?2", params![job,operation])?;
+    }
     Ok(())
 }
 
@@ -874,6 +885,17 @@ pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<
 /// successful original operation may still owe source reconciliation after its
 /// destination is closed; an uncertain/failed attempt cannot use that exception.
 pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<bool> {
+    let binding: Option<(String,String)> = db.query_row("SELECT f.id,j.operation_id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1",[wallet],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+    if let Some((job, operation)) = binding {
+        if super::funding_delivery::delivered(db, &job, &operation)? {
+            return Ok(false);
+        }
+        let known:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM funding_delivery_events WHERE job_id=?1 AND operation_id=?2)",params![job,operation],|r|r.get(0))?;
+        if known {
+            return Ok(true);
+        }
+    }
+
     type DispositionRow = (
         bool,
         Option<String>,
@@ -919,7 +941,7 @@ pub(super) fn read_funding_facts(
     let (mut facts, flags, phase) = db.query_row(
             "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1),j.phase FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((FundingFacts {
-                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false, preparation_started: false,
+                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, delivery_verified:false, return_pending:false, archived:r.get(3)?, source_closed: false, preparation_started: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
                 source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,hidden_prepared:false,
             }, provider_flags(r, 4), r.get::<_,String>(11)?)),
@@ -932,6 +954,8 @@ pub(super) fn read_funding_facts(
     ) = flags.context(super::scheduling::FundingDecodeFailure)?;
     let phase: FundingPhase =
         serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
+    facts.delivery_verified = super::funding_delivery::delivered(db, job, operation)?;
+    facts.return_pending = super::funding_delivery::return_pending(db, operation)?;
     facts.hidden_prepared = facts.source_submission.as_deref() == Some("PREPARED")
         && facts.source_attempts == 0
         && matches!(
@@ -1497,14 +1521,19 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         } else {(None,0,false)};
         let phase = phase.context(super::scheduling::FundingDecodeFailure)?;
         let parsed_phase: FundingPhase = serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
-        // Also normalize historical completed rows for read-only wallet status.
-        let completed_without_observations = parsed_phase == FundingPhase::Complete
-            && (version < 16 || !read_funding_facts(db, &id, &operation_id)?.observations_needed());
+        // Historical reports preserve saved diagnostics. Their old schemas do
+        // not contain today's runtime observation/ownership tables.
+        let completed_without_observations = version >= 22
+            && parsed_phase == FundingPhase::Complete
+            && !read_funding_facts(db, &id, &operation_id)?.observations_needed();
         let last_error = if completed_without_observations {
             completed_error(last_error.as_deref()).map(str::to_owned)
         } else {
             last_error
         };
+        let last_error = if version >= 22 && super::funding_delivery::return_pending(db, &operation_id)? {
+            Some("return_accounting_pending".to_owned())
+        } else { last_error };
         let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
             started_at: started_at.map(u64::try_from).transpose().context(super::scheduling::FundingDecodeFailure)?,
@@ -2457,7 +2486,7 @@ mod completion_tests {
 
     #[cfg(feature = "zcash")]
     #[test]
-    fn incomplete_deposit_keeps_observing_until_a_terminal_provider_fact() {
+    fn terminal_provider_facts_cannot_end_observation_without_delivery_proof() {
         use crate::rotation::near::SwapStatus;
         for terminal in [SwapStatus::Success, SwapStatus::Refunded] {
             let (_dir, mut store, job) = fixture();
@@ -2497,10 +2526,11 @@ mod completion_tests {
                 .record_provider_outcome(&job.id, &job.operation_id, &terminal, 4)
                 .unwrap();
             assert!(
-                !store
+                store
                     .funding_facts(&job.id, &job.operation_id)
                     .unwrap()
-                    .status_needed()
+                    .status_needed(),
+                "terminal labels cannot prove destination delivery or absence"
             );
             assert_eq!(
                 store.funding_job(&job.id).unwrap().unwrap().phase,
@@ -2755,7 +2785,7 @@ mod completion_tests {
             .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 1)
             .unwrap();
         assert!(
-            !store
+            store
                 .funding_facts(&job.id, &job.operation_id)
                 .unwrap()
                 .status_needed()

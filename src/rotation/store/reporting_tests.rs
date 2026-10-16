@@ -260,3 +260,23 @@ fn schema19_and_20_disputed_liabilities_remain_readable_without_new_wallet_field
         assert_eq!(db.total_changes(), changes);
     }
 }
+
+#[test]
+fn frozen_schema20_completed_funding_preserves_historical_diagnostics() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(include_str!("../../../tests/fixtures/state/schema20.sql"))
+        .unwrap();
+    db.execute_batch("INSERT INTO pools(id,name,payment_limit) VALUES('pool','historical','100');
+        INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES('wallet','pool',1,'address',X'00','1','ACTIVE');
+        INSERT INTO funding_jobs(id,wallet_id,state,target,pool_id,allocation_kind,claim_generation) VALUES('job','wallet','COMPLETE','1','pool','small',0);
+        INSERT INTO funding_progress(job_id,operation_id,phase,last_error) VALUES('job','original','\"COMPLETE\"','historical accounting pending');
+        PRAGMA query_only=ON;").unwrap();
+    let before = db.total_changes();
+    let jobs = funding::read_jobs(&db).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(
+        jobs[0].last_error.as_deref(),
+        Some("historical accounting pending")
+    );
+    assert_eq!(db.total_changes(), before);
+}

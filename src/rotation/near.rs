@@ -15,6 +15,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 mod settlement;
 pub use settlement::{SettlementIssue, StatusObservation, UnverifiedSettlement};
+pub(crate) fn restore_status_observation(
+    quote: &Quote,
+    value: &Value,
+) -> Result<StatusObservation> {
+    settlement::parse(quote, value)
+}
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
 #[derive(Debug)]
 pub(crate) struct QuoteWindowExpired;
@@ -46,7 +52,7 @@ pub struct Limits {
     pub max_fee: u64,
     pub max_fee_bps: u32,
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SwapStatus {
     PendingDeposit,
     KnownDeposit,

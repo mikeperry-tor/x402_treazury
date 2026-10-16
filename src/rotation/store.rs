@@ -24,6 +24,7 @@ pub(crate) mod bootstrap;
 #[cfg(feature = "zcash")]
 mod expiry;
 pub mod funding;
+pub(crate) mod funding_delivery;
 pub(crate) mod history;
 pub(crate) mod inventory;
 mod ownership;
@@ -399,6 +400,8 @@ impl Store {
         ))?;
         tx.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
         tx.execute_batch(include_str!("store/evidence/replacement_schema.sql"))?;
+        tx.execute_batch(include_str!("store/funding_delivery_schema.sql"))?;
+        tx.execute_batch(include_str!("store/shielding_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
             params![id, birthday, network.name()],
@@ -450,7 +453,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 21,
+                version == 22,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -1125,7 +1128,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 21,
+        schema == 22,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1334,7 +1337,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 21,
+        version == 22,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;

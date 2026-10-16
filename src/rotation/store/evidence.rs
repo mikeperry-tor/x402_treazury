@@ -1857,6 +1857,9 @@ impl Store {
                 ],
             )?;
         }
+        if !amount_conflict {
+            super::funding_delivery::dispute_anchor(&tx, wallet, &anchor.hash)?;
+        }
         super::funding::dispute_support(
             &tx,
             wallet,
@@ -1906,6 +1909,7 @@ impl Store {
             ensure!(changed == 1, EvidenceFailure::ScopeMismatch);
             bump_generation(&tx, "wallet", wallet)?;
         }
+        super::funding_delivery::dispute_endpoint(&tx, endpoint)?;
         super::funding::dispute_endpoint_support(&tx, endpoint)?;
         super::capacity::dispute_endpoint_support(&tx, endpoint)?;
         bump_generation(&tx, "endpoint", endpoint)?;

@@ -73,8 +73,9 @@ failure. The reviewed fixture correction passed its focused rerun; full all-targ
 and synthetic lifecycle acceptance remain outstanding. Subsequent all-target/all-feature
 Clippy and dependency compatibility checks passed. C15 bounded publication is committed
 as `55d5b3b`, with cleanup ownership fixup `0f36e2f` and historical reporting fixup
-`110f2e0`. Its final manager gate passed 72 tests with one ignored helper. C18
-validated provider observations (`891f848`) and canonical Base delivery verification
+`110f2e0`. Its final manager gate passed 72 tests with one ignored helper. The remaining
+exact-revalidation fallback was removed in `525069f` after six repair and 17
+replacement tests passed. C18 validated provider observations (`891f848`) and canonical Base delivery verification
 (`63354df`) are committed prerequisites; durable delivery publication and C20 automatic
 shielding remain under implementation with reviewed contracts below.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
@@ -82,7 +83,11 @@ sequence. No live-funded qualification or private-state repair has been performe
 or authorized by these changes.
 
 Continue independent reviews at commit gates and land findings as separate fixup
-commits. Full `scripts/check.sh` and final acceptance closure remain outstanding.
+commits. Full `scripts/check.sh` and final acceptance closure remain outstanding. The next
+all-target run passed 667 library tests with ten ignored helpers, then stopped on
+an obsolete CLI fixture using diagnostic text as unprepared-closure authority.
+The reviewed production-closure fixture correction (`26e502d`) passed its focused
+process test; subsequent all-target integration targets remain to run.
 The resumed work also passed all 35 Python tooling tests and both vendor
 provenance verifiers; these do not substitute for the remaining Rust acceptance
 checks. Preserve unrelated untracked user files (`TODO`, local deployment overrides,
@@ -241,9 +246,9 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G18 | `validate_resolved_funding`, `managed_connection_preflight`, `initialize_wallets`, `Treasury::open` SDK reconstruction before store-worker creation; F20 | Exclusive store/key ownership, Base journal integrity, dependency-specific connection policy and SDK mutation ownership | Isolate independent static service; decide safe Base/store initialization without a usable Zcash SDK or funding-only configuration, including declaration validation before connection setup; retain justified shared-state stops | 8 | T22, T41 | Implemented scoped startup slices `51c4aef`/`151369f`, `59f9b83`, `fc7fed1`, `3d3305a`/`68e5ef4`; independent static/Base service survives unavailable SDK or funding configuration. See C06 contracts and final cross-layer acceptance limits |
 | G19 | `funding_work_page` whole-page job/facts decoding and `collect_inventory` propagation; F21 | Identifiable operation ownership, reservations and shared treasury liabilities | Isolate malformed jobs where dependency scope is provable; retain affected obligations and traverse later jobs; restarting an undecodable page is insufficient | 2, 6 | T42 | Implemented `c27987c`/`f53b7cf` and health decoding `173657c`; exact ownership/source correspondence precedes scoped decode failures, including post-capture completion and reopen |
 | G20 | `record_readiness`, `payment_ownership`, candidate discovery/selection, balance scheduling and `consume_reserve`; F22 | Per-payment capacity, exact claim ownership and pending funding authority | Separate payment-sized capacity from funding-target satisfaction; specify initial role/claim transition without closing or duplicating funding | 2, 4 | T26, T43 | Initial-capacity slice implemented `8760345`; reviewed captured-claim/deferred-publication fixture correction `4c876b9` passed all 55 deployment tests. Full cross-layer acceptance remains |
-| G21 | Wallet-wide admission halt for disputed authorization resolutions; F23 | Complete bounded exposure, compatible current balances and debit accounting | Decide whether full conservative exposure permits use of remaining capacity; retain broader stops for unbounded or unidentifiable liabilities | 2, 4 | T19, T27, T44 | C12 conservative remaining-capacity service and C14 canonical release implemented; immutable audit proofs retained. C15 bounded canonical publication `55d5b3b` and review fixups are implemented; the exact-revalidation fallback remains under audit |
+| G21 | Wallet-wide admission halt for disputed authorization resolutions; F23 | Complete bounded exposure, compatible current balances and debit accounting | Decide whether full conservative exposure permits use of remaining capacity; retain broader stops for unbounded or unidentifiable liabilities | 2, 4 | T19, T27, T44 | C12 conservative remaining-capacity service and C14 canonical release implemented; immutable audit proofs retained. C15 bounded canonical publication `55d5b3b` and review fixups are implemented; the exact-revalidation fallback was removed in `525069f` |
 | G22 | `eligible_payment_evidence` exposure-read failure, cached candidate scan, pre-filter certificate merging and `candidate_for` propagation; F24 | Identifiable wallet-local liability versus shared store integrity | Isolate affected candidates without treating their exposure as zero; retain diagnostics and try independent usable wallets | 2 | T38, T46 | Pending |
-| G23 | `FundingFacts::provider_review_required`, `status_needed`, `record_provider_outcome`, phase derivation and closure predicates; F26 | Exact accepted operation correlation and remaining source/destination/refund obligations | Decide which provider observations are terminal, provisional or superseded; retain audit facts without an unjustified permanent veto or premature end to required observation | 2, 7 | T13, T14, T48 | Partial: exact external-satisfaction closure `33689ec` passed 21 completion tests and independent review. Canonical provider-delivery attribution remains pending; balances/status labels are insufficient |
+| G23 | `FundingFacts::provider_review_required`, `status_needed`, `record_provider_outcome`, phase derivation and closure predicates; F26 | Exact accepted operation correlation and remaining source/destination/refund obligations | Decide which provider observations are terminal, provisional or superseded; retain audit facts without an unjustified permanent veto or premature end to required observation | 2, 7 | T13, T14, T48 | Partial: exact external-satisfaction closure `33689ec` passed 21 completion tests and independent review. Canonical delivery publication is implemented below; current source/return support remains pending, and balances/status labels are insufficient |
 | G24 | Wall-clock evidence/authority checks, elapsed-time scheduling and persisted polling times; F27 | Canonical expiry, original evidence age, signed deadlines and executable observation ownership | Audit clock correction, suspend/resume and restart semantics; remove any durable halt caused only by a temporary clock condition without adding a timer | 2, 6 | T02, T20, T49 | Base lease `7c4f0ae`, scheduling/authority time separation `06af797`, and original treasury observation lease `d8b4dbc` implemented with focused tests; full T49 acceptance remains |
 
 ## Implementation sequence and acceptance gates
@@ -1352,7 +1357,7 @@ original operation/source/quote, enforce unique event ownership and discharge so
 and return accounting separately. Multiple source/destination candidates remain
 unsupported/incomplete. No financial closure is enabled by this prerequisite alone.
 
-**C18 canonical delivery implementation contract (reviewed design; pending):**
+**C18 canonical delivery publication (implemented and reviewed):**
 Retain validated original quote/deposit and source-transaction correlation from the
 provider observation independently of its status label. That mapping supplies
 attribution; a canonical transfer alone cannot identify a swap. Validate a unique
@@ -1378,6 +1383,25 @@ implementation seams. Required tests include zero-current-balance delivery, wron
 correlation/amount/token/recipient, receipt/reorg negatives, unique-event ownership,
 operation rollover, retained correlation through outage, and unresolved source or
 return obligations despite valid destination proof.
+
+Schema22 retains one active and one queued encrypted hint per operation, permanent
+unique event ownership, immutable proof versions and one current proof pointer.
+Canonical verification uses a fifth independent scheduler lane (four active reads);
+blocked delivery reads do not block source, status or credit observations. A current
+event takes priority over unrelated hints, while a chain-disputed event fairly
+alternates with a corrected candidate after completed reads. Cancellation retains
+ownership. Old proofs never become fallback authority after the current proof is
+disputed. Publication rechecks freshness and original source/quote bindings.
+
+Positive or malformed return claims survive missing candidates and subsequent
+status labels. A late claim withdraws effective completion while preserving the
+historical outcome and gross debit. Exact source-closed external/recovered cases
+remain exempt by proof. Historical schema reports preserve their saved diagnostics.
+Eleven delivery-store tests and 22 funding tests passed. The scheduler gate passed
+20 tests, then its corrected terminal-status restart fixture passed separately;
+independent review is clear.
+Full canonical source/return reconciliation remains a separate next gate, so this
+slice does not claim complete G23 or automatic refund recovery.
 
 **C20 shielding implementation contract (reviewed design; implementation pending):**
 Automatic shielding uses the serialized treasury owner and existing maintenance

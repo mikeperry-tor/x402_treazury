@@ -4,7 +4,7 @@ use super::*;
 use crate::rotation::near::{Quote, StatusObservation};
 use sha2::{Digest, Sha256};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FundingDeliveryExpectation {
     operation: uuid::Uuid,
     quote_digest: [u8; 32],
@@ -84,6 +84,9 @@ pub struct FundingDeliveryProof {
     freshness: crate::freshness::FreshnessLease,
 }
 impl FundingDeliveryProof {
+    pub(crate) fn matches_expectation(&self, expected: &FundingDeliveryExpectation) -> bool {
+        &self.expected == expected
+    }
     pub fn operation(&self) -> uuid::Uuid {
         self.expected.operation
     }
@@ -149,6 +152,26 @@ impl BaseRpc {
         }
         unreachable!("primary RPC always exists")
     }
+    async fn recheck_saved_delivery(&self, capture: &EvidenceCapture) -> Result<()> {
+        for anchor in &capture.durable_balance_anchors {
+            let (current, _) = self.block(&format!("0x{:x}", anchor.height)).await?;
+            ensure!(
+                current.height == anchor.height,
+                "receipt block height mismatch"
+            );
+            ensure!(
+                current.hash == anchor.hash,
+                EvidenceConflict {
+                    wallet: capture.wallet.clone(),
+                    endpoint: self.endpoint_id(),
+                    anchor: anchor.clone(),
+                    latest_only: false,
+                    financial_checkpoint: false,
+                }
+            );
+        }
+        Ok(())
+    }
     async fn delivery_inner(
         &self,
         expected: &FundingDeliveryExpectation,
@@ -174,6 +197,7 @@ impl BaseRpc {
             )
             .await?;
         if receipt.is_null() {
+            self.recheck_saved_delivery(&capture).await?;
             return Ok(None);
         }
         let height = quantity(&receipt["blockNumber"])?;
@@ -182,11 +206,20 @@ impl BaseRpc {
             .checked_sub(self.confirmations)
             .is_none_or(|confirmed| height > confirmed)
         {
+            self.recheck_saved_delivery(&capture).await?;
             return Ok(None);
         }
         let (block, _) = self.block(&format!("0x{height:x}")).await?;
         ensure!(block.height == height, "receipt block height mismatch");
-        let log_index = validate_delivery(&receipt, expected, &block)?;
+        let log_index = match validate_delivery(&receipt, expected, &block) {
+            Ok(index) => index,
+            Err(error) => {
+                // A now-reverted or changed receipt must not hide a canonical
+                // contradiction of previously accepted support.
+                self.recheck_saved_delivery(&capture).await?;
+                return Err(error);
+            }
+        };
         for pinned in [&block, &latest] {
             let (current, _) = self.block(&format!("0x{:x}", pinned.height)).await?;
             ensure!(
