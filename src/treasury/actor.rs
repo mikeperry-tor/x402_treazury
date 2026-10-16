@@ -88,23 +88,24 @@ impl Treasury {
         let mut scheduled_sync = None;
         schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
         loop {
-            if !self.healthy && !stop.is_cancelled() {
-                if let Err(error) = self.reconstruct_live(&stop).await {
-                    if !stop.is_cancelled() && !super::ownership::retryable_reconstruction(&error) {
-                        // Shared SQL/ownership failures are not SDK retry authority.
-                        // The retired SDK is gone; retained Base handles own the
-                        // remaining Store lifetime without waiting for its worker.
-                        return Err(error);
-                    }
-                    if !stop.is_cancelled() {
-                        super::diagnostics::warn_sync_failure(&error);
-                    }
-                    // Preserve accepted queued commands while SDK capability is
-                    // unavailable; retry at the existing maintenance cadence.
-                    tokio::select! {
-                        _ = stop.cancelled() => break,
-                        _ = interval.tick() => continue,
-                    }
+            if !self.healthy
+                && !stop.is_cancelled()
+                && let Err(error) = self.reconstruct_live(&stop).await
+            {
+                if !stop.is_cancelled() && !super::ownership::retryable_reconstruction(&error) {
+                    // Shared SQL/ownership failures are not SDK retry authority.
+                    // The retired SDK is gone; retained Base handles own the
+                    // remaining Store lifetime without waiting for its worker.
+                    return Err(error);
+                }
+                if !stop.is_cancelled() {
+                    super::diagnostics::warn_sync_failure(&error);
+                }
+                // Preserve accepted queued commands while SDK capability is
+                // unavailable; retry at the existing maintenance cadence.
+                tokio::select! {
+                    _ = stop.cancelled() => break,
+                    _ = interval.tick() => continue,
                 }
             }
             tokio::select! {
