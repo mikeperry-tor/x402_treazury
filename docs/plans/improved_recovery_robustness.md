@@ -404,6 +404,29 @@ The expanded test retains 256 malformed obligations, resolves seven later record
 and completes within a three-second harness deadline (existing cadence is five).
 The reviewer confirmed the fairness fix with no additional actionable findings.
 
+**C04 / G19 funding inventory contract (reviewed):** Only typed decoding failures
+from scheduler payloads (phase/provider observation fields) may become local inventory
+outcomes. Validate exact job/wallet/pool/current-operation ownership and intact
+source-journal correspondence before scoping the error. Unknown ownership, source
+liabilities and SQL failures remain shared errors. Existing fresh SDK spendability
+and prepared-outgoing checks, not funding inventory totals, guard source preparation.
+Keep source bytes, reservations, archives, counters and operation identity unchanged.
+Advance every lane's bounded ID cursor past malformed entries, including entirely
+malformed pages. Retain a first error for one-pass completion after healthy work
+drains; continuous observation revisits the original rows on its existing cadence.
+Apply the same classification to post-capture completion decoding failures, without
+swallowing store writes or granting new work. No additional quarantine ledger,
+funding budget, retry mechanism or schema is required.
+Validation: 16 scheduler tests pass, including post-capture phase/provider corruption,
+same-pool/other-pool observation progress, source-byte retention, no new recovery,
+restart, cancellation, saturation and fatal store-error ownership controls. Five
+initial scheduling tests and the added all-malformed-page/reopen/ownership regression
+pass. Completion's provider decoder uses the same typed conversion as inventory;
+its SQL and transactional writes remain shared failures. Sub-agent review found no
+blocking defect and requested exact-operation diagnostic attribution as a separate
+fixup. Health-field conversions remain a following C04 scope extension; source
+facts/attempts with unknown liabilities are intentionally shared failures.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

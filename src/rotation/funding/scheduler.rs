@@ -1,6 +1,9 @@
 //! One retained funding owner; observations never borrow the source backend.
 use super::*;
-use crate::rotation::store::{funding::FundingFacts, scheduling::FundingWork};
+use crate::rotation::store::{
+    funding::FundingFacts,
+    scheduling::{FundingWork, MalformedFunding},
+};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -83,6 +86,14 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
     ]
 }
 
+fn report_decode_failure(fault: &MalformedFunding) {
+    tracing::warn!(
+        category = "malformed_funding_inventory",
+        "funding payload unavailable; original operation retained"
+    );
+    tracing::debug!(job=%fault.id, operation=%fault.operation, "malformed funding ownership");
+}
+
 struct Pending {
     job: FundingJob,
     // Quote inventory contains source-owned prerequisites, not quote HTTP reads.
@@ -96,6 +107,7 @@ struct LaneInventory {
     cursor: String,
     exhausted: bool,
     pass_due: u64,
+    decode_failure: Option<MalformedFunding>,
 }
 impl LaneInventory {
     fn new(kind: Kind, through: i64, pass_due: u64) -> Self {
@@ -105,6 +117,7 @@ impl LaneInventory {
             cursor: String::new(),
             exhausted: false,
             pass_due,
+            decode_failure: None,
         }
     }
 }
@@ -234,6 +247,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
             .map(|kind| LaneInventory::new(kind, boundary, pass_due));
         let mut stopping = false;
+        let mut first_decode_failure = None;
         loop {
             stopping |= stop.is_cancelled();
             if !once && !stopping && !allocation_groups.is_empty() && clock.now() >= allocation_due
@@ -256,6 +270,11 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             if !stopping {
                 self.collect_inventory(&mut inventory, &mut pending, &clock, health_after, once)
                     .await?;
+                for lane in &mut inventory {
+                    if let Some(error) = lane.decode_failure.take() {
+                        first_decode_failure.get_or_insert(error);
+                    }
+                }
                 self.dispatch_pending(&mut pending, &mut flight, &reader, &lease, &clock);
                 self.dispatch_quote(&mut flight, &reader, &lease, &clock);
             }
@@ -273,7 +292,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 && flight.reads.is_empty()
                 && flight.quote_pending.is_none()
             {
-                return Ok(());
+                return first_decode_failure.map_or(Ok(()), |error| Err(error.into()));
             }
             let needs_page = inventory
                 .iter()
@@ -292,11 +311,21 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             };
             if let Some(completion) = completion {
                 flight.release(&completion);
-                if let Some(ready) = self
+                let id = completion.job.id.clone();
+                match self
                     .publish_observation(&lease, completion, clock.now())
-                    .await?
+                    .await
                 {
-                    flight.quote_pending = Some(ready);
+                    Ok(Some(ready)) => flight.quote_pending = Some(ready),
+                    Ok(None) => {}
+                    Err(error) => {
+                        let fault = self
+                            .store
+                            .call(move |s| s.scope_funding_decode_failure(&id, error))
+                            .await?;
+                        report_decode_failure(&fault);
+                        first_decode_failure.get_or_insert(fault);
+                    }
                 }
             }
         }
@@ -336,8 +365,16 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             if let Some(hook) = &self.inventory_test_hook {
                 hook.captured(kind).await;
             }
-            lane.cursor = page.last().unwrap().job.id.clone();
-            for FundingWork { mut job, facts } in page {
+            lane.cursor = page.last().unwrap().0.clone();
+            for (_, entry) in page {
+                let FundingWork { mut job, facts } = match entry {
+                    Ok(work) => work,
+                    Err(fault) => {
+                        report_decode_failure(&fault);
+                        lane.decode_failure.get_or_insert(fault);
+                        continue;
+                    }
+                };
                 if job
                     .started_at
                     .is_some_and(|started| clock.now().saturating_sub(started) >= health_after)
