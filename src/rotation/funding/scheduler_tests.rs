@@ -2703,3 +2703,83 @@ async fn completion_read_corruption_stops_without_retry_or_financial_publication
     drop(store);
     actor.await.unwrap();
 }
+
+#[tokio::test]
+async fn confirmed_source_without_current_support_keeps_observation_lane_after_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut raw = Store::create(&state, &key, 1, b"fixture").unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = raw.funding_jobs().unwrap().remove(0);
+    submitted(&mut raw, &job);
+    raw.confirm_spend(&job.operation_id, 60, 0).unwrap();
+    let treasury = raw.id().to_owned();
+    drop(raw);
+    let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+    db.execute(
+        "UPDATE funding_progress SET phase='\"COMPLETE\"',provider_success=1 WHERE job_id=?1",
+        [&job.id],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE funding_jobs SET state='COMPLETE' WHERE id=?1",
+        [&job.id],
+    )
+    .unwrap();
+    db.execute("UPDATE pools SET enabled=0", []).unwrap();
+    drop(db);
+    let raw = Store::open(&state, &key, &treasury).unwrap();
+    let saved = raw.funding_job(&job.id).unwrap().unwrap();
+    let facts = raw.funding_facts(&job.id, &job.operation_id).unwrap();
+    assert!(facts.source_accounting_pending && facts.observations_needed());
+    assert!(applicable_work(&saved, &facts)[2]);
+    assert_eq!(
+        saved.last_error.as_deref(),
+        Some("source_accounting_pending")
+    );
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (started, mut events) = mpsc::unbounded_channel();
+    let (statuses, _) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            gate: Arc::new(Semaphore::new(1)),
+            started,
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Arc::new(AtomicUsize::new(0)),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Arc::new(std::sync::Mutex::new(None)),
+                processing: true,
+                quotes: None,
+                deliveries: None,
+            },
+        },
+        60,
+    );
+    assert!(worker.source_step(&saved).await.unwrap().is_none());
+    assert_eq!(events.try_recv().unwrap(), job.id);
+    let operation = job.operation_id.clone();
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&operation)?.submission, "CONFIRMED");
+            assert_eq!(s.operation(&operation)?.attempts, 1);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+}

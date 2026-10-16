@@ -5,6 +5,30 @@ Working sections: [gate inventory](#gate-inventory-and-implementation-evidence),
 The [target design](#target-design) and [findings](#supporting-review-findings)
 provide supporting context.
 
+## C18 canonical source support checkpoint — 2026-10-16
+
+Schema23 adds bounded inactive source observations, activated with the final
+wallet snapshot only after exact inventory and fresh observation checks. Saved
+CONFIRMED labels and immutable gross debit entries alone no longer grant source
+accounting support. Known canonical loss revokes support immediately; completed
+jobs remain observable with `source_accounting_pending`, without new submission.
+The existing sync reuse path shares current unavailable observations across jobs.
+
+A sealed historical pass retains its original scanned block anchor across an
+expired observation window. Incremental catch-up rechecks that hash and unchanged
+inventory before binding publication to the fresh snapshot; original balance
+freshness is never renewed. Restart cannot adopt an inactive pass.
+
+Independent review passed. Focused validation: source Store5, completed-job source
+scheduler1, accounting1, canonical-delivery/source-loss1, and real synthetic-chain
+lifecycle1. The latter checks one historical staging pass across expiry/catch-up,
+eight unavailable observations without another scan, canonical reorg/reappearance,
+and unchanged gross debit, original bytes and submission attempts. Earlier
+completion20 and delivery10 siblings passed before localized fixture corrections.
+The declaration-only restoration schema substrate shares this version; restoration
+behavior is a separate commit. Full canonical return closure and operation-scoped
+live orphan recovery remain pending; the existing generic live-input guard stays.
+
 ## Reboot checkpoint — 2026-10-16
 
 Checkpoint saved at the user's request for a laptop reboot after the C10 review

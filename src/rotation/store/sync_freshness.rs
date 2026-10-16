@@ -120,8 +120,25 @@ impl Store {
         observation: SyncObservation,
         start: SyncObservationStart,
     ) -> Result<i64> {
+        self.save_observed_source_snapshot(expected, bytes, observation, start, None)
+    }
+
+    pub(crate) fn save_observed_source_snapshot(
+        &mut self,
+        expected: i64,
+        bytes: &[u8],
+        observation: SyncObservation,
+        start: SyncObservationStart,
+        source: Option<&source_support::Pass>,
+    ) -> Result<i64> {
         start.validate(&observation)?;
-        let revision = self.save_sync_snapshot(expected, bytes, Some(observation))?;
+        let revision = self.save_wallet_snapshot(
+            expected,
+            bytes,
+            Some(observation),
+            None,
+            source.map(|pass| (pass, &start)),
+        )?;
         // The writer sets the committed revision and checkpoint timestamp. Bind
         // those final bytes rather than a pre-transaction copy of the report.
         let serialized: String = self.db.query_row(

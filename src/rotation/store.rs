@@ -34,6 +34,7 @@ pub mod refunds;
 pub(crate) mod scheduling;
 pub(crate) mod selection;
 pub(crate) mod shielding;
+pub(crate) mod source_support;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
 use alloy_primitives::U256;
@@ -403,6 +404,8 @@ impl Store {
         tx.execute_batch(include_str!("store/evidence/replacement_schema.sql"))?;
         tx.execute_batch(include_str!("store/funding_delivery_schema.sql"))?;
         tx.execute_batch(include_str!("store/shielding_schema.sql"))?;
+        tx.execute_batch(include_str!("store/restoration_schema.sql"))?;
+        tx.execute_batch(include_str!("store/source_support_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
             params![id, birthday, network.name()],
@@ -454,7 +457,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 22,
+                version == 23,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -534,7 +537,7 @@ impl Store {
         bytes: &[u8],
         observation: Option<SyncObservation>,
     ) -> Result<i64> {
-        self.save_wallet_snapshot(expected, bytes, observation, None)
+        self.save_wallet_snapshot(expected, bytes, observation, None, None)
     }
     fn save_wallet_snapshot(
         &mut self,
@@ -542,6 +545,7 @@ impl Store {
         bytes: &[u8],
         observation: Option<SyncObservation>,
         refund: Option<(&str, &str)>,
+        source: Option<(&source_support::Pass, &SyncObservationStart)>,
     ) -> Result<i64> {
         ensure!(!bytes.is_empty(), "empty snapshot");
         let revision = expected
@@ -580,6 +584,11 @@ impl Store {
                 "INSERT OR REPLACE INTO treasury_sync VALUES (1,?1)",
                 [serde_json::to_string(&observation)?],
             )?;
+        }
+        if let Some((pass, start)) = source
+            && start.fresh(crate::rotation::base::now()?)?
+        {
+            source_support::activate(&tx, self.evidence_namespace, pass, expected, revision)?;
         }
         tx.commit()?;
         self.revoke_sync_certificate();
@@ -1150,7 +1159,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 22,
+        schema == 23,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1359,7 +1368,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 22,
+        version == 23,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;

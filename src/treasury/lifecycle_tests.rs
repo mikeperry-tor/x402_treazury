@@ -556,6 +556,33 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         TransactionPresence::Confirmed { height: 24 }
     );
     accounting(&dir.path().join("state"), &prepared, true);
+    // Simulate history staging consuming the original freshness window. The
+    // next fresh scan must recheck the old anchor and retain these exact pages.
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch("CREATE TABLE fixture_source_stage_count(n INTEGER NOT NULL); INSERT INTO fixture_source_stage_count VALUES(0); CREATE TRIGGER fixture_source_stage AFTER INSERT ON source_support_rows BEGIN UPDATE fixture_source_stage_count SET n=n+1; END;").unwrap();
+    let expired_history = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    owner.final_checkpoint_test_hook = Some(expired_history.clone());
+    // Confirmation accounting predates the next complete canonical source pass.
+    owner.sync_once(&stop).await.unwrap();
+    owner.final_checkpoint_test_hook = None;
+    assert_eq!(expired_history.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        db.query_row("SELECT n FROM fixture_source_stage_count", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1,
+        "freshness catch-up must not repeat source history"
+    );
+    db.execute_batch("DROP TRIGGER fixture_source_stage; DROP TABLE fixture_source_stage_count;")
+        .unwrap();
+    drop(db);
+    let confirmed_id = job.operation_id.clone();
+    assert!(
+        store
+            .call(move |s| s.source_confirmation_supported(&confirmed_id))
+            .await
+            .unwrap()
+    );
     {
         let mut chain = net.chain.write().await;
         assert_eq!(chain.reorg_to(23), vec![prepared.bytes().to_vec()]);
@@ -570,6 +597,10 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
     store
         .call(move |s| {
             assert_eq!(s.operation(&id)?.attempts, 1);
+            assert!(
+                !s.source_confirmation_supported(&id)?,
+                "failed live scan must revoke prior support"
+            );
             assert!(s.require_spend_ready(now()?, 1).is_err());
             Ok(())
         })
@@ -589,6 +620,13 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         SyncPhase::Ready
     );
     accounting(&dir.path().join("state"), &prepared, true);
+    let confirmed_id = job.operation_id.clone();
+    assert!(
+        store
+            .call(move |s| s.source_confirmation_supported(&confirmed_id))
+            .await
+            .unwrap()
+    );
     let expiry = prepared.facts().unwrap().expiry_height;
     let buried = u64::from(expiry) + 1;
     {
@@ -650,6 +688,19 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
     assert_eq!(sync.phase, SyncPhase::Ready);
     assert_eq!(sync.height, Some(buried));
     assert!(sync.spendable_shielded_zatoshis >= 1_000_000);
+    let observed_revision = owner.revision;
+    for _ in 0..8 {
+        assert!(
+            !owner
+                .reconcile_source_confirmation(job.operation_id.clone(), &stop)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            owner.revision, observed_revision,
+            "current unavailable observation must not rescan history for each caller"
+        );
+    }
     accounting(&dir.path().join("state"), &prepared, true);
     let id = owner.status().await.unwrap().treasury_id;
     let operation = job.operation_id.clone();
@@ -659,6 +710,10 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
             assert_eq!(s.prepared_bytes(&operation)?.as_slice(), original);
             assert_eq!(s.operation(&operation)?.attempts, 1);
             assert_eq!(s.operation(&operation)?.submission, "CONFIRMED");
+            assert!(
+                !s.source_confirmation_supported(&operation)?,
+                "buried absence is incomplete accounting, not canonical confirmation"
+            );
             assert!(!s.treasury_sync_state()?.outgoing_pending);
             s.require_spend_ready(now()?, 100_000)
         })

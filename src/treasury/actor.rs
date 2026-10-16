@@ -19,6 +19,7 @@ enum Command {
     ),
     Refund(String, oneshot::Sender<Result<String>>),
     Sync(oneshot::Sender<Result<()>>),
+    SourceConfirmation(String, oneshot::Sender<Result<bool>>),
     Prepare(PrepareRequest, oneshot::Sender<Result<PreparedTransaction>>),
     Submit(String, bool, oneshot::Sender<Result<SubmissionOutcome>>),
     Reconcile(String, oneshot::Sender<Result<TransactionPresence>>),
@@ -58,6 +59,10 @@ impl TreasuryHandle {
     }
     pub async fn sync(&self) -> Result<()> {
         self.call(Command::Sync).await
+    }
+    pub(crate) async fn source_confirmation(&self, id: String) -> Result<bool> {
+        self.call(|reply| Command::SourceConfirmation(id, reply))
+            .await
     }
     pub async fn prepare(&self, request: PrepareRequest) -> Result<PreparedTransaction> {
         self.call(|reply| Command::Prepare(request, reply)).await
@@ -118,6 +123,7 @@ impl Treasury {
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
+                        Command::SourceConfirmation(id, reply) => { let _ = reply.send(self.reconcile_source_confirmation(id, &stop).await); }
                         Command::Prepare(request, reply) => {
                             let result = match self.sync_for_command(&stop).await {
                                 Ok(()) if !stop.is_cancelled() => self.prepare(request).await,

@@ -13,6 +13,7 @@ mod refunds;
 mod regtest;
 mod send;
 mod server;
+mod source_support;
 mod sync_reuse;
 use crate::rotation::store::TreasuryNetwork;
 impl TreasuryNetwork {
@@ -413,10 +414,20 @@ impl Treasury {
             .await?;
         Ok(())
     }
+    #[cfg(all(test, feature = "zcash-testutils"))]
     async fn checkpoint_observed(
         &mut self,
         observation: SyncObservation,
         start: crate::rotation::store::SyncObservationStart,
+    ) -> Result<bool> {
+        self.checkpoint_observed_source(observation, start, None)
+            .await
+    }
+    async fn checkpoint_observed_source(
+        &mut self,
+        observation: SyncObservation,
+        start: crate::rotation::store::SyncObservationStart,
+        source: Option<crate::rotation::store::source_support::Pass>,
     ) -> Result<bool> {
         let bytes = snapshot(
             self.client
@@ -433,7 +444,15 @@ impl Treasury {
         }
         self.revision = self
             .store
-            .call(move |s| s.save_observed_sync_snapshot(expected, &bytes, observation, start))
+            .call(move |s| {
+                s.save_observed_source_snapshot(
+                    expected,
+                    &bytes,
+                    observation,
+                    start,
+                    source.as_ref(),
+                )
+            })
             .await?;
         let current = self.store.call(|s| s.treasury_sync_state()).await?;
         Ok(current
@@ -464,6 +483,7 @@ impl Treasury {
             .await
             .wallet_settings
             .min_confirmations = settings.confirmations;
+        let mut retained_source_pass = None;
         loop {
             let mut observation = self
                 .store
@@ -504,6 +524,7 @@ impl Treasury {
                 store: self.store.clone(),
                 revision: self.revision,
                 observation_start: None,
+                source_pass: retained_source_pass.take(),
             };
             let cancelled = stop.child_token();
             let _cancel_on_drop = cancelled.clone().drop_guard();
@@ -519,6 +540,7 @@ impl Treasury {
             let (session, mut observation, outcome) = self.finish_sync_owner().await?;
             self.revision = session.revision;
             let observation_start = session.observation_start;
+            let source_pass = session.source_pass;
             self.client = Some(session.client);
             observation.phase = if stop.is_cancelled() {
                 SyncPhase::Offline
@@ -535,8 +557,11 @@ impl Treasury {
             if observation.phase == SyncPhase::Ready {
                 let start =
                     observation_start.context("successful sync lacks observation origin")?;
-                let fresh = self.checkpoint_observed(observation, start).await?;
+                let fresh = self
+                    .checkpoint_observed_source(observation, start, source_pass.clone())
+                    .await?;
                 if !fresh && !stop.is_cancelled() {
+                    retained_source_pass = source_pass;
                     tracing::info!(
                         stage = "freshness_catch_up",
                         "Treasury checkpoint retained; acquiring fresh spending evidence"
@@ -605,6 +630,7 @@ impl Treasury {
 }
 
 struct SyncSession {
+    source_pass: Option<crate::rotation::store::source_support::Pass>,
     observation_start: Option<crate::rotation::store::SyncObservationStart>,
     identity: crate::network::IsolationId,
     network: TreasuryNetwork,
@@ -781,65 +807,21 @@ impl SyncSession {
         tracing::debug!(
             "treasury sync: chain checks completed; reconciling prior spending and balances"
         );
-        let boundary = self.store.call(|s| s.source_recheck_boundary()).await?;
-        let wallet = self.client.wallet();
-        let wallet = wallet.read().await;
-        let mut cursor = String::new();
-        loop {
-            let after = cursor.clone();
-            let operations = self
-                .store
-                .call(move |s| s.source_recheck_page(&after, boundary))
-                .await?;
-            let Some(last) = operations.last() else { break };
-            cursor = last.operation_id.clone();
-            for operation in operations {
-                if source_expiry_buried(
-                    operation.facts.expiry_height,
-                    height,
-                    settings.confirmations.get(),
-                ) {
-                    let id = operation.operation_id.clone();
-                    let raw = self.store.call(move |s| s.prepared_bytes(&id)).await?;
-                    let transaction = submission::decode(&raw)?;
-                    ensure!(
-                        transaction.txid().to_string() == operation.facts.txid
-                            && u32::from(transaction.expiry_height())
-                                == operation.facts.expiry_height,
-                        "durable transaction identity mismatch"
-                    );
-                    // No archival wallet lookup: the original confirmation or
-                    // expiry remains historical, without a new canonical claim.
-                    continue;
-                }
-                let txid = zcash_primitives::transaction::TxId::from_hex(&operation.facts.txid)
-                    .context(if operation.submission == "EXPIRED" {
-                        "invalid transaction identity"
-                    } else {
-                        "invalid confirmed transaction identity"
-                    })?;
-                let record = wallet.wallet_transactions.get(&txid);
-                if operation.submission == "EXPIRED" {
-                    ensure!(
-                        height
-                            >= u64::from(operation.facts.expiry_height)
-                                + u64::from(settings.confirmations.get())
-                            && !record.is_some_and(|r| r.status().is_confirmed()),
-                        "treasury_expiry_reorg: recovered source requires review"
-                    );
-                } else {
-                    let confirmed_height = record
-                        .and_then(|r| r.status().get_confirmed_height())
-                        .map(|h| u64::from(u32::from(h)));
-                    ensure!(
-                        confirmed_height.is_some_and(|h| h > 0
-                            && height >= h
-                            && height - h + 1 >= u64::from(settings.confirmations.get())),
-                        "treasury_confirmed_spend_reorg: source spend requires recovery"
-                    );
-                }
+        let retained = match self.source_pass.take() {
+            Some(pass) => {
+                self.retain_source_support(pass, &mut indexer, height)
+                    .await?
             }
-        }
+            None => None,
+        };
+        self.source_pass = Some(match retained {
+            Some(pass) => pass,
+            None => {
+                self.recheck_source_support(height, settings.confirmations.get())
+                    .await?
+            }
+        });
+        let wallet = self.client.wallet().read().await;
         let balance = wallet
             .account_balance(zip32::AccountId::ZERO)
             .map_err(|_| anyhow::anyhow!("treasury balance unavailable"))?;

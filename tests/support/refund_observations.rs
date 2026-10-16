@@ -261,6 +261,7 @@ async fn treasury_sync_return_stage_isolates_ambiguous_history_and_revalidates_c
         .await
         .unwrap();
     let session = SyncSession {
+        source_pass: None,
         observation_start: None,
         identity: crate::network::IsolationId::treasury(
             &treasury.status().await.unwrap().treasury_id,

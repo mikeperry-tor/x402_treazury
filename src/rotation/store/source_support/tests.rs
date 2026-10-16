@@ -1,0 +1,360 @@
+use super::*;
+
+fn fixture(count: usize) -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"snapshot",
+    )
+    .unwrap();
+    for index in 0..count {
+        let id = format!("operation-{index:04}");
+        store.reserve(&id, None, 0, 11).unwrap();
+        let revision = store.snapshot().unwrap().0;
+        store
+            .prepare_with_facts(
+                &id,
+                revision,
+                b"prepared snapshot",
+                b"exact original bytes",
+                Some(TransactionFacts {
+                    txid: format!("{index:064x}"),
+                    expiry_height: 10,
+                    amount_zatoshis: 10,
+                    fee_zatoshis: 1,
+                    deadline: Some(100),
+                }),
+            )
+            .unwrap();
+        store.confirm_spend(&id, 11, 0).unwrap();
+    }
+    (dir, store)
+}
+fn observation(start: &SyncObservationStart, revision: i64) -> SyncObservation {
+    SyncObservation {
+        phase: SyncPhase::Ready,
+        last_error: None,
+        snapshot_revision: revision,
+        checked_at: Some(start.checked_at()),
+        checkpoint_at: 0,
+        scanned_blocks: 1,
+        target_height: Some(100),
+        height: Some(100),
+        observed_tip_height: Some(100),
+        confirmations: 1,
+        max_age_seconds: 300,
+        confirmed_pool_balances_zatoshis: None,
+        confirmed_shielded_zatoshis: 0,
+        spendable_shielded_zatoshis: 0,
+    }
+}
+fn stage(store: &mut Store, disposition: Disposition) -> Pass {
+    let pass = store
+        .begin_source_support(
+            store.snapshot().unwrap().0,
+            Anchor {
+                height: 100,
+                hash: [1; 32],
+            },
+        )
+        .unwrap();
+    let mut after = String::new();
+    loop {
+        let page = store.source_recheck_page(&after, pass.boundary).unwrap();
+        assert!(page.len() <= 64);
+        let Some(last) = page.last() else { break };
+        after = last.operation_id.clone();
+        for operation in page {
+            let raw = store.prepared_bytes(&operation.operation_id).unwrap();
+            store
+                .stage_source_support(&pass, &operation, &raw, disposition)
+                .unwrap();
+        }
+    }
+    store.seal_source_support(&pass).unwrap();
+    pass
+}
+fn activate_pass(store: &mut Store, pass: &Pass) {
+    let start = SyncObservationStart::capture(300).unwrap();
+    store
+        .save_observed_source_snapshot(
+            pass.base_revision,
+            b"scanned snapshot",
+            observation(&start, pass.base_revision),
+            start,
+            Some(pass),
+        )
+        .unwrap();
+}
+#[test]
+fn complete_sync_replaces_support_and_preserves_exact_debit_bytes_across_reopen() {
+    let (dir, mut store) = fixture(1);
+    let id = "operation-0000";
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    assert!(
+        !confirmed(&store.db, id).unwrap(),
+        "inactive prefix is not evidence"
+    );
+    activate_pass(&mut store, &pass);
+    assert!(confirmed(&store.db, id).unwrap());
+    let pass = stage(&mut store, Disposition::Unavailable);
+    assert!(
+        !confirmed(&store.db, id).unwrap(),
+        "observed loss revokes before final publication"
+    );
+    activate_pass(&mut store, &pass);
+    assert!(!confirmed(&store.db, id).unwrap());
+    let pass = stage(&mut store, Disposition::Confirmed(7));
+    activate_pass(&mut store, &pass);
+    assert!(confirmed(&store.db, id).unwrap());
+    assert_eq!(
+        store.prepared_bytes(id).unwrap().as_slice(),
+        b"exact original bytes"
+    );
+    let amounts: (i64, i64) = store
+        .db
+        .query_row(
+            "SELECT consumed,reserved FROM budget_entries WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(amounts, (11, 0));
+    let identity = store.id.clone();
+    drop(store);
+    let store = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &identity,
+    )
+    .unwrap();
+    assert!(
+        confirmed(&store.db, id).unwrap(),
+        "historical canonical support remains readable after reopen"
+    );
+}
+#[test]
+fn changed_inventory_stale_snapshot_and_expired_observation_cannot_activate() {
+    let (_dir, mut store) = fixture(1);
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    store
+        .db
+        .execute(
+            "UPDATE treasury_operations SET facts=json_set(facts,'$.fee_zatoshis',2)",
+            [],
+        )
+        .unwrap();
+    let start = SyncObservationStart::capture(300).unwrap();
+    assert!(
+        store
+            .save_observed_source_snapshot(
+                pass.base_revision,
+                b"stale",
+                observation(&start, pass.base_revision),
+                start,
+                Some(&pass)
+            )
+            .is_err()
+    );
+    assert_eq!(store.snapshot().unwrap().0, pass.base_revision);
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    store
+        .save_snapshot(pass.base_revision, b"other accepted work")
+        .unwrap();
+    let start = SyncObservationStart::capture(300).unwrap();
+    assert!(
+        store
+            .save_observed_source_snapshot(
+                pass.base_revision,
+                b"stale",
+                observation(&start, pass.base_revision),
+                start,
+                Some(&pass)
+            )
+            .is_err()
+    );
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    let start = SyncObservationStart::capture(300).unwrap();
+    start.expire_for_test();
+    store
+        .save_observed_source_snapshot(
+            pass.base_revision,
+            b"useful stale scan",
+            observation(&start, pass.base_revision),
+            start,
+            Some(&pass),
+        )
+        .unwrap();
+    assert!(!confirmed(&store.db, "operation-0000").unwrap());
+}
+#[test]
+fn pages_and_cleanup_are_bounded_and_incomplete_pass_cannot_publish() {
+    let (_dir, mut store) = fixture(130);
+    let pass = store
+        .begin_source_support(
+            store.snapshot().unwrap().0,
+            Anchor {
+                height: 100,
+                hash: [1; 32],
+            },
+        )
+        .unwrap();
+    let page = store.source_recheck_page("", pass.boundary).unwrap();
+    assert_eq!(page.len(), 64);
+    let operation = &page[0];
+    let raw = store.prepared_bytes(&operation.operation_id).unwrap();
+    store
+        .stage_source_support(&pass, operation, &raw, Disposition::Confirmed(5))
+        .unwrap();
+    assert!(store.seal_source_support(&pass).is_err());
+    let start = SyncObservationStart::capture(300).unwrap();
+    assert!(
+        store
+            .save_observed_source_snapshot(
+                pass.base_revision,
+                b"partial",
+                observation(&start, pass.base_revision),
+                start,
+                Some(&pass)
+            )
+            .is_err()
+    );
+    while !store.cleanup_source_support_page().unwrap() {}
+    let complete = stage(&mut store, Disposition::Confirmed(5));
+    let mut calls = 0;
+    loop {
+        let before: i64 = store
+            .db
+            .query_row("SELECT count(*) FROM source_support_rows", [], |r| r.get(0))
+            .unwrap();
+        let done = store.cleanup_source_support_page().unwrap();
+        let after: i64 = store
+            .db
+            .query_row("SELECT count(*) FROM source_support_rows", [], |r| r.get(0))
+            .unwrap();
+        assert!(before - after <= 64);
+        calls += 1;
+        if done {
+            break;
+        }
+    }
+    assert!(calls >= 4);
+    let start = SyncObservationStart::capture(300).unwrap();
+    assert!(
+        store
+            .save_observed_source_snapshot(
+                complete.base_revision,
+                b"cancelled",
+                observation(&start, complete.base_revision),
+                start,
+                Some(&complete)
+            )
+            .is_err()
+    );
+}
+#[test]
+fn current_contradiction_and_new_scan_never_fall_back_to_old_support() {
+    let (_dir, mut store) = fixture(1);
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    activate_pass(&mut store, &pass);
+    let _interrupted = stage(&mut store, Disposition::Conflict);
+    assert!(!confirmed(&store.db, "operation-0000").unwrap());
+    let pass = stage(&mut store, Disposition::Confirmed(6));
+    activate_pass(&mut store, &pass);
+    let revision = store.snapshot().unwrap().0;
+    let start = SyncObservationStart::capture(300).unwrap();
+    store
+        .save_observed_sync_snapshot(
+            revision,
+            b"new scan without source verification",
+            observation(&start, revision),
+            start,
+        )
+        .unwrap();
+    assert!(!confirmed(&store.db, "operation-0000").unwrap());
+}
+
+/// Store-only fixtures explicitly publish the canonical evidence their test owns.
+pub(crate) fn publish_confirmed(store: &mut Store) {
+    let pass = stage(store, Disposition::Confirmed(5));
+    activate_pass(store, &pass);
+}
+
+pub(crate) fn publish_unavailable(store: &mut Store) {
+    let pass = stage(store, Disposition::Unavailable);
+    activate_pass(store, &pass);
+}
+
+#[test]
+fn sealed_history_continues_after_stale_checkpoint_without_restaging() {
+    let (_dir, mut store) = fixture(130);
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    let start = SyncObservationStart::capture(300).unwrap();
+    start.expire_for_test();
+    store
+        .save_observed_source_snapshot(
+            pass.base_revision,
+            b"useful stale scan",
+            observation(&start, pass.base_revision),
+            start,
+            Some(&pass),
+        )
+        .unwrap();
+    assert!(!confirmed(&store.db, "operation-0000").unwrap());
+    let revision = store.snapshot().unwrap().0;
+    let continued = store
+        .continue_source_support(&pass, revision)
+        .unwrap()
+        .unwrap();
+    let start = SyncObservationStart::capture(300).unwrap();
+    store
+        .save_observed_source_snapshot(
+            revision,
+            b"fresh incremental scan",
+            observation(&start, revision),
+            start,
+            Some(&continued),
+        )
+        .unwrap();
+    assert!(confirmed(&store.db, "operation-0000").unwrap());
+    let rows: i64 = store
+        .db
+        .query_row("SELECT COUNT(*) FROM source_support_rows", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        rows, 130,
+        "historical pages are reused without copying or restaging"
+    );
+    let original: i64 = store
+        .db
+        .query_row(
+            "SELECT base_revision FROM source_support_passes WHERE id=?1",
+            [&pass.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(original, pass.base_revision);
+    let mut altered_anchor = pass.clone();
+    altered_anchor.anchor.hash = [2; 32];
+    assert!(
+        store
+            .continue_source_support(&altered_anchor, store.snapshot().unwrap().0)
+            .unwrap()
+            .is_none()
+    );
+    store
+        .db
+        .execute(
+            "UPDATE treasury_operations SET attempts=attempts+1 WHERE id='operation-0000'",
+            [],
+        )
+        .unwrap();
+    assert!(
+        store
+            .continue_source_support(&pass, store.snapshot().unwrap().0)
+            .unwrap()
+            .is_none()
+    );
+}

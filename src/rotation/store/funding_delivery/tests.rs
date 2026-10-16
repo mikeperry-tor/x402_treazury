@@ -675,7 +675,21 @@ async fn late_return_claim_reopens_current_observation_without_rewriting_success
         )
         .unwrap();
     f.store.db.execute("UPDATE funding_jobs SET readiness_requirement=target,readiness_support='historical',readiness_operation=?2 WHERE id=?1",params![f.job.id,f.job.operation_id]).unwrap();
+    super::super::source_support::tests::publish_confirmed(&mut f.store);
     assert!(funding::finish_if_proven(&f.store.db, &f.job.id, &f.job.operation_id).unwrap());
+    super::super::source_support::tests::publish_unavailable(&mut f.store);
+    let facts = f
+        .store
+        .funding_facts(&f.job.id, &f.job.operation_id)
+        .unwrap();
+    assert!(facts.readiness_recorded && facts.delivery_verified && facts.provider_success);
+    assert!(facts.source_accounting_pending && facts.observations_needed());
+    assert!(facts.source_reconciliation_needed());
+    assert_eq!(
+        f.store.funding_job(&f.job.id).unwrap().unwrap().phase,
+        super::super::funding::FundingPhase::Complete
+    );
+    super::super::source_support::tests::publish_confirmed(&mut f.store);
     value["swapDetails"]["destinationChainTxHashes"] = Value::Null;
     value["swapDetails"]["refundedAmount"] = json!("500");
     let observation = crate::rotation::near::restore_status_observation(&f.quote, &value).unwrap();

@@ -111,6 +111,8 @@ pub struct FundingFacts {
     pub provider_incomplete: bool,
     pub source_submission: Option<String>,
     pub source_attempts: u32,
+    /// Saved confirmation lacks support from the current canonical sync.
+    pub source_accounting_pending: bool,
     /// Exact unsubmitted bytes outside their ordinary preparation workflow.
     pub hidden_prepared: bool,
 }
@@ -138,7 +140,8 @@ impl FundingFacts {
                 && self.source_submission.is_none())
     }
     pub fn source_reconciliation_needed(&self) -> bool {
-        self.hidden_prepared
+        self.source_accounting_pending
+            || self.hidden_prepared
             || self.source_attempts > 0
                 && self
                     .source_submission
@@ -673,7 +676,7 @@ fn source_accounted(db: &Connection, operation: &str) -> Result<bool> {
         u64::try_from(consumed)? == gross && reserved == 0 && state == "RESOLVED",
         "funding source accounting integrity conflict"
     );
-    Ok(true)
+    super::source_support::confirmed(db, operation)
 }
 
 type ProviderFlags = (bool, bool, bool, bool);
@@ -943,7 +946,7 @@ pub(super) fn read_funding_facts(
             params![job,operation], |r| Ok((FundingFacts {
                 readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, delivery_verified:false, return_pending:false, archived:r.get(3)?, source_closed: false, preparation_started: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,hidden_prepared:false,
+                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,hidden_prepared:false,source_accounting_pending:false,
             }, provider_flags(r, 4), r.get::<_,String>(11)?)),
         ).context("funding operation binding changed")?;
     (
@@ -954,6 +957,10 @@ pub(super) fn read_funding_facts(
     ) = flags.context(super::scheduling::FundingDecodeFailure)?;
     let phase: FundingPhase =
         serde_json::from_str(&phase).context(super::scheduling::FundingDecodeFailure)?;
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    facts.source_accounting_pending = version >= 23
+        && facts.source_submission.as_deref() == Some("CONFIRMED")
+        && !super::source_support::confirmed(db, operation)?;
     facts.delivery_verified = super::funding_delivery::delivered(db, job, operation)?;
     facts.return_pending = super::funding_delivery::return_pending(db, operation)?;
     facts.hidden_prepared = facts.source_submission.as_deref() == Some("PREPARED")
@@ -1200,7 +1207,7 @@ impl Store {
         revision: i64,
         snapshot: &[u8],
     ) -> Result<i64> {
-        self.save_wallet_snapshot(revision, snapshot, None, Some((job, address)))
+        self.save_wallet_snapshot(revision, snapshot, None, Some((job, address)), None)
     }
 
     pub fn funding_job(&self, id: &str) -> Result<Option<FundingJob>> {
@@ -1534,6 +1541,10 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
         let last_error = if version >= 22 && super::funding_delivery::return_pending(db, &operation_id)? {
             Some("return_accounting_pending".to_owned())
         } else { last_error };
+        let last_error = if version >= 23
+            && read_funding_facts(db, &id, &operation_id)?.source_accounting_pending
+            && last_error.is_none()
+        { Some("source_accounting_pending".to_owned()) } else { last_error };
         let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
         Ok(FundingJob {
             started_at: started_at.map(u64::try_from).transpose().context(super::scheduling::FundingDecodeFailure)?,
@@ -2385,11 +2396,22 @@ mod completion_tests {
                 .unwrap()
         );
         store.db.execute("INSERT INTO budget_entries(id,pool_id,day,original_day,requested,reserved,consumed) VALUES(?1,?2,0,0,100,100,0)",params![job.operation_id,job.pool_id]).unwrap();
+        let raw = super::super::seal(
+            &store.key,
+            &format!(
+                "v1:{}:{}:outgoing:{}",
+                store.id,
+                store.network.name(),
+                job.operation_id
+            ),
+            b"exact source bytes",
+        )
+        .unwrap();
         store
             .db
             .execute(
-                "INSERT INTO outgoing(id,state,raw,revision) VALUES(?1,'PREPARED',X'00',1)",
-                [&job.operation_id],
+                "INSERT INTO outgoing(id,state,raw,revision) VALUES(?1,'PREPARED',?2,1)",
+                params![job.operation_id, raw],
             )
             .unwrap();
         let facts = crate::rotation::transaction::TransactionFacts {
@@ -2407,6 +2429,30 @@ mod completion_tests {
                 .unwrap()
         );
         store.confirm_spend(&job.operation_id, 100, 0).unwrap();
+        assert!(
+            !store
+                .finish_funding_if_proven(&job.id, &job.operation_id)
+                .unwrap()
+        );
+        let facts = store.funding_facts(&job.id, &job.operation_id).unwrap();
+        assert!(facts.source_accounting_pending && facts.source_reconciliation_needed());
+        assert!(facts.observations_needed());
+        assert_eq!(
+            store
+                .funding_job(&job.id)
+                .unwrap()
+                .unwrap()
+                .last_error
+                .as_deref(),
+            Some("source_accounting_pending")
+        );
+        super::super::source_support::tests::publish_confirmed(&mut store);
+        assert!(
+            !store
+                .funding_facts(&job.id, &job.operation_id)
+                .unwrap()
+                .source_accounting_pending
+        );
         store
             .db
             .execute(
@@ -2425,6 +2471,22 @@ mod completion_tests {
                 .unwrap()
         );
         assert_eq!(store.destination_requirement(&job.id).unwrap().amount, "10");
+        super::super::source_support::tests::publish_unavailable(&mut store);
+        let facts = store.funding_facts(&job.id, &job.operation_id).unwrap();
+        assert!(facts.readiness_recorded && facts.provider_success);
+        assert!(facts.source_accounting_pending && facts.source_reconciliation_needed());
+        assert!(facts.observations_needed());
+        let current = store.funding_job(&job.id).unwrap().unwrap();
+        assert_eq!(current.phase, FundingPhase::Complete);
+        assert_eq!(
+            current.last_error.as_deref(),
+            Some("source_accounting_pending")
+        );
+        assert!(
+            !store
+                .finish_funding_if_proven(&job.id, &job.operation_id)
+                .unwrap()
+        );
     }
 
     #[cfg(feature = "zcash")]

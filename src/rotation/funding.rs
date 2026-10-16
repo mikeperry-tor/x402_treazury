@@ -687,7 +687,10 @@ impl FundingBackend for Backend {
             .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
             .await?
         {
-            return Ok(true);
+            return self
+                .treasury
+                .source_confirmation(job.operation_id.clone())
+                .await;
         }
         Ok(matches!(
             self.treasury.reconcile(job.operation_id.clone()).await?,
