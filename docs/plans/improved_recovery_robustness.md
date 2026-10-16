@@ -396,8 +396,13 @@ is a separate C04 boundary with separately reviewed source-liability dependencie
 Validation: the 20 history-focused tests pass, including cancellation, retained
 active work, retry saturation, all-malformed-page continuation, unchanged malformed
 liabilities, unknown-ownership/storage failures and restart. Sub-agent review found
-an acquisition fairness issue for long malformed prefixes; a separate fixup will
-yield between bounded pages without delaying independent reads by a cadence sleep.
+an acquisition fairness issue for long malformed prefixes. Implementation 281279f
+plus a separate fixup yields after PAGE_SIZE scanned rows, retaining the cursor and
+resuming immediately while polling independent reads/cancellation. All ten maintenance
+tests pass (nine together plus the corrected multi-page regression separately).
+The expanded test retains 256 malformed obligations, resolves seven later records
+and completes within a three-second harness deadline (existing cadence is five).
+The reviewer confirmed the fairness fix with no additional actionable findings.
 
 ### Stage 1 — Minimal authority and dependency specification
 

@@ -42,6 +42,7 @@ struct Pass<T> {
     queued: VecDeque<(i64, T)>,
     due: Instant,
     completed: bool,
+    yielded: bool,
     decode_failure: Option<crate::rotation::store::history::MalformedHistory>,
 }
 impl<T> Pass<T> {
@@ -52,6 +53,7 @@ impl<T> Pass<T> {
             queued: VecDeque::new(),
             due: Instant::now(),
             completed: false,
+            yielded: false,
             decode_failure: None,
         }
     }
@@ -222,10 +224,10 @@ impl ManagedPool {
                         .boxed(),
                 );
             }
-            if let Some(error) = history.decode_failure.take() {
-                if first_error.is_none() {
-                    first_error = Some(error.into());
-                }
+            if let Some(error) = history.decode_failure.take()
+                && first_error.is_none()
+            {
+                first_error = Some(error.into());
             }
             if !qualification_active
                 && instant >= qualification_due
@@ -252,7 +254,9 @@ impl ManagedPool {
                 .min(history.due);
             // Active passes may have an old due time. They are driven by
             // completions; the cadence prevents an empty/all-owned busy loop.
-            let wake = if wake <= Instant::now() {
+            let wake = if history.yielded {
+                Instant::now()
+            } else if wake <= Instant::now() {
                 Instant::now() + CADENCE
             } else {
                 wake
@@ -329,7 +333,13 @@ impl ManagedPool {
         active: &BTreeSet<String>,
         now: Instant,
     ) -> Result<Option<PendingAuthorization>> {
-        while let Some(payload) = self.next_history(pass, one_pass).await? {
+        pass.yielded = false;
+        // Bound acquisition work before polling already-owned reads/cancellation.
+        // Exhausting this slice resumes immediately, without resetting the pass.
+        for _ in 0..PAGE_SIZE {
+            let Some(payload) = self.next_history(pass, one_pass).await? else {
+                return Ok(None);
+            };
             let auth = match payload {
                 Ok(auth) => auth,
                 Err(error) => {
@@ -356,6 +366,7 @@ impl ManagedPool {
                 }
             }
         }
+        pass.yielded = true;
         Ok(None)
     }
     async fn next_history(
@@ -709,14 +720,33 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_history_page_retains_liabilities_and_drains_independent_work() {
-        let f = fixture(PAGE_SIZE + 7).await;
+        let f = fixture(PAGE_SIZE * 4 + 7).await;
         let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
         db.execute(
-            "UPDATE payment_attempts SET valid_before=-1 WHERE reconciliation_sequence<=64",
+            "UPDATE payment_attempts SET valid_before=-1 WHERE reconciliation_sequence<=256",
             [],
         )
         .unwrap();
-        let error = tokio::time::timeout(Duration::from_secs(10), f.pool.reconcile())
+        let mut pass = Pass::new(0);
+        let mut retries = HistoryRetries::default();
+        assert!(
+            f.pool
+                .next_admitted_history(
+                    &mut pass,
+                    true,
+                    &mut retries,
+                    &BTreeSet::new(),
+                    Instant::now()
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(pass.cursor, PAGE_SIZE as i64);
+        assert!(pass.yielded && !pass.completed);
+        assert!(retries.0.is_empty());
+        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 0);
+        let error = tokio::time::timeout(Duration::from_secs(3), f.pool.reconcile())
             .await
             .unwrap()
             .unwrap_err();
@@ -729,8 +759,8 @@ mod tests {
         assert!(f.balance_reads.load(Ordering::SeqCst) >= 2);
         assert_eq!(unfinished(&f).await, PAGE_SIZE);
         let exposure: String = db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get(0)).unwrap();
-        assert_eq!(exposure, PAGE_SIZE.to_string());
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE valid_before=-1 AND state='POSSIBLY_SUBMITTED'", [], |r| r.get::<_, i64>(0)).unwrap(), PAGE_SIZE as i64);
+        assert_eq!(exposure, (PAGE_SIZE * 4).to_string());
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE valid_before=-1 AND state='POSSIBLY_SUBMITTED'", [], |r| r.get::<_, i64>(0)).unwrap(), (PAGE_SIZE * 4) as i64);
         assert_eq!(
             db.query_row("SELECT COUNT(*) FROM payment_resolutions", [], |r| r
                 .get::<_, i64>(0))
