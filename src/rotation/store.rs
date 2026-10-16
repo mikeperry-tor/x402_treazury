@@ -420,6 +420,9 @@ impl Store {
             network,
         })
     }
+    pub(crate) fn network(&self) -> TreasuryNetwork {
+        self.network
+    }
     pub fn open(dir: &Path, key_file: &Path, expected_id: &str) -> Result<Self> {
         Self::open_with_network(dir, key_file, expected_id, TreasuryNetwork::Mainnet)
     }

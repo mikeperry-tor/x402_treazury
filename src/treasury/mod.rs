@@ -58,6 +58,21 @@ pub struct Treasury {
     // Scheduling only; never used to date or authorize spending evidence.
     last_completed_sync: Option<tokio::time::Instant>,
 }
+/// Shared state remains exclusively owned when only SDK reconstruction fails.
+/// Serving can use that authenticated store independently of the SDK capability.
+pub(crate) enum OpenedTreasury {
+    Ready(Box<Treasury>),
+    SnapshotUnavailable(Box<Store>),
+}
+#[derive(Debug)]
+pub(crate) struct SnapshotUnavailable;
+impl std::fmt::Display for SnapshotUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("corrupt or incompatible treasury snapshot")
+    }
+}
+impl std::error::Error for SnapshotUnavailable {}
+
 /// Endpoint is intentionally excluded from Debug/serialization and status output.
 #[derive(Clone)]
 pub struct SyncSettings {
@@ -178,28 +193,52 @@ impl Treasury {
         id: String,
         network: TreasuryNetwork,
     ) -> Result<Self> {
-        let path = dir.clone();
-        let (store, revision, bytes) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let mut store = Store::open_with_network(&path, &key, &id, network)?;
+        let store = Self::open_shared_state(dir, key, id, network).await?;
+        match Self::reconstruct(store).await? {
+            OpenedTreasury::Ready(owner) => Ok(*owner),
+            OpenedTreasury::SnapshotUnavailable(store) => {
+                drop(store);
+                Err(SnapshotUnavailable.into())
+            }
+        }
+    }
+    /// Shared identity, schema, key, snapshot authentication and exclusive owner
+    /// validation precede any capability-local connection/preparation fallback.
+    pub(crate) async fn open_shared_state(
+        dir: PathBuf,
+        key: PathBuf,
+        id: String,
+        network: TreasuryNetwork,
+    ) -> Result<Store> {
+        tokio::task::spawn_blocking(move || {
+            let mut store = Store::open_with_network(&dir, &key, &id, network)?;
             store.set_sync_phase(SyncPhase::Offline)?;
-            let (revision, bytes) = store.snapshot()?;
-            Ok((store, revision, bytes))
+            Ok(store)
         })
-        .await??;
+        .await?
+    }
+    /// SQL/decryption/configuration failures remain outer errors. Only the SDK's
+    /// inability to reconstruct authenticated bytes yields the retained store.
+    pub(crate) async fn reconstruct(store: Store) -> Result<OpenedTreasury> {
+        let network = store.network();
+        let (revision, bytes) = store.snapshot()?;
         let scratch = tempfile::tempdir()?;
         // Borrow a zeroizing buffer instead of handing an unzeroized Vec to upstream.
-        let client = LightClient::from_reader(
+        let client = match LightClient::from_reader(
             bytes.as_slice(),
             config(scratch.path(), WalletConfig::Read, network)?,
         )
         .await
-        .map_err(|_| anyhow::anyhow!("corrupt or incompatible treasury snapshot"))?;
+        {
+            Ok(client) => client,
+            Err(_) => return Ok(OpenedTreasury::SnapshotUnavailable(Box::new(store))),
+        };
         ensure!(
             client.indexer_uri().is_none(),
             "offline treasury must not connect to an indexer"
         );
         let (store, worker) = StoreHandle::spawn(store);
-        Ok(Self {
+        Ok(OpenedTreasury::Ready(Box::new(Self {
             network,
             _scratch: scratch,
             client: Some(client),
@@ -210,7 +249,7 @@ impl Treasury {
             sync_settings: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
-        })
+        })))
     }
     pub(crate) fn store_handle(&self) -> StoreHandle {
         self.store.clone()
@@ -792,4 +831,77 @@ async fn address_info(client: &LightClient) -> Result<serde_json::Value> {
         );
     }
     Ok(addresses)
+}
+
+#[cfg(test)]
+mod initialization_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sdk_reconstruction_failure_retains_authenticated_store_and_exclusive_ownership() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let store = Store::create(&state, &key, 1, b"synthetic invalid SDK bytes").unwrap();
+        let id = store.id().to_owned();
+        drop(store);
+        let store = Treasury::open_shared_state(
+            state.clone(),
+            key.clone(),
+            id.clone(),
+            TreasuryNetwork::Mainnet,
+        )
+        .await
+        .unwrap();
+        let before = store.snapshot().unwrap();
+        let OpenedTreasury::SnapshotUnavailable(store) =
+            Treasury::reconstruct(store).await.unwrap()
+        else {
+            panic!("invalid fixture reconstructed")
+        };
+        assert_eq!(store.snapshot().unwrap(), before);
+        assert_eq!(store.id(), id);
+        assert!(store.funding_jobs().unwrap().is_empty());
+        assert!(Store::open(&state, &key, &id).is_err());
+        drop(store);
+        assert!(
+            Treasury::open(state, key, id)
+                .await
+                .err()
+                .unwrap()
+                .is::<SnapshotUnavailable>()
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_state_failures_cannot_become_sdk_unavailability() {
+        for fault in ["schema", "key", "identity", "owner"] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = dir.path().join("state");
+            let key = dir.path().join("key");
+            let store = Store::create(&state, &key, 1, b"synthetic invalid SDK bytes").unwrap();
+            let mut id = store.id().to_owned();
+            let owner = if fault == "owner" {
+                Some(store)
+            } else {
+                drop(store);
+                None
+            };
+            match fault {
+                "schema" => {
+                    let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+                    db.execute("PRAGMA user_version=15", []).unwrap();
+                }
+                "key" => std::fs::write(&key, [0u8; 32]).unwrap(),
+                "identity" => id = uuid::Uuid::new_v4().to_string(),
+                _ => {}
+            }
+            let error = Treasury::open_shared_state(state, key, id, TreasuryNetwork::Mainnet)
+                .await
+                .err()
+                .unwrap();
+            assert!(!error.is::<SnapshotUnavailable>());
+            drop(owner);
+        }
+    }
 }

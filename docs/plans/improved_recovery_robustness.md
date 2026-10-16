@@ -474,6 +474,16 @@ boundary failure after the source task is held, confirms the fault is consumed,
 then requires new credit/status observations without a duplicate source. The
 expanded regression passes.
 
+**C06/C07 shared-state prerequisite contract (reviewed):** Serving fallback must
+not mask shared identity, schema, key, snapshot authentication or exclusive-owner
+failures. Split shared Store opening from SDK reconstruction, retaining the exact
+exclusively owned store only for the typed SDK authenticated-snapshot decode failure.
+SQL, decryption, offline configuration and unexpected network binding errors remain
+fatal. Strict wallet commands still require the SDK and report the same fixed
+failure. No new state, schema, owner generation or financial authority is introduced.
+This narrow prerequisite supplies C06's preflight ordering and C07's live Base store;
+it does not yet publish degraded serving or claim those startup acceptance gates.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
