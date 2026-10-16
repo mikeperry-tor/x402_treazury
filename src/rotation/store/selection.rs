@@ -157,7 +157,11 @@ impl Store {
                 continue;
             }
             if let Some(saved) = certificates.get(wallet) {
-                match evidence::check_balance(&self.db, self.evidence_namespace, certificate) {
+                match evidence::check_payment_balance(
+                    &self.db,
+                    self.evidence_namespace,
+                    certificate,
+                ) {
                     Ok(support) if now <= support.observation.valid_until => {}
                     Ok(_) => continue,
                     Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
@@ -165,7 +169,7 @@ impl Store {
                     }
                     Err(error) => return Err(error),
                 }
-                match evidence::check_balance(&self.db, self.evidence_namespace, saved) {
+                match evidence::check_payment_balance(&self.db, self.evidence_namespace, saved) {
                     Ok(support) if now <= support.observation.valid_until => {
                         match self.compare_cached_balance_or_invalidate(
                             wallet,
@@ -232,14 +236,14 @@ impl Store {
         if cost > ownership.payment_limit {
             return Ok(None);
         }
-        let support = match evidence::check_balance(&self.db, self.evidence_namespace, certificate)
-        {
-            Ok(support) => support,
-            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
-                return Ok(None);
-            }
-            Err(error) => return Err(error),
-        };
+        let support =
+            match evidence::check_payment_balance(&self.db, self.evidence_namespace, certificate) {
+                Ok(support) => support,
+                Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
         if now > support.observation.valid_until {
             return Ok(None);
         }
@@ -300,14 +304,14 @@ impl Store {
         let Some((_, certificate)) = self.evidence_cache.get(wallet) else {
             return Ok(missing);
         };
-        let support = match evidence::check_balance(&self.db, self.evidence_namespace, certificate)
-        {
-            Ok(support) => support,
-            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
-                return Ok(missing);
-            }
-            Err(error) => return Err(error),
-        };
+        let support =
+            match evidence::check_payment_balance(&self.db, self.evidence_namespace, certificate) {
+                Ok(support) => support,
+                Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
+                    return Ok(missing);
+                }
+                Err(error) => return Err(error),
+            };
         let observation = support.observation;
         if super::super::base::now()? > observation.valid_until {
             return Ok(missing);
@@ -344,7 +348,7 @@ impl Store {
                 && view.released.is_empty(),
             "candidate evidence scope mismatch"
         );
-        self.prepare_evidence_view(view)?;
+        self.prepare_payment_evidence_view(view)?;
         self.candidate_evidence(pool, wallet)
     }
 

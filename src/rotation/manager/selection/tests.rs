@@ -865,7 +865,7 @@ async fn wallet_local_repair_preserves_healthy_selection_and_negative_diagnostic
         }
         f.db()
             .execute(
-                "UPDATE wallets SET evidence_repair='chain_repair_required' WHERE id=?1",
+                "UPDATE wallets SET evidence_repair='evidence_repair_required' WHERE id=?1",
                 [&f.bound.wallet],
             )
             .unwrap();
@@ -901,7 +901,7 @@ async fn wallet_local_repair_preserves_healthy_selection_and_negative_diagnostic
             }
             Err(error) if !sufficient => assert_eq!(
                 error.downcast_ref::<EvidenceFailure>(),
-                Some(&EvidenceFailure::ChainRepairRequired)
+                Some(&EvidenceFailure::EvidenceRepairRequired)
             ),
             _ => panic!("wallet-local failure escaped its scope or lost its diagnostic"),
         }
@@ -913,7 +913,7 @@ async fn wallet_local_repair_preserves_healthy_selection_and_negative_diagnostic
                 |r| r.get::<_, String>(0)
             )
             .unwrap(),
-            "chain_repair_required"
+            "evidence_repair_required"
         );
         assert_eq!(
             db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r

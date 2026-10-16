@@ -37,13 +37,17 @@ Resume from the committed checkout; do not restart or replay completed work.
   Validation: startup/status parity and shared SQL-error regressions passed,
   all-target Clippy passed, and formatting/diff checks passed.
 
-Next: finish C09/C10's remaining obligation membership and decision-specific
-observation/admission contract before broadening initial capacity in C11 or disputed
-exposure service in C12. Do not simply delete the repair veto: invalidated RESOLVED
-authorizations are not yet included in pending exposure. Then continue C13–C22 in
-the recommended sequence, including treasury provenance/ownership, closure,
-refund shielding, clocks and final integrated checks. No live-funded qualification
-or private-state repair has been performed or authorized by these changes.
+Since the reboot checkpoint, C10 resolution-only observation separation landed in
+`3904c78`; C09 funding-observation traversal and its review fixup landed in
+`29bc0d2` and `08a5c5d`. Schema17 disputed authorization membership landed in
+`a0f5f2b`, with historical reporting review fixup `6bfdf75`. Invalidated resolved
+authorizations now retain their full exposure and original audit proofs. The
+contracts below record remaining inventory and endpoint-membership gaps.
+
+Next: implement and validate C12's narrow all-releases-reserved capacity contract,
+then continue the remaining C09–C11 obligations and C13–C22 in the recommended
+sequence. No live-funded qualification or private-state repair has been performed
+or authorized by these changes.
 
 Continue independent reviews at commit gates and land findings as separate fixup
 commits. Full `scripts/check.sh` and final acceptance closure remain outstanding.
@@ -196,14 +200,14 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G11 | `require_spend_ready`, outgoing commit checks and funding refresh `outgoing_pending`; F16 | SDK input/snapshot ownership and exact pending bytes | Decide required scope; remove only proven redundant global waiting, retain commit race checks | 2, 3 | T29 | Pending |
 | G12 | Repair snapshot/commit scans, maintenance balance lane, treasury wallet read guard and process-wide Base RPC resources; F3 | Coherent final commit and exclusive mutation owner | Remove avoidable actor/lock occupancy; retain CAS and ownership | 5 | T03, T04, T07, T33 | Pending |
 | G13 | Disabled/removed pool and listener scheduling, retired-wallet observation selection; ownership audit | Durable unresolved obligations independent of service demand | Audit/derive observation eligibility; retain prohibitions on new funding and retired capacity | 7 | T16, T31 | Pending |
-| G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Partial: `2229598`, `8384e4e` derive pending payment exposure; disputed-release membership and funding inventory remain pending |
+| G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Partial: journal-derived pending/disputed exposure and completed-label-independent funding traversal landed; endpoint membership and historical/zero-attempt obligation coverage remain |
 | G15 | Base maintenance inventory-read error propagation and deployment log-only exit; funding-scheduler exit audit; F17 | Observation ownership and durable unresolved obligations | Resume recoverable observation work under existing ownership/backoff; justify stops for corruption or lost ownership | 6 | T37 | Pending |
 | G16 | `history_page` whole-page decoding and failure propagation; F18 | Malformed live authority and identifiable affected scope | Keep affected liability blocked; allow independent wallets in the same pool to progress when scope is provable | 2, 6 | T38 | Pending |
 | G17 | `TreasuryConfig::runtime_id`, `validate_static_identities`, full `store::status` reporting; F19 | Treasury identity, supported schema and managed/static ownership binding | Replace operational full-report reads with narrow identity/ownership queries; unrelated report decoding cannot gate opening or recovery | 2, 8 | T32, T38, T40 | C01 implemented in b4a3b48; see implementation contracts and evidence below |
 | G18 | `validate_resolved_funding`, `managed_connection_preflight`, `initialize_wallets`, `Treasury::open` SDK reconstruction before store-worker creation; F20 | Exclusive store/key ownership, Base journal integrity, dependency-specific connection policy and SDK mutation ownership | Isolate independent static service; decide safe Base/store initialization without a usable Zcash SDK or funding-only configuration, including declaration validation before connection setup; retain justified shared-state stops | 8 | T22, T41 | Pending |
 | G19 | `funding_work_page` whole-page job/facts decoding and `collect_inventory` propagation; F21 | Identifiable operation ownership, reservations and shared treasury liabilities | Isolate malformed jobs where dependency scope is provable; retain affected obligations and traverse later jobs; restarting an undecodable page is insufficient | 2, 6 | T42 | Pending |
 | G20 | `record_readiness`, `payment_ownership`, candidate discovery/selection, balance scheduling and `consume_reserve`; F22 | Per-payment capacity, exact claim ownership and pending funding authority | Separate payment-sized capacity from funding-target satisfaction; specify initial role/claim transition without closing or duplicating funding | 2, 4 | T26, T43 | Pending |
-| G21 | Wallet-wide admission halt for disputed authorization resolutions; F23 | Complete bounded exposure, compatible current balances and debit accounting | Decide whether full conservative exposure permits use of remaining capacity; retain broader stops for unbounded or unidentifiable liabilities | 2, 4 | T19, T27, T44 | Pending |
+| G21 | Wallet-wide admission halt for disputed authorization resolutions; F23 | Complete bounded exposure, compatible current balances and debit accounting | Decide whether full conservative exposure permits use of remaining capacity; retain broader stops for unbounded or unidentifiable liabilities | 2, 4 | T19, T27, T44 | Narrow all-resolved-reserved service implemented under C12 contract; alternate canonical release and broader endpoint membership remain |
 | G22 | `eligible_payment_evidence` exposure-read failure, cached candidate scan, pre-filter certificate merging and `candidate_for` propagation; F24 | Identifiable wallet-local liability versus shared store integrity | Isolate affected candidates without treating their exposure as zero; retain diagnostics and try independent usable wallets | 2 | T38, T46 | Pending |
 | G23 | `FundingFacts::provider_review_required`, `status_needed`, `record_provider_outcome`, phase derivation and closure predicates; F26 | Exact accepted operation correlation and remaining source/destination/refund obligations | Decide which provider observations are terminal, provisional or superseded; retain audit facts without an unjustified permanent veto or premature end to required observation | 2, 7 | T13, T14, T48 | Pending |
 | G24 | Wall-clock evidence/authority checks, elapsed-time scheduling and persisted polling times; F27 | Canonical expiry, original evidence age, signed deadlines and executable observation ownership | Audit clock correction, suspend/resume and restart semantics; remove any durable halt caused only by a temporary clock condition without adding a timer | 2, 6 | T02, T20, T49 | Pending |
@@ -829,6 +833,35 @@ retirement records independently of current admission fields. The regression use
 an actual schema16 layout and query-only connection, retaining nonzero totals
 without fabricating current capacity. Focused regression and all-target Clippy
 passed; independent re-review found no remaining actionable findings.
+
+**C12 conservative remaining-capacity contract (reviewed):** A separate payment
+capture may omit disputed historical checkpoint RPC dependencies only for exact
+`chain_repair_required` state when every RESOLVED authorization is again reserved.
+An indexed absence check for undisputed resolutions and checked pending/disputed
+exposure establish that conservative inventory; unknown amounts or missing original
+resolution rows fail. The capture binds original financial/debit tuples as an exact
+commit-time snapshot, retains the numeric debit-height floor, and uses ordinary
+fresh canonical confirmed/latest balances and namespace/wallet/endpoint generations.
+Any new undisputed resolution or changed snapshot invalidates admission. Cache
+rechecks preserve purpose and original validity, never converting payment-only
+proofs into historical proof. This does not release disputed liabilities or claim
+individual endpoint-membership completeness.
+
+Payment acquisition, candidate publication/selection, preparation and final journal
+commit share that validator. Conservative publication updates only current wallet
+balance projections; it cannot record funding readiness, publish funded roles,
+retire wallets or release authorizations. Strict funding/history consumers reject
+the purpose before publishing observations. Existing payment caps, ownership and
+atomic exposure comparisons remain authoritative. Amount-only repair remains
+blocked because restored authorization maxima do not explain contradictory balances.
+Validation: the rotation suite passed 260 tests with four ignored helpers and two
+fixture failures; the invalid ACTIVE/claim fixture and obsolete blanket-chain-repair
+expectation were corrected, and both focused regressions passed. The real
+PaidClient restart test also passed: $20 balance with $1 disputed exposure refuses
+$20 before signing and sends exactly one journaled $19 payment, without historical
+checkpoint RPC reads. Review identified the missing lookup index on existing
+schema17 reopen; a separate additive-index fixup follows this slice. Final
+all-target Clippy, formatting and diff checks passed.
 
 ### Stage 1 — Minimal authority and dependency specification
 

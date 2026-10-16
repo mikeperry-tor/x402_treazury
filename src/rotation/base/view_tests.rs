@@ -87,6 +87,7 @@ fn query(history: bool) -> ChainQuery {
 
 fn capture(wallet: &str, checkpoint: Option<Anchor>) -> EvidenceCapture {
     EvidenceCapture {
+        capacity_snapshot: None,
         namespace: uuid::Uuid::new_v4(),
         wallet: wallet.into(),
         generation: 0,

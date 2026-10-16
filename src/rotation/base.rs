@@ -321,7 +321,8 @@ impl BaseRpc {
         ensure!(
             capture.namespace == certificate.capture().namespace
                 && capture.wallet == observation.wallet
-                && capture.generation == certificate.capture().generation,
+                && capture.generation == certificate.capture().generation
+                && capture.capacity_snapshot == certificate.capture().capacity_snapshot,
             evidence::EvidenceFailure::Invalidated
         );
         let endpoint = self.original_endpoint(&observation.endpoint)?;

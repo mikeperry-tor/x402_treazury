@@ -80,3 +80,5 @@ PRAGMA user_version=17;
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
 CREATE INDEX funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
 CREATE INDEX funding_recovery_job ON funding_recovery(job_id,operation_id);
+
+CREATE INDEX payment_undisputed_wallet ON payment_attempts(wallet_id,id) WHERE state='RESOLVED' AND resolution_disputed=0;

@@ -317,9 +317,7 @@ impl ManagedPool {
         let (pool, id) = (self.pool.clone(), wallet.clone());
         let query = self
             .store
-            .call_with_guard(guard, move |s| {
-                s.scoped_chain_query(&pool, vec![id], vec![])
-            })
+            .call_with_guard(guard, move |s| s.payment_balance_query(&pool, vec![id]))
             .await?;
         let view = self.acquire_view(query, true).await?;
         let guard = Arc::new(self.gate.clone().lock_owned().await);

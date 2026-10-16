@@ -234,7 +234,7 @@ impl ManagedPool {
         let query = self
             .store
             .call_with_guard(guard.clone(), move |s| {
-                s.scoped_chain_query(&pool, vec![wallet], vec![])
+                s.payment_balance_query(&pool, vec![wallet])
             })
             .await?;
         drop(guard);
@@ -415,7 +415,10 @@ impl ManagedPool {
                                 wallets
                                     .into_iter()
                                     .map(|wallet| {
-                                        Ok((wallet.clone(), store.capture_evidence(&wallet)?))
+                                        Ok((
+                                            wallet.clone(),
+                                            store.capture_payment_evidence(&wallet)?,
+                                        ))
                                     })
                                     .collect::<Result<std::collections::BTreeMap<_, _>>>()
                             })
@@ -441,7 +444,7 @@ impl ManagedPool {
                             .store
                             .call_with_guard(guard.clone(), move |store| {
                                 let wallets = vec![wallet];
-                                store.scoped_chain_query(&pool, wallets, vec![])
+                                store.payment_balance_query(&pool, wallets)
                             })
                             .await?;
                         drop(guard);
@@ -495,7 +498,7 @@ impl ManagedPool {
                                 .store
                                 .call_with_guard(guard.clone(), move |s| {
                                     let wallets = vec![wallet];
-                                    s.scoped_chain_query(&pool, wallets, vec![])
+                                    s.payment_balance_query(&pool, wallets)
                                 })
                                 .await?;
                             drop(guard);

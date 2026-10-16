@@ -1466,6 +1466,21 @@ impl Store {
         })
     }
 
+    /// Current payment balances carry no historical resolution or role authority.
+    pub(crate) fn payment_balance_query(
+        &self,
+        pool: &str,
+        wallets: Vec<String>,
+    ) -> Result<super::base::ChainQuery> {
+        let mut query = self.scoped_chain_query(pool, wallets, vec![])?;
+        for (wallet, _) in &query.wallets {
+            query
+                .captures
+                .insert(wallet.clone(), self.capture_payment_evidence(wallet)?);
+        }
+        Ok(query)
+    }
+
     pub(crate) fn publish_scoped_evidence(
         &mut self,
         pool: &str,
@@ -1584,7 +1599,7 @@ impl Store {
         view.balances.retain(|id, _| id == &wallet);
         view.observations.retain(|id, _| id == &wallet);
         view.balance_certificates.retain(|id, _| id == &wallet);
-        let view = self.prepare_evidence_view(view)?;
+        let view = self.prepare_payment_evidence_view(view)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1617,7 +1632,7 @@ impl Store {
             .context(AdmissionError::WalletNotReady("payer balance unavailable"))?;
         // Evidence publication cannot allocate or consume a reserve. The immutable
         // funded-role binding was checked before accepting the observation.
-        let depleted = apply_chain_view(&tx, pool, &view, self.evidence_namespace, false, false)?;
+        let depleted = apply_payment_view(&tx, pool, &view, self.evidence_namespace)?;
         let reserved = payment_exposure(&tx, &wallet)?;
         ensure!(
             balance.saturating_sub(reserved) >= cost,
@@ -1639,7 +1654,7 @@ impl Store {
                 .balance_certificates
                 .get(&wallet)
                 .map(|certificate| {
-                    evidence::check_balance(&self.db, self.evidence_namespace, certificate)
+                    evidence::check_payment_balance(&self.db, self.evidence_namespace, certificate)
                 })
                 .transpose()?,
             certificate: view.balance_certificates.get(&wallet).cloned(),
@@ -1665,7 +1680,9 @@ impl Store {
         let support = admission
             .certificate
             .as_ref()
-            .map(|certificate| evidence::check_balance(&tx, self.evidence_namespace, certificate))
+            .map(|certificate| {
+                evidence::check_payment_balance(&tx, self.evidence_namespace, certificate)
+            })
             .transpose()?;
         ensure!(
             support.as_ref().map(|support| &support.observation)
@@ -1898,6 +1915,37 @@ fn commit_chain_view(
     Ok(())
 }
 
+/// Conservative capacity can update the admission projection, never funding roles.
+fn apply_payment_view(
+    tx: &Connection,
+    pool: &str,
+    view: &super::base::ChainView,
+    namespace: Uuid,
+) -> Result<ChainPublication> {
+    let conservative = view
+        .balance_certificates
+        .values()
+        .any(|certificate| certificate.capture().capacity_snapshot.is_some());
+    if !conservative {
+        return apply_chain_view(tx, pool, view, namespace, false, false);
+    }
+    ensure!(
+        view.resolutions.is_empty()
+            && view.resolution_certificates.is_empty()
+            && view.released.is_empty(),
+        "payment capacity cannot release authorizations"
+    );
+    validate_chain_balances_for(tx, pool, view, namespace, true)?;
+    for (wallet, observation) in &view.observations {
+        tx.execute(
+            "UPDATE wallets SET balance=?1,block_hash=?2,block_height=?3 WHERE id=?4 AND pool_id=?5",
+            params![observation.available().to_string(), observation.confirmed.anchor.hash,
+                i64::try_from(observation.confirmed.anchor.height)?, wallet, pool],
+        )?;
+    }
+    Ok(ChainPublication::default())
+}
+
 fn apply_chain_view(
     tx: &Connection,
     pool: &str,
@@ -1935,6 +1983,16 @@ fn validate_chain_balances(
     view: &super::base::ChainView,
     namespace: Uuid,
 ) -> Result<()> {
+    validate_chain_balances_for(tx, pool, view, namespace, false)
+}
+
+fn validate_chain_balances_for(
+    tx: &Connection,
+    pool: &str,
+    view: &super::base::ChainView,
+    namespace: Uuid,
+    payment: bool,
+) -> Result<()> {
     #[cfg(not(test))]
     ensure!(
         view.observations.len() == view.balances.len()
@@ -1959,7 +2017,11 @@ fn validate_chain_balances(
             certificate.observation() == observation,
             "balance_certificate_binding_mismatch"
         );
-        evidence::check_balance(tx, namespace, certificate)?;
+        if payment {
+            evidence::check_payment_balance(tx, namespace, certificate)?;
+        } else {
+            evidence::check_balance(tx, namespace, certificate)?;
+        }
         let address: String = tx.query_row(
             "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
             params![wallet, pool],
@@ -2164,3 +2226,6 @@ mod filesystem_tests;
 #[cfg(test)]
 #[path = "../../tests/support/funding_restriction.rs"]
 mod funding_restriction_tests;
+
+#[cfg(test)]
+mod capacity_payment_tests;

@@ -296,6 +296,117 @@ mod tests {
             .addresses
             .remove(0)
             .id;
+        // Canonical current balances can cover fully reserved historical
+        // releases without verifying their now-disputed block hashes.
+        store.db.execute("UPDATE wallets SET evidence_repair='chain_repair_required',financial_height=80,financial_hash='disputed',debit_height=80,debit_hash='disputed' WHERE id=?1", [&wallet]).unwrap();
+        store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,resolution_disputed) VALUES('capacity-old',?1,?2,0,'1','fixture','RESOLVED',1)", params![pool,wallet]).unwrap();
+        store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES('capacity-old','USED',80,'disputed',1,'immutable')", []).unwrap();
+        let mut query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        let capacity_capture = store.capture_payment_evidence(&wallet).unwrap();
+        assert!(capacity_capture.checkpoint.is_none());
+        assert!(capacity_capture.previous.is_none());
+        query.captures.insert(wallet.clone(), capacity_capture);
+        let capacity_view = rpc.view(query).await.unwrap();
+        let certificate = &capacity_view.balance_certificates[&wallet];
+        assert!(check_payment_balance(&store.db, store.evidence_namespace, certificate).is_ok());
+        assert!(check_balance(&store.db, store.evidence_namespace, certificate).is_err());
+        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(1));
+        for update in [
+            "financial_hash='changed'",
+            "debit_hash='changed'",
+            "debit_height=99",
+            "evidence_repair='evidence_repair_required'",
+        ] {
+            store
+                .db
+                .execute(
+                    &format!("UPDATE wallets SET {update} WHERE id=?1"),
+                    [&wallet],
+                )
+                .unwrap();
+            assert!(
+                check_payment_balance(&store.db, store.evidence_namespace, certificate).is_err()
+            );
+            store.db.execute("UPDATE wallets SET evidence_repair='chain_repair_required',financial_height=80,financial_hash='disputed',debit_height=80,debit_hash='disputed' WHERE id=?1", [&wallet]).unwrap();
+        }
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET resolution_disputed=0 WHERE id='capacity-old'",
+                [],
+            )
+            .unwrap();
+        assert!(check_payment_balance(&store.db, store.evidence_namespace, certificate).is_err());
+        assert!(store.capture_payment_evidence(&wallet).is_err());
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET resolution_disputed=1 WHERE id='capacity-old'",
+                [],
+            )
+            .unwrap();
+        assert!(check_payment_balance(&store.db, store.evidence_namespace, certificate).is_ok());
+        assert!(store.prepare_evidence_view(capacity_view.clone()).is_err());
+        assert!(
+            store
+                .prepare_payment_evidence_view(capacity_view.clone())
+                .is_ok()
+        );
+        // A fresh capture above the confirmed debit floor still cannot admit.
+        store
+            .db
+            .execute("UPDATE wallets SET debit_height=99 WHERE id=?1", [&wallet])
+            .unwrap();
+        let mut query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        query.captures.insert(
+            wallet.clone(),
+            store.capture_payment_evidence(&wallet).unwrap(),
+        );
+        let before_debit = rpc.view(query).await.unwrap();
+        assert!(
+            check_payment_balance(
+                &store.db,
+                store.evidence_namespace,
+                &before_debit.balance_certificates[&wallet]
+            )
+            .is_err()
+        );
+        store
+            .db
+            .execute("UPDATE wallets SET debit_height=80 WHERE id=?1", [&wallet])
+            .unwrap();
+        bump_generation(&store.db, "wallet", &wallet).unwrap();
+        assert!(check_payment_balance(&store.db, store.evidence_namespace, certificate).is_err());
+        let plan: Vec<String> = store
+            .db
+            .prepare(&format!("EXPLAIN QUERY PLAN {UNDISPUTED_SQL}"))
+            .unwrap()
+            .query_map([&wallet], |row| row.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|line| line.contains("payment_undisputed_wallet"))
+        );
+        store.evidence_cache.clear();
+        store
+            .db
+            .execute(
+                "DELETE FROM payment_resolutions WHERE attempt_id='capacity-old'",
+                [],
+            )
+            .unwrap();
+        assert!(store.capture_payment_evidence(&wallet).is_err());
+        store
+            .db
+            .execute("DELETE FROM payment_attempts WHERE id='capacity-old'", [])
+            .unwrap();
+        store.db.execute("UPDATE wallets SET evidence_repair=NULL,financial_height=NULL,financial_hash=NULL,debit_height=NULL,debit_hash=NULL WHERE id=?1", [&wallet]).unwrap();
         let query = store
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
             .unwrap();
@@ -901,6 +1012,31 @@ pub(super) fn checkpoint(db: &Connection, wallet: &str) -> Result<Option<Anchor>
     }
 }
 impl Store {
+    /// A payment can use remaining capacity while every historical release is
+    /// reserved again. This proof cannot establish historical funding or nonce facts.
+    pub(crate) fn capture_payment_evidence(
+        &self,
+        wallet: &str,
+    ) -> Result<crate::rotation::base::EvidenceCapture> {
+        let mut capture = self.capture_evidence(wallet)?;
+        let repair: Option<String> = self.db.query_row(
+            "SELECT evidence_repair FROM wallets WHERE id=?1",
+            [wallet],
+            |row| row.get(0),
+        )?;
+        if repair.as_deref() == Some("chain_repair_required") {
+            check_reserved_releases(&self.db, wallet)?;
+            capture.capacity_snapshot = Some((
+                checkpoint(&self.db, wallet)?,
+                debit_checkpoint(&self.db, wallet)?,
+            ));
+            capture.checkpoint = None;
+            capture.previous = None;
+            capture.previous_confirmed_covered = false;
+        }
+        Ok(capture)
+    }
+
     pub(crate) fn capture_evidence(
         &self,
         wallet: &str,
@@ -923,6 +1059,7 @@ impl Store {
         // Current capacity does not depend on archival funding/retirement
         // balances. Financial checkpoint and debit support remain independent.
         Ok(crate::rotation::base::EvidenceCapture {
+            capacity_snapshot: None,
             durable_balance_anchors: Vec::new(),
             previous_confirmed_covered,
             namespace: self.evidence_namespace,
@@ -936,6 +1073,69 @@ impl Store {
                 .map(|(_, certificate)| certificate.observation().clone()),
         })
     }
+}
+
+const UNDISPUTED_SQL: &str = "SELECT EXISTS(SELECT 1 FROM payment_attempts INDEXED BY payment_undisputed_wallet WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0)";
+
+fn debit_checkpoint(db: &Connection, wallet: &str) -> Result<Option<Anchor>> {
+    let (height, hash): (Option<i64>, Option<String>) = db.query_row(
+        "SELECT debit_height,debit_hash FROM wallets WHERE id=?1",
+        [wallet],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    match (height, hash) {
+        (None, None) => Ok(None),
+        (Some(height), Some(hash)) => Ok(Some(Anchor {
+            height: height.try_into()?,
+            hash,
+        })),
+        _ => anyhow::bail!("incomplete debit checkpoint"),
+    }
+}
+
+fn check_reserved_releases(db: &Connection, wallet: &str) -> Result<()> {
+    let repair: Option<String> = db.query_row(
+        "SELECT evidence_repair FROM wallets WHERE id=?1",
+        [wallet],
+        |row| row.get(0),
+    )?;
+    ensure!(
+        repair.as_deref() == Some("chain_repair_required"),
+        EvidenceFailure::ChainRepairRequired
+    );
+    let undisputed: bool = db.query_row(UNDISPUTED_SQL, [wallet], |row| row.get(0))?;
+    ensure!(!undisputed, EvidenceFailure::ChainRepairRequired);
+    exposure(db, wallet)?;
+    Ok(())
+}
+
+pub(super) fn check_payment_balance(
+    db: &Connection,
+    namespace: Uuid,
+    certificate: &crate::rotation::base::BalanceCertificate,
+) -> Result<BalanceSupport> {
+    let Some((financial, debit)) = &certificate.capture().capacity_snapshot else {
+        return check_balance(db, namespace, certificate);
+    };
+    check_balance_integrity(db, namespace, certificate)?;
+    let observation = certificate.observation();
+    check_reserved_releases(db, &observation.wallet)?;
+    ensure!(
+        checkpoint(db, &observation.wallet)? == *financial
+            && debit_checkpoint(db, &observation.wallet)? == *debit,
+        EvidenceFailure::Invalidated
+    );
+    ensure!(
+        debit
+            .as_ref()
+            .is_none_or(|anchor| observation.confirmed.anchor.height >= anchor.height),
+        EvidenceFailure::BeforeDebit
+    );
+    // No historical lineage is asserted by a capacity-only support value.
+    Ok(BalanceSupport {
+        observation: observation.clone(),
+        checkpoint: None,
+    })
 }
 
 pub(super) fn check_capture(
@@ -1007,6 +1207,10 @@ pub(super) fn check_balance(
     namespace: Uuid,
     certificate: &crate::rotation::base::BalanceCertificate,
 ) -> Result<BalanceSupport> {
+    ensure!(
+        certificate.capture().capacity_snapshot.is_none(),
+        EvidenceFailure::CompatibilityRequired
+    );
     check_balance_integrity(db, namespace, certificate)?;
     check_capacity_repair(db, &certificate.capture().wallet)?;
     let observation = certificate.observation();
@@ -1070,6 +1274,10 @@ pub(super) fn check_resolution(
     namespace: Uuid,
     certificate: &crate::rotation::base::ResolutionCertificate,
 ) -> Result<String> {
+    ensure!(
+        certificate.capture().capacity_snapshot.is_none(),
+        EvidenceFailure::CompatibilityRequired
+    );
     check_capture(
         db,
         namespace,
@@ -1345,8 +1553,40 @@ impl Store {
     /// financial support is separately committed with each durable disposition.
     pub(crate) fn prepare_evidence_view(
         &mut self,
-        mut view: crate::rotation::base::ChainView,
+        view: crate::rotation::base::ChainView,
     ) -> Result<crate::rotation::base::ChainView> {
+        self.prepare_evidence_view_inner(view, false)
+    }
+
+    pub(crate) fn prepare_payment_evidence_view(
+        &mut self,
+        view: crate::rotation::base::ChainView,
+    ) -> Result<crate::rotation::base::ChainView> {
+        self.prepare_evidence_view_inner(view, true)
+    }
+
+    fn prepare_evidence_view_inner(
+        &mut self,
+        mut view: crate::rotation::base::ChainView,
+        payment: bool,
+    ) -> Result<crate::rotation::base::ChainView> {
+        let validate_balance = if payment {
+            check_payment_balance
+        } else {
+            check_balance
+        };
+        let capacity_only = view
+            .balance_certificates
+            .values()
+            .any(|certificate| certificate.capture().capacity_snapshot.is_some());
+        ensure!(
+            !capacity_only
+                || (payment
+                    && view.resolution_certificates.is_empty()
+                    && view.resolutions.is_empty()
+                    && view.released.is_empty()),
+            EvidenceFailure::CompatibilityRequired
+        );
         // Validate all cross-map bindings before any contradiction can invalidate
         // durable evidence. A malformed view is not proof of a chain conflict.
         for (attempt, certificate) in &view.resolution_certificates {
@@ -1399,7 +1639,7 @@ impl Store {
                 }
                 if order != std::cmp::Ordering::Greater
                     && crate::rotation::base::now()? <= saved.observation().valid_until
-                    && check_balance(&self.db, self.evidence_namespace, &saved).is_ok()
+                    && validate_balance(&self.db, self.evidence_namespace, &saved).is_ok()
                 {
                     *incoming = saved;
                     view.observations
@@ -1408,7 +1648,7 @@ impl Store {
                         .insert(wallet.clone(), incoming.observation().available());
                 }
             }
-            check_balance(&self.db, self.evidence_namespace, incoming)?;
+            validate_balance(&self.db, self.evidence_namespace, incoming)?;
             self.evidence_order = self.evidence_order.saturating_add(1);
             self.evidence_cache
                 .insert(wallet.clone(), (self.evidence_order, incoming.clone()));

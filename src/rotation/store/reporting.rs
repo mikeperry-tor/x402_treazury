@@ -75,7 +75,8 @@ pub(super) fn runtime_status(store: &Store, checked_at: u64) -> Result<Status> {
         let observation = certificate.observation();
         let fresh = checked_at <= observation.valid_until;
         let (compatible, unavailable_reason) =
-            match evidence::check_balance(&store.db, store.evidence_namespace, certificate) {
+            match evidence::check_payment_balance(&store.db, store.evidence_namespace, certificate)
+            {
                 Ok(_) => (true, (!fresh).then(|| "evidence_expired".into())),
                 Err(error) => {
                     match error.downcast_ref::<super::super::base::evidence::EvidenceFailure>() {

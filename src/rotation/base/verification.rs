@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct EvidenceCapture {
+    /// Payment-only proof with immutable original financial and debit anchors.
+    pub(crate) capacity_snapshot: Option<(Option<Anchor>, Option<Anchor>)>,
     pub(crate) namespace: uuid::Uuid,
     pub(crate) wallet: String,
     pub(crate) generation: u64,
