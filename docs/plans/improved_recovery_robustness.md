@@ -61,8 +61,18 @@ malformed ownership isolation is committed as `e559f28`. C16 preparation
 provenance is committed as `d4d5407` after focused tests and independent review.
 C09 hidden prepared-obligation observation is committed as `1ef6616` with 27
 funding tests passing. C21 treasury freshness is committed as `d8b4dbc` and C17
-live SDK reconstruction as `929b6ca`. C19 durable observation ownership has passed
-independent review and the complete 55-test deployment suite.
+live SDK reconstruction as `929b6ca`, with snapshot-read continuation `3639bbb`.
+C19 durable observation ownership is committed as `8bdcc3e`; retired-liability
+repair as `8b7d78b`. C18 external closure is `33689ec` with fixture fixup `9e7396f`.
+C05 completion admission-read retention is `dd64f58`, with independent-review
+cancellation coverage fixup `1a8dc14`. These slices passed their focused tests and
+reviews. The 55-test deployment suite and all-target/all-feature Clippy passed.
+The resumed full check passed tooling/complexity/vendor gates, then ran 645 library
+tests successfully with ten ignored helpers and one obsolete readiness-error fixture
+failure. The reviewed fixture correction passed its focused rerun; full all-target,
+synthetic lifecycle, final Clippy and compatibility acceptance remain outstanding.
+C15 bounded publication is now being implemented; C18 canonical provider-delivery
+correlation and C20 automatic shielding have reviewed contracts below.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
