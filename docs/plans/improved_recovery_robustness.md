@@ -456,6 +456,22 @@ Implementation: 753d25a. Review found no implementation defect; its test fixup
 records actual balance RPC payer addresses and requires observation of an added
 non-priority retained wallet after the failed page resumes. The expanded test passes.
 
+**C05 funding inventory resumption contract (reviewed):** Share Base's typed
+Busy/Locked read classifier, restricted to initial/rolling funding boundaries and
+page reads. Preserve the funding lease, lane cursor, active source/read futures and
+per-operation backoff. Defer only the affected lane under its existing poll cadence;
+other lanes keep observing. A transient initial boundary failure waits with the same
+lease; one-pass requests report it. Never retry `publish_observation`, phase changes,
+timeout writes or accepted source work. Permanent store faults retain existing fatal
+owner behavior and any separately owned source drain. No new worker generation,
+SDK reopen, spending authority, retry ceiling or durable scheduling record is added.
+Validation: all 17 funding scheduler tests and library Clippy pass. New fault cases
+cover both inventory read kinds in continuous and one-pass mode, independent
+credit/status progress, retained source lease through cancellation, unchanged signed
+bytes/attempt counts after reopen, and corruption propagation. Sub-agent review found
+no code defect; a separate test fixup will exercise the rolling-boundary retry after
+a source task is already held, beyond the initial-boundary regression.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

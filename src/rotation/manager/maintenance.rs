@@ -1,6 +1,7 @@
 //! One resumable reconciliation owner per store/group. Runtime cursors enumerate
 //! committed work; only separately verified SQL commits resolve liabilities.
 use super::*;
+use crate::rotation::store::inventory::read_result as inventory_result;
 use crate::rotation::{
     base::PendingAuthorization,
     store::history::{HistoryPayload, PAGE_SIZE},
@@ -69,26 +70,6 @@ impl<T> Pass<T> {
         self.completed = true;
     }
 }
-// Only read-only inventory acquisition uses this retry classifier. Financial
-// publication, owner/channel failures and unknown corruption still propagate.
-fn inventory_result<T>(
-    result: Result<T>,
-    first_error: &mut Option<anyhow::Error>,
-) -> Result<Option<T>> {
-    match result {
-        Ok(value) => Ok(Some(value)),
-        Err(error) if crate::rotation::store::inventory::transient_read(&error) => {
-            tracing::warn!(
-                category = "inventory_busy",
-                "inventory observation deferred; active work remains owned"
-            );
-            first_error.get_or_insert(error);
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
-}
-
 fn history_delay(failures: u32) -> Duration {
     Duration::from_secs(if failures == 0 {
         5
