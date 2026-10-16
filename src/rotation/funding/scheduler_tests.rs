@@ -133,7 +133,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             if n == 0 {
                 active.insert(key);
             } else {
-                state.complete(&job, kind, 100, 10, Some("fixture outage".into()));
+                state.complete(&job, kind, 100, 10, Some("fixture outage".into()), None);
             }
             jobs.push(job);
         }
@@ -165,7 +165,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         );
         assert_eq!(state.records.len(), RECORDS);
         // Completion still finds the active record after eviction pressure.
-        state.complete(&jobs[0], kind, due, 10, None);
+        state.complete(&jobs[0], kind, due, 10, None, None);
         active.remove(&protected);
         assert_eq!(state.admit(&protected, &jobs[0], due, &active), Some(false));
         // A new operation on the same job has independent retry metadata.
@@ -715,6 +715,7 @@ async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fat
                 900,
                 1,
                 Some("funding_quote_failed; fixture outage".into()),
+                None,
             );
         }
         for kind in [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote] {
@@ -1738,6 +1739,7 @@ fn sibling_observations_report_current_phase_once_per_operation() {
         due: 0,
         streak: 0,
         error: None,
+        condition: None,
     };
     state.records.insert(
         Key {

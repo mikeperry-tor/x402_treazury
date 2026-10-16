@@ -391,7 +391,10 @@ pub struct Backend {
 }
 impl Backend {
     fn require_auto_funding(&self) -> Result<()> {
-        ensure!(self.funding.auto_fund, "funding_disabled");
+        ensure!(
+            self.funding.auto_fund,
+            super::error::FundingCondition::Disabled
+        );
         Ok(())
     }
     fn policy(&self, job: &FundingJob) -> Result<(super::near::Limits, u32)> {
@@ -488,7 +491,10 @@ impl FundingBackend for Backend {
         let job_id = job.id.clone();
         // The exact fee is checked and reserved by the serialized owner before signing.
         let reserve = quote.input;
-        ensure!(reserve < limits.max_input, "funding_cost_limit_exceeded");
+        ensure!(
+            reserve < limits.max_input,
+            super::error::FundingCondition::CostLimit
+        );
         let state = self.store.call(|s| s.treasury_sync_state()).await?;
         // A still-fresh low balance can predate an operator's deposit. Scan
         // before reporting insufficient capital again; pending bytes instead
@@ -868,6 +874,31 @@ fn near_diagnostic(error: &anyhow::Error) -> String {
 
 // Recognize only explicit local wait conditions, never an entire funding phase:
 // sync, RPC, validation and storage failures must remain warnings.
+fn funding_condition(error: &anyhow::Error) -> Option<super::error::FundingCondition> {
+    use super::error::{AdmissionError, FundingCondition as Condition};
+    if let Some(condition) = error.downcast_ref::<Condition>() {
+        return Some(*condition);
+    }
+    if matches!(
+        error.downcast_ref::<AdmissionError>(),
+        Some(AdmissionError::FundingRestricted | AdmissionError::FundingPermitDenied)
+    ) {
+        return Some(Condition::QualificationDenied);
+    }
+    if matches!(
+        error.downcast_ref::<super::near::HttpStatus>(),
+        Some(super::near::HttpStatus(401 | 403))
+    ) {
+        return Some(Condition::AuthenticationRequired);
+    }
+    if error.downcast_ref::<super::base::evidence::EvidenceFailure>()
+        == Some(&super::base::evidence::EvidenceFailure::MalformedSupport)
+    {
+        return Some(Condition::EvidenceInvalid);
+    }
+    None
+}
+
 fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'static str> {
     if matches!(
         phase,
@@ -876,18 +907,6 @@ fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'stati
         == Some(&super::transaction::RecoveryEvidenceError::ConfirmationPending)
     {
         return Some("zcash_confirmations_pending");
-    }
-    if matches!(
-        phase,
-        FundingPhase::Swapping | FundingPhase::VerifyingCredit
-    ) && error
-        .downcast_ref::<super::base::VerificationStage>()
-        .is_some_and(|stage| stage.0 == "funding credit persistence")
-        && error
-            .chain()
-            .any(|cause| cause.to_string() == "insufficient confirmed credit")
-    {
-        return Some("base_credit_pending");
     }
     None
 }

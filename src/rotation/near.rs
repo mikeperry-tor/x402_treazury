@@ -1,5 +1,15 @@
 //! Explicit public or confidential foreign-chain EXACT_OUTPUT swaps. No signer or wallet keys enter
 //! this client. Its credential cannot follow redirects or reach another origin.
+/// HTTP response class, without provider prose or credentials.
+#[derive(Debug)]
+pub(crate) struct HttpStatus(pub u16);
+impl std::fmt::Display for HttpStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "near_http_{}", self.0)
+    }
+}
+impl std::error::Error for HttpStatus {}
+
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -191,8 +201,7 @@ impl NearClient {
         let status = response.status();
         ensure!(
             status.is_success() || status.as_u16() == 400,
-            "near_http_{}",
-            status.as_u16()
+            HttpStatus(status.as_u16())
         );
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|error| {
@@ -274,7 +283,7 @@ impl NearClient {
                         .as_str()
                         .context("missing output amount")?
                 )? <= limits.max_output,
-                "funding_amount_limit_exceeded"
+                super::error::FundingCondition::AmountLimit
             );
             match self
                 .quote(
@@ -297,7 +306,7 @@ impl NearClient {
                     ensure!(minimum.0 > previous, "near_bridge_minimum_not_increasing");
                     ensure!(
                         minimum.0 <= limits.max_output,
-                        "funding_amount_limit_exceeded"
+                        super::error::FundingCondition::AmountLimit
                     );
                     if attempt == 2 {
                         anyhow::bail!(
@@ -518,13 +527,16 @@ fn validate_quote_on(
     let q = &response["quote"];
     let input = atomic(q["amountIn"].as_str().context("missing input")?)?;
     let target = atomic(text("amount")?)?;
-    ensure!(target <= limits.max_output, "funding_amount_limit_exceeded");
+    ensure!(
+        target <= limits.max_output,
+        super::error::FundingCondition::AmountLimit
+    );
     ensure!(
         input > 0
             && input
                 .checked_add(limits.max_fee)
                 .is_some_and(|n| n <= limits.max_input),
-        "quote input limit"
+        super::error::FundingCondition::InputLimit
     );
     ensure!(
         atomic(q["amountOut"].as_str().context("missing output")?)? == target,

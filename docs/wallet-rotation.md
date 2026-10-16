@@ -442,6 +442,12 @@ treasury preparation command is a typed pre-preparation deferral. The store
 requires proof of no outgoing or budget record before returning it to `Quoted`;
 ordinary untouched-quote refresh does not consume transaction recovery attempts.
 
+Recovery eligibility comes from the original operation and its bound closure
+archive, with liabilities rechecked before reuse. Saved error messages grant no
+recovery permission. Startup obstructions use current typed observations and current
+funding restrictions; reopening does not turn historical diagnostic prose into a
+new policy obstruction.
+
 An uncertain broadcast retains the saved bytes and transaction identity. Recovery
 reconciles that operation; explicit rebroadcast uses the same bytes. A timeout,
 indexer omission or provider status is insufficient proof to release source inputs.

@@ -607,7 +607,7 @@ fn permit_denial_remains_actionable_without_leaking_registry_errors() {
 }
 
 #[test]
-fn only_expected_confirmation_and_credit_waits_are_classified_as_progress() {
+fn only_typed_confirmation_waits_are_classified_as_progress() {
     let credit = |reason| {
         anyhow::anyhow!("{}", reason)
             .context(super::super::base::VerificationStage(
@@ -620,7 +620,7 @@ fn only_expected_confirmation_and_credit_waits_are_classified_as_progress() {
             &credit("insufficient confirmed credit"),
             &FundingPhase::VerifyingCredit
         ),
-        Some("base_credit_pending")
+        None
     );
     for reason in [
         "disk failure",
@@ -802,4 +802,37 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     stop.cancel();
     actor.await.unwrap().unwrap();
     server.abort();
+}
+
+#[test]
+fn startup_condition_classification_uses_producer_types_not_message_copies() {
+    use crate::rotation::error::{AdmissionError, FundingCondition};
+    for condition in [
+        FundingCondition::Disabled,
+        FundingCondition::CostLimit,
+        FundingCondition::AmountLimit,
+        FundingCondition::InputLimit,
+        FundingCondition::InsufficientFunds,
+    ] {
+        let text = condition.to_string();
+        assert_eq!(super::funding_condition(&anyhow::anyhow!(text)), None);
+        assert_eq!(
+            super::funding_condition(
+                &anyhow::Error::new(condition).context("arbitrary annotation")
+            ),
+            Some(condition)
+        );
+    }
+    assert_eq!(
+        super::funding_condition(&anyhow::Error::new(crate::rotation::near::HttpStatus(401))),
+        Some(FundingCondition::AuthenticationRequired)
+    );
+    assert_eq!(
+        super::funding_condition(&anyhow::anyhow!("near_http_401")),
+        None
+    );
+    assert_eq!(
+        super::funding_condition(&anyhow::Error::new(AdmissionError::FundingPermitDenied)),
+        Some(FundingCondition::QualificationDenied)
+    );
 }

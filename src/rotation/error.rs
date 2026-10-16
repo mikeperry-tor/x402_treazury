@@ -39,3 +39,32 @@ impl std::fmt::Display for AdmissionError {
     }
 }
 impl std::error::Error for AdmissionError {}
+
+/// Current-operation observations used for startup assessment. These are not
+/// durable spending authority and are never reconstructed from diagnostic prose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FundingCondition {
+    Disabled,
+    QualificationDenied,
+    CostLimit,
+    AmountLimit,
+    InputLimit,
+    AuthenticationRequired,
+    InsufficientFunds,
+    EvidenceInvalid,
+}
+impl std::fmt::Display for FundingCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Disabled => "funding_disabled",
+            Self::QualificationDenied => "qualification_funding_denied",
+            Self::CostLimit => "funding_cost_limit_exceeded",
+            Self::AmountLimit => "funding_amount_limit_exceeded",
+            Self::InputLimit => "quote input limit",
+            Self::AuthenticationRequired => "near_authentication_required",
+            Self::InsufficientFunds => "treasury_insufficient_spendable_funds",
+            Self::EvidenceInvalid => "funding_integrity_conflict",
+        })
+    }
+}
+impl std::error::Error for FundingCondition {}

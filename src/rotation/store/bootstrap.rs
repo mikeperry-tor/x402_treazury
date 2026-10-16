@@ -38,7 +38,7 @@ pub(crate) struct StartupPath {
     pub destination_ready: bool,
     pub recovery_count: u64,
     pub readiness_dispute: Option<String>,
-    pub shortage_observed: bool,
+    pub condition: Option<super::super::error::FundingCondition>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub(crate) enum StartupDisposition {
     Obstructed(&'static str),
 }
 impl StartupPath {
-    /// Interpret the worker's committed facts and fixed diagnostic categories;
+    /// Interpret committed obligations and typed current-process observations;
     /// this does not transition jobs, quote, forecast input cost, or authorize work.
     pub(crate) fn disposition(
         &self,
@@ -98,27 +98,18 @@ impl StartupPath {
         if !self.facts.enabled {
             return Obstructed("funding_group_disabled");
         }
-        let category = self
-            .job
-            .last_error
-            .as_deref()
-            .unwrap_or("")
-            .split(';')
-            .next()
-            .unwrap_or("");
-        let reason = match category {
-            "funding_disabled" => "funding_disabled",
-            "qualification_funding_denied" => "qualification_funding_denied",
-            "funding_cost_limit_exceeded"
-            | "funding_amount_limit_exceeded"
-            | "funding_input_cap_exceeded"
-            | "near_authentication_required" => "funding_policy_requires_review",
-            "funding_allocation_evidence_invalid" | "funding_integrity_conflict" => {
-                "funding_evidence_requires_review"
-            }
-            "treasury_insufficient_spendable_funds"
-                if !source_pending && self.shortage_observed =>
-            {
+        use super::super::error::FundingCondition as Condition;
+        let reason = match self.condition {
+            Some(Condition::Disabled) => "funding_disabled",
+            Some(Condition::QualificationDenied) => "qualification_funding_denied",
+            Some(
+                Condition::CostLimit
+                | Condition::AmountLimit
+                | Condition::InputLimit
+                | Condition::AuthenticationRequired,
+            ) => "funding_policy_requires_review",
+            Some(Condition::EvidenceInvalid) => "funding_evidence_requires_review",
+            Some(Condition::InsufficientFunds) if !source_pending => {
                 "treasury_insufficient_spendable_funds"
             }
             _ => {
@@ -134,19 +125,27 @@ impl StartupPath {
 }
 
 impl Store {
-    pub(super) fn observe_funding_shortage(
+    pub(crate) fn observe_funding_condition(
         &mut self,
         job: &str,
         operation: &str,
-        error: Option<&str>,
-    ) {
-        if error.and_then(|e| e.split(';').next()) == Some("treasury_insufficient_spendable_funds")
-        {
-            self.funding_shortages
-                .insert(job.to_owned(), operation.to_owned());
-        } else {
-            self.funding_shortages.remove(job);
+        condition: Option<super::super::error::FundingCondition>,
+    ) -> Result<()> {
+        let current: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_progress WHERE job_id=?1 AND operation_id=?2)",
+            params![job, operation],
+            |r| r.get(0),
+        )?;
+        if !current {
+            return Ok(());
         }
+        if let Some(condition) = condition {
+            self.funding_conditions
+                .insert(job.to_owned(), (operation.to_owned(), condition));
+        } else {
+            self.funding_conditions.remove(job);
+        }
+        Ok(())
     }
 
     /// Caller pages its immutable configured name set, at most GROUP_PAGE per turn.
@@ -296,7 +295,19 @@ impl Store {
         let facts = self.funding_facts(id, &job.operation_id)?;
         let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
         Ok(StartupPath {
-            shortage_observed: self.funding_shortages.get(id) == Some(&job.operation_id),
+            condition: match self.funding_restriction {
+                super::super::restriction::FundingRestriction::Paused => {
+                    Some(super::super::error::FundingCondition::Disabled)
+                }
+                super::super::restriction::FundingRestriction::DenyNewFunding => {
+                    Some(super::super::error::FundingCondition::QualificationDenied)
+                }
+                super::super::restriction::FundingRestriction::Ordinary => self
+                    .funding_conditions
+                    .get(id)
+                    .filter(|(operation, _)| operation == &job.operation_id)
+                    .map(|(_, condition)| *condition),
+            },
             wallet_type: self.funding_wallet_type(id)?,
             job,
             facts,
@@ -497,6 +508,9 @@ mod tests {
         for order in [[0, 1], [1, 0]] {
             for job in &jobs {
                 store.defer_funding(&job.id, 0, None, false).unwrap();
+                store
+                    .observe_funding_condition(&job.id, &job.operation_id, None)
+                    .unwrap();
             }
             store
                 .defer_funding(
@@ -504,6 +518,13 @@ mod tests {
                     0,
                     Some("treasury_insufficient_spendable_funds; fixed worker result"),
                     false,
+                )
+                .unwrap();
+            store
+                .observe_funding_condition(
+                    &jobs[order[0]].id,
+                    &jobs[order[0]].operation_id,
+                    Some(super::super::super::error::FundingCondition::InsufficientFunds),
                 )
                 .unwrap();
             assert!(
@@ -519,6 +540,13 @@ mod tests {
                     0,
                     Some("funding_amount_limit_exceeded; fixed worker result"),
                     false,
+                )
+                .unwrap();
+            store
+                .observe_funding_condition(
+                    &jobs[order[1]].id,
+                    &jobs[order[1]].operation_id,
+                    Some(super::super::super::error::FundingCondition::AmountLimit),
                 )
                 .unwrap();
             assert_eq!(
@@ -562,11 +590,82 @@ mod tests {
                 false,
             )
             .unwrap();
+        store
+            .observe_funding_condition(&jobs[0].id, &jobs[0].operation_id, None)
+            .unwrap();
         assert!(
             store
                 .startup_obstruction("configured", 3, None)
                 .unwrap()
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod typed_condition_tests {
+    use super::*;
+    use crate::rotation::error::FundingCondition;
+
+    #[test]
+    fn startup_obstructions_depend_on_typed_current_observations_not_saved_prose() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )?;
+        super::super::test_support::declare_two_reserves(
+            &mut store,
+            "typed",
+            "1",
+            Some(U256::from(10)),
+            0,
+        )?;
+        let jobs = store.funding_jobs()?;
+        for job in &jobs {
+            store.defer_funding(
+                &job.id,
+                0,
+                Some("funding_cost_limit_exceeded; forged policy observation"),
+                false,
+            )?;
+        }
+        assert!(store.startup_obstruction("typed", 3, None)?.is_none());
+        for job in &jobs {
+            store.observe_funding_condition(
+                &job.id,
+                &job.operation_id,
+                Some(FundingCondition::CostLimit),
+            )?;
+            store.defer_funding(&job.id, 0, Some("arbitrary diagnostic"), false)?;
+        }
+        assert_eq!(
+            store.startup_obstruction("typed", 3, None)?.unwrap().len(),
+            2
+        );
+        for job in &jobs {
+            store.observe_funding_condition(&job.id, "obsolete-operation", None)?;
+        }
+        assert_eq!(
+            store.startup_obstruction("typed", 3, None)?.unwrap().len(),
+            2
+        );
+        for job in &jobs {
+            store.observe_funding_condition(&job.id, &job.operation_id, None)?;
+        }
+        assert!(store.startup_obstruction("typed", 3, None)?.is_none());
+        store.pause_new_funding();
+        assert!(
+            store
+                .startup_obstruction("typed", 3, None)?
+                .unwrap()
+                .iter()
+                .all(|(_, reason)| *reason == "funding_disabled")
+        );
+        assert!(store.status()?.treasury_operations.is_empty());
+        assert_eq!(store.status()?.snapshot_revision, 1);
+        Ok(())
     }
 }

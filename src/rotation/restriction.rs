@@ -22,7 +22,7 @@ impl FundingRestriction {
             anyhow::bail!(AdmissionError::FundingRestricted);
         }
         if self == Self::Paused {
-            anyhow::bail!("funding_disabled");
+            anyhow::bail!(super::error::FundingCondition::Disabled);
         }
         Ok(())
     }

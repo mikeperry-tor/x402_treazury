@@ -31,6 +31,7 @@ struct Record {
     due: u64,
     streak: u32,
     error: Option<String>,
+    condition: Option<super::super::error::FundingCondition>,
 }
 #[derive(Default)]
 struct State {
@@ -639,6 +640,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         if let Some(reason) = wait {
             tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,phase=?phase,reason,"funding awaiting chain confirmation; polling automatically");
         }
+        let condition = failure.as_ref().and_then(funding_condition);
         let error = failure
             .filter(|_| wait.is_none())
             .map(|error| safe_error(&error, &phase));
@@ -648,10 +650,16 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             tracing::warn!(wallet=%job.pool_name,size=%wallet_type,phase=?phase,category,"Funding observation failed; existing work retained and observation will retry");
             tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,category,"Funding observation failure correlation");
         }
-        let (next, streak, health) = {
+        let (next, streak, health, condition) = {
             let mut state = lease.state.lock().expect("funding schedule lock");
-            state.complete(&job, kind, instant, self.poll_seconds, error);
-            state.health(&job.operation_id, instant, applicable)
+            state.complete(&job, kind, instant, self.poll_seconds, error, condition);
+            let (next, streak, health) = state.health(&job.operation_id, instant, applicable);
+            (
+                next,
+                streak,
+                health,
+                state.condition(&job.operation_id, applicable),
+            )
         };
         let (id, operation) = (job.id.clone(), job.operation_id.clone());
         let phase = self
@@ -670,6 +678,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     streak,
                     health.as_deref(),
                 )?;
+                s.observe_funding_condition(&id, &operation, condition)?;
                 let current = s.funding_job(&id)?.context("funding job missing")?;
                 Ok(Some((current.phase, s.funding_wallet_type(&id)?)))
             })
@@ -753,6 +762,7 @@ impl State {
                 due,
                 streak: 0,
                 error: None,
+                condition: None,
             },
         );
         Some(due <= now)
@@ -764,6 +774,7 @@ impl State {
         now: u64,
         poll: u64,
         error: Option<String>,
+        condition: Option<super::super::error::FundingCondition>,
     ) {
         let key = Key {
             operation: job.operation_id.clone(),
@@ -785,6 +796,24 @@ impl State {
         let jitter = job.id.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
         record.due = now.saturating_add(delay).saturating_add(jitter);
         record.error = error;
+        record.condition = condition;
+    }
+    fn condition(
+        &self,
+        operation: &str,
+        applicable: [bool; 4],
+    ) -> Option<super::super::error::FundingCondition> {
+        [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit]
+            .into_iter()
+            .filter(|kind| applicable[*kind as usize])
+            .find_map(|kind| {
+                self.records
+                    .get(&Key {
+                        operation: operation.to_owned(),
+                        kind,
+                    })
+                    .and_then(|record| record.condition)
+            })
     }
     fn health(
         &self,
@@ -808,14 +837,15 @@ impl State {
             .map(|(_, record)| record.streak)
             .max()
             .unwrap_or(0);
-        // Keep the fixed leading category consumed by startup and recovery.
-        // Per-kind errors remain independently retained in the bounded owner;
-        // integrity failures precede source/quote policy obstructions and outages.
+        // Diagnostics remain presentation-only. Typed current observations are
+        // independently retained in the same bounded scheduling records.
         let integrity = entries.iter().find_map(|(_, record)| {
             record
                 .error
                 .as_ref()
-                .filter(|error| error.starts_with("funding_integrity_conflict;"))
+                .filter(|_| {
+                    record.condition == Some(super::super::error::FundingCondition::EvidenceInvalid)
+                })
                 .cloned()
         });
         let error = integrity.or_else(|| {

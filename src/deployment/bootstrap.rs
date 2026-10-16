@@ -733,6 +733,13 @@ mod tests {
                 false,
             )
             .unwrap();
+        state
+            .observe_funding_condition(
+                &jobs[0].id,
+                &jobs[0].operation_id,
+                Some(crate::rotation::error::FundingCondition::InsufficientFunds),
+            )
+            .unwrap();
         let (store, owner) = StoreHandle::spawn(state);
         let names = BTreeSet::from(["web".to_owned()]);
         let attempts = BTreeMap::from([("web".to_owned(), 3)]);
@@ -749,6 +756,12 @@ mod tests {
                     0,
                     Some("funding_amount_limit_exceeded; private fixture prose"),
                     false,
+                )?;
+                let operation = s.funding_job(&blocked)?.unwrap().operation_id;
+                s.observe_funding_condition(
+                    &blocked,
+                    &operation,
+                    Some(crate::rotation::error::FundingCondition::AmountLimit),
                 )
             })
             .await

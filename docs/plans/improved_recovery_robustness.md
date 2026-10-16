@@ -326,7 +326,7 @@ Normal selection stays read-only; discovering a contradiction may invalidate
 support but cannot reserve, sign, change roles or start funding. No new persistent
 incident record is needed. A shared database failure still propagates. C09 remains
 responsible for authoritative exposure derivation; this slice supplies isolation.
-Implementation: 07529ca plus review fixup. The sub-agent review identified lost
+Implementation: 07529ca plus review fixup a1817b8. The sub-agent review identified lost
 merge-failure metadata and a cached-hint fallback regression. The fixup retains
 typed failure through traversal exhaustion, scopes merge/invalidation to the captured
 group, and keeps unsigned hint fallback separate from admission. All 29 selection
@@ -351,11 +351,33 @@ field. New-work permission and durable recovery count remain separate checks.
 Fixtures must create real archive provenance rather than simulate it with prose.
 The remaining startup/health diagnostic interpreters are a separate C02 sub-slice;
 C16 still owns safe cleanup of interrupted `Preparing` work.
-Validation: nine focused `recovery_` tests, the extended archive/liability regression,
+Implementation: 3491cc6. Validation: nine focused `recovery_` tests, the extended archive/liability regression,
 and the normal-library `confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn`
 test pass. A sub-agent review found no code defects; its archive-plus-reservation
 negative control was added and passes. This slice does not claim the full signed
 conflict/canonical-replacement lifecycle acceptance, which remains pending.
+
+**C02 / G01 startup and observation contract:** Replace `funding_shortages` and
+`StartupPath::disposition`'s diagnostic category parser with typed, operation-bound
+current-process observations. Actual funding restriction supplies current pause and
+qualification status. Cost, amount, input-cap, shortage and authentication producers
+return typed errors; unsigned outages remain ordinary retryable observations.
+The scheduler retains the type beside diagnostics in its existing bounded records
+and publishes it under the same operation check. Reopen does not reconstruct a
+policy obstruction from saved prose. Delete source-operator diagnostic append/
+preservation and scheduler integrity-prefix priority; retained provider flags and
+original journals remain the authority. Ordinary health text can be replaced or
+cleared without changing closure eligibility. Remove the credit-wait string branch:
+its sole producer is the test-only `record_credit` helper; production funding credit
+publication already returns successful observation while credit is insufficient.
+No additional timer, funding permission, durable incident field or schema is needed.
+Validation: all 26 bootstrap tests, eight startup tests, five scheduling tests and
+14 scheduler tests pass; library/funding-test Clippy passes with warnings denied.
+The funding integration suite passed 23 cases; its remaining historical-diagnostic
+assertion was updated to check unknown-preparation ownership after diagnostic clearing
+and a later tick, and that focused case passes. Read-only sub-agent review found no
+actionable defect. A focused sibling-lane
+condition retention/clearing regression is retained as a review follow-up.
 
 ### Stage 1 — Minimal authority and dependency specification
 
