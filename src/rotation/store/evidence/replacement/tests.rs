@@ -643,3 +643,96 @@ async fn unused_replacement_preserves_absent_debit_and_unexpired_nonce_cannot_re
     assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::from(1));
     f.store.clear_replacement_staging(&snapshot.id).unwrap();
 }
+
+#[tokio::test]
+async fn retired_repair_releases_disputed_liability_without_restoring_payment_authority() {
+    let mut f = Fixture::new(2, true).await;
+    f.store
+        .db
+        .execute(
+            "UPDATE reserve_claims SET wallet_id=NULL WHERE wallet_id=?1",
+            [&f.wallet],
+        )
+        .unwrap();
+    f.store
+        .db
+        .execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&f.wallet])
+        .unwrap();
+    f.store
+        .db
+        .execute(
+            "UPDATE pools SET payment_limit='1000000',enabled=1 WHERE id=?1",
+            [&f.pool],
+        )
+        .unwrap();
+    assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::from(2));
+    let before: String = f.store.db.query_row("SELECT json_object('requirement',readiness_requirement,'support',readiness_support,'dispute',readiness_disputed,'state',state) FROM funding_jobs WHERE wallet_id=?1",[&f.wallet],|r|r.get(0)).unwrap();
+    let boundary = f.store.wallet_boundary(&f.pool).unwrap();
+    assert!(
+        f.store
+            .repair_wallet_page(&f.pool, -1, boundary, PAGE)
+            .unwrap()
+            .iter()
+            .any(|(_, id)| id.as_deref() == Some(&f.wallet))
+    );
+    let scratch = tempfile::tempdir().unwrap();
+    let dummy = Store::create(
+        &scratch.path().join("state"),
+        &scratch.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let original = std::mem::replace(&mut f.store, dummy);
+    let (store, worker) = StoreHandle::spawn(original);
+    assert!(
+        super::super::repair::repair_wallet(
+            store.clone(),
+            f.base.clone(),
+            f.pool.clone(),
+            f.wallet.clone()
+        )
+        .await
+        .unwrap()
+    );
+    let pool = f.pool.clone();
+    let wallet = f.wallet.clone();
+    let query = store.call(move |s| {
+        assert_eq!(exposure(&s.db,&wallet)?,U256::ZERO);
+        let (role,repair):(String,Option<String>) = s.db.query_row("SELECT role,evidence_repair FROM wallets WHERE id=?1",[&wallet],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        assert_eq!(role,"RETIRED");
+        assert!(repair.is_none());
+        assert_eq!(s.db.query_row("SELECT COUNT(*) FROM reserve_claims WHERE wallet_id=?1",[&wallet],|r|r.get::<_,i64>(0))?,0);
+        let after:String = s.db.query_row("SELECT json_object('requirement',readiness_requirement,'support',readiness_support,'dispute',readiness_disputed,'state',state) FROM funding_jobs WHERE wallet_id=?1",[&wallet],|r|r.get(0))?;
+        assert_eq!(before,after);
+        assert!(!s.repair_wallet_page(&pool,-1,s.wallet_boundary(&pool)?,PAGE)?.iter().any(|(_,id)|id.as_deref()==Some(&wallet)));
+        s.payment_balance_query(&pool,vec![wallet])
+    }).await.unwrap();
+    let view = f.base.view(query).await.unwrap();
+    let pool = f.pool.clone();
+    let wallet = f.wallet.clone();
+    store
+        .call(move |s| {
+            assert!(
+                s.payment_candidate_with_evidence(
+                    &pool,
+                    U256::from(1),
+                    Some(&wallet),
+                    i64::MAX,
+                    &[view]
+                )?
+                .is_none(),
+                "fresh positive balance cannot restore a retired payer"
+            );
+            assert!(
+                s.wallet_page(&pool, -1, s.wallet_boundary(&pool)?, PAGE)?
+                    .iter()
+                    .all(|(_, id, _)| id != &wallet)
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    worker.await.unwrap();
+}

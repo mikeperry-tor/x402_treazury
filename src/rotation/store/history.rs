@@ -174,15 +174,13 @@ impl Store {
         through: i64,
         limit: usize,
     ) -> Result<Vec<(i64, Option<String>)>> {
-        let mut statement = self.db.prepare("SELECT sequence,id,evidence_repair,role FROM wallets WHERE pool_id=?1 AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
+        let mut statement = self.db.prepare("SELECT sequence,id,evidence_repair FROM wallets WHERE pool_id=?1 AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
         Ok(statement
             .query_map(params![pool, after, through, page_limit(limit)?], |row| {
                 let reason: Option<String> = row.get(2)?;
                 Ok((
                     row.get(0)?,
-                    if reason.as_deref() == Some("chain_repair_required")
-                        && row.get::<_, String>(3)? != "RETIRED"
-                    {
+                    if reason.as_deref() == Some("chain_repair_required") {
                         Some(row.get(1)?)
                     } else {
                         None
@@ -214,6 +212,59 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repair_pages_cross_healthy_retired_prefix_without_granting_balance_membership() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = crate::rotation::store::test_support::declare_two_reserves(
+            &mut store,
+            "retiredpages",
+            "1",
+            None,
+            0,
+        )
+        .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET role='RETIRED' WHERE pool_id=?1",
+                [&pool],
+            )
+            .unwrap();
+        for sequence in 2..130 {
+            store.db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role,evidence_repair) VALUES(?1,?2,?3,?4,X'00','1','RETIRED',?5)",params![format!("retired-{sequence}"),pool,sequence,format!("0x{sequence:040x}"),if sequence==129 {Some("chain_repair_required")} else if sequence==128 {Some("evidence_repair_required")} else {None}]).unwrap();
+        }
+        let through = store.wallet_boundary(&pool).unwrap();
+        let first = store
+            .repair_wallet_page(&pool, -1, through, PAGE_SIZE)
+            .unwrap();
+        assert_eq!(first.len(), PAGE_SIZE);
+        assert_eq!(first.last().unwrap().0, 63);
+        assert!(first.iter().all(|(_, wallet)| wallet.is_none()));
+        let second = store
+            .repair_wallet_page(&pool, 63, through, PAGE_SIZE)
+            .unwrap();
+        assert_eq!(second.len(), PAGE_SIZE);
+        assert!(second.iter().all(|(_, wallet)| wallet.is_none()));
+        let last = store
+            .repair_wallet_page(&pool, 127, through, PAGE_SIZE)
+            .unwrap();
+        assert_eq!(last, vec![(128, None), (129, Some("retired-129".into()))]);
+        assert!(
+            store
+                .wallet_page(&pool, -1, through, PAGE_SIZE)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(store.priority_wallets(&pool, through).unwrap().is_empty());
+    }
 
     #[test]
     fn wallet_pages_finish_captured_inventory_without_adopting_arrivals() {
