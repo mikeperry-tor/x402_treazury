@@ -579,7 +579,11 @@ Back up while serving is stopped. The consistent database and key must be synced
 before atomically publishing `backup.json`; directory sync is also required for
 reported success. A failed backup destination cannot be silently overwritten.
 Seed-only recovery does not recover EVM keys, pending swap bindings or payment
-liabilities. Protect the whole backup as spending material.
+liabilities. Protect the whole backup as spending material. Declare a manually restored
+working copy with `wallet mark-restored` before using it. This retains a durable
+missing-provenance restriction on new financial work while allowing known-operation
+observations. It cannot detect an undeclared rollback or reconstruct later off-chain
+authorizations; see [the restoration workflow](wallet-cli.md).
 
 `wallet status` reads saved metadata offline. `wallet addresses` displays saved
 receive addresses; singular `wallet address` derives an address. Explicit recovery

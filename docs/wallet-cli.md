@@ -251,10 +251,33 @@ EVM keys and all journals) and its encryption key into an owner-only directory.
 fully written and synced. A failed destination cannot be reused. If a directory
 sync fails after publication, the command returns an error even though a complete
 backup may be present; durability is not assured until sync succeeds. Protect the
-entire backup as spending material. To restore, stop the original process and use the backup directory as
-`state_dir`, its `key` as `key_file`, and the same treasury ID. Do not run the
-original and restored copies simultaneously. A Zcash mnemonic alone cannot restore
-random EVM keys, pending payment authorizations or the rotation journal.
+entire backup as spending material. For manual restoration, stop the original process,
+retain the backup unchanged, and use a private working copy as `state_dir`, its `key`
+as `key_file`, and the same treasury ID. Before serving or submitting anything from
+that copy, declare the restoration offline:
+
+```sh
+x402_treazury wallet mark-restored --state-dir /path/to/restored-copy --key-file /path/to/restored-copy/key
+```
+
+The declaration persists across restart and further backups. It disables new managed
+payments, allocations, treasury preparation, shielding, submission (including saved
+bytes) and funding reauthorization. Known-operation observations, sync, accounting,
+status and backups remain available. It does not erase known liabilities or change
+attempt counts. `wallet status` reports `restored_backup_missing_provenance`.
+
+A chain scan cannot reconstruct later, still-valid off-chain payment authorizations,
+missing submission attempts or qualification permits. There is no reset switch:
+restoring dependent spending would require complete externally retained financial
+journals and a separately reviewed reconciliation/import, which this command does
+not implement. Observing current balances or waiting alone is insufficient.
+
+This is an explicit declaration workflow, not automatic rollback detection or an
+atomic file-restoration command. Undeclared filesystem rollback may be undetectable;
+never use an unmarked restored copy before making the declaration. Do not run original
+and restored copies simultaneously or reuse their keys in an independent static-wallet
+configuration to bypass the restriction. A Zcash mnemonic alone cannot restore random
+EVM keys, pending payment authorizations or the rotation journal.
 
 To assess existing funding problems and perform one recovery pass, stop serving and run:
 

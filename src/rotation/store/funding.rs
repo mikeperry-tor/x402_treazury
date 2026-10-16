@@ -350,6 +350,7 @@ impl Store {
     }
 
     pub fn require_funding_attempt(&self, job: &str, max_attempts: u32) -> Result<()> {
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("funding_attempt_start")?;
         self.check_job_permit(job, 1)?;
@@ -386,6 +387,7 @@ impl Store {
         operation: &str,
         authority: Option<&super::super::transaction::ManagedFundingAuthority>,
     ) -> Result<()> {
+        self.require_complete_provenance()?;
         let binding: Option<(String, bool)> = self.db.query_row(
             "SELECT j.job_id,p.enabled FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE j.operation_id=?1",
             [operation],
@@ -546,6 +548,7 @@ impl Store {
         target: &str,
         ceiling: &str,
     ) -> Result<()> {
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("funding_quote_start")?;
         self.check_job_permit(job, 1)?;
@@ -1132,6 +1135,7 @@ impl Store {
         job: &str,
         expected_operation: &str,
     ) -> Result<()> {
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("funding_attempt_reset")?;
         self.check_job_permit(job, 1)?;
@@ -1255,6 +1259,7 @@ impl Store {
         target: Option<&str>,
         expected_operation: Option<&str>,
     ) -> Result<()> {
+        self.require_complete_provenance()?;
         ensure!(!quote.is_empty(), "empty funding quote");
         let aad = format!("v1:{}:{}:funding:{id}", self.id, self.network.name());
         let encrypted = seal(&self.key, &aad, quote)?;
@@ -1378,6 +1383,7 @@ impl Store {
     ) -> Result<()> {
         ensure!(expected.permits(&next), "invalid funding transition");
         if next == FundingPhase::Preparing {
+            self.require_complete_provenance()?;
             self.funding_restriction
                 .require_new_funding("funding_preparation_start")?;
             self.check_job_permit(id, 1)?;

@@ -845,3 +845,46 @@ async fn standalone_modes_preserve_inspection_and_unsigned_probe_order() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn restored_backup_declaration_is_offline_exclusive_and_retained() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let state = dir.join("restored");
+    let key = dir.join("key");
+    let store = Store::create(&state, &key, 1, b"synthetic snapshot").unwrap();
+    let id = store.id().to_owned();
+    let args = [
+        "wallet",
+        "mark-restored",
+        "--state-dir",
+        "restored",
+        "--key-file",
+        "key",
+    ];
+    let blocked = bad(run(dir, &args, &[]).await);
+    assert!(blocked.contains("state_in_use"), "{blocked}");
+    assert!(!store.status().unwrap().restored_backup_missing_provenance);
+    drop(store);
+    let marked = good(run(dir, &args, &[]).await);
+    assert_eq!(marked["restored_backup_missing_provenance"], true);
+    assert_eq!(marked["financial_actions_enabled"], false);
+    let saved = good(
+        run(
+            dir,
+            &["wallet", "status", "--state-dir", "restored", "--json"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(saved["restored_backup_missing_provenance"], true);
+    let mut store = Store::open(&state, &key, &id).unwrap();
+    assert!(
+        store
+            .reserve("forbidden", None, 1, 1)
+            .unwrap_err()
+            .to_string()
+            .starts_with("restored_backup_missing_provenance")
+    );
+    assert_eq!(store.snapshot().unwrap().0, 1);
+}

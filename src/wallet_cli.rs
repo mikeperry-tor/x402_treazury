@@ -54,6 +54,8 @@ enum Action {
         #[arg(long)]
         json: bool,
     },
+    /// Declare manually restored state before serving; disable new financial actions.
+    MarkRestored,
     /// Make an offline backup, including the encryption key.
     Backup {
         #[arg(long)]
@@ -160,6 +162,11 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
             treasury_id: (!treasury_id.is_empty()).then_some(treasury_id),
         },
         Action::Address => Command::Address {
+            state_dir,
+            key_file,
+            treasury_id,
+        },
+        Action::MarkRestored => Command::MarkRestored {
             state_dir,
             key_file,
             treasury_id,
@@ -334,6 +341,12 @@ enum Command {
         treasury_id: String,
         job_id: String,
     },
+    /// Offline declaration of restored state with unknown later financial history.
+    MarkRestored {
+        state_dir: PathBuf,
+        key_file: PathBuf,
+        treasury_id: String,
+    },
     /// Back up encrypted wallet, EVM keys, journals and encryption key offline.
     Backup {
         state_dir: PathBuf,
@@ -397,7 +410,10 @@ async fn run_args(
     anyhow::ensure!(
         matches!(
             &args.command,
-            Action::Status { .. } | Action::Backup { .. } | Action::RecoverUnprepared { .. }
+            Action::Status { .. }
+                | Action::Backup { .. }
+                | Action::MarkRestored
+                | Action::RecoverUnprepared { .. }
         ),
         "treasury commands require a build with --features zcash"
     );
@@ -444,6 +460,24 @@ async fn run_args(
         let output =
             crate::treasury::Treasury::inspect_addresses(state_dir, key_file, treasury_id).await?;
         println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+    if let Command::MarkRestored {
+        state_dir,
+        key_file,
+        treasury_id,
+    } = command
+    {
+        tokio::task::spawn_blocking(move || {
+            let mut store =
+                crate::rotation::store::Store::open(&state_dir, &key_file, &treasury_id)?;
+            store.declare_restored_backup()
+        })
+        .await??;
+        println!(
+            "{}",
+            serde_json::json!({"restored_backup_missing_provenance":true,"financial_actions_enabled":false})
+        );
         return Ok(());
     }
     if let Command::Backup {
@@ -568,6 +602,7 @@ async fn execute_wallet_command(
         Command::Bootstrap { .. }
         | Command::Addresses { .. }
         | Command::Status { .. }
+        | Command::MarkRestored { .. }
         | Command::Backup { .. }
         | Command::RecoverUnprepared { .. }
         | Command::Recover { .. } => {

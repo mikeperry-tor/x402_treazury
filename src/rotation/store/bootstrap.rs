@@ -30,6 +30,7 @@ pub(crate) struct StartupClaim {
 
 #[derive(Debug)]
 pub(crate) struct StartupPath {
+    pub provenance_missing: bool,
     pub wallet_type: String,
     pub job: FundingJob,
     pub facts: FundingFacts,
@@ -57,6 +58,9 @@ impl StartupPath {
         source_pending: bool,
     ) -> StartupDisposition {
         use StartupDisposition::*;
+        if self.provenance_missing {
+            return Obstructed("restored_backup_missing_provenance");
+        }
         if self.destination_ready {
             return DestinationReady;
         }
@@ -152,6 +156,7 @@ impl Store {
     /// Each group has at most one ACTIVE and two enabled reserve claims.
     pub(crate) fn startup_groups(&self, names: &[String]) -> Result<Vec<StartupGroup>> {
         ensure!(names.len() <= GROUP_PAGE, "startup group page too large");
+        let provenance_missing = super::restoration::declared(&self.db)?;
         let mut result = Vec::with_capacity(names.len());
         for name in names {
             let (pool, enabled): (String, bool) = self
@@ -202,8 +207,8 @@ impl Store {
                 pool,
                 name: name.clone(),
                 enabled,
-                serving_ready: enabled && serving_ready,
-                inventory_ready: enabled && inventory_ready,
+                serving_ready: enabled && serving_ready && !provenance_missing,
+                inventory_ready: enabled && inventory_ready && !provenance_missing,
                 claims,
                 source_pending: self.db.query_row(
                     "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
@@ -224,6 +229,12 @@ impl Store {
         max_attempts: u32,
         captured: Option<&[StartupClaim]>,
     ) -> Result<Option<Vec<(String, &'static str)>>> {
+        if super::restoration::declared(&self.db)? {
+            return Ok(Some(vec![(
+                name.to_owned(),
+                "restored_backup_missing_provenance",
+            )]));
+        }
         let group = self.startup_groups(&[name.to_owned()])?.remove(0);
         let serving = captured.is_none();
         if serving && group.serving_ready {
@@ -296,6 +307,7 @@ impl Store {
         let facts = self.funding_facts(id, &job.operation_id)?;
         let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
         Ok(StartupPath {
+            provenance_missing: super::restoration::declared(&self.db)?,
             condition: match self.funding_restriction {
                 super::super::restriction::FundingRestriction::Paused => {
                     Some(super::super::error::FundingCondition::Disabled)

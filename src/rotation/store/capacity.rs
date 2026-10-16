@@ -367,6 +367,7 @@ impl Store {
         auto_fund: bool,
     ) -> Result<Option<String>> {
         ensure!(auto_fund, "automatic_funding_disabled");
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("capacity_allocation")?;
         let tx = self

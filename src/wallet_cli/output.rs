@@ -29,6 +29,9 @@ pub(super) fn status(status: &Status) -> String {
         "Zcash wallet status\nTreasury ID: {}\nBirthday block: {}\nWallet snapshot revision: {}\n",
         status.treasury_id, status.birthday, status.snapshot_revision
     );
+    if status.restored_backup_missing_provenance {
+        text.push_str("Restored backup: missing later financial provenance; new financial actions disabled. Observations remain available.\n");
+    }
     if let Some(sync) = &status.sync {
         let phase = match sync.phase {
             SyncPhase::Syncing => "syncing",

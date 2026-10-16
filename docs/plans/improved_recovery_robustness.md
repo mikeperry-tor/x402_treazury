@@ -1528,6 +1528,31 @@ expiry-only submission, legacy header-bound numeric facts and block-expiry rejec
 The fixture now awaits production owner close before reopening. Independent review
 is clear; no live-funded work was run.
 
+**C22 declared restoration contract (implemented and reviewed):** Ordinary reopen
+cannot detect an undeclared filesystem rollback. The explicit offline
+`wallet mark-restored` command declares a manually restored working copy before
+serving or submission. Its durable, one-way missing-provenance marker fences new
+managed payments, source/qualification allocation, treasury preparation, shielding,
+all submission including saved bytes, and funding reauthorization. Known-operation
+observations, scans, accounting and read-only inspection remain available. Current
+balances, reconstructed projections and canonical expiry of known operations cannot
+clear unknown later authorizations or missing journals. Original bytes, gross debit,
+known liabilities and attempt counts remain intact; backups retain the declaration.
+
+This is not an atomic file-restoration tool or automatic rollback detection.
+Operators must stop the original process and declare the restored working copy before
+use. Unrelated static credentials remain independent; reusing restored keys as a static
+wallet bypasses this state's ownership and is not protected. Complete externally
+retained authorization/submission journals and a separately reviewed reconciliation
+would be required to recover dependent spending; there is no generic reset switch or
+claim that scanning known chains recovers unseen off-chain liabilities.
+
+The Store backup/reopen test preserves exact known bytes and attempts while blocking
+new authority and startup readiness. A current Base balance cannot recover a missing
+signed authorization from an older backup. The actual CLI test verifies exclusive
+ownership, offline declaration and persistent status without opening the SDK. All
+three focused gates passed; independent review is clear. No private backup was used.
+
 **C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
 PREPARED treasury bytes with zero submission attempts remain observable when a
 stale derived phase says ALLOCATED, QUOTED or COMPLETE. Inventory and health use

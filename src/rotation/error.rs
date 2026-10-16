@@ -2,6 +2,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionError {
     PayerChanged,
+    RestoredState,
     UnsupportedPayment(&'static str),
     PriceLimit(&'static str),
     PaymentPending(&'static str),
@@ -15,6 +16,10 @@ pub enum AdmissionError {
 impl std::fmt::Display for AdmissionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (code, detail): (&str, &str) = match self {
+            Self::RestoredState => (
+                "restored_backup_missing_provenance",
+                "declared restored state may omit later authorizations and submissions; observations remain available, new financial actions are disabled",
+            ),
             Self::PayerChanged => (
                 "payer_changed_before_payment",
                 "wallet rotated before signing; retry this tool call",

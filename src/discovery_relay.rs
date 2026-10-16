@@ -180,6 +180,7 @@ impl RelayFailure {
         if let Some(admission) = error.downcast_ref::<crate::rotation::error::AdmissionError>() {
             use crate::rotation::error::AdmissionError;
             let reason = match admission {
+                AdmissionError::RestoredState => "restored_backup_missing_provenance",
                 AdmissionError::PayerChanged => "payer_changed",
                 AdmissionError::UnsupportedPayment(_) => "unsupported_payment",
                 AdmissionError::PriceLimit(_) => "price_limit",

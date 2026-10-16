@@ -204,6 +204,13 @@ missing environment references fail, and submission otherwise follows the indexe
 Birthday discovery uses the older valid information/tip observation minus the
 scan rewind; ordinary advancement between independent reads is not a failure.
 
+Before using a manually restored backup, declare its private working copy with
+`wallet mark-restored`. The durable declaration blocks new financial actions,
+including submission of saved bytes, while retaining known-operation observations,
+accounting, sync and backups. It is not automatic rollback detection: current
+balances and chain scans cannot reconstruct missing off-chain authorizations or
+submission journals. There is no reset switch or authority to bypass the marker.
+
 Managed serving binds listeners before starting initial or replacement funding and
 does not wait for a funded payer before exposing available tools. It defaults to
 automatic funding, using actual spendable treasury funds under ZEC/fee

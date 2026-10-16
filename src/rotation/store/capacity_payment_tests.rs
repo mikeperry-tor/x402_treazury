@@ -262,3 +262,77 @@ fn supported_reopen_adds_capacity_lookup_without_changing_liabilities() {
     let original: (String, String, i64) = store.db.query_row("SELECT r.hash,r.support,(SELECT payment_resolutions_disputed FROM wallets WHERE id=a.wallet_id) FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(original, ("disputed".into(), "immutable".into(), 1));
 }
+
+#[tokio::test]
+async fn restored_backup_cannot_recover_missing_signed_authority_from_current_balance() {
+    let (rpc, server) = balance_rpc().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mut latest, pool, wallet) = disputed_store(dir.path());
+    let identity = latest.id().to_owned();
+    let backup = dir.path().join("older");
+    latest.backup(&backup).unwrap();
+    let view = rpc
+        .view(
+            latest
+                .payment_balance_query(&pool, vec![wallet.clone()])
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let prepared = latest
+        .prepare_payment(&pool, U256::from(2), "later-authorization", view, None)
+        .unwrap();
+    latest
+        .journal_authorization(&prepared, auth(&prepared), None)
+        .unwrap();
+    assert_eq!(signed_count(&latest), 1);
+    drop(latest);
+    let mut restored = Store::open(&backup, &backup.join("key"), &identity).unwrap();
+    assert_eq!(
+        signed_count(&restored),
+        0,
+        "later still-valid authorization is absent from backup"
+    );
+    restored.declare_restored_backup().unwrap();
+    // Real production RPC certificates remain obtainable, but cannot manufacture
+    // the missing off-chain journal or regain financial authority.
+    let view = rpc
+        .view(
+            restored
+                .payment_balance_query(&pool, vec![wallet.clone()])
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(view.balances[&wallet], U256::from(20));
+    let error = restored
+        .prepare_payment(&pool, U256::from(1), "forbidden", view, None)
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<AdmissionError>(),
+        Some(&AdmissionError::RestoredState)
+    );
+    assert_eq!(
+        restored
+            .journal_authorization(&prepared, auth(&prepared), None)
+            .unwrap_err()
+            .downcast_ref::<AdmissionError>(),
+        Some(&AdmissionError::RestoredState)
+    );
+    assert_eq!(signed_count(&restored), 0);
+    assert_eq!(
+        evidence::exposure(&restored.db, &wallet).unwrap(),
+        U256::from(1)
+    );
+    drop(restored);
+    let restored = Store::open(&backup, &backup.join("key"), &identity).unwrap();
+    assert!(
+        restored
+            .status()
+            .unwrap()
+            .restored_backup_missing_provenance
+    );
+    assert_eq!(signed_count(&restored), 0);
+    server.abort();
+}

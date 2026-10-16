@@ -45,6 +45,11 @@ fn command_value(command: Command) -> Value {
             key_file,
             treasury_id,
         } => json!({"kind":"address","state":state_dir,"key":key_file,"id":treasury_id}),
+        Command::MarkRestored {
+            state_dir,
+            key_file,
+            treasury_id,
+        } => json!({"kind":"mark-restored","state":state_dir,"key":key_file,"id":treasury_id}),
         Command::Backup {
             state_dir,
             key_file,

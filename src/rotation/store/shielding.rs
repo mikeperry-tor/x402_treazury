@@ -244,6 +244,7 @@ impl Store {
             self.funding_permits.is_none(),
             AdmissionError::FundingPermitDenied
         );
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("shielding_preparation")?;
         ensure!(

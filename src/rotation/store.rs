@@ -29,6 +29,7 @@ pub(crate) mod history;
 pub(crate) mod inventory;
 mod ownership;
 mod reporting;
+mod restoration;
 pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvidence};
 pub mod refunds;
 pub(crate) mod scheduling;
@@ -61,6 +62,9 @@ const SCHEMA: &str = include_str!("store/schema.sql");
 pub struct Status {
     pub schema_version: u32,
     pub state_schema_version: u32,
+    /// Explicit declaration only; false does not prove absence of rollback.
+    #[serde(default)]
+    pub restored_backup_missing_provenance: bool,
     pub treasury_id: String,
     pub birthday: u32,
     pub snapshot_revision: i64,
@@ -684,6 +688,7 @@ impl Store {
         Ok(())
     }
     pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
         let outgoing_pending: bool = self.db.query_row(
@@ -800,6 +805,7 @@ impl Store {
     }
     /// Reserve total input+fee across all pools. Unknown exposure survives UTC rollover.
     pub fn reserve(&mut self, id: &str, pool: Option<&str>, day: u32, zatoshis: i64) -> Result<()> {
+        self.require_complete_provenance()?;
         ensure!(zatoshis > 0, "invalid ZEC reservation amount");
         self.check_operation_permit(id, u64::try_from(zatoshis)?)?;
         let tx = self
@@ -940,6 +946,7 @@ impl Store {
             }
             return Ok(revision);
         }
+        self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("source_preparation_commit")?;
         if self.funding_permits.is_some() {
@@ -1241,9 +1248,17 @@ fn read_status(db: &Connection) -> Result<Status> {
                     ))
         });
     }
+    let provenance_missing = version >= 23 && restoration::declared(db)?;
+    if provenance_missing {
+        for pool in &mut pools {
+            pool.serving_ready = false;
+            pool.inventory_ready = false;
+        }
+    }
     Ok(Status {
         schema_version: 2,
         state_schema_version: version,
+        restored_backup_missing_provenance: provenance_missing,
         refunds: if version >= 7 {
             refunds::read_refunds(db)?
         } else {
@@ -1714,6 +1729,7 @@ impl Store {
         mut view: super::base::ChainView,
         expected: Option<&super::manager::PaymentCandidateHandle>,
     ) -> Result<PreparedPayment> {
+        self.require_complete_provenance()?;
         ensure!(cost > U256::ZERO, "invalid payment amount");
         let expected = match expected {
             Some(value) => value.clone(),
@@ -1809,6 +1825,7 @@ impl Store {
         auth: Authorization,
         qualification: Option<&crate::qualification::PaymentContext>,
     ) -> Result<()> {
+        self.require_complete_provenance()?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -2001,6 +2018,7 @@ impl Store {
         height: u64,
         retry: bool,
     ) -> Result<i64> {
+        self.require_complete_provenance()?;
         ensure!(self.operation_pending(id)?, "transaction is not pending");
         let operation = self.operation(id)?;
         super::transaction::SubmissionWindow::load(self, id, &operation.facts)?
