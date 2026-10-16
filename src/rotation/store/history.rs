@@ -16,6 +16,21 @@ fn page_limit(limit: usize) -> Result<i64> {
     Ok(limit as i64)
 }
 
+/// Only payload decoding may be scoped. Cursor, attempt identity and wallet/pool
+/// ownership must already be established; no obligation is removed by this value.
+#[derive(Debug, Clone)]
+pub(crate) struct MalformedHistory {
+    pub id: String,
+    pub wallet: String,
+}
+impl std::fmt::Display for MalformedHistory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("malformed_authorization_history")
+    }
+}
+impl std::error::Error for MalformedHistory {}
+pub(crate) type HistoryPayload = std::result::Result<PendingAuthorization, MalformedHistory>;
+
 impl Store {
     /// Buffered pages are snapshots, not authority to acquire another nonce proof.
     /// Revalidate identity and state in the serialized store immediately before I/O.
@@ -63,24 +78,39 @@ impl Store {
         after: i64,
         through: i64,
         limit: usize,
-    ) -> Result<Vec<(i64, PendingAuthorization)>> {
+    ) -> Result<Vec<(i64, HistoryPayload)>> {
         let mut statement = self.db.prepare(
-            "SELECT reconciliation_sequence,id,wallet_id,payer,nonce,valid_before FROM payment_attempts WHERE pool_id=?1 AND state='POSSIBLY_SUBMITTED' AND reconciliation_sequence>?2 AND reconciliation_sequence<=?3 ORDER BY reconciliation_sequence LIMIT ?4",
+            "SELECT a.reconciliation_sequence,a.id,a.wallet_id,a.payer,a.nonce,a.valid_before,EXISTS(SELECT 1 FROM wallets w WHERE w.id=a.wallet_id AND w.pool_id=a.pool_id) FROM payment_attempts a WHERE a.pool_id=?1 AND a.state='POSSIBLY_SUBMITTED' AND a.reconciliation_sequence>?2 AND a.reconciliation_sequence<=?3 ORDER BY a.reconciliation_sequence LIMIT ?4",
         )?;
-        Ok(statement
-            .query_map(params![pool, after, through, page_limit(limit)?], |row| {
-                Ok((
-                    row.get(0)?,
-                    PendingAuthorization {
-                        id: row.get(1)?,
-                        wallet: row.get(2)?,
-                        payer: row.get(3)?,
-                        nonce: row.get(4)?,
-                        valid_before: sql_u64(row, 5)?,
-                    },
-                ))
-            })?
-            .collect::<rusqlite::Result<_>>()?)
+        let mut rows = statement.query(params![pool, after, through, page_limit(limit)?])?;
+        let mut page = Vec::new();
+        let mut cursor = after;
+        while let Some(row) = rows.next()? {
+            let sequence: i64 = row.get(0)?;
+            let id: String = row.get(1)?;
+            let wallet: String = row.get(2)?;
+            ensure!(
+                sequence > cursor && sequence <= through,
+                "invalid_history_cursor"
+            );
+            ensure!(
+                !id.is_empty() && !wallet.is_empty() && row.get::<_, bool>(6)?,
+                "unknown_history_ownership"
+            );
+            let payload = (|| -> rusqlite::Result<PendingAuthorization> {
+                Ok(PendingAuthorization {
+                    id: id.clone(),
+                    wallet: wallet.clone(),
+                    payer: row.get(3)?,
+                    nonce: row.get(4)?,
+                    valid_before: sql_u64(row, 5)?,
+                })
+            })()
+            .map_err(|_| MalformedHistory { id, wallet });
+            page.push((sequence, payload));
+            cursor = sequence;
+        }
+        Ok(page)
     }
     pub(crate) fn wallet_boundary(&self, pool: &str) -> Result<i64> {
         Ok(self.db.query_row(
@@ -208,7 +238,7 @@ mod tests {
         let first = store.history_page(&pool, 0, upper, PAGE_SIZE).unwrap();
         assert_eq!(first.len(), PAGE_SIZE);
         assert_eq!(first[0].0, 1);
-        assert_eq!(first[0].1.id, "attempt-00004095");
+        assert_eq!(first[0].1.as_ref().unwrap().id, "attempt-00004095");
         let tx = store.db.transaction().unwrap();
         tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE pool_id=?1 AND reconciliation_sequence=65",[&pool]).unwrap();
         evidence::subtract_exposure(&tx, &wallet, U256::from(1)).unwrap();
@@ -226,7 +256,7 @@ mod tests {
             for (sequence, authorization) in page {
                 assert!(sequence > cursor && sequence <= upper);
                 assert_ne!(sequence, 65);
-                assert_ne!(authorization.id, "aaa-late-commit");
+                assert_ne!(authorization.unwrap().id, "aaa-late-commit");
                 cursor = sequence;
                 count += 1;
             }
@@ -247,8 +277,66 @@ mod tests {
         assert_eq!(
             store.history_page(&pool, 2048, 2049, PAGE_SIZE).unwrap()[0]
                 .1
+                .as_ref()
+                .unwrap()
                 .id,
             "aaa-late-commit"
         );
+        store.db.execute("UPDATE payment_attempts SET valid_before=-1 WHERE reconciliation_sequence<=64 OR reconciliation_sequence IN (66,128,2048)", []).unwrap();
+        let mut cursor = 0;
+        let mut malformed = 0;
+        let mut healthy = 0;
+        loop {
+            let page = store.history_page(&pool, cursor, 2049, PAGE_SIZE).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            if cursor == 0 {
+                assert!(page.iter().all(|(_, payload)| payload.is_err()));
+            }
+            for (sequence, payload) in page {
+                assert!(sequence > cursor);
+                cursor = sequence;
+                match payload {
+                    Ok(_) => healthy += 1,
+                    Err(fault) => {
+                        assert_eq!(fault.wallet, wallet);
+                        assert!(!fault.id.is_empty());
+                        malformed += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!((malformed, healthy), (67, 1981));
+        assert_eq!(
+            evidence::exposure(&store.db, &wallet).unwrap(),
+            U256::from(2048)
+        );
+        drop(store);
+        let store = Store::open(&state, &key, &identity).unwrap();
+        assert!(store.history_page(&pool, 0, 2049, 1).unwrap()[0].1.is_err());
+        assert_eq!(
+            evidence::exposure(&store.db, &wallet).unwrap(),
+            U256::from(2048)
+        );
+        // Ownership and storage failures must never masquerade as local payload faults.
+        store.db.execute("PRAGMA foreign_keys=OFF", []).unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET wallet_id='unknown' WHERE reconciliation_sequence=1",
+                [],
+            )
+            .unwrap();
+        assert!(
+            store
+                .history_page(&pool, 0, 2049, PAGE_SIZE)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("unknown_history_ownership")
+        );
+        store.db.execute("DROP TABLE payment_attempts", []).unwrap();
+        assert!(store.history_page(&pool, 0, 2049, PAGE_SIZE).is_err());
     }
 }

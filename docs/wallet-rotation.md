@@ -564,3 +564,10 @@ pending deposits, cross-listener concurrency and restart. These do not establish
 confidential swaps, managed Permit2/upto, all provider routes or a full automated
 lifecycle/restart qualification. See [testing](testing.md#qualification-status) for
 scope and outstanding acceptance. Current operation requires fresh quotes and chain checks.
+
+Base history enumeration isolates payload conversion failures only after validating
+attempt identity, cursor and wallet/pool ownership. It keeps the original liability
+and continues independent history and balance work. A one-pass recovery reports
+incomplete observation after healthy work drains; background observation revisits
+these rows on its normal cadence. Unknown ownership and storage failures remain
+shared errors.

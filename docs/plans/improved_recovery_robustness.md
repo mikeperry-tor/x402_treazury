@@ -380,6 +380,25 @@ actionable runtime defect. Review follow-up adds a sibling-lane condition
 retention/clearing regression and corrects the later-tick assertion to inspect
 the later treasury-operation snapshot. Implementation: e27a5bd plus review fixup.
 
+**C04 / G16 Base history contract:** Advance the bounded cursor past an identifiable
+malformed payload only after decoding the sequence, attempt ID, wallet ID and exact
+wallet/pool ownership. Payload conversion failures produce a typed scoped outcome;
+SQL stepping failures, unknown ownership and cursor failures remain shared errors.
+No malformed row receives RPC, resolution, exposure subtraction or replacement.
+Existing exposure and atomic admission remain unchanged; this slice does not infer
+that an unknown liability is bounded or repair corrupted liability amounts. An
+all-malformed page is not an empty page. Independent balance/history reads continue;
+a one-pass caller receives the scoped failure after independent work drains. The
+continuous owner revisits durable malformed rows on its existing cadence. Buffered
+valid records retain their exact pre-I/O revalidation. No new durable marker,
+quarantine, retry ceiling, timer or schema is needed. Funding inventory isolation
+is a separate C04 boundary with separately reviewed source-liability dependencies.
+Validation: the 20 history-focused tests pass, including cancellation, retained
+active work, retry saturation, all-malformed-page continuation, unchanged malformed
+liabilities, unknown-ownership/storage failures and restart. Sub-agent review found
+an acquisition fairness issue for long malformed prefixes; a separate fixup will
+yield between bounded pages without delaying independent reads by a cadence sleep.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.
