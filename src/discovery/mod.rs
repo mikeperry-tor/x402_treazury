@@ -2,6 +2,7 @@
 mod directory;
 mod import;
 pub mod policy;
+mod publication;
 pub(crate) mod raw;
 mod store;
 pub mod tools;
@@ -59,6 +60,7 @@ struct State {
     receipts: BTreeMap<String, Receipt>,
 }
 struct Inner {
+    base: CatalogSnapshot,
     state: State,
     store: Option<store::Store>,
 }
@@ -83,7 +85,6 @@ pub struct Manager {
     listeners: BTreeMap<String, ListenerConfig>,
     payers: BTreeMap<String, PaidClient>,
     catalog: Arc<CatalogState>,
-    base: CatalogSnapshot,
     inner: Mutex<Inner>,
     fetches: Mutex<BTreeMap<String, FetchCell>>,
     global_import: Arc<Semaphore>,
@@ -232,9 +233,12 @@ impl Manager {
             policy,
             listeners,
             payers,
-            base: (*catalog.read()).clone(),
+            inner: Mutex::new(Inner {
+                base: (*catalog.read()).clone(),
+                state,
+                store,
+            }),
             catalog,
-            inner: Mutex::new(Inner { state, store }),
             fetches: Mutex::new(BTreeMap::new()),
             global_import: Arc::new(Semaphore::new(4)),
             owner_import,
@@ -272,20 +276,26 @@ impl Manager {
                     .map(|_| "policy_or_catalog_invalid".into())
             };
         }
-        let snapshot = match self.snapshot(&state) {
+        let generation = state.generation.max(self.catalog.read().generation);
+        let snapshot = match self.snapshot(&state, &inner.base, generation) {
             Ok(s) => s,
             Err(_) => {
                 for r in state.records.values_mut().filter(|r| !r.removed) {
                     r.disabled = Some("registration_conflict_or_quota".into());
                 }
-                self.snapshot(&state)?
+                self.snapshot(&state, &inner.base, generation)?
             }
         };
         inner.state = state;
         self.catalog.publish(snapshot);
         Ok(())
     }
-    fn snapshot(&self, state: &State) -> Result<CatalogSnapshot> {
+    fn snapshot(
+        &self,
+        state: &State,
+        base: &CatalogSnapshot,
+        generation: u64,
+    ) -> Result<CatalogSnapshot> {
         let live: Vec<_> = state.records.values().filter(|r| !r.removed).collect();
         // Disabled records occupy registration quota, but a revoked quota must not prevent startup.
         if live.iter().any(|r| r.disabled.is_none()) {
@@ -298,8 +308,9 @@ impl Manager {
             live.iter().map(|r| r.document.len()).sum::<usize>() <= 128 * 1024 * 1024,
             "registry_document_limit"
         );
-        let mut result = self.base.clone();
-        result.generation = state.generation;
+        let mut result = base.clone();
+        result.generation = generation;
+        let previous = self.catalog.read();
         for record in live.into_iter().filter(|r| r.disabled.is_none()) {
             let built = import::build(
                 &self.policy,
@@ -343,7 +354,18 @@ impl Manager {
                         client: payer.clone(),
                         base: built.base.clone(),
                         source: Some((record.id.clone(), record.revision)),
-                        help: Arc::new(OnceCell::new()),
+                        help: previous
+                            .views
+                            .get(target)
+                            .and_then(|tools| {
+                                tools.iter().find(|bound| {
+                                    bound.tool.name == tool.name
+                                        && bound.source.as_ref()
+                                            == Some(&(record.id.clone(), record.revision))
+                                })
+                            })
+                            .map(|bound| bound.help.clone())
+                            .unwrap_or_else(|| Arc::new(OnceCell::new())),
                     });
                 }
                 ensure!(
@@ -355,7 +377,7 @@ impl Manager {
         }
         Ok(result)
     }
-    fn result(&self, r: &Record, state: &State, caller: &str, snapshot: &CatalogSnapshot) -> Value {
+    fn result(&self, r: &Record, caller: &str, snapshot: &CatalogSnapshot) -> Value {
         let targets: Vec<_> = r
             .targets
             .iter()
@@ -370,7 +392,7 @@ impl Manager {
                     .map(|listener| (t.clone(), policy::wallet(&self.policy, listener).to_owned()))
             })
             .collect();
-        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":state.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use x402_treazury_tools_search and x402_treazury_tool_call, or explicitly refresh your client's tool list."})
+        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":snapshot.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use x402_treazury_tools_search and x402_treazury_tool_call, or explicitly refresh your client's tool list."})
     }
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
@@ -472,7 +494,7 @@ impl Manager {
                 .values()
                 .find(|r| r.owner == owner && !r.removed && r.candidate.spec_url == a.spec_url)
             {
-                return Ok(self.result(r, &inner.state, owner, &self.catalog.read()));
+                return Ok(self.result(r, owner, &self.catalog.read()));
             }
             inner
                 .state
@@ -552,7 +574,7 @@ impl Manager {
             if let Some(r) = inner.state.records.values().find(|r| {
                 !r.removed && r.owner == owner && r.candidate.spec_url == record.candidate.spec_url
             }) {
-                return Ok(this.result(r, &inner.state, &owner, &this.catalog.read()));
+                return Ok(this.result(r, &owner, &this.catalog.read()));
             }
             let mut state = inner.state.clone();
             ensure!(
@@ -567,10 +589,11 @@ impl Manager {
             state.records.insert(id.clone(), record);
             state.generation = state
                 .generation
+                .max(this.catalog.read().generation)
                 .checked_add(1)
                 .context("generation exhausted")?;
-            let snapshot = this.snapshot(&state)?;
-            let result = this.result(&state.records[&id], &state, &owner, &snapshot);
+            let snapshot = this.snapshot(&state, &inner.base, state.generation)?;
+            let result = this.result(&state.records[&id], &owner, &snapshot);
             ensure!(state.receipts.len() < 10000, "idempotency_capacity_reached");
             state.receipts.insert(
                 receipt_key(&owner, &key)?,

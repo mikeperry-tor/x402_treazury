@@ -547,6 +547,23 @@ invalid Base limits, missing explicit environment values and insecure endpoints,
 actual managed MCP rejection versus successful static MCP invocation, cloned
 clients/probe identity refusal, no allocation/funding jobs and owner cleanup.
 
+**C08 shared-publication prerequisite contract (reviewed):** A late static source
+or pricing result must compose with current dynamic registrations under the existing
+Manager mutation lock. Store the static base there, expose an off-lock immutable
+capture and compare its revision when replacing complete static views. Validate
+listener keys, static bindings, reserved names and collisions, then construct the
+combined snapshot and check all generation overflows before changing anything.
+Dynamic registry commits retain durability-before-publication and use the latest
+static base; catalog generations advance across both writers. Unchanged dynamic
+record revisions retain their help cells, and captured snapshots remain immutable.
+An accepted blocking publication survives a cancelled waiter; stale retry/revision
+failure cannot undo a later removal. Static changes are process-local and add no
+registry schema or durable work ledger. Deferred relay scheduling, source status,
+pricing integration, standalone publication and relay drain remain pending C08;
+this prerequisite alone does not enable deferred discovery. Tests cover overlapping
+registration/publication, stale pricing after removal, view/binding/name/overflow
+failures without partial publication, and accepted-work cancellation.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

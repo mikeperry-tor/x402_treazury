@@ -2042,3 +2042,193 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
 
 #[path = "url_info_tests.rs"]
 mod url_info_tests;
+
+#[tokio::test]
+async fn static_publication_composes_with_dynamic_commits_and_fences_stale_pricing() {
+    let m = manager(None).await;
+    add(&m, "first", "", "").await;
+    let initial = m.catalog.read();
+    let dynamic = initial.views["writer"][0].clone();
+    dynamic.help.set("retained help".into()).unwrap();
+    let mut base = m.static_snapshot().await.unwrap();
+    let mut tool = dynamic.clone();
+    tool.source = None;
+    tool.tool.name = "static_read".into();
+    tool.tool.description = "initial static description".into();
+    base.views.get_mut("writer").unwrap().push(tool);
+    assert_eq!(m.replace_static(0, base.clone()).await.unwrap(), 1);
+    let captured = m.catalog.read();
+    let generation = captured.generation;
+    let mut priced = m.static_snapshot().await.unwrap();
+    priced.views.get_mut("writer").unwrap()[0].tool.description = "startup price".into();
+    let second_url = "https://api.example.com/second.json";
+    let cell = m.fetches.lock().unwrap()["https://api.example.com/openapi.json"].clone();
+    m.fetches.lock().unwrap().insert(second_url.into(), cell);
+    let (registered, published) = tokio::join!(
+        m.invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":second_url,"name":"second"})
+        ),
+        m.replace_static(1, priced.clone()),
+    );
+    registered.unwrap();
+    assert_eq!(published.unwrap(), 2);
+    let current = m.catalog.read();
+    assert_eq!(current.generation, generation + 2);
+    assert_eq!(
+        current.views["writer"]
+            .iter()
+            .filter(|b| b.source.is_some())
+            .count(),
+        4
+    );
+    assert_eq!(
+        current.views["writer"]
+            .iter()
+            .find(|b| b.tool.name == "static_read")
+            .unwrap()
+            .tool
+            .description,
+        "startup price"
+    );
+    let unchanged = current.views["writer"]
+        .iter()
+        .find(|b| b.tool.name == dynamic.tool.name)
+        .unwrap();
+    assert!(Arc::ptr_eq(&unchanged.help, &dynamic.help));
+    assert_eq!(unchanged.help.get().unwrap(), "retained help");
+    assert_eq!(
+        captured.views["writer"]
+            .iter()
+            .find(|b| b.tool.name == "static_read")
+            .unwrap()
+            .tool
+            .description,
+        "initial static description"
+    );
+    // A later static removal cannot be undone by an earlier completed price.
+    let mut removed = m.static_snapshot().await.unwrap();
+    removed.views.get_mut("writer").unwrap().clear();
+    assert_eq!(m.replace_static(2, removed).await.unwrap(), 3);
+    let before = m.catalog.read();
+    assert!(m.replace_static(1, priced).await.is_err());
+    assert!(Arc::ptr_eq(&before, &m.catalog.read()));
+    assert!(
+        m.catalog.read().views["writer"]
+            .iter()
+            .all(|b| b.tool.name != "static_read")
+    );
+    // Duplicate registration reports the current catalog, not the older durable
+    // registration generation or a stale static base.
+    let duplicate = m
+        .invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":second_url,"name":"second"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate["catalog_generation"], before.generation);
+    assert_eq!(initial.views["writer"].len(), 2);
+}
+
+#[tokio::test]
+async fn rejected_static_publications_preserve_revision_and_catalog() {
+    for fault in [
+        "listeners",
+        "dynamic_source",
+        "reserved",
+        "duplicate",
+        "static_overflow",
+        "catalog_overflow",
+    ] {
+        let m = manager(None).await;
+        add(&m, "first", "", "").await;
+        let mut base = m.static_snapshot().await.unwrap();
+        let mut bound = m.catalog.read().views["writer"][0].clone();
+        bound.source = None;
+        bound.tool.name = "static_read".into();
+        base.views.get_mut("writer").unwrap().push(bound.clone());
+        let mut expected = 0;
+        match fault {
+            "listeners" => {
+                base.views.remove("hidden");
+            }
+            "dynamic_source" => {
+                base.views.get_mut("writer").unwrap()[0].source = Some(("forged".into(), 1));
+            }
+            "reserved" => {
+                base.views.get_mut("writer").unwrap()[0].tool.name = "dyn_reserved".into();
+            }
+            "duplicate" => {
+                base.views.get_mut("writer").unwrap().push(bound);
+            }
+            "static_overflow" => {
+                m.inner.lock().unwrap().base.generation = u64::MAX;
+                expected = u64::MAX;
+            }
+            "catalog_overflow" => {
+                let mut s = (*m.catalog.read()).clone();
+                s.generation = u64::MAX;
+                m.catalog.publish(s);
+            }
+            _ => unreachable!(),
+        }
+        let before = m.catalog.read();
+        let static_before = m.static_snapshot().await.unwrap();
+        assert!(m.replace_static(expected, base).await.is_err(), "{fault}");
+        assert!(Arc::ptr_eq(&before, &m.catalog.read()), "{fault}");
+        let after = m.static_snapshot().await.unwrap();
+        assert_eq!(after.generation, static_before.generation);
+        assert!(after.views.values().all(Vec::is_empty));
+    }
+}
+
+#[tokio::test]
+async fn accepted_static_publication_outlives_cancelled_waiter() {
+    let m = manager(None).await;
+    add(&m, "first", "", "").await;
+    let mut base = m.static_snapshot().await.unwrap();
+    let mut bound = m.catalog.read().views["writer"][0].clone();
+    bound.source = None;
+    bound.tool.name = "static_read".into();
+    base.views.get_mut("writer").unwrap().push(bound);
+    let (locked, acquired) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let held = m.clone();
+    let lock_task = tokio::task::spawn_blocking(move || {
+        let _guard = held.inner.lock().unwrap();
+        locked.send(()).unwrap();
+        released.recv().unwrap();
+    });
+    acquired.await.unwrap();
+    let owner = m.clone();
+    let task = tokio::spawn(async move { owner.replace_static(0, base).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while m.mutations.available_permits() == 16 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    let _ = task.await;
+    release.send(()).unwrap();
+    lock_task.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if m.static_snapshot().await.unwrap().generation == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted publication orphaned");
+    assert!(
+        m.catalog.read().views["writer"]
+            .iter()
+            .any(|b| b.tool.name == "static_read")
+    );
+}
