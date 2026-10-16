@@ -240,7 +240,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
         }
         let mut allocation_cursor = 0usize;
-        let mut allocation_due = clock.now().saturating_add(self.poll_seconds.max(1));
+        let mut allocation_due = clock
+            .schedule_now()
+            .saturating_add(self.poll_seconds.max(1));
         let mut flight = InFlight::new();
         let mut pending = VecDeque::<Pending>::new();
         // Quote here names the prerequisite inventory lane; its owned step
@@ -261,13 +263,16 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 _=tokio::time::sleep(std::time::Duration::from_secs(self.poll_seconds.max(1)))=>{},
             }
         };
-        let pass_due = clock.now();
+        let pass_due = clock.schedule_now();
         let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
             .map(|kind| LaneInventory::new(kind, boundary, pass_due));
         let mut stopping = false;
         loop {
             stopping |= stop.is_cancelled();
-            if !once && !stopping && !allocation_groups.is_empty() && clock.now() >= allocation_due
+            if !once
+                && !stopping
+                && !allocation_groups.is_empty()
+                && clock.schedule_now() >= allocation_due
             {
                 let name = allocation_groups[allocation_cursor].clone();
                 if self
@@ -281,7 +286,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 allocation_cursor += 1;
                 if allocation_cursor == allocation_groups.len() {
                     allocation_cursor = 0;
-                    allocation_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    allocation_due = clock
+                        .schedule_now()
+                        .saturating_add(self.poll_seconds.max(1));
                 }
             }
             if !stopping {
@@ -316,7 +323,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             let needs_page = inventory.iter().any(|lane| {
                 !lane.exhausted
-                    && clock.now() >= lane.pass_due
+                    && clock.schedule_now() >= lane.pass_due
                     && !pending.iter().any(|item| item.lane == lane.kind)
             });
             let completion = if needs_page && !stopping {
@@ -336,7 +343,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 let id = completion.job.id.clone();
                 let operation = completion.job.operation_id.clone();
                 match self
-                    .publish_observation(&lease, completion, clock.now())
+                    .publish_observation(&lease, completion, clock.schedule_now())
                     .await
                 {
                     Ok(Some(ready)) => flight.quote_pending = Some(ready),
@@ -369,16 +376,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         for lane in inventory {
             let kind = lane.kind;
             let waiting = pending.iter().any(|item| item.lane == kind);
-            if clock.now() < lane.pass_due {
+            if clock.schedule_now() < lane.pass_due {
                 continue;
             }
-            if !once && lane.exhausted && !waiting && clock.now() >= lane.pass_due {
+            if !once && lane.exhausted && !waiting && clock.schedule_now() >= lane.pass_due {
                 let Some(through) = read_result(
                     self.store.call(|s| s.funding_work_boundary()).await,
                     &mut lane.read_failure,
                 )?
                 else {
-                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    lane.pass_due = clock
+                        .schedule_now()
+                        .saturating_add(self.poll_seconds.max(1));
                     continue;
                 };
                 lane.through = through;
@@ -395,13 +404,17 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 .call(move |s| s.funding_work_page(&after, upper))
                 .await;
             let Some(page) = read_result(page, &mut lane.read_failure)? else {
-                lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                lane.pass_due = clock
+                    .schedule_now()
+                    .saturating_add(self.poll_seconds.max(1));
                 lane.exhausted |= once;
                 continue;
             };
             if page.is_empty() {
                 lane.exhausted = true;
-                lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                lane.pass_due = clock
+                    .schedule_now()
+                    .saturating_add(self.poll_seconds.max(1));
                 continue;
             }
             #[cfg(test)]
@@ -425,10 +438,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 {
                     continue;
                 }
-                if job
-                    .started_at
-                    .is_some_and(|started| clock.now().saturating_sub(started) >= health_after)
-                    && !job.timed_out
+                if job.started_at.is_some_and(|started| {
+                    clock.schedule_now().saturating_sub(started) >= health_after
+                }) && !job.timed_out
                 {
                     let id = job.id.clone();
                     let operation = job.operation_id.clone();
@@ -503,7 +515,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             let ready = {
                 let mut state = lease.state.lock().expect("funding schedule lock");
-                state.admit(&key, &item.job, clock.now(), &flight.active)
+                state.admit(&key, &item.job, clock.schedule_now(), &flight.active)
             };
             match ready {
                 Some(false) => continue,
@@ -556,21 +568,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     flight.source_active = true;
                     let worker = self.clone();
                     let lease = lease.clone();
-                    let epoch = clock.now();
                     // An accepted mutable step owns the lease even
                     // if an outer scheduler error drops its waiter.
                     let task = tokio::spawn(async move {
                         let _lease = lease;
-                        let source_clock = TickClock {
-                            epoch,
-                            started: std::time::Instant::now(),
-                        };
-                        let result = worker
-                            .source_step(&job, &source_clock)
-                            .await
-                            .map(|request| {
-                                request.map_or(Observation::None, Observation::Prerequisite)
-                            });
+                        let result = worker.source_step(&job).await.map(|request| {
+                            request.map_or(Observation::None, Observation::Prerequisite)
+                        });
                         Completion { job, kind, result }
                     });
                     flight.reads.push(
@@ -598,7 +602,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             let admitted = lease.state.lock().expect("funding schedule lock").admit(
                 &key,
                 &job,
-                clock.now(),
+                clock.schedule_now(),
                 &flight.active,
             );
             if admitted == Some(true) {

@@ -83,16 +83,22 @@ pub trait FundingBackend: Send + 'static {
     }
     fn max_attempts(&self, job: &FundingJob) -> u32;
 }
-// Scheduling tests supply an epoch; elapsed work advances that same clock.
-// Every authority decision reads it again after awaited work.
+// Polling and health metadata use a scheduling epoch plus elapsed work.
+// Absolute quote authority always reads the actual wall clock after awaited work.
 struct TickClock {
     epoch: u64,
     started: std::time::Instant,
 }
 impl TickClock {
-    fn now(&self) -> u64 {
+    fn schedule_now(&self) -> u64 {
         self.epoch.saturating_add(self.started.elapsed().as_secs())
     }
+}
+
+fn quote_window_available(deadline: u64, wall_now: u64) -> bool {
+    deadline
+        .checked_sub(wall_now)
+        .is_some_and(|remaining| remaining >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS)
 }
 
 pub struct FundingWorker<B> {
@@ -126,6 +132,8 @@ impl<B: FundingBackend> FundingWorker<B> {
     pub async fn run(self, stop: CancellationToken) -> Result<()> {
         self.schedule(now()?, stop, false).await
     }
+    /// Run one scheduling pass. The supplied epoch affects polling and health
+    /// metadata only; it never supplies financial authority time.
     pub async fn tick(&self, instant: u64) -> Result<()> {
         self.schedule(instant, CancellationToken::new(), true).await
     }
@@ -154,7 +162,6 @@ impl<B: FundingBackend> FundingWorker<B> {
     async fn source_step(
         &self,
         job: &FundingJob,
-        clock: &TickClock,
     ) -> Result<Option<<B::Observations as FundingObservations>::QuoteRequest>> {
         use crate::treasury::recovery::RecoveryOutcome;
         use FundingPhase::*;
@@ -255,7 +262,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .map(Some);
             }
             Quoted if !facts.readiness_recorded && facts.enabled => {
-                self.prepare_quoted(&current, clock).await?
+                self.prepare_quoted(&current).await?
             }
             Preparing => {
                 let id = current.operation_id.clone();
@@ -266,13 +273,12 @@ impl<B: FundingBackend> FundingWorker<B> {
             Prepared if facts.source_attempts == 0 => {
                 let id = current.operation_id.clone();
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
-                if operation.facts.deadline.saturating_sub(clock.now())
-                    < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
-                {
+                let authority_now = now()?;
+                if !quote_window_available(operation.facts.deadline, authority_now) {
                     let error = anyhow::anyhow!("prepared_quote_window_exhausted");
                     let diagnostic = safe_error(&error, &current.phase);
                     let (id, operation) = (current.id.clone(), current.operation_id.clone());
-                    let instant = clock.now();
+                    let instant = authority_now;
                     self.store
                         .call(move |s| {
                             s.mark_prepared_quote_window_exhausted(
@@ -302,7 +308,7 @@ impl<B: FundingBackend> FundingWorker<B> {
     }
     // Readiness and quote refresh precede PREPARING; once that phase commits,
     // only saved-byte recovery may proceed after an interrupted preparation.
-    async fn prepare_quoted(&self, job: &FundingJob, clock: &TickClock) -> Result<()> {
+    async fn prepare_quoted(&self, job: &FundingJob) -> Result<()> {
         let quote = self.quote(job).await?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
@@ -341,9 +347,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             }
         }
         self.backend.lock().await.ready(job, &quote).await?;
-        if quote.deadline.saturating_sub(clock.now())
-            < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
-        {
+        if !quote_window_available(quote.deadline, now()?) {
             let id = job.id.clone();
             let operation = job.operation_id.clone();
             return self
@@ -1027,3 +1031,16 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
 #[cfg(test)]
 #[path = "../../tests/support/funding_backend.rs"]
 mod tests;
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    #[test]
+    fn quote_window_uses_absolute_authority_time_at_exact_boundary() {
+        assert!(!quote_window_available(1299, 1000));
+        assert!(quote_window_available(1300, 1000));
+        assert!(!quote_window_available(999, 1000));
+        assert!(!quote_window_available(0, u64::MAX));
+        assert!(quote_window_available(u64::MAX, u64::MAX - 300));
+    }
+}

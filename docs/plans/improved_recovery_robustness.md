@@ -54,7 +54,8 @@ accounting is separated from SDK synchronization in `2ea6762`. Durable payment
 endpoint membership landed in `2f43075`. The C14 canonical replacement gate below
 records the reviewed schema19 implementation and passing validation.
 The separate C15 repair-owner slice landed in `07b5cad`; its database-turn
-fairness work remains explicit below. C21's Base freshness lease has passed its focused tests and independent review;
+fairness work remains explicit below. C21's Base freshness lease landed in
+`7c4f0ae` after focused tests, independent review and all-feature Clippy.
 C16 preparation provenance is next at the commit gate.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
@@ -1070,8 +1071,21 @@ their regression fixes passed independent re-review. Final focused validation:
 seven freshness-filter tests, all 42 evidence tests and all 32 selection tests
 passed; the earlier 38 Base tests also passed. The final selection run waited in
 the macOS loader before the harness started, then completed normally; no timeout
-or security workaround was added. All-target/all-feature Clippy passed with warnings denied. Absolute funding quote deadlines, treasury runtime freshness and
+or security workaround was added. All-target/all-feature Clippy passed with
+warnings denied. Absolute funding quote deadlines, treasury runtime freshness and
 persisted polling remain separate C21 work; this is not blanket G24 closure.
+
+**C21 funding deadline clock followup:** Polling/backoff and health metadata keep
+their elapsed scheduling clock. Quote-window decisions after awaited readiness
+and operation reads now use actual wall time. The supplied `tick` epoch controls
+scheduling only; it cannot grant or revoke financial authority. Production
+treasury preparation and submission retain their own checks at the mutation
+boundary. The existing 300-second submission margin is unchanged. Independent
+review found no issues. The exact-boundary unit test, all 24 funding integration
+tests and seven concrete-backend unit tests passed. Integrations preserve prepared
+bytes and attempts after actual expiry, and artificial future scheduling ticks
+cannot expire a valid quote. All-target/all-feature Clippy also passed with these
+changes present.
 
 ### Stage 1 — Minimal authority and dependency specification
 

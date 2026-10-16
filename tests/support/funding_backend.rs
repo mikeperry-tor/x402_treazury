@@ -336,15 +336,8 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             })
             .await
             .unwrap();
-        let clock = TickClock {
-            epoch: now().unwrap(),
-            started: std::time::Instant::now(),
-        };
         let (result, observed) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            tokio::join!(
-                coordinator.source_step(&current, &clock),
-                commands.test_observe()
-            )
+            tokio::join!(coordinator.source_step(&current), commands.test_observe())
         })
         .await
         .unwrap();

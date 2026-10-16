@@ -605,7 +605,7 @@ async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
 async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_recovery_authority() {
     let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
-    worker.backend.lock().await.quote_deadline = now + 400;
+    worker.backend.lock().await.quote_deadline = now + 299;
     worker.tick(now).await.unwrap();
     let original = worker
         .store
@@ -656,19 +656,32 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
     task.await.unwrap();
 }
 
+async fn wait_until_quote_window_exhausted(deadline: u64) {
+    // Harness bound only: with a now+301 fixture, crossing below300 requires
+    // at most two wall-clock seconds. Runtime work has no added deadline.
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while deadline.saturating_sub(x402_treazury::rotation::base::now().unwrap()) >= 300 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
-async fn quote_and_prepared_validity_boundaries_are_exact() {
+async fn quote_and_prepared_windows_use_wall_time_not_scheduling_epoch() {
     use x402_treazury::rotation::store::funding::FundingPhase;
-    for remaining in [299, 300] {
+    for remaining in [299, 600] {
         let (_dir, worker, task) = fixture().await;
         let now = x402_treazury::rotation::base::now().unwrap();
-        worker.backend.lock().await.quote_deadline = now + 100 + remaining;
+        worker.backend.lock().await.quote_deadline = now + remaining;
         worker.tick(now).await.unwrap();
-        worker.tick(now + 100).await.unwrap();
+        // A far-future scheduler tick cannot expire a valid financial quote.
+        worker.tick(now + 100_000).await.unwrap();
         let status = worker.store.call(|s| s.status()).await.unwrap();
         assert_eq!(
             status.funding_jobs[0].phase,
-            if remaining == 300 {
+            if remaining == 600 {
                 FundingPhase::Prepared
             } else {
                 FundingPhase::Allocated
@@ -676,44 +689,46 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
         );
         assert_eq!(
             status.treasury_operations.len(),
-            usize::from(remaining == 300)
+            usize::from(remaining == 600)
         );
         assert_eq!(worker.backend.lock().await.sends, 0);
-        drop(worker);
-        task.await.unwrap();
-        let (_dir, worker, task) = fixture().await;
-        worker.backend.lock().await.quote_deadline = now + 200 + remaining;
-        worker.tick(now).await.unwrap();
-        worker.tick(now + 100).await.unwrap();
-        worker.tick(now + 200).await.unwrap();
-        let status = worker.store.call(|s| s.status()).await.unwrap();
-        assert_eq!(
-            status.funding_jobs[0].phase,
-            if remaining == 300 {
-                FundingPhase::DepositPending
-            } else {
-                FundingPhase::RecoveryRequired
-            }
-        );
-        if remaining < 300 {
-            assert!(
-                status.funding_jobs[0]
-                    .last_error
-                    .as_deref()
-                    .unwrap()
-                    .starts_with("prepared_quote_window_exhausted;")
-            );
-            assert_eq!(status.treasury_operations[0].submission, "PREPARED");
-            assert_eq!(status.treasury_operations[0].attempts, 0);
+        if remaining == 600 {
+            worker.tick(now + 200_000).await.unwrap();
+            assert_eq!(worker.backend.lock().await.sends, 1);
         }
-        assert_eq!(
-            worker.backend.lock().await.sends,
-            usize::from(remaining == 300)
-        );
-        assert_eq!(status.treasury_operations.len(), 1);
         drop(worker);
         task.await.unwrap();
     }
+    let (_dir, worker, task) = fixture().await;
+    let now = x402_treazury::rotation::base::now().unwrap();
+    let deadline = now + 301;
+    worker.backend.lock().await.quote_deadline = deadline;
+    worker.tick(now).await.unwrap();
+    worker.tick(now + 100).await.unwrap();
+    assert_eq!(
+        worker
+            .store
+            .call(|s| Ok(s.status()?.funding_jobs[0].phase.clone()))
+            .await
+            .unwrap(),
+        FundingPhase::Prepared
+    );
+    wait_until_quote_window_exhausted(deadline).await;
+    worker.tick(now + 200).await.unwrap();
+    let status = worker.store.call(|s| s.status()).await.unwrap();
+    assert_eq!(status.funding_jobs[0].phase, FundingPhase::RecoveryRequired);
+    assert!(
+        status.funding_jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap()
+            .starts_with("prepared_quote_window_exhausted;")
+    );
+    assert_eq!(status.treasury_operations[0].submission, "PREPARED");
+    assert_eq!(status.treasury_operations[0].attempts, 0);
+    assert_eq!(worker.backend.lock().await.sends, 0);
+    drop(worker);
+    task.await.unwrap();
 }
 
 #[tokio::test]
@@ -1323,9 +1338,10 @@ async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
     };
     let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
-    worker.backend.lock().await.quote_deadline = now + 450;
+    worker.backend.lock().await.quote_deadline = now + 301;
     worker.tick(now).await.unwrap();
     worker.tick(now + 100).await.unwrap();
+    wait_until_quote_window_exhausted(now + 301).await;
     worker.tick(now + 200).await.unwrap();
     worker.backend.lock().await.recovery =
         Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
