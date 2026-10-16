@@ -75,6 +75,11 @@ impl Row {
     }
 }
 
+fn insert_inactive_set(db: &Connection, snapshot: &Snapshot, pass: &ReplacementPass) -> Result<()> {
+    db.execute("INSERT INTO payment_resolution_repairs(id,wallet_id,activated,original_financial_height,original_financial_hash,original_debit_height,original_debit_hash,evidence_digest,resolution_count,confirmed_height,confirmed_hash,latest_height,latest_hash,endpoint) VALUES(?1,?2,0,?3,?4,?5,?6,'',0,?7,?8,?7,?8,?9)",params![snapshot.id,snapshot.wallet,snapshot.capture.checkpoint.as_ref().map(|a|i64::try_from(a.height)).transpose()?,snapshot.capture.checkpoint.as_ref().map(|a|&a.hash),snapshot.debit.as_ref().map(|a|i64::try_from(a.height)).transpose()?,snapshot.debit.as_ref().map(|a|&a.hash),i64::try_from(pass.anchor().height)?,pass.anchor().hash,pass.endpoint()])?;
+    Ok(())
+}
+
 impl Store {
     fn replacement_snapshot(
         &self,
@@ -101,13 +106,18 @@ impl Store {
         let mut capture = self.capture_evidence(wallet)?;
         capture.previous = None;
         capture.previous_confirmed_covered = false;
+        let debit = debit_checkpoint(&self.db, wallet)?;
+        ensure!(
+            has_resolved || (capture.checkpoint.is_none() && debit.is_none()),
+            EvidenceFailure::MalformedSupport
+        );
         Ok(Some(Snapshot {
             id,
             pool: pool.into(),
             wallet: wallet.into(),
             address,
             capture,
-            debit: debit_checkpoint(&self.db, wallet)?,
+            debit,
             revision,
         }))
     }
@@ -213,7 +223,7 @@ impl Store {
         // set. Consequently sealed page accounting does not need a second
         // durable ledger or an unbounded final reread.
         if after.is_empty() {
-            tx.execute("INSERT INTO payment_resolution_repairs(id,wallet_id,activated,original_financial_height,original_financial_hash,original_debit_height,original_debit_hash,evidence_digest,resolution_count,confirmed_height,confirmed_hash,latest_height,latest_hash,endpoint) VALUES(?1,?2,0,?3,?4,?5,?6,'',0,?7,?8,?7,?8,?9)",params![snapshot.id,snapshot.wallet,snapshot.capture.checkpoint.as_ref().map(|a|i64::try_from(a.height)).transpose()?,snapshot.capture.checkpoint.as_ref().map(|a|&a.hash),snapshot.debit.as_ref().map(|a|i64::try_from(a.height)).transpose()?,snapshot.debit.as_ref().map(|a|&a.hash),i64::try_from(pass.anchor().height)?,pass.anchor().hash,pass.endpoint()])?;
+            insert_inactive_set(&tx, snapshot, pass)?;
         }
         let mut has_debit = false;
         for ((id, raw), certificate) in originals.iter().zip(page.resolutions()) {
@@ -281,7 +291,10 @@ impl Store {
             [&snapshot.id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        ensure!(count > 0, EvidenceFailure::MalformedSupport);
+        ensure!(
+            count > 0 || (snapshot.capture.checkpoint.is_none() && snapshot.debit.is_none()),
+            EvidenceFailure::MalformedSupport
+        );
         ensure!(
             i64::try_from(expected)? == count
                 && rows(&self.db, &snapshot.wallet, &after)?.is_empty(),
@@ -396,19 +409,19 @@ impl Store {
                     .is_none_or(|a| observation.confirmed.anchor.height >= a.height),
             EvidenceFailure::Invalidated
         );
-        let has_debit: bool = self.db.query_row(
-            "SELECT has_debit FROM resolution_replacement_passes WHERE id=?1 AND sealed=1",
+        let (has_debit, has_resolutions): (bool, bool) = self.db.query_row(
+            "SELECT has_debit,count>0 FROM resolution_replacement_passes WHERE id=?1 AND sealed=1",
             [&snapshot.id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         let support = serde_json::to_string(&BalanceSupport {
             observation: observation.clone(),
-            checkpoint: Some(observation.confirmed.anchor.clone()),
+            checkpoint: has_resolutions.then(|| observation.confirmed.anchor.clone()),
         })?;
         let verified_at = crate::rotation::base::now()?;
         let tx = self.db.transaction()?;
         tx.execute("UPDATE payment_resolution_repairs SET activated=1,verified_at=?2,confirmed_height=?3,confirmed_hash=?4,latest_height=?5,latest_hash=?6,endpoint=?7,balance_support=?8 WHERE id=?1 AND activated=0",params![snapshot.id,i64::try_from(verified_at)?,i64::try_from(observation.confirmed.anchor.height)?,observation.confirmed.anchor.hash,i64::try_from(observation.latest.anchor.height)?,observation.latest.anchor.hash,observation.endpoint,support])?;
-        tx.execute("UPDATE wallets SET payment_resolutions_disputed=0,evidence_repair=NULL,financial_height=?2,financial_hash=?3,debit_height=CASE WHEN ?4 THEN ?2 ELSE NULL END,debit_hash=CASE WHEN ?4 THEN ?3 ELSE NULL END WHERE id=?1 AND evidence_repair='chain_repair_required'",params![snapshot.wallet,i64::try_from(observation.confirmed.anchor.height)?,observation.confirmed.anchor.hash,has_debit || snapshot.debit.is_some()])?;
+        tx.execute("UPDATE wallets SET payment_resolutions_disputed=0,evidence_repair=NULL,financial_height=CASE WHEN ?5 THEN ?2 ELSE NULL END,financial_hash=CASE WHEN ?5 THEN ?3 ELSE NULL END,debit_height=CASE WHEN ?4 THEN ?2 ELSE NULL END,debit_hash=CASE WHEN ?4 THEN ?3 ELSE NULL END WHERE id=?1 AND evidence_repair='chain_repair_required'",params![snapshot.wallet,i64::try_from(observation.confirmed.anchor.height)?,observation.confirmed.anchor.hash,has_debit || snapshot.debit.is_some(),has_resolutions])?;
         check_balance(&tx, self.evidence_namespace, certificate)?;
         bump_generation(&tx, "wallet", &snapshot.wallet)?;
         tx.execute(
@@ -832,7 +845,18 @@ pub(super) async fn replace_wallet(
             snapshot.capture.checkpoint.is_none() && snapshot.debit.is_none(),
             EvidenceFailure::MalformedSupport
         );
-        return Ok(false);
+        let captured = snapshot.clone();
+        let scoped = pass.clone();
+        store
+            .call(move |s| {
+                s.validate_replacement_snapshot(&captured)?;
+                ensure!(
+                    rows(&s.db, &captured.wallet, "")?.is_empty(),
+                    EvidenceFailure::Invalidated
+                );
+                insert_inactive_set(&s.db, &captured, &scoped)
+            })
+            .await?;
     }
     let captured = snapshot.clone();
     let digest = format!("{:x}", digest.finalize());

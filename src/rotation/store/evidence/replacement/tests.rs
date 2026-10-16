@@ -511,14 +511,16 @@ async fn replacement_rejects_missing_authoritative_rows_and_ambiguous_amounts() 
         .db
         .execute("DELETE FROM payment_attempts", [])
         .unwrap();
-    let (snapshot, pass, digest, count) = f.stage().await;
-    assert_eq!(count, 0);
-    let fresh = f.base.finish_replacement(&pass).await.unwrap();
+    let error =
+        match f
+            .store
+            .begin_replacement_staging(&f.pool, &f.wallet, Uuid::new_v4().to_string())
+        {
+            Err(error) => error,
+            Ok(_) => panic!("missing journal must fail before acquiring chain evidence"),
+        };
     assert_eq!(
-        f.store
-            .finish_replacement_fixture(snapshot, pass, fresh, digest, count)
-            .unwrap_err()
-            .downcast_ref::<EvidenceFailure>(),
+        error.downcast_ref::<EvidenceFailure>(),
         Some(&EvidenceFailure::MalformedSupport)
     );
 }
