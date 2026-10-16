@@ -1674,6 +1674,24 @@ impl Store {
     }
 }
 
+/// Endpoint identity is an authority field inside original resolution support.
+/// Guard extraction in the expression itself: SQLite may reorder predicates.
+/// Unknown provenance is contained to its owner, never treated as an absent debt.
+fn payment_endpoint_dependents(
+    db: &Connection,
+    endpoint: &str,
+) -> Result<std::collections::BTreeMap<String, bool>> {
+    let mut query = db.prepare("WITH supports AS (SELECT a.wallet_id,CASE WHEN json_valid(r.support) THEN CASE WHEN json_type(r.support,'$.endpoint')='text' THEN json_extract(r.support,'$.endpoint') END END AS endpoint FROM payment_attempts a LEFT JOIN payment_resolutions r ON r.attempt_id=a.id WHERE a.state='RESOLVED') SELECT wallet_id,endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*' AS malformed FROM supports WHERE endpoint=?1 OR endpoint IS NULL OR length(endpoint)!=64 OR endpoint GLOB '*[^0-9a-fA-F]*'")?;
+    let mut wallets = std::collections::BTreeMap::new();
+    for row in query.query_map([endpoint], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+    })? {
+        let (wallet, malformed) = row?;
+        *wallets.entry(wallet).or_insert(false) |= malformed;
+    }
+    Ok(wallets)
+}
+
 fn bump_generation(db: &Connection, kind: &str, scope: &str) -> Result<()> {
     let next = generation(db, kind, scope)?
         .checked_add(1)
@@ -1749,12 +1767,34 @@ impl Store {
             "invalid endpoint identity"
         );
         let tx = self.db.transaction()?;
+        let payment_wallets = payment_endpoint_dependents(&tx, endpoint)?;
+        for (wallet, malformed) in &payment_wallets {
+            // Checkpoints advance only from released payment proofs. Losing
+            // their endpoint invalidates every release for this wallet; the
+            // original proof, financial/debit anchors and attempt stay intact.
+            tx.execute("UPDATE payment_attempts SET resolution_disputed=1 WHERE wallet_id=?1 AND state='RESOLVED' AND resolution_disputed=0", [wallet])?;
+            let changed = tx.execute("UPDATE wallets SET evidence_repair=CASE WHEN evidence_repair='evidence_repair_required' OR ?2 THEN 'evidence_repair_required' ELSE 'chain_repair_required' END WHERE id=?1", params![wallet,malformed])?;
+            ensure!(changed == 1, EvidenceFailure::ScopeMismatch);
+            bump_generation(&tx, "wallet", wallet)?;
+        }
         super::funding::dispute_endpoint_support(&tx, endpoint)?;
         super::capacity::dispute_endpoint_support(&tx, endpoint)?;
         bump_generation(&tx, "endpoint", endpoint)?;
         tx.commit()?;
-        self.evidence_cache
-            .retain(|_, (_, certificate)| certificate.observation().endpoint != endpoint);
+        self.evidence_cache.retain(|wallet, (_, certificate)| {
+            certificate.observation().endpoint != endpoint && !payment_wallets.contains_key(wallet)
+        });
+        let malformed_wallets = payment_wallets
+            .values()
+            .filter(|malformed| **malformed)
+            .count();
+        if malformed_wallets > 0 {
+            tracing::warn!(
+                category = "malformed_payment_resolution_support",
+                affected_wallets = malformed_wallets,
+                "Payment resolution endpoint provenance requires wallet-scoped evidence repair"
+            );
+        }
         Ok(())
     }
     pub(crate) fn record_base_failure(&mut self, error: &anyhow::Error) -> Result<()> {
@@ -1930,3 +1970,6 @@ mod retirement_tests;
 
 #[cfg(test)]
 mod preparation_tests;
+
+#[cfg(test)]
+mod endpoint_tests;

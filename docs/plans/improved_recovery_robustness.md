@@ -794,6 +794,20 @@ journal pool bindings cannot hide a sole obligation. Missing original resolution
 proofs and malformed amounts fail for the affected pool; unrelated wallet amounts
 are not decoded. Focused regression passed; independent review found no findings.
 
+**C09 durable payment endpoint dependency prerequisite:** Typed endpoint distrust
+now finds original resolution dependencies through guarded JSON authority fields.
+It atomically reserves every resolved liability of each affected wallet, preserves
+original proofs and financial/debit anchors, bumps wallet and endpoint generations,
+and evicts affected wallet caches even when acquired through another endpoint.
+Malformed or missing provenance blocks its identifiable owner without treating its
+liability as zero; existing stronger amount/evidence repair is never downgraded.
+Ordinary RPC outages do not invalidate facts. No schema change is needed because
+current compact payment checkpoints originate only from original resolutions.
+C14 must extend this dependency lookup to adopted replacement proofs/checkpoints
+before enabling replacement release. The focused regression passed rollback,
+restart, sibling isolation, malformed provenance and repeated invalidation checks;
+independent review found no actionable findings.
+
 **C09 funding inventory traversal contract (reviewed narrow slice):** Remove the
 `state != COMPLETE OR readiness_disputed` SQL filter. Traverse the existing funding
 job primary key in bounded 64-row pages under the captured insertion boundary;
