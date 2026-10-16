@@ -21,7 +21,7 @@ static ACTIVE: Mutex<Vec<Active>> = Mutex::new(Vec::new());
 
 struct RetainedOwner {
     channel: watch::Receiver<Option<SharedResult>>,
-    permit: tokio::sync::SemaphorePermit<'static>,
+    permit: resources::QueryPermit,
 }
 impl Drop for RetainedOwner {
     fn drop(&mut self) {
@@ -106,7 +106,7 @@ impl BaseRpc {
                 owner.result.clone()
             } else {
                 // Reuse the existing query-memory permit; never evict active work.
-                let permit = resources::query()?;
+                let permit = resources::query(resources::Class::Current)?;
                 let (sender, receiver) = watch::channel(None);
                 active.push(Active {
                     key,
@@ -277,7 +277,7 @@ mod tests {
             let (_, channel) = watch::channel(None);
             let owner = RetainedOwner {
                 channel: channel.clone(),
-                permit: resources::query().unwrap(),
+                permit: resources::query(resources::Class::Current).unwrap(),
             };
             ACTIVE.lock().unwrap().push(Active {
                 key: Key {

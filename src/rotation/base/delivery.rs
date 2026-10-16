@@ -130,12 +130,16 @@ impl BaseRpc {
         expected: &FundingDeliveryExpectation,
         capture: EvidenceCapture,
     ) -> Result<Option<FundingDeliveryProof>> {
-        let _owner = resources::query()?;
+        let historical = self.classified(resources::Class::Historical);
+        let _owner = resources::query(resources::Class::Historical)?;
         ensure!(
             !capture.namespace.is_nil() && !capture.wallet.is_empty(),
             evidence::EvidenceFailure::ScopeMismatch
         );
-        for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
+        for (index, endpoint) in std::iter::once(&historical)
+            .chain(&historical.fallbacks)
+            .enumerate()
+        {
             let endpoint = endpoint.for_address(&expected.recipient.to_string())?;
             match endpoint.delivery_inner(expected, capture.clone()).await {
                 Ok(proof) => return Ok(proof),

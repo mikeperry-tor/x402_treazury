@@ -2,6 +2,24 @@ use super::*;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+// These transport fixtures exercise ordinary current-query calls. Historical
+// ownership and reserved slots are covered by the isolated resources tests.
+async fn rpc(
+    http: &reqwest::Client,
+    url: &reqwest::Url,
+    method: &'static str,
+    params: Value,
+) -> Result<Value> {
+    super::rpc(
+        http,
+        url,
+        method,
+        params,
+        super::super::resources::Class::Current,
+    )
+    .await
+}
+
 type Requests = Arc<Mutex<Vec<Value>>>;
 async fn fixture(
     responses: Vec<(Duration, String)>,

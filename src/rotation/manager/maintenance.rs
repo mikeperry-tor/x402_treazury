@@ -1780,4 +1780,296 @@ mod tests {
         assert_eq!(history_delay(u32::MAX).as_secs(), 300);
         assert_eq!(CADENCE.as_secs(), 5);
     }
+    #[test]
+    fn multiple_pools_retain_repairs_through_global_query_and_socket_saturation() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "rotation::manager::maintenance::tests::multi_pool_repair_saturation_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "process-wide resources; exercised by isolated parent"]
+    async fn multi_pool_repair_saturation_child() {
+        use axum::{Json, Router, routing::post};
+        use serde_json::json;
+        let mut fixtures = Vec::new();
+        let stop = CancellationToken::new();
+        let mut owners = Vec::new();
+        for _ in 0..4 {
+            let f = fixture(1).await;
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            db.execute(
+                "UPDATE payment_attempts SET nonce=?1 WHERE id='attempt-1'",
+                [format!("0x{:064x}", 2)],
+            )
+            .unwrap();
+            drop(db);
+            install_repair_wallets(&f);
+            owners.push(tokio::spawn({
+                let pool = f.pool.clone();
+                let stop = stop.clone();
+                async move { pool.run_reconciliation(stop).await }
+            }));
+            tokio::time::timeout(Duration::from_secs(5), f.slow_started.notified())
+                .await
+                .unwrap();
+            wait_for(&f, 0).await;
+            fixtures.push(f);
+        }
+        // Four distinct owners retain one historical nonce call each. Their
+        // healthy balance/history lanes already made progress without release.
+        for f in &fixtures {
+            assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
+            assert!(f.balance_reads.load(Ordering::SeqCst) > 0);
+        }
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/",
+            post({
+                let active = active.clone();
+                let peak = peak.clone();
+                move |Json(request): Json<Value>| {
+                    let active = active.clone();
+                    let peak = peak.clone();
+                    async move {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(current, Ordering::SeqCst);
+                        std::future::pending::<()>().await;
+                        Json(json!({"jsonrpc":"2.0","id":request["id"],"result":"0x2105"}))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rpc = BaseRpc::new(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            12,
+            120,
+        )
+        .unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut pressure = Vec::new();
+        for _ in 0..80 {
+            let rpc = rpc.clone();
+            pressure.push(tokio::spawn(async move {
+                rpc.view(crate::rotation::base::ChainQuery {
+                    wallets: vec![],
+                    pending: vec![],
+                    anchor: None,
+                    captures: BTreeMap::new(),
+                })
+                .await
+            }));
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while crate::rotation::base::available_queries() != 0
+                || active.load(Ordering::SeqCst) != 28
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // The existing 32-socket ceiling includes all four held repairs.
+        assert_eq!(peak.load(Ordering::SeqCst) + fixtures.len(), 32);
+        for f in &fixtures {
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                f.store.call(|s| Ok(s.id().to_owned())),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                f.nonce_reads.load(Ordering::SeqCst),
+                2,
+                "saturation must not duplicate historical owners"
+            );
+        }
+        let before: Vec<_> = fixtures
+            .iter()
+            .map(|f| f.balance_reads.load(Ordering::SeqCst))
+            .collect();
+        // Deliberate current-query pressure owns every free slot. Cancel that
+        // unsigned pressure, retaining all repair owners and their liabilities.
+        for task in &pressure {
+            task.abort();
+        }
+        for task in pressure {
+            let _ = task.await;
+        }
+        server.abort();
+        tokio::time::timeout(Duration::from_secs(12), async {
+            loop {
+                if fixtures
+                    .iter()
+                    .zip(&before)
+                    .all(|(f, before)| f.balance_reads.load(Ordering::SeqCst) > *before)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.cancel();
+        for task in owners {
+            task.await.unwrap().unwrap();
+        }
+        for f in fixtures {
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM wallets WHERE payment_resolutions_disputed=1",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                4
+            );
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
+            drop(db);
+            f.release.notify_waiters();
+            f.server.abort();
+            drop(f.pool);
+            drop(f.store);
+            f.worker.await.unwrap();
+        }
+        assert_eq!(crate::rotation::base::available_queries(), 64);
+    }
+    #[test]
+    fn historical_repairs_across_more_pools_than_sockets_leave_current_evidence_capacity() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "rotation::manager::maintenance::tests::historical_pool_saturation_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "process-wide resources; exercised by isolated parent"]
+    async fn historical_pool_saturation_child() {
+        let mut fixtures = Vec::new();
+        let stop = CancellationToken::new();
+        let mut owners = Vec::new();
+        // More independently owned historical repairs than the unchanged32
+        // socket bound. No held historical response is released before shutdown.
+        for _ in 0..36 {
+            let f = fixture(0).await;
+            install_repair_wallets(&f);
+            owners.push(tokio::spawn({
+                let pool = f.pool.clone();
+                let stop = stop.clone();
+                async move { pool.run_reconciliation(stop).await }
+            }));
+            fixtures.push(f);
+        }
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while fixtures
+                .iter()
+                .map(|f| f.nonce_reads.load(Ordering::SeqCst))
+                .sum::<usize>()
+                != 31
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let before: Vec<_> = fixtures
+            .iter()
+            .map(|f| f.balance_reads.load(Ordering::SeqCst))
+            .collect();
+        for f in &fixtures {
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                f.store.call(|s| Ok(s.id().to_owned())),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while !fixtures
+                .iter()
+                .zip(&before)
+                .all(|(f, before)| f.balance_reads.load(Ordering::SeqCst) > *before)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            fixtures
+                .iter()
+                .map(|f| f.nonce_reads.load(Ordering::SeqCst))
+                .sum::<usize>(),
+            31
+        );
+        assert!(
+            fixtures
+                .iter()
+                .all(|f| f.nonce_reads.load(Ordering::SeqCst) <= 1)
+        );
+        stop.cancel();
+        for task in owners {
+            task.await.unwrap().unwrap();
+        }
+        for f in fixtures {
+            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM wallets WHERE payment_resolutions_disputed=1",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                4
+            );
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM payment_resolution_repairs", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            drop(db);
+            f.release.notify_waiters();
+            f.server.abort();
+            drop(f.pool);
+            drop(f.store);
+            f.worker.await.unwrap();
+        }
+        assert_eq!(crate::rotation::base::available_queries(), 64);
+    }
 }

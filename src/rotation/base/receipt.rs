@@ -26,8 +26,13 @@ impl BaseRpc {
         &self,
         expected: &TransferExpectation,
     ) -> Result<Option<TransferProof>> {
+        let historical = self.classified(resources::Class::Historical);
+        let _owner = resources::query(resources::Class::Historical)?;
         ensure!(expected.amount > U256::ZERO, "zero expected payment amount");
-        for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
+        for (index, endpoint) in std::iter::once(&historical)
+            .chain(&historical.fallbacks)
+            .enumerate()
+        {
             let client = endpoint.for_address(&expected.payer.to_string())?;
             let result = client.transfer_inner(expected).await;
             match result {

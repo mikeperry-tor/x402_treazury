@@ -80,7 +80,8 @@ impl BaseRpc {
         payer: String,
         debit_floor: Option<u64>,
     ) -> Result<ReplacementPass> {
-        let _owner = resources::query()?;
+        let historical = self.classified(resources::Class::Historical);
+        let _owner = resources::query(resources::Class::Historical)?;
         ensure!(
             !capture.namespace.is_nil() && !capture.wallet.is_empty(),
             evidence::EvidenceFailure::ScopeMismatch
@@ -94,7 +95,10 @@ impl BaseRpc {
             anchor: None,
             captures: BTreeMap::new(),
         };
-        for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
+        for (index, endpoint) in std::iter::once(&historical)
+            .chain(&historical.fallbacks)
+            .enumerate()
+        {
             let endpoint = endpoint.for_address(&payer)?;
             let result = async {
                 let headers = endpoint
@@ -148,7 +152,7 @@ impl BaseRpc {
         pass: &ReplacementPass,
         authorizations: Vec<PendingAuthorization>,
     ) -> Result<ReplacementPage> {
-        let _owner = resources::query()?;
+        let _owner = resources::query(resources::Class::Historical)?;
         ensure!(
             !authorizations.is_empty()
                 && authorizations.len() <= crate::rotation::store::history::PAGE_SIZE,
@@ -221,7 +225,7 @@ impl BaseRpc {
         &self,
         pass: &ReplacementPass,
     ) -> Result<ReplacementBalance> {
-        let _owner = resources::query()?;
+        let _owner = resources::query(resources::Class::Historical)?;
         let endpoint = &pass.endpoint;
         endpoint.check_replacement_anchor(pass).await?;
         let view = endpoint

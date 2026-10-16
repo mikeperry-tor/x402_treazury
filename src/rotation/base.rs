@@ -162,6 +162,7 @@ pub struct ChainView {
 }
 #[derive(Clone)]
 pub struct BaseRpc {
+    class: resources::Class,
     http: reqwest::Client,
     url: reqwest::Url,
     confirmations: u64,
@@ -201,6 +202,7 @@ impl BaseRpc {
     pub fn new(url: &str, confirmations: u64, max_age: u64) -> Result<Self> {
         ensure!(confirmations > 0 && max_age > 0, "invalid Base RPC limits");
         Ok(Self {
+            class: resources::Class::Current,
             http: crate::network::discovery(url, None)?,
             url: secure_endpoint(url)?,
             confirmations,
@@ -229,8 +231,19 @@ impl BaseRpc {
         primary.fallbacks = endpoints;
         Ok(primary)
     }
+    fn classified(&self, class: resources::Class) -> Self {
+        let mut scoped = self.clone();
+        scoped.class = class;
+        scoped.fallbacks = self
+            .fallbacks
+            .iter()
+            .map(|endpoint| endpoint.classified(class))
+            .collect();
+        scoped
+    }
     fn for_address(&self, address: &str) -> Result<Self> {
         Ok(Self {
+            class: self.class,
             http: crate::network::global().http(
                 &crate::network::IsolationId::evm(address)?,
                 self.url.as_str(),
@@ -320,7 +333,7 @@ impl BaseRpc {
         certificate: BalanceCertificate,
         mut capture: EvidenceCapture,
     ) -> Result<BalanceCertificate> {
-        let _owner = resources::query()?;
+        let _owner = resources::query(resources::Class::Current)?;
         let observation = certificate.observation();
         ensure!(
             capture.namespace == certificate.capture().namespace
@@ -360,7 +373,8 @@ impl BaseRpc {
         certificate: ResolutionCertificate,
         mut capture: EvidenceCapture,
     ) -> Result<ResolutionCertificate> {
-        let _owner = resources::query()?;
+        let historical = self.classified(resources::Class::Historical);
+        let _owner = resources::query(resources::Class::Historical)?;
         ensure!(
             capture.namespace == certificate.capture().namespace
                 && capture.wallet == certificate.authorization().wallet
@@ -372,7 +386,7 @@ impl BaseRpc {
                     == certificate.endpoint_generation(),
             evidence::EvidenceFailure::Invalidated
         );
-        let endpoint = self
+        let endpoint = historical
             .original_endpoint(certificate.endpoint())?
             .for_address(&certificate.authorization().payer)?;
         // Only the compact checkpoint and immutable proof anchor are required.
@@ -436,7 +450,7 @@ impl BaseRpc {
     }
 
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
-        transport::rpc(&self.http, &self.url, method, params).await
+        transport::rpc(&self.http, &self.url, method, params, self.class).await
     }
 
     async fn block(&self, tag: &str) -> Result<(Anchor, u64)> {
@@ -474,13 +488,19 @@ impl BaseRpc {
         U256::from_str_radix(&s[2..], 16).map_err(|_| RpcFailure::malformed("eth_call").into())
     }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
-        let owner = resources::query()?;
-        self.view_with_owner(query, &owner).await
+        let class = if query.pending.is_empty() {
+            resources::Class::Current
+        } else {
+            resources::Class::Historical
+        };
+        let scoped = self.classified(class);
+        let owner = resources::query(class)?;
+        scoped.view_with_owner(query, &owner).await
     }
     async fn view_with_owner(
         &self,
         query: ChainQuery,
-        _owner: &tokio::sync::SemaphorePermit<'static>,
+        _owner: &resources::QueryPermit,
     ) -> Result<ChainView> {
         // Process-local correlation only; never derived from wallet/pool identities.
         static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);

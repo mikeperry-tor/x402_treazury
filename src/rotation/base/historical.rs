@@ -40,14 +40,15 @@ impl BaseRpc {
         &self,
         request: HistoricalBalanceRequest,
     ) -> Result<HistoricalBalanceCertificate> {
-        let _owner = resources::query()?;
+        let historical = self.classified(resources::Class::Historical);
+        let _owner = resources::query(resources::Class::Historical)?;
         request.observation.validate()?;
         ensure!(
             request.capture.wallet == request.observation.wallet,
             evidence::EvidenceFailure::ScopeMismatch
         );
         let observation = &request.observation;
-        let endpoint = self
+        let endpoint = historical
             .original_endpoint(&observation.endpoint)?
             .for_address(&observation.address)?;
         let mut capture = request.capture.clone();

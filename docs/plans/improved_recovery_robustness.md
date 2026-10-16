@@ -1165,6 +1165,23 @@ Root review found no further correctness issue. All six repair tests and 17
 replacement tests passed. This removes the previously documented unbounded fallback;
 final cross-layer acceptance remains a separate gate.
 
+**C15 cross-pool resource fairness fixup (implemented and reviewed):** Per-group
+repair lanes alone did not prevent enough historical queries from occupying every
+process-wide RPC socket. Historical query/caller/socket subsets now leave one current
+evidence slot at each existing boundary: 63 of 64 queries, 127 of 128 callers and
+31 of 32 sockets. Aggregate bounds are unchanged. Classification follows isolated
+endpoint and fallback clones; waiting historical calls cannot take the reserved
+current socket. Query and caller admission stay bounded, and cancellation releases
+both subset and aggregate ownership without abandoning accepted financial work.
+
+Independent review is clear. The Base filter passed 41 tests with one ignored helper;
+resource accounting, 36-pool historical saturation, four-pool aggregate saturation
+and actual managed-payment saturation tests passed. With 31 historical RPCs held,
+every pool's current balance reads and independent Store work progressed. Original
+liabilities and immutable proofs survive shutdown. A production repair/reopen test
+also passed after the original RPC was stopped and an explicitly configured alternate
+was selected, retaining original endpoint provenance and funding disputes (T06).
+
 **C21 Base observation clock contract:** Measure the existing validity window
 from a clock capture before the latest-header request. The elapsed clock includes
 suspend on macOS and Linux; no new timeout or durable clock halt is introduced.

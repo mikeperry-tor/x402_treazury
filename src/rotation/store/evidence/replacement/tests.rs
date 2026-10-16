@@ -51,6 +51,7 @@ struct Chain {
 struct Fixture {
     store: Store,
     base: BaseRpc,
+    url: String,
     wallet: String,
     pool: String,
     chain: Arc<Mutex<Chain>>,
@@ -96,12 +97,8 @@ impl Fixture {
             }
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = BaseRpc::new(
-            &format!("http://{}/", listener.local_addr().unwrap()),
-            12,
-            120,
-        )
-        .unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let base = BaseRpc::new(&url, 12, 120).unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::create(
@@ -166,6 +163,7 @@ impl Fixture {
         Self {
             store,
             base,
+            url,
             wallet,
             pool,
             chain,
@@ -1261,4 +1259,82 @@ async fn expired_final_balance_reacquires_only_current_evidence_without_replayin
         .unwrap();
     assert_eq!(nonce_reads(), history);
     assert_eq!(exposure(&f.store.db, &f.wallet).unwrap(), U256::ZERO);
+}
+
+#[tokio::test]
+async fn reopened_production_repair_uses_only_configured_alternate_without_original_endpoint() {
+    let mut original = Fixture::new(2, true).await;
+    let alternative = Fixture::new(1, true).await;
+    let original_support: String = original
+        .store
+        .db
+        .query_row(
+            "SELECT support FROM payment_resolutions WHERE attempt_id='resolved-0000'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let alternative_support: String = alternative
+        .store
+        .db
+        .query_row(
+            "SELECT support FROM payment_resolutions WHERE attempt_id='resolved-0000'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let original_endpoint = serde_json::from_str::<Value>(&original_support).unwrap()["endpoint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let alternative_endpoint =
+        serde_json::from_str::<Value>(&alternative_support).unwrap()["endpoint"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    original.server.abort();
+    let configured =
+        BaseRpc::with_fallbacks(&[original.url.clone(), alternative.url.clone()], 12, 120).unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let dummy = Store::create(
+        &scratch.path().join("state"),
+        &scratch.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let old = std::mem::replace(&mut original.store, dummy);
+    let identity = old.id().to_owned();
+    drop(old);
+    let reopened = Store::open(
+        &original._dir.path().join("state"),
+        &original._dir.path().join("key"),
+        &identity,
+    )
+    .unwrap();
+    let (store, worker) = StoreHandle::spawn(reopened);
+    assert!(
+        super::super::repair::repair_wallet(
+            store.clone(),
+            configured,
+            original.pool.clone(),
+            original.wallet.clone()
+        )
+        .await
+        .unwrap()
+    );
+    let wallet = original.wallet.clone();
+    store.call(move |s| {
+        assert_eq!(exposure(&s.db, &wallet)?, U256::ZERO);
+        let old: String = s.db.query_row("SELECT support FROM payment_resolutions WHERE attempt_id='resolved-0000'", [], |r| r.get(0))?;
+        assert!(old.contains(&original_endpoint));
+        let endpoint: String = s.db.query_row("SELECT endpoint FROM effective_payment_resolutions WHERE attempt_id='resolved-0000'", [], |r| r.get(0))?;
+        assert_eq!(endpoint, alternative_endpoint);
+        let disputed: Option<String> = s.db.query_row("SELECT readiness_disputed FROM funding_jobs WHERE wallet_id=?1", [&wallet], |r| r.get(0))?;
+        assert_eq!(disputed.as_deref(), Some("chain_repair_required"));
+        Ok(())
+    }).await.unwrap();
+    assert!(!alternative.chain.lock().unwrap().requests.is_empty());
+    drop(store);
+    worker.await.unwrap();
 }
