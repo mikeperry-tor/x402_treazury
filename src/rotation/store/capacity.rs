@@ -905,7 +905,12 @@ mod tests {
             [&prior],
         )
         .unwrap();
-        assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
+        let error = retire_with_support(&db, "pool", &retired, &one, 100).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::rotation::base::evidence::EvidenceFailure>(),
+            Some(&crate::rotation::base::evidence::EvidenceFailure::MalformedSupport)
+        );
+        assert_eq!(role(&db, &prior), "RETAINED");
         db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=?1) WHERE id=?1",[&prior]).unwrap();
         db.execute(
             "UPDATE funding_progress SET provider_success=1,accepted_output='2000000',accepted_recipient=(SELECT address FROM wallets WHERE id=?2) WHERE job_id=?1",
