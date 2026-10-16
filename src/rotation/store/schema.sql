@@ -1,4 +1,4 @@
--- Fresh schema23 only. Older state requires separately reviewed conversion.
+-- Fresh schema24 only. Older state requires separately reviewed conversion.
 -- Older schema16 stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -8,7 +8,7 @@ CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(
  payment_resolutions_disputed INTEGER NOT NULL DEFAULT 0 CHECK(payment_resolutions_disputed IN (0,1)),
  resolved_revision INTEGER NOT NULL DEFAULT 0 CHECK(typeof(resolved_revision)='integer' AND resolved_revision>=0),
  liability_revision INTEGER NOT NULL DEFAULT 0 CHECK(typeof(liability_revision)='integer' AND liability_revision>=0),
- unresolved_exposure TEXT NOT NULL DEFAULT '0',UNIQUE(pool_id,sequence));
+ UNIQUE(pool_id,sequence));
 CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REFERENCES wallets(id),state TEXT NOT NULL CHECK(state IN ('QUEUED','COMPLETE')),target TEXT NOT NULL, readiness_operation TEXT, readiness_requirement TEXT, readiness_capacity TEXT, readiness_hash TEXT, readiness_height INTEGER, readiness_support TEXT, readiness_latest_hash TEXT, readiness_endpoint TEXT, readiness_checkpoint_hash TEXT, readiness_disputed TEXT, completion_outcome TEXT, pool_id TEXT NOT NULL REFERENCES pools(id), allocation_kind TEXT NOT NULL CHECK(allocation_kind IN ('small','large')), claim_generation INTEGER NOT NULL CHECK(claim_generation>=0));
 CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT REFERENCES pools(id),day INTEGER NOT NULL,original_day INTEGER NOT NULL,requested INTEGER NOT NULL CHECK(requested>0),reserved INTEGER NOT NULL CHECK(reserved>=0),consumed INTEGER NOT NULL CHECK(consumed>=0));
 CREATE TABLE outgoing(id TEXT PRIMARY KEY REFERENCES budget_entries(id),state TEXT NOT NULL CHECK(state IN ('PREPARED','RESOLVED')),raw BLOB NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
@@ -77,7 +77,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=23;
+PRAGMA user_version=24;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';

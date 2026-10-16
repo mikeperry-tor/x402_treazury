@@ -291,7 +291,6 @@ impl Fixture {
             let o = &support.observation;
             store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES(?1,?2,?3,?4,'0',?5,?6,?7,?8,?9,'ACTIVE')",
                 params![id,i64::try_from(o.confirmed.anchor.height).unwrap(),o.confirmed.anchor.hash,o.available().to_string(),o.valid_until.to_string(),serde_json::to_string(&support).unwrap(),i64::try_from(o.latest.anchor.height).unwrap(),o.latest.anchor.hash,o.endpoint]).unwrap();
-            add_exposure(&store.db, &wallet, U256::from(7)).unwrap();
         }
         chain.lock().unwrap().wrong_nonce = expired;
         let pending = PendingAuthorization {

@@ -344,7 +344,7 @@ mod tests {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
         assert_eq!(value["schema_version"], 2);
-        assert_eq!(value["state_schema_version"], 23);
+        assert_eq!(value["state_schema_version"], 24);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()

@@ -1265,7 +1265,7 @@ async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity
             .contains("state identity mismatch")
     );
     let path = write_config(dir.path(), &config);
-    for version in [15, 16, 17, 18, 19, 20, 21, 22, 24] {
+    for version in [15, 16, 17, 18, 19, 20, 21, 22, 23, 25] {
         db.pragma_update(None, "user_version", version).unwrap();
         assert!(treasury.runtime_id().is_err());
         let deployment = Deployment::load(&path).await.unwrap();

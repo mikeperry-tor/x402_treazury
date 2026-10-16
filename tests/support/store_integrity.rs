@@ -70,7 +70,6 @@ fn populated(dir: &Path) -> Store {
     capacity::consume_reserve(&tx, &pool, &wallet.id).unwrap();
     tx.commit().unwrap();
     s.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES ('payment',?1,?2,0,'7','hash','POSSIBLY_SUBMITTED',?3,?3,?4,0,1000,1)",params![pool,wallet.id,wallet.address,format!("0x{:064x}",1)]).unwrap();
-    evidence::add_exposure(&s.db, &wallet.id, U256::from(7)).unwrap();
     s.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund) SELECT 'prior-operation',p.job_id,p.phase,p.quote,r.address FROM funding_progress p JOIN funding_refunds r ON r.job_id=p.job_id ORDER BY p.rowid LIMIT 1",[]).unwrap();
     s
 }
@@ -886,7 +885,6 @@ fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
             "capacity" => {
                 let tx = store.db.transaction().unwrap();
                 tx.execute("UPDATE payment_attempts SET amount='4999999' WHERE id='payment'", []).unwrap();
-                evidence::add_exposure(&tx, &prepared.wallet, U256::from(4_999_992)).unwrap();
                 tx.commit().unwrap();
             },
             "cap" => { store.db.execute("UPDATE pools SET payment_limit='10' WHERE id=?1", [&prepared.pool]).unwrap(); },

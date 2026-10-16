@@ -107,7 +107,6 @@ impl Fixture {
         let nonce = format!("0x{:064x}", 1);
         let valid_before = now().unwrap() + 100;
         self.store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,nonce,valid_before,reconciliation_sequence) VALUES('proof',?1,?2,0,'7','fixture','POSSIBLY_SUBMITTED',?3,?4,?5,1)",params![self.pool,wallet,payer,nonce,i64::try_from(valid_before).unwrap()]).unwrap();
-        add_exposure(&self.store.db, wallet, U256::from(7)).unwrap();
         PendingAuthorization {
             id: "proof".into(),
             wallet: wallet.clone(),

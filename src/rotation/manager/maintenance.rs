@@ -797,11 +797,6 @@ mod tests {
         for sequence in 1..=count {
             tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,0,'1','fixture','POSSIBLY_SUBMITTED',?4,?4,?5,0,?6,?7)",rusqlite::params![format!("attempt-{sequence}"),id,wallet.id,wallet.address,format!("0x{sequence:064x}"),i64::try_from(now().unwrap()+1000).unwrap(),sequence as i64]).unwrap();
         }
-        tx.execute(
-            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
-            rusqlite::params![wallet.id, count.to_string()],
-        )
-        .unwrap();
         tx.commit().unwrap();
         drop(db);
         let release = Arc::new(tokio::sync::Notify::new());

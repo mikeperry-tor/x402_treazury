@@ -565,7 +565,7 @@ mod tests {
             "SELECT * FROM treasury_operations ORDER BY id",
             "SELECT * FROM payment_attempts ORDER BY id",
             "SELECT * FROM reserve_claims ORDER BY pool_id,slot",
-            "SELECT id,role,balance,unresolved_exposure FROM wallets ORDER BY id",
+            "SELECT id,role,balance FROM wallets ORDER BY id",
             "SELECT * FROM funding_jobs ORDER BY id",
         ];
         if !financial_only {

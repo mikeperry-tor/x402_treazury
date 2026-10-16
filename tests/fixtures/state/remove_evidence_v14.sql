@@ -9,7 +9,6 @@ ALTER TABLE wallets DROP COLUMN financial_hash;
 ALTER TABLE wallets DROP COLUMN debit_height;
 ALTER TABLE wallets DROP COLUMN debit_hash;
 ALTER TABLE wallets DROP COLUMN evidence_repair;
-ALTER TABLE wallets DROP COLUMN unresolved_exposure;
 ALTER TABLE payment_attempts DROP COLUMN reconciliation_sequence;
 ALTER TABLE payment_admission_evidence DROP COLUMN support;
 ALTER TABLE payment_admission_evidence DROP COLUMN latest_height;

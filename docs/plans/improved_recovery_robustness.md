@@ -3098,3 +3098,18 @@ a separate $1 payment succeeds with a distinct nonce; both new pending
 authorizations total $20, and no funding job is added. The fixture uses an owned
 ACTIVE payer without synthetic readiness support. The focused default-build
 test passed and independent review found no issues.
+
+
+**C22 / G14 fresh-schema exposure cleanup (implemented and reviewed):** Fresh
+schema 24 removes the independently writable `wallets.unresolved_exposure`
+projection. Runtime admission continues deriving exact pending and disputed
+liabilities from authoritative journals; no financial limit changes. Test-only
+incremental projection helpers are removed. Frozen historical schemas remain
+readable, and explicit legacy-shaped corrupt projections remain in fault tests
+to prove they cannot override journal authority. Runtime identity guards require
+the new layout without an on-open migration. Independent review cleared the
+cleanup. Default Store and manager coverage passed after separately committed
+reporting/fixture corrections, including historical read-only reports and the
+actual process-loss regression; the deployment schema/identity gate and treasury
+recovery tests also passed. This does not claim automatic rollback detection or
+completion of the remaining canonical-return and shielding acceptance work.

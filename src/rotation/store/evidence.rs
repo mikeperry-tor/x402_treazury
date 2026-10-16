@@ -115,44 +115,6 @@ fn exposure_from_rows(db: &Connection, wallet: &str, sql: &str) -> Result<U256> 
     Ok(total)
 }
 
-#[cfg(test)]
-fn projected_exposure(db: &Connection, wallet: &str) -> Result<U256> {
-    let value: String = db.query_row(
-        "SELECT unresolved_exposure FROM wallets WHERE id=?1",
-        [wallet],
-        |row| row.get(0),
-    )?;
-    amount(&value)
-}
-#[cfg(test)]
-pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
-    let total = projected_exposure(db, wallet)?
-        .checked_add(value)
-        .context("reservation overflow")?;
-    ensure!(
-        db.execute(
-            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
-            params![wallet, total.to_string()]
-        )? == 1,
-        "missing liability wallet"
-    );
-    Ok(())
-}
-#[cfg(test)]
-pub(super) fn subtract_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
-    let total = projected_exposure(db, wallet)?
-        .checked_sub(value)
-        .context("reservation underflow")?;
-    ensure!(
-        db.execute(
-            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
-            params![wallet, total.to_string()]
-        )? == 1,
-        "missing liability wallet"
-    );
-    Ok(())
-}
-
 pub(super) fn next_sequence(db: &Connection) -> Result<i64> {
     let previous: i64 = db.query_row(
         "SELECT COALESCE(MAX(reconciliation_sequence),0) FROM payment_attempts",
@@ -645,7 +607,6 @@ mod tests {
         let nonce = format!("0x{:064x}", 1);
         let valid_before = now().unwrap() + 100;
         store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,nonce,valid_before,reconciliation_sequence) VALUES('history-proof',?1,?2,0,'7','fixture','POSSIBLY_SUBMITTED',?3,?4,?5,1)",params![pool,wallet,payer,nonce,i64::try_from(valid_before).unwrap()]).unwrap();
-        add_exposure(&store.db, &wallet, U256::from(7)).unwrap();
         let authorization = crate::rotation::base::PendingAuthorization {
             id: "history-proof".into(),
             wallet: wallet.clone(),
@@ -945,6 +906,14 @@ mod tests {
         let insert = |db: &Connection, id: &str, value: U256| {
             db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT ?1,pool_id,id,0,?3,'fixture','POSSIBLY_SUBMITTED' FROM wallets WHERE id=?2", params![id,wallet,value.to_string()]).unwrap();
         };
+        assert_eq!(store.db.query_row("SELECT COUNT(*) FROM pragma_table_info('wallets') WHERE name='unresolved_exposure'", [], |r|r.get::<_,i64>(0)).unwrap(), 0);
+        // An extraneous legacy-shaped field is not runtime liability authority.
+        store
+            .db
+            .execute_batch(
+                "ALTER TABLE wallets ADD COLUMN unresolved_exposure TEXT NOT NULL DEFAULT '0'",
+            )
+            .unwrap();
         insert(&store.db, "one", U256::MAX);
         for projection in [
             "malformed",

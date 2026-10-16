@@ -287,7 +287,6 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
     let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     state.lock().unwrap().4 = 6_000_000;
     store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES('outstanding',?1,?2,0,'2000000','fixture','POSSIBLY_SUBMITTED')",params![pool,job.wallet_id]).unwrap();
-    add_exposure(&store.db, &job.wallet_id, U256::from(2_000_000)).unwrap();
     let query = store
         .scoped_chain_query(&pool, vec![job.wallet_id.clone()], vec![])
         .unwrap();

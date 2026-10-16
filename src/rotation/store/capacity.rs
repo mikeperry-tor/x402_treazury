@@ -1184,11 +1184,8 @@ mod tests {
         let job = active(&db);
         funded(&db, &job);
         let wallet = wallet(&db, &job);
-        db.execute(
-            "UPDATE wallets SET role='RETAINED',unresolved_exposure='1' WHERE id=?1",
-            [&wallet],
-        )
-        .unwrap();
+        db.execute("UPDATE wallets SET role='RETAINED' WHERE id=?1", [&wallet])
+            .unwrap();
         pending_payment(&db, "retirement-liability", &wallet);
         let zero = support(&db, &job, 0, 0);
         assert!(!retire_with_support(&db, "pool", &wallet, &zero, 100).unwrap());
@@ -1307,11 +1304,8 @@ mod tests {
         // No cached observation exists; zero balance and unresolved liabilities
         // do not change the unsigned active identity.
         pending_payment(&db, "pending-active", &first);
-        db.execute(
-            "UPDATE wallets SET balance='0',unresolved_exposure='1' WHERE id=?1",
-            [&first],
-        )
-        .unwrap();
+        db.execute("UPDATE wallets SET balance='0' WHERE id=?1", [&first])
+            .unwrap();
         let tx = db.transaction().unwrap();
         assert_eq!(resolve_identity(&tx, "pool").unwrap(), Some(first.clone()));
         tx.commit().unwrap();

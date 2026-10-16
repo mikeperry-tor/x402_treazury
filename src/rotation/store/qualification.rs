@@ -583,7 +583,6 @@ mod tests {
         for (id, wallet) in ["used", "expired"].into_iter().zip(&wallets) {
             store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES(?1,?2,?3,0,'1','hash','POSSIBLY_SUBMITTED')",
                 params![id,pool,wallet.id]).unwrap();
-            super::evidence::add_exposure(&store.db, &wallet.id, U256::from(1)).unwrap();
         }
         let view = || ChainView {
             observations: Default::default(),

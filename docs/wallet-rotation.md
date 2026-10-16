@@ -303,8 +303,10 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. The supported fresh schema
-preserves original payer role, consumed slot/generation and exact balance support;
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema 24
+derives payment exposure from authoritative journals; no independently writable
+exposure total remains. It preserves original payer role, consumed slot/generation
+and exact balance support;
 it also binds calculate-only treasury preparation to its operation and snapshot.
 Older state requires separately reviewed stopped-service conversion and is never
 upgraded on open. Canonical checkpoint conflicts restore conservative exposure for

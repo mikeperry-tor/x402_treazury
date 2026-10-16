@@ -139,11 +139,6 @@ async fn race(race: Race) {
     let dbpath = dir.path().join("state/state.sqlite");
     let db = rusqlite::Connection::open(&dbpath).unwrap();
     db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES ('old',?1,?2,0,'1','fixture','POSSIBLY_SUBMITTED',?3,?3,?4,0,0,1)",rusqlite::params![pool,wallet.id,wallet.address,format!("0x{:064x}",1)]).unwrap();
-    db.execute(
-        "UPDATE wallets SET unresolved_exposure='1' WHERE id=?1",
-        [&wallet.id],
-    )
-    .unwrap();
     let fixture = Fixture {
         holding: 5_000_000,
         debit: 1,
@@ -427,6 +422,12 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
             body: None,
         };
         let db = rusqlite::Connection::open(&fixture.db).unwrap();
+        // Deliberately reintroduce an ignored legacy-shaped annotation to prove
+        // neither malformed nor low/high projections can override the journal.
+        db.execute_batch(
+            "ALTER TABLE wallets ADD COLUMN unresolved_exposure TEXT NOT NULL DEFAULT '0'",
+        )
+        .unwrap();
         db.execute(
             "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
             rusqlite::params![
