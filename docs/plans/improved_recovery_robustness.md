@@ -658,6 +658,15 @@ starts. Obsolete supervisor-handoff tests are replaced by real serving ownership
 coverage. The initial unsigned-catalog barrier and remaining C08 end-to-end
 restoration/status evidence are still tracked separately.
 
+**C08 deferred unsigned-origin slice:** Enabled-relay ordinary serving retains
+remote catalog preparation before origin I/O. Aliases share one immutable
+preparation result; catalog permits cover unsigned requests and are released
+before relay dependency waiting. Cancellation retains the existing unsigned
+OnceCell semantics; accepted relay work retains its independent owner. Local
+authored catalogs and strict inspection/qualification/warm loading are unchanged.
+Focused tests cover deferred I/O, alias coalescing, late publication and shutdown.
+No-relay startup and the remaining recovery/status acceptance remain pending.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

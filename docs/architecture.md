@@ -102,8 +102,9 @@ catalog continuations and startup pricing. Late sources publish complete listene
 views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources; unsigned dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
-Initial unsigned catalog loading still precedes serving; broader independent
-startup remains tracked in the
+Enabled-relay serving also defers initial remote unsigned catalog loading; local
+authored catalogs remain validated before serving. Broader independent startup
+remains tracked in the
 [recovery plan](plans/improved_recovery_robustness.md).
 
 ## MCP and output boundaries
