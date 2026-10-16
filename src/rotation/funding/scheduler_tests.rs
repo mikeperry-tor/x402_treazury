@@ -1356,115 +1356,122 @@ async fn quote_saturation_releases_failed_slot_and_single_pass_drains_all_reads(
 
 #[tokio::test]
 async fn cancellation_drains_owned_prerequisite_without_starting_quote_or_next_source() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut raw = Store::create(
-        &dir.path().join("state"),
-        &dir.path().join("key"),
-        1,
-        b"fixture",
-    )
-    .unwrap();
-    crate::rotation::store::test_support::declare_two_reserves(
-        &mut raw,
-        "pool",
-        "5",
-        Some(alloy_primitives::U256::from(1_000_000)),
-        0,
-    )
-    .unwrap();
-    let jobs = raw.funding_jobs().unwrap();
-    let (store, actor) = StoreHandle::spawn(raw);
-    let (statuses, mut status_events) = mpsc::unbounded_channel();
-    let (started, mut source_events) = mpsc::unbounded_channel();
-    let (quotes, mut quote_events) = mpsc::unbounded_channel();
-    let source_gate = Arc::new(Semaphore::new(0));
-    let worker = FundingWorker::new(
-        store.clone(),
-        Source {
-            store: store.clone(),
-            reads: Reads {
-                credits: Arc::new(Semaphore::new(0)),
-                credit_calls: Arc::new(AtomicUsize::new(0)),
-                statuses,
-                status_gates: Default::default(),
-                failed_job: Default::default(),
-                processing: false,
-                quotes: Some(quotes),
+    for retained_completion in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut raw = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            "pool",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+        let jobs = raw.funding_jobs().unwrap();
+        let (store, actor) = StoreHandle::spawn(raw);
+        let (statuses, mut status_events) = mpsc::unbounded_channel();
+        let (started, mut source_events) = mpsc::unbounded_channel();
+        let (quotes, mut quote_events) = mpsc::unbounded_channel();
+        let source_gate = Arc::new(Semaphore::new(0));
+        let worker = FundingWorker::new(
+            store.clone(),
+            Source {
+                store: store.clone(),
+                reads: Reads {
+                    credits: Arc::new(Semaphore::new(0)),
+                    credit_calls: Arc::new(AtomicUsize::new(0)),
+                    statuses,
+                    status_gates: Default::default(),
+                    failed_job: Default::default(),
+                    processing: false,
+                    quotes: Some(quotes),
+                },
+                gate: source_gate.clone(),
+                started,
             },
-            gate: source_gate.clone(),
-            started,
-        },
-        1,
-    );
-    let fault = store
-        .funding_owner()
-        .lock_owned()
-        .await
-        .completion_fault
-        .clone();
-    *fault.lock().unwrap() = Some((Kind::Source, rusqlite::ffi::SQLITE_BUSY, 1));
-    let stop = CancellationToken::new();
-    let waiter = tokio::spawn({
-        let worker = worker.clone();
-        let stop = stop.clone();
-        async move { worker.schedule(1000, stop, true).await }
-    });
-    let accepted = event(&mut source_events).await;
-    source_gate.add_permits(1);
-    // Cancel after the source has completed and its exact prerequisite is
-    // retained behind the failed admission read, not while source I/O runs.
-    wait_until(|| fault.lock().unwrap().as_ref().unwrap().2 == 0).await;
-    stop.cancel();
-    waiter.abort();
-    assert!(waiter.await.unwrap_err().is_cancelled());
-    assert!(worker.tick(1000).await.unwrap_err().is::<AlreadyOwned>());
-    assert!(quote_events.try_recv().is_err());
-    // Acquiring the actual owner gate proves the detached scheduler and source
-    // have drained. Keep it held while inspecting forbidden follow-up effects.
-    let lease = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        store.funding_owner().lock_owned(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(fault.lock().unwrap().as_ref().unwrap().2, 0);
-    assert!(source_events.try_recv().is_err());
-    assert!(quote_events.try_recv().is_err());
-    assert!(status_events.try_recv().is_err());
-    let accepted_job = jobs.iter().find(|job| job.id == accepted).unwrap();
-    {
-        let state = lease.state.lock().unwrap();
-        let record = state
-            .records
-            .get(&Key {
-                operation: accepted_job.operation_id.clone(),
-                kind: Kind::Source,
-            })
-            .expect("accepted source ownership lost");
-        assert!(
-            record.due > 1000,
-            "accepted source completion was not published"
+            1,
         );
-        assert!(record.error.is_none());
-    }
-    for job in jobs {
-        store
-            .call(move |s| {
-                let facts = s.funding_facts(&job.id, &job.operation_id)?;
-                assert!(!facts.accepted_quote);
-                assert_eq!(facts.source_attempts, 0);
-                let current = s.funding_job(&job.id)?.unwrap();
-                assert_eq!(current.phase, FundingPhase::Allocated);
-                assert_eq!(current.attempts, 0);
-                Ok(())
-            })
+        let fault = store
+            .funding_owner()
+            .lock_owned()
             .await
-            .unwrap();
+            .completion_fault
+            .clone();
+        *fault.lock().unwrap() = Some((Kind::Source, rusqlite::ffi::SQLITE_BUSY, 1));
+        let stop = CancellationToken::new();
+        let waiter = tokio::spawn({
+            let worker = worker.clone();
+            let stop = stop.clone();
+            async move { worker.schedule(1000, stop, true).await }
+        });
+        let accepted = event(&mut source_events).await;
+        if retained_completion {
+            source_gate.add_permits(1);
+            // Also cover stopping after source work finished but its exact
+            // prerequisite remains retained behind the failed admission read.
+            wait_until(|| fault.lock().unwrap().as_ref().unwrap().2 == 0).await;
+        }
+        stop.cancel();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        assert!(worker.tick(1000).await.unwrap_err().is::<AlreadyOwned>());
+        assert!(quote_events.try_recv().is_err());
+        if !retained_completion {
+            source_gate.add_permits(1);
+        }
+        // Acquiring the actual owner gate proves the detached scheduler and source
+        // have drained. Keep it held while inspecting forbidden follow-up effects.
+        let lease = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            store.funding_owner().lock_owned(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fault.lock().unwrap().as_ref().unwrap().2, 0);
+        assert!(source_events.try_recv().is_err());
+        assert!(quote_events.try_recv().is_err());
+        assert!(status_events.try_recv().is_err());
+        let accepted_job = jobs.iter().find(|job| job.id == accepted).unwrap();
+        {
+            let state = lease.state.lock().unwrap();
+            let record = state
+                .records
+                .get(&Key {
+                    operation: accepted_job.operation_id.clone(),
+                    kind: Kind::Source,
+                })
+                .expect("accepted source ownership lost");
+            assert!(
+                record.due > 1000,
+                "accepted source completion was not published"
+            );
+            assert!(record.error.is_none());
+        }
+        for job in jobs {
+            store
+                .call(move |s| {
+                    let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                    assert!(!facts.accepted_quote);
+                    assert_eq!(facts.source_attempts, 0);
+                    let current = s.funding_job(&job.id)?.unwrap();
+                    assert_eq!(current.phase, FundingPhase::Allocated);
+                    assert_eq!(current.attempts, 0);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        drop(lease);
+        drop(worker);
+        drop(store);
+        actor.await.unwrap();
     }
-    drop(lease);
-    drop(worker);
-    drop(store);
-    actor.await.unwrap();
 }
 
 #[tokio::test]
