@@ -174,6 +174,12 @@ impl ManagedPool {
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
         self.candidate_for(None).await
     }
+    pub(crate) async fn discovery_changes(&self) -> Result<Arc<tokio::sync::Notify>> {
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| Ok(s.capacity_changes(&pool)))
+            .await
+    }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
         let pool = self.pool.clone();
         self.store
