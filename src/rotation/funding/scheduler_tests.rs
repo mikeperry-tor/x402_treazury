@@ -2123,3 +2123,100 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
         }
     }
 }
+
+#[tokio::test]
+async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let jobs = raw.funding_jobs().unwrap();
+    submitted(&mut raw, &jobs[0]);
+    raw.confirm_spend(&jobs[0].operation_id, 60, 1).unwrap();
+    submitted(&mut raw, &jobs[1]);
+    let treasury = raw.id().to_owned();
+    drop(raw);
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute("UPDATE funding_jobs SET state='COMPLETE'", [])
+        .unwrap();
+    db.execute("UPDATE funding_progress SET phase='\"COMPLETE\"'", [])
+        .unwrap();
+    drop(db);
+    let raw = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &treasury,
+    )
+    .unwrap();
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, mut status_events) = mpsc::unbounded_channel();
+    let (started, mut source_events) = mpsc::unbounded_channel();
+    let credits = Arc::new(AtomicUsize::new(0));
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(64)),
+                credit_calls: credits.clone(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: true,
+                quotes: None,
+            },
+            gate: Arc::new(Semaphore::new(2)),
+            started,
+        },
+        1,
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), worker.tick(1000))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(credits.load(Ordering::SeqCst), jobs.len());
+    let expected: BTreeSet<_> = jobs.iter().map(|job| job.id.clone()).collect();
+    let mut sources = BTreeSet::new();
+    let mut statuses = BTreeSet::new();
+    while let Ok(id) = source_events.try_recv() {
+        sources.insert(id);
+    }
+    while let Ok(id) = status_events.try_recv() {
+        statuses.insert(id);
+    }
+    assert_eq!(sources, [jobs[1].id.clone()].into_iter().collect());
+    assert_eq!(statuses, expected);
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+    let reopened = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &treasury,
+    )
+    .unwrap();
+    assert_eq!(reopened.funding_jobs().unwrap().len(), jobs.len());
+    for job in &jobs {
+        assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
+        assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
+        assert_eq!(
+            reopened
+                .prepared_bytes(&job.operation_id)
+                .unwrap()
+                .as_slice(),
+            b"signed"
+        );
+    }
+}

@@ -53,8 +53,15 @@ impl Store {
     pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingEntry>> {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::FundingPage)?;
-        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_actionable_inventory WHERE (state!='COMPLETE' OR readiness_disputed IS NOT NULL) AND id>?1 AND rowid<=?2 ORDER BY id LIMIT ?3")?
-            .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
+        // Completion labels are projections, not proof that source/provider or
+        // destination obligations are absent. Traverse the primary-key inventory
+        // in bounded pages; the captured facts select each observation lane.
+        let ids = self
+            .db
+            .prepare("SELECT id FROM funding_jobs WHERE id>?1 AND rowid<=?2 ORDER BY id LIMIT ?3")?
+            .query_map(params![after, through, PAGE_SIZE as i64], |r| {
+                r.get::<_, String>(0)
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut jobs = Vec::with_capacity(ids.len());
         for id in ids {

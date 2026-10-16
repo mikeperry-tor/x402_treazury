@@ -760,6 +760,16 @@ is malformed. A focused canonical-proof test resolves the valid attempt while
 leaving the malformed attempt outstanding and admission-blocking. Reports derive
 from journals; the old column remains only for schema compatibility.
 
+**C09 funding inventory traversal contract (reviewed narrow slice):** Remove the
+`state != COMPLETE OR readiness_disputed` SQL filter. Traverse the existing funding
+job primary key in bounded 64-row pages under the captured insertion boundary;
+coherent operation facts select actual credit, provider and submitted-source lanes.
+A stale completion projection must not hide those observations, including after
+restart. No new ledger, financial authority, preparation or submission is introduced.
+This does not yet cover prepared-but-unsubmitted bytes hidden by a stale phase or
+historical operations replaced in the current progress row. Health bookkeeping and
+reporting of newly exposed work require the separate review fixup.
+
 **C10 current-capacity historical-dependency deletion contract (reviewed):**
 Current balance captures retain financial checkpoint/debit support and namespace,
 wallet/endpoint generations, freshness and cache ordering. They no longer decode
