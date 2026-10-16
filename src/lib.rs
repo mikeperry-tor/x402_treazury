@@ -47,3 +47,5 @@ pub mod discovery_relay;
 #[cfg(test)]
 #[path = "../tests/support/funding_quote.rs"]
 mod test_funding_quote;
+
+mod freshness;

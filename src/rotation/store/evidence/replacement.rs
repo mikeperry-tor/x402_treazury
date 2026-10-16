@@ -254,7 +254,7 @@ impl Store {
         check_balance_integrity(&self.db, self.evidence_namespace, certificate)?;
         self.check_journal_support_or_invalidate(&snapshot.wallet, observation)?;
         ensure!(
-            observation.valid_until >= crate::rotation::base::now()?
+            certificate.is_fresh(crate::rotation::base::now()?)?
                 && observation.endpoint == pass.endpoint()
                 && observation.confirmed.anchor.height >= pass.anchor().height
                 && snapshot
@@ -301,10 +301,7 @@ impl Store {
         // The complete-set CAS can make progress for longer than this balance
         // remains fresh. It never renews the original admission authority.
         let verified_at = crate::rotation::base::now()?;
-        ensure!(
-            observation.valid_until >= verified_at,
-            EvidenceFailure::Expired
-        );
+        ensure!(certificate.is_fresh(verified_at)?, EvidenceFailure::Expired);
         let support = serde_json::to_string(&BalanceSupport {
             observation: observation.clone(),
             checkpoint: Some(observation.confirmed.anchor.clone()),

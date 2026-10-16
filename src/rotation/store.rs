@@ -1300,7 +1300,11 @@ fn admission_schema(db: &Connection) -> Result<()> {
     )?;
     Ok(())
 }
+#[cfg(test)]
+pub(crate) type JournalCommitHook = std::sync::Arc<dyn Fn(&Connection) + Send + Sync>;
 pub(crate) struct PreparedPayment {
+    #[cfg(test)]
+    pub(crate) before_journal_commit: Option<JournalCommitHook>,
     pub id: String,
     pub wallet: String,
     pub address: String,
@@ -1315,6 +1319,17 @@ pub(crate) struct PreparedPayment {
     pub(crate) valid_until: u64,
     support: Option<evidence::BalanceSupport>,
     certificate: Option<super::base::BalanceCertificate>,
+}
+impl PreparedPayment {
+    pub(crate) fn freshness_certificate(&self) -> Option<super::base::BalanceCertificate> {
+        self.certificate.clone()
+    }
+    fn evidence_fresh(&self, now: u64) -> Result<bool> {
+        self.certificate.as_ref().map_or_else(
+            || Ok(now <= self.valid_until),
+            |certificate| certificate.is_fresh(now),
+        )
+    }
 }
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AdmissionExpired;
@@ -1649,7 +1664,10 @@ impl Store {
                 observation.valid_until
             });
         ensure!(
-            super::base::now()? <= valid_until,
+            view.balance_certificates.get(&wallet).map_or_else(
+                || Ok(super::base::now()? <= valid_until),
+                |certificate| certificate.is_fresh(super::base::now()?),
+            )?,
             super::base::evidence::EvidenceFailure::Expired
         );
         let balance = *view
@@ -1675,6 +1693,8 @@ impl Store {
         commit_chain_view(tx, pool, &view, &depleted)?;
         let key = self.wallet_secret(pool, &wallet)?;
         Ok(PreparedPayment {
+            #[cfg(test)]
+            before_journal_commit: None,
             id: Uuid::new_v4().to_string(),
             pool: pool.into(),
             cost,
@@ -1766,7 +1786,7 @@ impl Store {
         let clock = super::base::now()?;
         ensure!(auth.valid_after <= clock, "authorization not yet valid");
         ensure!(
-            clock <= admission.valid_until && clock < auth.valid_before,
+            admission.evidence_fresh(clock)? && clock < auth.valid_before,
             AdmissionExpired
         );
         // Preserve legacy report metadata without using it as admission authority.
@@ -1790,21 +1810,37 @@ impl Store {
             ],
         )?;
         capacity::consume_reserve(&tx, &admission.pool, &admission.wallet)?;
-        if let Some(context) = qualification {
-            // The separate qualification journal claims this case before the
-            // financial commit can dispatch. A crash between databases keeps
-            // the case charged, never grants permission to retry it.
-            let qualification_deadline =
-                context.record(&qualification::payment_evidence(&tx, &admission.id)?)?;
-            let clock = super::base::now()?;
+        // The separate qualification journal claims this case before the
+        // financial commit can dispatch. A crash between databases keeps
+        // the case charged, never grants permission to retry it.
+        let qualification_deadline = qualification
+            .map(|context| {
+                context
+                    .record(&qualification::payment_evidence(&tx, &admission.id)?)
+                    .and_then(|deadline| u64::try_from(deadline).map_err(Into::into))
+            })
+            .transpose()?;
+        #[cfg(test)]
+        if let Some(hook) = &admission.before_journal_commit {
+            hook(&tx);
+        }
+        // Writes and reserve promotion may take time. Revalidate the same
+        // evidence and signed authority immediately before publishing them.
+        let clock = super::base::now()?;
+        let fresh = admission.evidence_fresh(clock)?
+            && auth.valid_after <= clock
+            && clock < auth.valid_before;
+        if let Some(deadline) = qualification_deadline {
+            // The accepted qualification record cannot inherit ordinary
+            // private-signature retry after this transaction rolls back.
             ensure!(
-                clock <= admission.valid_until
-                    && clock < auth.valid_before
-                    && clock < u64::try_from(qualification_deadline)?,
+                fresh && clock < deadline,
                 AdmissionError::WalletNotReady(
-                    "qualified payment authority expired before commit; no submission"
+                    "qualified payment authority expired before commit; no submission",
                 )
             );
+        } else {
+            ensure!(fresh, AdmissionExpired);
         }
         tx.commit()?;
         Ok(())
@@ -2192,6 +2228,7 @@ fn publish_chain_balances(
                 funding::publish_destination_readiness(tx, id)?;
             }
             if retire
+                && certificate.is_fresh(super::base::now()?)?
                 && capacity::retire_with_support(tx, pool, id, &support, super::base::now()?)?
                 && support.observation.remainder() > U256::ZERO
             {

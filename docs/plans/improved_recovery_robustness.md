@@ -53,6 +53,9 @@ their attribution fixup landed in `46489cf` and `c172c62`. Unidentifiable refund
 accounting is separated from SDK synchronization in `2ea6762`. Durable payment
 endpoint membership landed in `2f43075`. The C14 canonical replacement gate below
 records the reviewed schema19 implementation and passing validation.
+The separate C15 repair-owner slice landed in `07b5cad`; its database-turn
+fairness work remains explicit below. C21's Base freshness lease has passed its focused tests and independent review;
+C16 preparation provenance is next at the commit gate.
 Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
 sequence. No live-funded qualification or private-state repair has been performed
 or authorized by these changes.
@@ -1047,6 +1050,28 @@ and independent history progress, then require adoption; shutdown/restart retain
 liabilities and cleans staging. This slice does not close G12: complete final replacement validation and activation still occupy
 one serialized database job. Moving that work out requires complete revision
 coverage and short atomic activation, not weaker validation or a work deadline.
+
+**C21 Base observation clock contract:** Measure the existing validity window
+from a clock capture before the latest-header request. The elapsed clock includes
+suspend on macOS and Linux; no new timeout or durable clock halt is introduced.
+Wall-clock expiry, elapsed expiry and elapsed regression retire that observation's
+shared lease. Clones, rechecks and equal-observation cache merges cannot renew it.
+Equal merges retire detached incoming handles so eviction cannot restore their
+discarded authority; supersession alone must not expire an independent retained
+lease. Unsupported elapsed-clock platforms fail the affected acquisition explicitly.
+
+Payment selection, admission, repair activation and retirement consume the same
+lease. Admission repeats the check after journal writes immediately before commit;
+failure rolls back the payment and reservation. A qualified payment retains its
+existing nonretryable classification after external qualification recording.
+Historical resolution evidence does not acquire a balance-age prerequisite.
+Independent review identified detached-clone/cache-eviction and final-commit gaps;
+their regression fixes passed independent re-review. Final focused validation:
+seven freshness-filter tests, all 42 evidence tests and all 32 selection tests
+passed; the earlier 38 Base tests also passed. The final selection run waited in
+the macOS loader before the harness started, then completed normally; no timeout
+or security workaround was added. All-target/all-feature Clippy passed with warnings denied. Absolute funding quote deadlines, treasury runtime freshness and
+persisted polling remain separate C21 work; this is not blanket G24 closure.
 
 ### Stage 1 — Minimal authority and dependency specification
 

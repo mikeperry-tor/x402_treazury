@@ -463,6 +463,7 @@ impl ManagedPool {
                 .await;
                 let attempt_id = prepared.id.clone();
                 let balance_valid_until = prepared.valid_until;
+                let balance_certificate = prepared.freshness_certificate();
                 let context = qualification.clone();
                 // Mark before enqueueing: cancelled/lost acknowledgements never
                 // permit relay retry, dispatch or replacement signing.
@@ -485,7 +486,10 @@ impl ManagedPool {
                     {
                         // This typed rejection proves rollback and the bytes are
                         // still private. Discard them and sign once more.
-                        if now()? > balance_valid_until {
+                        if !balance_certificate.as_ref().map_or_else(
+                            || Ok(now()? <= balance_valid_until),
+                            |certificate| certificate.is_fresh(now()?),
+                        )? {
                             ensure!(
                                 recovery.take_evidence(),
                                 AdmissionError::WalletNotReady(

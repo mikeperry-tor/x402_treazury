@@ -449,6 +449,67 @@ mod tests {
             Some("evidence_expired")
         );
         assert_eq!(evidence.valid_until, saved.valid_until);
+        // A corrected wall clock cannot revive the cached certificate or a raw
+        // view clone acquired before another clone merges with that cache.
+        assert!(
+            !store.evidence_cache[&wallet]
+                .1
+                .is_fresh(now().unwrap())
+                .unwrap()
+        );
+        let query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        let raw = rpc.view(query).await.unwrap();
+        let raw_clone = raw.clone();
+        let detached = raw.clone();
+        assert!(
+            raw.balance_certificates[&wallet]
+                .is_fresh(now().unwrap())
+                .unwrap()
+        );
+        let merged = store.prepare_evidence_view(raw).unwrap();
+        assert!(
+            !merged.balance_certificates[&wallet]
+                .is_fresh(now().unwrap())
+                .unwrap()
+        );
+        assert!(
+            matches!(store.prepare_evidence_view(raw_clone), Err(error) if error.downcast_ref::<EvidenceFailure>() == Some(&EvidenceFailure::Expired))
+        );
+        let cached = store.evidence_cache.remove(&wallet).unwrap();
+        let expected = crate::rotation::manager::PaymentCandidateHandle {
+            wallet: wallet.clone(),
+            address: detached.observations[&wallet].address.clone(),
+        };
+        let rejected = store.prepare_payment(
+            &pool,
+            U256::from(1),
+            "detached-expiry",
+            detached,
+            Some(&expected),
+        );
+        assert!(
+            matches!(rejected, Err(error) if error.downcast_ref::<EvidenceFailure>() == Some(&EvidenceFailure::Expired)),
+            "detached raw clone must not regain authority after cache eviction"
+        );
+        assert!(
+            !store.evidence_cache.contains_key(&wallet),
+            "rejected detached handle must not poison the cache"
+        );
+        let query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        let newly_acquired = store
+            .prepare_evidence_view(rpc.view(query).await.unwrap())
+            .unwrap();
+        assert!(
+            newly_acquired.balance_certificates[&wallet]
+                .is_fresh(now().unwrap())
+                .unwrap(),
+            "new acquisition may establish age after cache eviction"
+        );
+        store.evidence_cache.insert(wallet.clone(), cached);
         assert!(
             crate::rotation::store::status(&dir.path().join("state"))
                 .unwrap()
@@ -463,7 +524,8 @@ mod tests {
             .get_mut(&wallet)
             .unwrap()
             .1
-            .restrict_validity(expired_at);
+            .restrict_validity(expired_at)
+            .unwrap();
         let query = store
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
             .unwrap();
@@ -480,6 +542,10 @@ mod tests {
             .unwrap();
         let mut raced = rpc.view(query).await.unwrap();
         let original_age = raced.observations[&wallet].valid_until;
+        let elapsed_expired = raced.balance_certificates[&wallet].clone();
+        elapsed_expired.advance_freshness_for_test(std::time::Duration::from_secs(121));
+        assert!(now().unwrap() <= original_age);
+        assert!(!elapsed_expired.is_fresh(now().unwrap()).unwrap());
         let anchor = |height| Anchor {
             height,
             hash: format!("0x{height:064x}"),
@@ -500,10 +566,24 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(certificate.observation().valid_until, original_age);
+        assert!(
+            !certificate.is_fresh(now().unwrap()).unwrap(),
+            "header recheck must preserve elapsed expiration"
+        );
         raced
             .balance_certificates
             .insert(wallet.clone(), certificate);
         store.publish_scoped_evidence(&pool, raced.clone()).unwrap();
+        assert!(store.cached_payment_view(&pool, &wallet).unwrap().is_none());
+        let elapsed_status =
+            crate::rotation::store::reporting::runtime_status(&store, now().unwrap()).unwrap();
+        assert!(
+            !elapsed_status.pools[0].addresses[0]
+                .runtime_balance_evidence
+                .as_ref()
+                .unwrap()
+                .fresh
+        );
         advance_checkpoint(&store.db, &wallet, &anchor(120), true).unwrap();
         assert_eq!(
             store
@@ -1633,6 +1713,9 @@ impl Store {
                 incoming.observation() == observation,
                 "balance_certificate_binding_mismatch"
             );
+            // A detached pre-merge handle has surrendered its own lease. It
+            // cannot become cache authority again after canonical eviction.
+            ensure!(!incoming.is_superseded()?, EvidenceFailure::Expired);
             check_balance_integrity(&self.db, self.evidence_namespace, incoming)?;
             self.check_journal_support_or_invalidate(wallet, observation)?;
 
@@ -1643,12 +1726,12 @@ impl Store {
                     saved.observation(),
                 )?;
                 if order == std::cmp::Ordering::Equal {
-                    incoming.restrict_validity(saved.observation().valid_until);
+                    incoming.retain_freshness(&saved)?;
                     view.observations
                         .insert(wallet.clone(), incoming.observation().clone());
                 }
                 if order != std::cmp::Ordering::Greater
-                    && crate::rotation::base::now()? <= saved.observation().valid_until
+                    && saved.is_fresh(crate::rotation::base::now()?)?
                     && validate_balance(&self.db, self.evidence_namespace, &saved).is_ok()
                 {
                     *incoming = saved;

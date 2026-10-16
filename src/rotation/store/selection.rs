@@ -162,7 +162,7 @@ impl Store {
                     self.evidence_namespace,
                     certificate,
                 ) {
-                    Ok(support) if now <= support.observation.valid_until => {}
+                    Ok(_) if certificate.is_fresh(now)? => {}
                     Ok(_) => continue,
                     Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => {
                         continue;
@@ -170,7 +170,7 @@ impl Store {
                     Err(error) => return Err(error),
                 }
                 match evidence::check_payment_balance(&self.db, self.evidence_namespace, saved) {
-                    Ok(support) if now <= support.observation.valid_until => {
+                    Ok(_) if saved.is_fresh(now)? => {
                         match self.compare_cached_balance_or_invalidate(
                             wallet,
                             certificate.observation(),
@@ -244,7 +244,7 @@ impl Store {
                 }
                 Err(error) => return Err(error),
             };
-        if now > support.observation.valid_until {
+        if !certificate.is_fresh(now)? {
             return Ok(None);
         }
         let exposure = evidence::exposure(&self.db, wallet)?;
@@ -313,7 +313,7 @@ impl Store {
                 Err(error) => return Err(error),
             };
         let observation = support.observation;
-        if super::super::base::now()? > observation.valid_until {
+        if !certificate.is_fresh(super::super::base::now()?)? {
             return Ok(missing);
         }
         Ok((

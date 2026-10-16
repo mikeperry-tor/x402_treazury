@@ -20,6 +20,7 @@ pub struct EvidenceCapture {
 pub struct BalanceCertificate {
     capture: EvidenceCapture,
     observation: BalanceObservation,
+    freshness: crate::freshness::FreshnessLease,
     verified_resolution_anchor: Anchor,
     endpoint_generation: u64,
 }
@@ -46,6 +47,7 @@ impl BalanceCertificate {
         capture: EvidenceCapture,
         observation: BalanceObservation,
         verified_resolution_anchor: Anchor,
+        freshness: crate::freshness::FreshnessLease,
     ) -> Self {
         let endpoint_generation = capture
             .endpoint_generations
@@ -55,6 +57,7 @@ impl BalanceCertificate {
         Self {
             capture,
             observation,
+            freshness,
             verified_resolution_anchor,
             endpoint_generation,
         }
@@ -69,8 +72,27 @@ impl BalanceCertificate {
         self.endpoint_generation
     }
     /// Reducing validity cannot create authority; equivalent state cannot renew age.
-    pub(crate) fn restrict_validity(&mut self, valid_until: u64) {
+    pub(crate) fn restrict_validity(&mut self, valid_until: u64) -> anyhow::Result<()> {
+        self.freshness.restrict_validity(valid_until)?;
         self.observation.valid_until = self.observation.valid_until.min(valid_until);
+        Ok(())
+    }
+    pub(crate) fn is_fresh(&self, now: u64) -> anyhow::Result<bool> {
+        self.freshness.is_fresh(now, self.observation.valid_until)
+    }
+    pub(crate) fn is_superseded(&self) -> anyhow::Result<bool> {
+        self.freshness.is_superseded()
+    }
+    pub(crate) fn retain_freshness(&mut self, saved: &Self) -> anyhow::Result<()> {
+        self.restrict_validity(saved.observation.valid_until)?;
+        self.freshness.retain_earlier(&saved.freshness)
+    }
+    #[cfg(test)]
+    pub(crate) fn advance_freshness_for_test(&self, elapsed: std::time::Duration) {
+        self.freshness.advance_for_test(elapsed);
+    }
+    pub(super) fn freshness(&self) -> crate::freshness::FreshnessLease {
+        self.freshness.clone()
     }
     pub(crate) fn compatible(&self, checkpoint: Option<&Anchor>) -> bool {
         checkpoint == Some(&self.verified_resolution_anchor)

@@ -183,6 +183,7 @@ pub fn secure_endpoint(text: &str) -> Result<reqwest::Url> {
     Ok(url)
 }
 struct ViewHeaders {
+    freshness_origin: Option<crate::freshness::ObservationClock>,
     latest: Anchor,
     timestamp: u64,
     confirmed: Anchor,
@@ -346,6 +347,7 @@ impl BaseRpc {
             capture,
             observation.clone(),
             observation.confirmed.anchor.clone(),
+            certificate.freshness(),
         ))
     }
 
@@ -599,6 +601,10 @@ impl BaseRpc {
             self.verify_capture(capture, &endpoint, progress, &mut rechecked)
                 .await?;
         }
+        let freshness_origin = headers
+            .freshness_origin
+            .as_ref()
+            .context("missing balance freshness origin")?;
         let balance_certificates = observations
             .iter()
             .filter_map(|(wallet, observation)| {
@@ -609,6 +615,10 @@ impl BaseRpc {
                             capture.clone(),
                             observation.clone(),
                             resolution_anchor.clone(),
+                            crate::freshness::FreshnessLease::from_observation(
+                                *freshness_origin,
+                                observation.valid_until,
+                            ),
                         ),
                     )
                 })
@@ -660,6 +670,11 @@ impl BaseRpc {
                 AdmissionError::ChainRecoveryRequired("confirmed anchor changed")
             );
         }
+        let freshness_origin = if query.wallets.is_empty() {
+            None
+        } else {
+            Some(crate::freshness::ObservationClock::capture()?)
+        };
         let (latest, timestamp) = progress
             .step("latest_block", self.block("latest"))
             .await
@@ -688,6 +703,7 @@ impl BaseRpc {
             "invalid confirmed block"
         );
         Ok(ViewHeaders {
+            freshness_origin,
             latest,
             timestamp,
             confirmed,
@@ -797,6 +813,7 @@ impl BaseRpc {
         resolution_anchor: &Anchor,
         progress: &ViewProgress,
     ) -> Result<ViewHeaders> {
+        let freshness_origin = crate::freshness::ObservationClock::capture()?;
         let (latest, timestamp) = progress
             .step("admission_latest_block", self.block("latest"))
             .await?;
@@ -818,6 +835,7 @@ impl BaseRpc {
             "invalid admission block"
         );
         Ok(ViewHeaders {
+            freshness_origin: Some(freshness_origin),
             latest,
             timestamp,
             confirmed,

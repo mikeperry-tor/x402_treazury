@@ -55,6 +55,16 @@ impl Fixture {
     fn block(&self, wallet: &str) {
         self.blocked.lock().unwrap().insert(self.address(wallet));
     }
+    async fn independent_view(&self, wallet: &str) -> ChainView {
+        let (pool, wallet) = (self.manager.pool.clone(), wallet.to_owned());
+        let query = self
+            .manager
+            .store
+            .call(move |store| store.scoped_chain_query(&pool, vec![wallet], vec![]))
+            .await
+            .unwrap();
+        self.manager.base.view(query).await.unwrap()
+    }
     async fn close(self) {
         self.server.abort();
         drop(self.manager);
@@ -761,6 +771,7 @@ async fn evicted_owned_proof_keeps_expiry_and_rechecks_liabilities_and_invalidat
             .unwrap(),
         CandidateEvidenceState::Missing
     ));
+    let mut expired = f.independent_view(&f.bound.wallet).await;
     let calls = f.calls.lock().unwrap().clone();
     let selected = select_owned(&f, view.clone(), 5).await.unwrap();
     assert_eq!(
@@ -770,12 +781,12 @@ async fn evicted_owned_proof_keeps_expiry_and_rechecks_liabilities_and_invalidat
     assert_eq!(selected.candidate.wallet, f.bound.wallet);
     assert!(f.manager.gate.try_lock().is_err());
     drop(selected);
-    let mut expired = view.clone();
     expired
         .balance_certificates
         .get_mut(&f.bound.wallet)
         .unwrap()
-        .restrict_validity(0);
+        .restrict_validity(0)
+        .unwrap();
     assert!(select_owned(&f, expired, 5).await.is_none());
     f.db()
         .execute(
@@ -1711,12 +1722,19 @@ async fn competing_expired_or_foreign_owned_certificate_cannot_displace_cached_s
         .acquire_candidate_wallet(f.bound.wallet.clone())
         .await
         .unwrap();
-    let mut expired = view.unwrap();
+    let cached = view.unwrap();
+    let mut expired = f.independent_view(&f.bound.wallet).await;
     expired
         .balance_certificates
         .get_mut(&f.bound.wallet)
         .unwrap()
-        .restrict_validity(0);
+        .restrict_validity(0)
+        .unwrap();
+    assert!(
+        cached.balance_certificates[&f.bound.wallet]
+            .is_fresh(now().unwrap())
+            .unwrap()
+    );
     assert_eq!(
         read_only_candidate(&f, 5, None, vec![expired]).await,
         Some(f.bound.wallet.clone())
@@ -2097,6 +2115,98 @@ async fn malformed_cached_hint_still_reaches_uncached_independent_payer() {
                 .get::<_, i64>(0))
             .unwrap(),
         1
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn elapsed_expiration_after_preparation_rejects_journal_without_new_liability() {
+    elapsed_expiration_rejects_journal(false).await;
+}
+
+#[tokio::test]
+async fn elapsed_expiration_after_journal_writes_rolls_back_before_commit() {
+    elapsed_expiration_rejects_journal(true).await;
+}
+
+async fn elapsed_expiration_rejects_journal(at_commit: bool) {
+    let f = fixture(0).await;
+    f.balance(&f.bound.wallet, 10);
+    let (_, view) = f
+        .manager
+        .acquire_candidate_wallet(f.bound.wallet.clone())
+        .await
+        .unwrap();
+    let (pool, bound) = (f.manager.pool.clone(), f.bound.clone());
+    let mut prepared = f
+        .manager
+        .store
+        .call(move |store| {
+            store.prepare_payment(
+                &pool,
+                U256::from(1),
+                "freshness",
+                view.unwrap(),
+                Some(&bound),
+            )
+        })
+        .await
+        .unwrap();
+    let certificate = prepared.freshness_certificate().unwrap();
+    let wall = now().unwrap();
+    assert!(wall <= prepared.valid_until);
+    if at_commit {
+        prepared.before_journal_commit = Some(Arc::new(move |db| {
+            let count: i64 = db
+                .query_row("SELECT COUNT(*) FROM payment_attempts", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 1, "exercise rollback after actual journal writes");
+            certificate.advance_freshness_for_test(std::time::Duration::from_secs(121));
+        }));
+    } else {
+        certificate.advance_freshness_for_test(std::time::Duration::from_secs(121));
+    }
+    let error = f
+        .manager
+        .store
+        .call(move |store| {
+            let authorization = crate::rotation::store::Authorization {
+                payer: prepared.address.clone(),
+                payee: "0x0000000000000000000000000000000000000003".into(),
+                nonce: format!("0x{:064x}", 900),
+                valid_after: wall - 1,
+                valid_before: wall + 60,
+            };
+            store.journal_authorization(&prepared, authorization, None)
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        error.is::<crate::rotation::store::AdmissionExpired>(),
+        "{error:#}"
+    );
+    let count: i64 = f
+        .db()
+        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        count, 0,
+        "expired evidence cannot create a signed liability"
+    );
+    assert!(
+        f.manager
+            .store
+            .call({
+                let (pool, wallet) = (f.manager.pool.clone(), f.bound.wallet.clone());
+                move |store| store.cached_payment_view(&pool, &wallet)
+            })
+            .await
+            .unwrap()
+            .is_none()
     );
     f.close().await;
 }

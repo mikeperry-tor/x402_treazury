@@ -315,7 +315,7 @@ impl Store {
         let o = certificate.observation();
         ensure!(
             certificate.capture() == &saved.capture
-                && o.valid_until >= crate::rotation::base::now()?,
+                && certificate.is_fresh(crate::rotation::base::now()?)?,
             EvidenceFailure::Expired
         );
         let tx = self.db.transaction()?;

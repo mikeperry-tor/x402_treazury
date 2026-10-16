@@ -73,7 +73,7 @@ pub(super) fn runtime_status(store: &Store, checked_at: u64) -> Result<Status> {
             continue;
         };
         let observation = certificate.observation();
-        let fresh = checked_at <= observation.valid_until;
+        let fresh = certificate.is_fresh(checked_at)?;
         let (compatible, unavailable_reason) =
             match evidence::check_payment_balance(&store.db, store.evidence_namespace, certificate)
             {
