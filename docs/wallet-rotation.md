@@ -572,7 +572,7 @@ incomplete observation after healthy work drains; background observation revisit
 these rows on its normal cadence. Unknown ownership and storage failures remain
 shared errors.
 
-Funding inventory similarly isolates phase/provider-field conversion failures only
+Funding inventory similarly isolates phase, provider and scheduling-health conversion failures only
 when exact job, wallet, pool and source-operation correspondence remains intact.
 The affected operation retains its original journals; independent jobs continue.
 One-pass recovery reports the incomplete inventory after draining healthy work.

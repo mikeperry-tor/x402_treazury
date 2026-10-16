@@ -428,6 +428,17 @@ completion diagnostics to their captured operation; the rollover/reopen regressi
 passes and the reviewer confirmed the correction. Health-field conversions remain a following C04 scope extension; source
 facts/attempts with unknown liabilities are intentionally shared failures.
 
+**C04 health-field extension contract (reviewed):** Apply the same scoped decoder
+to funding health field conversions and negative started-at/next-poll values. These
+are scheduling observations, not source spending authority. Preserve malformed
+values and current operation identity, retain missing-health-row behavior, and keep
+SQL execution/stepping errors shared. The existing ownership/source guard remains
+mandatory; do not default bad values to zero or create an incident record.
+Validation: six malformed health representations retain exact SQL values across
+reopen with healthy-peer continuation and missing-table failure. The runtime
+pre/post-capture regression also passes for health streak and next-poll corruption.
+Library Clippy passes. Read-only sub-agent review found no actionable issues.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

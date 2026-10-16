@@ -1833,7 +1833,12 @@ fn sibling_observations_report_current_phase_once_per_operation() {
 
 #[tokio::test]
 async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drain_siblings() {
-    for field in ["phase", "provider_success"] {
+    for (table, field, value) in [
+        ("funding_progress", "phase", "'invalid'"),
+        ("funding_progress", "provider_success", "'invalid'"),
+        ("funding_health", "error_streak", "'invalid'"),
+        ("funding_progress", "next_poll", "-1"),
+    ] {
         for after_capture in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let state_path = dir.path().join("state");
@@ -1861,7 +1866,7 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
             let db = rusqlite::Connection::open(state_path.join("state.sqlite")).unwrap();
             let corrupt = || {
                 db.execute(
-                    &format!("UPDATE funding_progress SET {field}='invalid' WHERE job_id=?1"),
+                    &format!("UPDATE {table} SET {field}={value} WHERE job_id=?1"),
                     [&bad.id],
                 )
                 .unwrap();
