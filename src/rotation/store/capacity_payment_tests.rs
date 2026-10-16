@@ -226,7 +226,7 @@ async fn concurrent_resolution_or_checkpoint_change_prevents_signing() {
 }
 
 #[test]
-fn schema17_reopen_adds_capacity_lookup_without_changing_liabilities() {
+fn supported_reopen_adds_capacity_lookup_without_changing_liabilities() {
     let dir = tempfile::tempdir().unwrap();
     let (store, _pool, wallet) = disputed_store(dir.path());
     let identity = store.id().to_owned();

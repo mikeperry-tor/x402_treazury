@@ -396,7 +396,7 @@ the seller receipt with an explicit unavailable marker and warning. Pending-stat
 bracketing measures the signed-request future through final headers, not the full
 MCP response-body interval. Rotation and lifecycle execution use these observations;
 lifecycle additionally verifies one graceful application restart during its first refill.
-Current admission events carry `ownership_evidence_version=1`: READY requires the original small/large slot and claim generation; ACTIVE/RETAINED requires no reserve claim. Validation uses the immutable journal-time values. Older unmarked evidence remains readable without inventing ownership facts.
+Current admission events carry `ownership_evidence_version=2`: READY and ALLOCATED require the original small/large slot and claim generation; ACTIVE/RETAINED may retain that paired claim until independent funding readiness. Version1 keeps its original rule that ACTIVE/RETAINED carries no claim. Validation uses immutable journal-time values. Older unmarked evidence remains readable without inventing ownership facts.
 The phase order is topological: dependencies must name earlier phases. Scenario
 fields live in `[phases.scenario]` and inappropriate fields are rejected.
 Rotation and refill-service scenarios require one `[[phases.scenario.rounds]]`;

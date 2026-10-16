@@ -528,7 +528,7 @@ impl Store {
             amount(target)? > U256::ZERO && amount(ceiling)? >= amount(target)?,
             "invalid funding quote terms"
         );
-        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?2) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1)",params![job,operation,target,ceiling])?;
+        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?2) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role IN ('ALLOCATED','ACTIVE','RETAINED') AND p.enabled=1)",params![job,operation,target,ceiling])?;
         ensure!(changed == 1, "funding quote boundary changed");
         Ok(())
     }
@@ -1040,7 +1040,7 @@ impl Store {
             "funding claim disabled or changed"
         );
         let operation: String = tx.query_row(
-            "SELECT j.operation_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1 AND j.phase='\"RECOVERY_REQUIRED\"' AND EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id)",
+            "SELECT j.operation_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE' AND f.readiness_requirement IS NULL AND w.role IN ('ALLOCATED','ACTIVE','RETAINED') AND p.enabled=1 AND j.phase='\"RECOVERY_REQUIRED\"' AND EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id)",
             params![job,expected_operation], |r| r.get(0))?;
         ensure!(
             source_attempt_closed(&tx, &operation)?,
@@ -1075,7 +1075,7 @@ impl Store {
             super::capacity::current_funding_claim(&tx, job)?.is_some(),
             "funding claim disabled or changed"
         );
-        let (operation, phase): (String, String) = tx.query_row("SELECT j.operation_id,j.phase FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.job_id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND EXISTS(SELECT 1 FROM pools p WHERE p.id=w.pool_id AND p.enabled=1)", params![job,expected_operation], |r| Ok((r.get(0)?,r.get(1)?)))?;
+        let (operation, phase): (String, String) = tx.query_row("SELECT j.operation_id,j.phase FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.job_id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE' AND f.readiness_requirement IS NULL AND w.role IN ('ALLOCATED','ACTIVE','RETAINED') AND EXISTS(SELECT 1 FROM pools p WHERE p.id=w.pool_id AND p.enabled=1)", params![job,expected_operation], |r| Ok((r.get(0)?,r.get(1)?)))?;
         let parsed: FundingPhase = serde_json::from_str(&phase)?;
         let attempts: u32 = tx.query_row(
             "SELECT attempts FROM funding_progress WHERE job_id=?1",
@@ -1226,7 +1226,7 @@ impl Store {
                 "quote target mismatch"
             );
             let (_wallet, address, enabled, ready, pending): (String,String,bool,bool,bool) = tx.query_row(
-                "SELECT w.id,w.address,p.enabled,f.readiness_requirement IS NOT NULL,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED' AND w.role='ALLOCATED'", [id],
+                "SELECT w.id,w.address,p.enabled,f.readiness_requirement IS NOT NULL,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED' AND w.role IN ('ALLOCATED','ACTIVE','RETAINED')", [id],
                 |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
             ensure!(
                 enabled && !ready && !pending,
@@ -2130,6 +2130,71 @@ mod completion_tests {
             )
             .unwrap();
         assert!(!recorded);
+    }
+
+    #[test]
+    fn early_serving_claim_retains_quote_refresh_and_closed_attempt_authority() {
+        for role in ["ACTIVE", "RETAINED"] {
+            let (_dir, mut store, job) = fixture();
+            let jobs: i64 = store
+                .db
+                .query_row("SELECT COUNT(*) FROM funding_jobs", [], |r| r.get(0))
+                .unwrap();
+            super::super::capacity::consume_reserve(&store.db, &job.pool_id, &job.wallet_id)
+                .unwrap();
+            if role == "RETAINED" {
+                store
+                    .db
+                    .execute(
+                        "UPDATE wallets SET role='RETAINED' WHERE id=?1",
+                        [&job.wallet_id],
+                    )
+                    .unwrap();
+            }
+            let claim = store.current_funding_claim(&job.id).unwrap();
+            store
+                .select_quote_terms(
+                    &job.id,
+                    &job.operation_id,
+                    &claim.target.to_string(),
+                    &claim.maximum_output.to_string(),
+                )
+                .unwrap();
+            let quote = serde_json::to_vec(&serde_json::json!({"request":{"amount":claim.target.to_string(),"recipient":job.recipient}})).unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            store
+                .refresh_unprepared_quote_for_operation(&job.id, &job.operation_id)
+                .unwrap();
+            let current = store.funding_job(&job.id).unwrap().unwrap();
+            assert_ne!(current.operation_id, job.operation_id);
+            assert_eq!(current.wallet_id, job.wallet_id);
+            store
+                .close_unprepared_funding_for_operation(&job.id, &current.operation_id)
+                .unwrap();
+            store
+                .reauthorize_closed_funding_for_operation(&job.id, &current.operation_id, 3)
+                .unwrap();
+            assert!(store.current_funding_claim(&job.id).is_ok());
+            assert_eq!(
+                store
+                    .db
+                    .query_row(
+                        "SELECT role FROM wallets WHERE id=?1",
+                        [&job.wallet_id],
+                        |r| r.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                role
+            );
+            assert_eq!(
+                store
+                    .db
+                    .query_row("SELECT COUNT(*) FROM funding_jobs", [], |r| r
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                jobs
+            );
+        }
     }
 
     #[test]

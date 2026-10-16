@@ -371,7 +371,7 @@ impl Store {
         if let Some(bound) = bound {
             priority.push(bound);
         }
-        let mut stmt = self.db.prepare("SELECT w.id FROM reserve_claims c JOIN wallets w ON w.id=c.wallet_id WHERE c.pool_id=?1 AND c.enabled=1 AND w.pool_id=?1 AND w.role='READY' AND w.sequence<=?2 ORDER BY w.sequence")?;
+        let mut stmt = self.db.prepare("SELECT w.id FROM reserve_claims c JOIN wallets w ON w.id=c.wallet_id WHERE c.pool_id=?1 AND c.enabled=1 AND w.pool_id=?1 AND w.role IN ('READY','ALLOCATED') AND w.sequence<=?2 ORDER BY w.sequence")?;
         for wallet in stmt.query_map(params![pool, through], |r| r.get::<_, String>(0))? {
             let wallet = wallet?;
             if !priority.contains(&wallet) {

@@ -442,7 +442,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 17,
+                version == 18,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -1076,7 +1076,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 17,
+        schema == 18,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1284,11 +1284,11 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 17,
+        version == 18,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
-    // Additive lookup optimization for existing schema17 stores; financial
+    // Additive lookup optimization for existing supported stores; financial
     // records and the state format are unchanged.
     db.execute_batch(
         "CREATE INDEX IF NOT EXISTS wallet_role_sequence ON wallets(pool_id,role,sequence);

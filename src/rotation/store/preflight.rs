@@ -197,7 +197,7 @@ mod tests {
                             .unwrap(),
                         version
                     );
-                    assert!(view.db.execute_batch("PRAGMA user_version=17").is_err());
+                    assert!(view.db.execute_batch("PRAGMA user_version=18").is_err());
                     assert!(view.db.execute("DELETE FROM payload", []).is_err());
                 }
                 assert_eq!(before, contents(source.path()));

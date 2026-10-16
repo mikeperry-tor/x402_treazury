@@ -63,8 +63,8 @@ pub(super) fn payment_ownership(
     };
     let Some(limit) = limit else { return Ok(None) };
     if !enabled
-        || !matches!(role.as_str(), "ACTIVE" | "RETAINED" | "READY")
-        || (role == "READY" && slot.is_none())
+        || !matches!(role.as_str(), "ACTIVE" | "RETAINED" | "READY" | "ALLOCATED")
+        || (matches!(role.as_str(), "READY" | "ALLOCATED") && slot.is_none())
     {
         return Ok(None);
     }
@@ -106,28 +106,37 @@ pub(super) fn consume_reserve(
     wallet: &str,
 ) -> Result<Option<ConsumedReserve>> {
     let ownership = payment_ownership(db, pool, wallet)?.context("payment_wallet_ineligible")?;
-    if ownership.role != "READY" {
+    if !matches!(ownership.role.as_str(), "READY" | "ALLOCATED") {
         return Ok(None);
     }
     let slot = ownership.slot.context("reserve_claim_missing")?;
     let generation = ownership
         .claim_generation
         .context("reserve_claim_missing")?;
-    let next_generation = generation
-        .checked_add(1)
-        .context("reserve_generation_overflow")?;
-    ensure!(db.execute("UPDATE reserve_claims SET wallet_id=NULL,generation=?5 WHERE pool_id=?1 AND slot=?2 AND wallet_id=?3 AND generation=?4 AND enabled=1",params![pool,slot,wallet,generation,next_generation])? == 1,"reserve_claim_conflict");
+    let next_generation = if ownership.role == "READY" {
+        generation
+            .checked_add(1)
+            .context("reserve_generation_overflow")?
+    } else {
+        generation
+    };
+    if ownership.role == "READY" {
+        ensure!(db.execute("UPDATE reserve_claims SET wallet_id=NULL,generation=?5 WHERE pool_id=?1 AND slot=?2 AND wallet_id=?3 AND generation=?4 AND enabled=1",params![pool,slot,wallet,generation,next_generation])? == 1,"reserve_claim_conflict");
+    }
     db.execute(
         "UPDATE wallets SET role='RETAINED' WHERE pool_id=?1 AND role='ACTIVE'",
         [pool],
     )?;
     ensure!(
         db.execute(
-            "UPDATE wallets SET role='ACTIVE' WHERE id=?1 AND pool_id=?2 AND role='READY'",
-            params![wallet, pool]
+            "UPDATE wallets SET role='ACTIVE' WHERE id=?1 AND pool_id=?2 AND role=?3",
+            params![wallet, pool, ownership.role]
         )? == 1,
         "reserve_role_conflict"
     );
+    if ownership.role == "ALLOCATED" {
+        return Ok(None);
+    }
     Ok(Some(ConsumedReserve {
         slot,
         generation,
@@ -143,6 +152,18 @@ pub(super) fn publish_funded_role(db: &Connection, job: &str) -> Result<()> {
         [job], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
     ensure!(ready, "destination_readiness_missing");
     // Repeat completion cannot restore consumed inventory or overwrite retirement.
+    if matches!(role.as_str(), "ACTIVE" | "RETAINED") {
+        // Early payment retains its exact claim until independent readiness.
+        let attached: Option<i64> = db.query_row("SELECT generation FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND wallet_id=?3", params![pool,kind,wallet], |r|r.get(0)).optional()?;
+        if let Some(current) = attached {
+            ensure!(current == generation, "funded_reserve_claim_conflict");
+            let next = generation
+                .checked_add(1)
+                .context("reserve_generation_overflow")?;
+            ensure!(db.execute("UPDATE reserve_claims SET wallet_id=NULL,generation=?5 WHERE pool_id=?1 AND slot=?2 AND wallet_id=?3 AND generation=?4", params![pool,kind,wallet,generation,next])? == 1, "reserve_claim_conflict");
+        }
+        return Ok(());
+    }
     if role != "ALLOCATED" {
         return Ok(());
     }
@@ -384,8 +405,8 @@ const READY_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN reserve
 /// there is no eligible alternative. No balance acquisition or role change.
 pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(String, String)>> {
     let mut failure = None;
-    for role in ["ACTIVE", "RETAINED", "READY"] {
-        let sql = if role == "READY" {
+    for role in ["ACTIVE", "RETAINED", "READY", "ALLOCATED"] {
+        let sql = if matches!(role, "READY" | "ALLOCATED") {
             READY_IDENTITY_SQL
         } else {
             ROLE_IDENTITY_SQL
@@ -705,6 +726,75 @@ mod tests {
             1
         );
     }
+    #[test]
+    fn early_payment_retains_funding_claim_until_readiness_and_rolls_back_atomically() {
+        let mut db = database();
+        let prior = active(&db);
+        let job = allocation(&db, "small");
+        let payer = wallet(&db, &job);
+        let original: (String, i64) = db.query_row("SELECT j.operation_id,f.claim_generation FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1", [&job], |r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!(
+            payment_ownership(&db, "pool", &payer)
+                .unwrap()
+                .unwrap()
+                .role,
+            "ALLOCATED"
+        );
+        {
+            let tx = db.transaction().unwrap();
+            assert!(consume_reserve(&tx, "pool", &payer).unwrap().is_none());
+            assert_eq!(role(&tx, &job), "ACTIVE");
+        }
+        assert_eq!(role(&db, &job), "ALLOCATED");
+        assert_eq!(role(&db, &prior), "ACTIVE");
+        let tx = db.transaction().unwrap();
+        consume_reserve(&tx, "pool", &payer).unwrap();
+        pending_payment(&tx, "early", &payer);
+        tx.commit().unwrap();
+        assert_eq!(role(&db, &job), "ACTIVE");
+        assert_eq!(role(&db, &prior), "RETAINED");
+        assert!(current_funding_claim(&db, &job).unwrap().is_some());
+        assert!(consume_reserve(&db, "pool", &payer).unwrap().is_none());
+        let attached: (String, i64) = db
+            .query_row(
+                "SELECT wallet_id,generation FROM reserve_claims WHERE slot='small'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(attached, (payer.clone(), original.1));
+        let partial = support(&db, &job, 1, 1);
+        assert!(!funding::record_readiness(&db, &payer, &partial).unwrap());
+        assert!(current_funding_claim(&db, &job).unwrap().is_some());
+        funded(&db, &job);
+        funded(&db, &job);
+        assert_eq!(role(&db, &job), "ACTIVE");
+        assert!(
+            db.query_row(
+                "SELECT wallet_id IS NULL AND generation=?1 FROM reserve_claims WHERE slot='small'",
+                [original.1 + 1],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT operation_id FROM funding_progress WHERE job_id=?1",
+                [&job],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            original.0
+        );
+        assert_eq!(
+            db.query_row("SELECT state FROM funding_jobs WHERE id=?1", [&job], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "QUEUED"
+        );
+    }
+
     #[test]
     fn disable_preserves_partial_claim_and_detaches_only_funded_reserve() {
         let mut db = database();

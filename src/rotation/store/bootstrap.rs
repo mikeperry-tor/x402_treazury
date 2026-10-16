@@ -332,7 +332,7 @@ mod tests {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
         assert_eq!(value["schema_version"], 2);
-        assert_eq!(value["state_schema_version"], 17);
+        assert_eq!(value["state_schema_version"], 18);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()
@@ -431,7 +431,7 @@ mod tests {
             .startup_groups(&["configured".into()])
             .unwrap()
             .remove(0);
-        assert!(!group.serving_ready && !group.inventory_ready);
+        assert!(group.serving_ready && !group.inventory_ready);
         let paths = store.startup_claim_paths(&pool, &group.claims).unwrap();
         assert_eq!(paths.len(), 2);
         assert_ne!(paths[0].job.id, paths[1].job.id);
@@ -505,6 +505,11 @@ mod tests {
     #[test]
     fn obstruction_requires_every_path_and_rechecks_worker_facts() {
         let (_dir, mut store, pool) = fixture();
+        let claims = store
+            .startup_groups(&["configured".into()])
+            .unwrap()
+            .remove(0)
+            .claims;
         let jobs = store.funding_jobs().unwrap();
         for order in [[0, 1], [1, 0]] {
             for job in &jobs {
@@ -530,7 +535,7 @@ mod tests {
                 .unwrap();
             assert!(
                 store
-                    .startup_obstruction("configured", 3, None)
+                    .startup_obstruction("configured", 3, Some(&claims))
                     .unwrap()
                     .is_none(),
                 "one blocked quote cannot forecast group exhaustion"
@@ -552,7 +557,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 store
-                    .startup_obstruction("configured", 3, None)
+                    .startup_obstruction("configured", 3, Some(&claims))
                     .unwrap()
                     .unwrap()
                     .len(),
@@ -624,6 +629,12 @@ mod typed_condition_tests {
             Some(U256::from(10)),
             0,
         )?;
+        let claims = store.startup_groups(&["typed".into()])?.remove(0).claims;
+        assert!(
+            store
+                .startup_obstruction("typed", 3, Some(&claims))?
+                .is_none()
+        );
         let jobs = store.funding_jobs()?;
         for job in &jobs {
             store.defer_funding(
@@ -633,7 +644,11 @@ mod typed_condition_tests {
                 false,
             )?;
         }
-        assert!(store.startup_obstruction("typed", 3, None)?.is_none());
+        assert!(
+            store
+                .startup_obstruction("typed", 3, Some(&claims))?
+                .is_none()
+        );
         for job in &jobs {
             store.observe_funding_condition(
                 &job.id,
@@ -643,24 +658,34 @@ mod typed_condition_tests {
             store.defer_funding(&job.id, 0, Some("arbitrary diagnostic"), false)?;
         }
         assert_eq!(
-            store.startup_obstruction("typed", 3, None)?.unwrap().len(),
+            store
+                .startup_obstruction("typed", 3, Some(&claims))?
+                .unwrap()
+                .len(),
             2
         );
         for job in &jobs {
             store.observe_funding_condition(&job.id, "obsolete-operation", None)?;
         }
         assert_eq!(
-            store.startup_obstruction("typed", 3, None)?.unwrap().len(),
+            store
+                .startup_obstruction("typed", 3, Some(&claims))?
+                .unwrap()
+                .len(),
             2
         );
         for job in &jobs {
             store.observe_funding_condition(&job.id, &job.operation_id, None)?;
         }
-        assert!(store.startup_obstruction("typed", 3, None)?.is_none());
+        assert!(
+            store
+                .startup_obstruction("typed", 3, Some(&claims))?
+                .is_none()
+        );
         store.pause_new_funding();
         assert!(
             store
-                .startup_obstruction("typed", 3, None)?
+                .startup_obstruction("typed", 3, Some(&claims))?
                 .unwrap()
                 .iter()
                 .all(|(_, reason)| *reason == "funding_disabled")

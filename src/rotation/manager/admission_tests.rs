@@ -577,3 +577,6 @@ async fn ten_balance_four_liability_eight_request_distinguishes_used_from_unused
 
 #[path = "admission_tests/disputed_capacity.rs"]
 mod disputed_capacity;
+
+#[path = "admission_tests/initial_capacity.rs"]
+mod initial_capacity;

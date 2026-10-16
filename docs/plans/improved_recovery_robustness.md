@@ -867,6 +867,41 @@ setup, without changing financial rows or format. Its dropped-index reopen
 regression passed and independent re-review cleared the finding. Final
 all-target Clippy, formatting and diff checks passed.
 
+**C11 initial-capacity contract (reviewed narrow slice):** ALLOCATED is an owned
+identity with an exact enabled slot/wallet/generation claim, not a financial
+minimum. Fresh payment-sized capacity and ordinary liability/cap checks may admit
+it below the allocation target. First signed admission atomically promotes it to
+ACTIVE and demotes the prior active wallet, retaining its original claim, funding
+job, operation and reservations. An occupied claim suppresses replacement allocation.
+Quote/recovery continuation follows that exact claim through ACTIVE/RETAINED roles;
+role projection cannot strand accepted source work. Independent destination readiness
+later detaches the original claim once, without changing the serving role or
+fabricating source/provider completion. Bootstrap inventory still requires original
+destination readiness. `serving_ready` continues to mean a serving identity is
+available, not that a balance or payment is guaranteed.
+
+The existing readiness rule compares current balance with original/accepted output.
+Spending after delivery but before readiness observation can prevent that accounting
+closure. C18 must establish exact operation-correlated destination delivery evidence;
+this slice retains the claim and observations, while independently proven payment
+service continues. It never lowers readiness requirements, treats signed exposure
+as delivery, or treats USED nonce state as an exact debit proof. Schema18 records
+honest ALLOCATED admission and paired claim metadata for early ACTIVE/RETAINED use;
+older runtime schemas are rejected before mutation, with no private conversion.
+The real restarted paid-call regression passed ($0.10 from $2 against a $10
+target), including zero-signature controls for disabled/mismatched claims and
+insufficient capacity. Promotion rollback/claim retention and ACTIVE/RETAINED
+quote-refresh/recovery tests passed. Store validation passed 133 tests with two
+ignored helpers; obsolete bootstrap/schema expectations and one fixture job-count
+assertion were corrected; all six bootstrap tests and the focused funding
+continuation rerun passed. Version2 qualification ownership and four saved-payment
+evidence tests passed while preserving version1 semantics. The deployment identity/
+schema rejection regression passed. Independent review found a preparation
+race when strict balance publication establishes readiness and changes the captured
+role/claim. A separate fixup will bind preparation to post-publication ownership
+inside the same transaction, with target-reaching and already-active regressions.
+All-target Clippy, formatting and diff checks passed for the core slice.
+
 ### Stage 1 — Minimal authority and dependency specification
 
 **Prerequisites:** Reviewed source findings; no runtime transition is authorized by this specification alone.

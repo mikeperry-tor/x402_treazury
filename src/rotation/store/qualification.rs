@@ -91,7 +91,7 @@ pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> 
             );
         evidence["support"] = serde_json::to_value(support)?;
     }
-    payment["ownership_evidence_version"] = json!(1);
+    payment["ownership_evidence_version"] = json!(2);
     crate::qualification::validate_admission_balance(&payment)?;
     payment["lifecycle"] = lifecycle(db, &read_status(db)?)?;
     Ok(payment)
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(saved["height"], 12);
         assert_eq!(saved["hash"], hash);
         let evidence = store.qualification_payment("new").unwrap();
-        assert_eq!(evidence["ownership_evidence_version"], 1);
+        assert_eq!(evidence["ownership_evidence_version"], 2);
         assert_eq!(evidence["payer_role"], "ACTIVE");
         assert!(evidence["reserve_slot"].is_null());
         assert!(evidence["claim_generation"].is_null());

@@ -231,14 +231,17 @@ operation, and configuration changes govern new work. Actual spendable treasury
 funds, outstanding liabilities, per-operation safeguards and explicit qualification
 permits govern funding. Reserve targets do not cap individual API payments.
 
-Sub-target external credits stay on the original allocation: for example, $3 sent
-into a $10 allocation cannot pay through ordinary selection until full destination
-readiness is recorded. This is a limitation of the allocation/readiness model,
-not a separate per-payment spending cap. Disabling and re-enabling the group or
-slot preserves that wallet, job, claim and recovery history; independent balance
-observation and safe recovery continue while disabled. No partial credit releases
-the claim, creates a successor or resets an attempt. Partial detachment and use
-before full readiness remain deferred to reviewed follow-up work.
+An ALLOCATED wallet with its exact enabled reserve claim can serve a payment from
+fresh proven capacity below the funding target. For example, $2 in a $10 allocation
+can cover a $0.10 payment under the ordinary cap and liability checks. Its first
+journaled payment promotes it to ACTIVE while retaining the original claim, funding
+job, operation and recovery history. No partial credit creates a reserve vacancy
+or replacement allocation. Funding observations and already accepted source work
+continue independently. Later proven destination readiness detaches the retained
+claim once without changing the serving role. Spending before that readiness was
+observed can leave destination accounting incomplete; exact delivery-based closure
+remains separate work, and this does not block independently proven payment capacity.
+Disabling and re-enabling preserves the original claim and obligations.
 
 `rotation/manager.rs` admits supported Base USDC v2 exact EIP-3009 offers. It
 validates the envelope, domain, amount and explicit API cap before acquisition or
@@ -290,8 +293,8 @@ A signed response or output-conversion failure never authorizes replay.
 
 Signing produces private bytes. One transaction rechecks current role, exact
 reserve claim, cap, evidence, capacity and signed validity, then commits the
-possibly-submitted authorization, exposure and immutable admission support. A
-READY payer consumes its exact claim in this transaction: the former active
+possibly-submitted authorization, exposure and immutable admission support. An
+ALLOCATED payer retains its exact claim when promoted. A READY payer consumes its exact claim in this transaction: the former active
 becomes RETAINED, the payer becomes ACTIVE and the reserve generation advances
 with a vacant slot. No replacement allocation or retirement occurs in admission.
 Ordinary authorized funding fills the vacancy independently, including while old
@@ -300,14 +303,18 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema17
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema18
 preserves original payer role, consumed slot/generation and exact balance support;
 older state requires separately reviewed stopped-service conversion and is never
 upgraded on open. Canonical checkpoint conflicts restore conservative exposure for
 previously resolved authorizations in the affected wallet without rewriting their
 original proofs. Exact historical revalidation may clear that disputed membership;
-ordinary duplicate nonce observations cannot. Current capacity remains gated during
-repair; endpoint-dispute membership and canonical replacement remain separate work.
+ordinary duplicate nonce observations cannot. Under chain repair, a separate
+payment-only proof can use remaining current capacity when every resolved
+authorization is reserved at its full amount and the debit-height floor is met.
+It cannot establish funding readiness, retire a wallet or release a liability.
+Amount contradictions and incomplete exposure still block affected admission;
+endpoint-dispute membership and canonical replacement remain separate work.
 
 All handles for a store/group share one gate. Accepted store jobs keep that gate
 after waiter cancellation, and funding-credit publication uses the same owner.
