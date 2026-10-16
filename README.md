@@ -226,8 +226,10 @@ target/release/x402_treazury serve \
 
 Serving handles API catalog download and price discovery and wallet replacement funding automatically.
 
-If you skipped funding bootstrap, `serve` performs the ZEC to USDC swaps,
-waits for a funded USDC wallet, and then performs API catalog download and pricing discovery.
+If you skipped funding bootstrap, `serve` starts ZEC-to-USDC funding in the
+background after listeners bind. Available tools remain accessible; managed paid
+calls require confirmed capacity. Relay-dependent catalogs appear when their payer
+becomes usable.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.

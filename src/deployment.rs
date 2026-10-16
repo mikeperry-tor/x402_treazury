@@ -440,7 +440,7 @@ impl Deployment {
         Ok(())
     }
 
-    async fn validate_bootstrap_inputs(
+    async fn validate_serving_inputs(
         &self,
         path: &Path,
         env: &BTreeMap<String, String>,
@@ -492,7 +492,7 @@ impl Deployment {
                 let needed = bindings.values().cloned().collect();
                 if self.initialized.is_none() {
                     self.initialized = Some(
-                        self.initialize_wallets(env, restriction, None, &needed)
+                        self.initialize_wallets_mode(env, restriction, None, &needed, true)
                             .await?,
                     );
                 }
@@ -528,8 +528,7 @@ impl Deployment {
         }
         let scoped_funding = relay_env.is_some()
             && !crate::qualification::active()
-            && !catalog_evidence::collecting()
-            && !config.discovery_relay.as_ref().is_some_and(|p| p.serve);
+            && !catalog_evidence::collecting();
         let wallet_resolution = config.validate_capabilities(scoped_funding)?;
         crate::network::install(config.network.clone())?;
         if let Some(t) = &mut config.treasury {
@@ -562,33 +561,13 @@ impl Deployment {
                 !crate::qualification::active() && !catalog_evidence::collecting(),
                 "paid discovery relay is unavailable during qualification"
             );
-            deployment.validate_bootstrap_inputs(path, env).await?;
+            deployment.validate_serving_inputs(path, env).await?;
             deployment.prebind_listeners().await?;
         }
-        #[cfg(feature = "zcash")]
-        if let Some((env, restriction)) = relay_env
-            && restriction != crate::rotation::restriction::FundingRestriction::DenyNewFunding
-            && !crate::qualification::active()
-            && !catalog_evidence::collecting()
-            && deployment.config.funding.as_ref().is_some()
-            && deployment
-                .wallet_resolution
-                .wallets
-                .values()
-                .any(WalletConfig::managed)
+        if let Some((env, _)) = relay_env
+            && deployment.prebound.is_empty()
         {
-            if deployment.prebound.is_empty() {
-                deployment.validate_bootstrap_inputs(path, env).await?;
-            }
-            if deployment
-                .config
-                .discovery_relay
-                .as_ref()
-                .is_some_and(|p| p.serve)
-            {
-                deployment.initialized =
-                    Some(deployment.bootstrap_for_serving(env, restriction).await?);
-            }
+            deployment.validate_serving_inputs(path, env).await?;
         }
         let loaded: Result<()> = async {
             let relay = deployment
@@ -1038,8 +1017,6 @@ impl Deployment {
             #[cfg(feature = "zcash")]
             funding_runtime,
             #[cfg(feature = "zcash")]
-            supervisor: None,
-            #[cfg(feature = "zcash")]
             managed_pools,
         })
     }
@@ -1201,13 +1178,7 @@ impl Deployment {
                 restriction,
                 None,
                 &BTreeSet::new(),
-                !crate::qualification::active()
-                    && !catalog_evidence::collecting()
-                    && !self
-                        .config
-                        .discovery_relay
-                        .as_ref()
-                        .is_some_and(|p| p.serve),
+                !crate::qualification::active() && !catalog_evidence::collecting(),
             )
             .await?
         };
@@ -1249,8 +1220,6 @@ impl Deployment {
             #[cfg(feature = "zcash")]
             funding_runtime: None,
             #[cfg(feature = "zcash")]
-            supervisor: None,
-            #[cfg(feature = "zcash")]
             managed_pools: Vec::new(),
         })
     }
@@ -1272,12 +1241,6 @@ impl Deployment {
                 .treasury
                 .as_ref()
                 .map(|treasury| treasury.store_handle())
-                .or_else(|| {
-                    initialized
-                        .supervisor
-                        .as_ref()
-                        .map(|supervisor| supervisor.store())
-                })
                 .or_else(|| {
                     initialized
                         .store_only
@@ -1443,8 +1406,6 @@ impl Deployment {
         #[cfg(feature = "zcash")]
         let funding_runtime = initialized.funding_runtime;
         #[cfg(feature = "zcash")]
-        let supervisor = initialized.supervisor;
-        #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
         let deferred_wallets = wallets.clone();
         let bound = self.bind_catalog_listeners(wallets, tokens).await;
@@ -1462,9 +1423,6 @@ impl Deployment {
                     drop(funding_runtime);
                     drop(managed_pools);
                     drop(self);
-                    if let Some(supervisor) = supervisor {
-                        supervisor.shutdown().await?;
-                    }
                     if let Some(treasury) = treasury {
                         treasury.close().await?;
                     }
@@ -1492,8 +1450,6 @@ impl Deployment {
             store_only,
             #[cfg(feature = "zcash")]
             funding_runtime,
-            #[cfg(feature = "zcash")]
-            supervisor,
             #[cfg(feature = "zcash")]
             managed_pools,
         })
@@ -1645,8 +1601,6 @@ struct InitializedWallets {
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
-    supervisor: Option<bootstrap::FundingSupervisor>,
-    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
 }
 #[cfg(feature = "zcash")]
@@ -1665,8 +1619,6 @@ pub struct RunningDeployment {
     #[cfg(feature = "zcash")]
     funding_runtime: Option<FundingRuntime>,
     #[cfg(feature = "zcash")]
-    supervisor: Option<bootstrap::FundingSupervisor>,
-    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
     #[cfg(feature = "zcash")]
     treasury: Option<crate::treasury::Treasury>,
@@ -1682,13 +1634,6 @@ impl RunningDeployment {
             .collect()
     }
     pub async fn serve(self, shutdown: CancellationToken) -> Result<()> {
-        #[cfg(feature = "zcash")]
-        let stop = self
-            .supervisor
-            .as_ref()
-            .map(|supervisor| supervisor.stop.clone())
-            .unwrap_or_default();
-        #[cfg(not(feature = "zcash"))]
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
         let reconciliation_stop = CancellationToken::new();
@@ -1703,38 +1648,34 @@ impl RunningDeployment {
             });
         }
         #[cfg(feature = "zcash")]
-        let (treasury_task, funding_task) = if let Some(supervisor) = self.supervisor {
-            supervisor.into_tasks()
-        } else {
-            match (self.treasury, self.funding_runtime) {
-                (Some(owner), Some((commands, sender, worker))) => (
-                    Some(tokio::spawn({
-                        let stopped = stop.clone();
-                        async move {
-                            let _stop_on_exit = stopped.clone().drop_guard();
-                            owner.run_commands(commands, sender, stopped).await
-                        }
-                    })),
-                    Some(tokio::spawn({
-                        let stopped = stop.clone();
-                        async move {
-                            let _stop_on_exit = stopped.clone().drop_guard();
-                            worker.run(stopped).await
-                        }
-                    })),
-                ),
-                (Some(owner), None) => (
-                    Some(tokio::spawn({
-                        let stopped = stop.clone();
-                        async move {
-                            let _stop_on_exit = stopped.clone().drop_guard();
-                            owner.run_sync(stopped).await
-                        }
-                    })),
-                    None,
-                ),
-                (None, _) => (None, None),
-            }
+        let (treasury_task, funding_task) = match (self.treasury, self.funding_runtime) {
+            (Some(owner), Some((commands, sender, worker))) => (
+                Some(tokio::spawn({
+                    let stopped = stop.clone();
+                    async move {
+                        let _stop_on_exit = stopped.clone().drop_guard();
+                        owner.run_commands(commands, sender, stopped).await
+                    }
+                })),
+                Some(tokio::spawn({
+                    let stopped = stop.clone();
+                    async move {
+                        let _stop_on_exit = stopped.clone().drop_guard();
+                        worker.run(stopped).await
+                    }
+                })),
+            ),
+            (Some(owner), None) => (
+                Some(tokio::spawn({
+                    let stopped = stop.clone();
+                    async move {
+                        let _stop_on_exit = stopped.clone().drop_guard();
+                        owner.run_sync(stopped).await
+                    }
+                })),
+                None,
+            ),
+            (None, _) => (None, None),
         };
         #[cfg(feature = "zcash")]
         let mut reconciliation = JoinSet::new();

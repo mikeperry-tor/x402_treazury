@@ -72,15 +72,21 @@ async fn paid(State(f): State<Fixture>, headers: HeaderMap) -> axum::response::R
 
 #[tokio::test]
 async fn authenticated_sdk_failure_preserves_base_payments_liabilities_and_shutdown() {
-    base_service("sdk").await;
+    base_service("sdk", false).await;
 }
 #[tokio::test]
 async fn funding_only_failures_preserve_base_payments_and_static_service() {
     for fault in ["credential", "quote", "fee"] {
-        base_service(fault).await;
+        base_service(fault, false).await;
     }
 }
-async fn base_service(fault: &str) {
+#[tokio::test]
+async fn enabled_relay_preserves_base_and_static_service_when_source_funding_is_unavailable() {
+    for fault in ["sdk", "credential", "quote", "fee"] {
+        base_service(fault, true).await;
+    }
+}
+async fn base_service(fault: &str, relay_enabled: bool) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -140,6 +146,13 @@ async fn base_service(fault: &str) {
         ),
         _ => config,
     };
+    if relay_enabled {
+        let provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
+        config.push_str(&format!(
+            "\n[discovery_relay]\nprovider='{}'\nwallet='selected'\nserve=true\n",
+            provider.display()
+        ));
+    }
     config.push_str("\n[wallets.static]\nmode='static'\nprivate_key_env='STATIC'\n[servers.static]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='static'\nsources=['api']\n");
     std::fs::write(&path, config).unwrap();
     let mut env = env();
@@ -152,7 +165,6 @@ async fn base_service(fault: &str) {
     let running = deployment.bind(&env).await.unwrap();
     assert!(running.treasury.is_none());
     assert!(running.funding_runtime.is_none());
-    assert!(running.supervisor.is_none());
     let store = running.store_only.as_ref().unwrap().store.clone();
     assert!(Store::open(&state, &key, &id).is_err());
     let pool = running.managed_pools[0].clone();
@@ -229,14 +241,21 @@ async fn base_service(fault: &str) {
 
 #[tokio::test]
 async fn serving_sdk_fallback_does_not_mask_shared_faults_or_allow_strict_bootstrap() {
-    for fault in [
+    for (fault, relay_enabled) in [
         "schema",
         "key",
         "authentication",
         "identity",
         "owner",
         "strict",
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|fault| {
+        [false, true]
+            .into_iter()
+            .filter(move |relay| fault != "strict" || !relay)
+            .map(move |relay| (fault, relay))
+    }) {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -270,24 +289,31 @@ async fn serving_sdk_fallback_does_not_mask_shared_faults_or_allow_strict_bootst
             }
             _ => {}
         }
+        if relay_enabled {
+            let provider =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
+            config.push_str(&format!(
+                "\n[discovery_relay]\nprovider='{}'\nwallet='selected'\nserve=true\n",
+                provider.display()
+            ));
+        }
         write_spec(dir.path());
         let path = dir.path().join("deployment.toml");
         std::fs::write(&path, config).unwrap();
-        let deployment = Deployment::load_for_serving_with_relay(&path, &env(), Default::default())
-            .await
-            .unwrap();
-        let error = if fault == "strict" {
-            deployment
+        let loaded =
+            Deployment::load_for_serving_with_relay(&path, &env(), Default::default()).await;
+        let error = match loaded {
+            Err(error) => error,
+            Ok(deployment) if fault == "strict" => deployment
                 .initialize_wallets(&env(), Default::default(), None, &BTreeSet::new())
                 .await
                 .err()
-                .expect("strict SDK requirement bypassed")
-        } else {
-            deployment
+                .expect("strict SDK requirement bypassed"),
+            Ok(deployment) => deployment
                 .bind(&env())
                 .await
                 .err()
-                .expect("shared integrity failure bypassed")
+                .expect("shared integrity failure bypassed"),
         };
         assert_eq!(
             error.is::<crate::treasury::SnapshotUnavailable>(),
@@ -441,7 +467,10 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
 
 #[tokio::test]
 async fn base_configuration_failure_preserves_static_service_and_refuses_managed_io() {
-    for fault in ["declaration", "missing_env", "insecure_endpoint"] {
+    for (fault, relay_enabled) in ["declaration", "missing_env", "insecure_endpoint"]
+        .into_iter()
+        .flat_map(|fault| [false, true].into_iter().map(move |relay| (fault, relay)))
+    {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -466,6 +495,14 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         if fault == "declaration" {
             config = config.replace("[funding]", "[funding]\nbase_confirmations=0");
         }
+        if relay_enabled {
+            let provider =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
+            config.push_str(&format!(
+                "\n[discovery_relay]\nprovider='{}'\nwallet='selected'\nserve=true\n",
+                provider.display()
+            ));
+        }
         config.push_str("\n[wallets.static]\nmode='static'\nprivate_key_env='STATIC'\n[servers.static]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='static'\nsources=['api']\n");
         let path = dir.path().join("deployment.toml");
         std::fs::write(&path, config).unwrap();
@@ -480,18 +517,22 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
             }
             _ => {}
         }
-        let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
-            .await
-            .unwrap();
+        let mut deployment =
+            Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+                .await
+                .unwrap();
         let strict = deployment
             .initialize_wallets(&env, Default::default(), None, &BTreeSet::new())
             .await;
         assert!(strict.is_err());
         // Inspect the same client binding used by tool/raw/documentation paths.
-        let initialized = deployment
-            .initialize_wallets_mode(&env, Default::default(), None, &BTreeSet::new(), true)
-            .await
-            .unwrap();
+        let initialized = match deployment.initialized.take() {
+            Some(initialized) => initialized,
+            None => deployment
+                .initialize_wallets_mode(&env, Default::default(), None, &BTreeSet::new(), true)
+                .await
+                .unwrap(),
+        };
         assert!(initialized.managed_pools.is_empty());
         let payer = initialized.wallets["selected"].clone();
         let error = payer.documentation_identity().await.unwrap_err();

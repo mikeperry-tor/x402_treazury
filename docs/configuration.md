@@ -34,8 +34,8 @@ Ordinary deployment examples live in `examples/deployments/`, standalone network
 `examples/network/`, and reusable APIs in `providers/`. Paths resolve from the file
 that declares them. Existing user-owned local copies are not moved automatically.
 
-Ordinary enabled managed serving confirms one eligible funded payer before discovery;
-the same owner continues reserve and replacement funding. `wallet bootstrap --config FILE`
+Ordinary enabled managed serving starts initial and replacement funding after
+listeners bind, without requiring an eligible funded payer before serving available tools. `wallet bootstrap --config FILE`
 waits for its captured enabled reserve claims without catalogs
 or listeners. Explicitly set
 `funding.auto_fund = false` to pause it. Merely inspecting a config or compiling
@@ -400,8 +400,9 @@ payment authorizations can cause earlier reserve consumption.
 
 ### Startup readiness and configuration changes
 
-Ordinary enabled serving waits for one funded eligible payer before discovery;
-small and large reserve funding may finish in either order. No ACTIVE wallet is
+Ordinary enabled serving binds available tools before starting funding;
+small and large reserve funding may finish in either order. An empty managed pool
+returns typed unavailability until confirmed capacity exists. No ACTIVE wallet is
 required: a funded READY reserve can serve immediately. Unsigned requests do not
 promote wallets or create replacement vacancies. `wallet bootstrap` instead
 captures the enabled slot generations and waits for those original
@@ -1059,9 +1060,11 @@ Curl, not the target's TLS policy. Never use it for authenticated discovery URLs
 The provider can also be exposed as ordinary MCP tools by adding it as a source;
 the relay setting alone does not expose a tool to listeners.
 
-With `funding.auto_fund=true`, ordinary managed serving waits for one eligible funded
-payer before catalogs and pricing, so paid fallback can use that group while the
-same owner continues reserve funding.
+With `funding.auto_fund=true`, ordinary managed serving starts funding only after
+listeners bind. Relay-dependent catalogs wait for an existing eligible payer using
+capacity notifications; they consume no relay attempts while waiting and never
+allocate funds themselves. Independent available tools remain callable. Initial
+unsigned catalog loading still precedes serving.
 Static wallets require external funding. For paid warming, first use
 `wallet bootstrap --config FILE`; warming opens only the wallets resolved for its selected
 sources (including treasury ownership for managed wallets), denies new funding

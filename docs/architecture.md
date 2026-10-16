@@ -76,12 +76,11 @@ further relay spending across all wallets after a possibly submitted payment fai
 or returns an invalid envelope. Waiter cancellation retains serialized ownership
 through terminal outcome publication. Proven pre-submission failures retain bounded retry/backoff and
 do not disable unrelated targets. Local bootstrap metadata avoids
-a catalog dependency cycle. No-relay serving binds listeners before starting funding.
-Enabled-relay serving first reserves every listener socket, then uses
-`deployment/bootstrap.rs` for initial managed funding and confirmation. Explicit
-`wallet bootstrap` remains catalog-free. The relay bootstrap retains the same treasury
-actor and funding worker into serving;
-reserve vacancies follow their exact current claims; there is no separate initial allocation. Warming starts no funding workers. Origin freshness and relay provenance
+a catalog dependency cycle. Serving binds listeners before starting initial or
+replacement funding, including when a relay payer has no capacity. The dormant
+owners start in the serving lifecycle. `deployment/bootstrap.rs` remains the
+catalog-free explicit `wallet bootstrap` path with captured-claim completeness.
+Reserve vacancies follow their exact current claims; there is no separate initial allocation. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#paid-discovery-relay).
 
@@ -103,8 +102,7 @@ catalog continuations and startup pricing. Late sources publish complete listene
 views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources; unsigned dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
-Initial unsigned catalog loading and enabled-relay funding bootstrap still precede
-serving.
+Initial unsigned catalog loading still precedes serving.
 
 ## MCP and output boundaries
 

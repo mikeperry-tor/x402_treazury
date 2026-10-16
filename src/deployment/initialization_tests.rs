@@ -236,10 +236,6 @@ async fn managed_initialization_restricts_before_selected_pool_setup_and_release
             );
             assert_eq!(initialized.managed_pools.len(), 1);
             assert!(initialized.funding_runtime.is_some());
-            assert!(
-                initialized.supervisor.is_none(),
-                "initialization does not start workers"
-            );
             let status = initialized
                 .treasury
                 .as_ref()
@@ -446,7 +442,6 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
             .unwrap();
         assert!(status.funding_jobs.is_empty());
         assert!(status.pools.iter().all(|pool| pool.addresses.is_empty()));
-        assert!(initialized.supervisor.is_none());
         let before = initialized
             .treasury
             .as_ref()
@@ -537,7 +532,6 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
         match deployment.bind(&env()).await {
             Ok(mut running) => {
                 assert!(!fail_second_bind);
-                assert!(running.supervisor.is_none());
                 assert!(running.funding_runtime.is_some());
                 let payer = PaidClient::managed(running.managed_pools[0].clone());
                 let error = tokio::time::timeout(
@@ -584,4 +578,89 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
         assert!(status.pools.iter().all(|p| p.addresses.is_empty()));
         owner.close().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_provider_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let owner = crate::treasury::Treasury::create(
+        state.clone(),
+        key.clone(),
+        2_000_000,
+        Some(zeroize::Zeroizing::new(SEED.into())),
+    )
+    .await
+    .unwrap();
+    let id = owner.status().await.unwrap().treasury_id;
+    owner.close().await.unwrap();
+    write_spec(dir.path());
+    let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let provider_url = format!("http://{}", provider.local_addr().unwrap());
+    let relay_provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
+    let config = format!(
+        "{}\n[discovery_relay]\nprovider='{}'\nwallet='selected'\nserve=true\n",
+        managed_config()
+            .replace("auto_fund=false", "auto_fund=true")
+            .replace("http://127.0.0.1:1", &provider_url),
+        relay_provider.display()
+    );
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(&path, config).unwrap();
+    let deployment = tokio::time::timeout(
+        Duration::from_secs(10),
+        Deployment::load_for_serving_with_relay(&path, &env(), FundingRestriction::Ordinary),
+    )
+    .await
+    .expect("relay load waited for funding")
+    .unwrap();
+    let initialized = deployment.initialized.as_ref().unwrap();
+    assert!(initialized.funding_runtime.is_some());
+    assert!(
+        initialized
+            .treasury
+            .as_ref()
+            .unwrap()
+            .status()
+            .await
+            .unwrap()
+            .funding_jobs
+            .is_empty()
+    );
+    let mut running = deployment.bind(&env()).await.unwrap();
+    let payer = PaidClient::managed(running.managed_pools[0].clone());
+    let error = tokio::time::timeout(
+        Duration::from_secs(2),
+        payer.execute(crate::catalog::RoutedRequest {
+            method: "GET".into(),
+            url: provider_url,
+            query: Default::default(),
+            body: None,
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<crate::rotation::error::AdmissionError>(),
+        Some(crate::rotation::error::AdmissionError::WalletNotReady(_))
+    ));
+    drop(payer);
+    let owner = running.treasury.take().unwrap();
+    let status = owner.status().await.unwrap();
+    assert!(status.funding_jobs.is_empty());
+    assert!(status.treasury_operations.is_empty());
+    assert!(status.pools.iter().all(|pool| pool.addresses.is_empty()));
+    drop(running);
+    owner.close().await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), provider.accept())
+            .await
+            .is_err()
+    );
+    let owner = crate::treasury::Treasury::open(state, key, id)
+        .await
+        .unwrap();
+    owner.close().await.unwrap();
 }

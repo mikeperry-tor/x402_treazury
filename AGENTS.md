@@ -204,8 +204,9 @@ missing environment references fail, and submission otherwise follows the indexe
 Birthday discovery uses the older valid information/tip observation minus the
 scan rewind; ordinary advancement between independent reads is not a failure.
 
-Managed serving completes initial pool bootstrap before discovery and defaults to
-automatic replacement funding, using actual spendable treasury funds under ZEC/fee
+Managed serving binds listeners before starting initial or replacement funding and
+does not wait for a funded payer before exposing available tools. It defaults to
+automatic funding, using actual spendable treasury funds under ZEC/fee
 safeguards. `auto_fund=false` pauses it; build features, inspection,
 wallet initialization and sync never authorize automatic funding. Qualification
 restrictions remain authoritative, and bounded live demos retain explicit opt-outs.
@@ -443,9 +444,11 @@ and [the runtime architecture](docs/architecture.md).
   origin-derived pricing freshness; shared responses cannot renew lifetimes;
   never revalidate through Curl, use outer relay headers or persist challenges.
   Serving initializes wallets before relay catalog I/O; warming denies funding and
-  opens only resolved wallets for selected sources. Ordinary managed serving with
-  auto_fund establishes a funded eligible payer before discovery via the same supervised path
-  as `wallet bootstrap`; qualification restrictions preserve their existing lifecycle.
+  opens only resolved wallets for selected sources. Ordinary managed serving starts
+  dormant funding owners after binding; deferred relay catalogs wait on existing
+  capacity notifications without allocation or attempt consumption. Explicit
+  `wallet bootstrap` retains captured-claim completeness; qualification restrictions
+  preserve their existing lifecycle.
   Ordinary inspection remains unsigned; qualification cannot invoke paid relays.
 - HTTP MCP is stateless and uses SSE responses with two-second keepalive comments,
   with bearer auth enabled by default. Keepalives report connection liveness only;
