@@ -369,7 +369,7 @@ impl TreasuryConfig {
         if !self.id.is_empty() {
             return Ok(self.id.clone());
         }
-        Ok(super::store::status(&self.state_dir)?.treasury_id)
+        super::store::treasury_id(&self.state_dir)
     }
     pub fn validate(&self) -> Result<()> {
         if !self.id.is_empty() {

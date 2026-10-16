@@ -616,17 +616,18 @@ impl Deployment {
             && t.state_dir.exists()
         {
             let dir = t.state_dir.clone();
-            let state =
-                tokio::task::spawn_blocking(move || crate::rotation::store::status(&dir)).await??;
+            let (treasury_id, pool_names) =
+                tokio::task::spawn_blocking(move || crate::rotation::store::static_ownership(&dir))
+                    .await??;
             ensure!(
-                t.id.is_empty() || state.treasury_id == t.id,
+                t.id.is_empty() || treasury_id == t.id,
                 "state identity mismatch"
             );
-            for pool in state.pools {
+            for name in pool_names {
                 ensure!(
-                    !self.wallet_resolution.wallets.contains_key(&pool.name),
+                    !self.wallet_resolution.wallets.contains_key(&name),
                     "managed pool {} cannot become static without explicit retirement",
-                    pool.name
+                    name
                 );
             }
         }

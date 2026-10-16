@@ -1044,16 +1044,61 @@ fn allocation_jobs(
     }
     Ok(jobs)
 }
-pub fn status(dir: &Path) -> Result<Status> {
+fn inspect_state<T>(dir: &Path, read: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
     directory(dir)?;
     database_paths(dir)?;
     let path = dir.join("state.sqlite");
     private_file(&path, false)?;
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let tx = db.unchecked_transaction()?;
-    let status = read_status(&tx)?;
+    let result = read(&tx)?;
     tx.commit()?;
-    Ok(status)
+    Ok(result)
+}
+
+/// Runtime identity discovery reads no financial history and grants no spending
+/// authority. Opening the owner still authenticates the encrypted snapshot.
+pub fn treasury_id(dir: &Path) -> Result<String> {
+    inspect_state(dir, read_runtime_identity)
+}
+
+fn read_runtime_identity(db: &Connection) -> Result<String> {
+    let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    ensure!(
+        schema == 16,
+        "unsupported state schema; stopped-service conversion required"
+    );
+    let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
+    let mut rows = query.query([])?;
+    let row = rows.next()?.context("missing state identity")?;
+    let id: String = row.get(0)?;
+    let version: u32 = row.get(1)?;
+    let network: String = row.get(2)?;
+    let account: u32 = row.get(3)?;
+    ensure!(
+        version == 1 && network == "mainnet" && account == 0,
+        "state identity/network/schema mismatch"
+    );
+    ensure!(!Uuid::parse_str(&id)?.is_nil(), "invalid state identity");
+    ensure!(rows.next()?.is_none(), "ambiguous state identity");
+    Ok(id)
+}
+
+/// Identity and managed profile bindings from one coherent read transaction.
+/// Pool names remain reserved even when their financial reports cannot decode.
+pub fn static_ownership(dir: &Path) -> Result<(String, Vec<String>)> {
+    inspect_state(dir, |db| {
+        let id = read_runtime_identity(db)?;
+        let names = db
+            .prepare("SELECT name FROM pools ORDER BY name")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok((id, names))
+    })
+}
+
+pub fn status(dir: &Path) -> Result<Status> {
+    inspect_state(dir, read_status)
 }
 fn read_status(db: &Connection) -> Result<Status> {
     let (id, birthday, version): (String, u32, u32) =
