@@ -463,13 +463,7 @@ impl Deployment {
                 && let Some((env, restriction)) = relay_env
             {
                 ensure!(
-                    !crate::qualification::active()
-                        && !catalog_evidence::collecting()
-                        && !self
-                            .config
-                            .discovery_relay
-                            .as_ref()
-                            .is_some_and(|p| p.serve),
+                    !crate::qualification::active() && !catalog_evidence::collecting(),
                     "paid discovery relay is unavailable during qualification"
                 );
                 // Validate listener credentials before discovery can spend.
