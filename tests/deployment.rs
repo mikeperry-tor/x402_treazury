@@ -1194,3 +1194,87 @@ sources=['a','b']
         }
     }
 }
+
+#[tokio::test]
+async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity_guards() {
+    use x402_treazury::rotation::{
+        config::TreasuryConfig,
+        store::{Store, status},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let store = Store::create(&state, &dir.path().join("key"), 1, b"unfunded fixture").unwrap();
+    let id = store.id().to_owned();
+    drop(store);
+    let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+    db.execute(
+        "INSERT INTO pools(id,name) VALUES ('managed','independent')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO treasury_sync(singleton,observation) VALUES (1,'malformed')",
+        [],
+    )
+    .unwrap();
+    assert!(status(&state).is_err());
+    let treasury: TreasuryConfig = toml::from_str(&format!("state_dir={:?}", state)).unwrap();
+    assert_eq!(treasury.runtime_id().unwrap(), id);
+    for name in ["alpha", "beta"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            spec("https://example.com").to_string(),
+        )
+        .unwrap();
+    }
+    let config = configuration() + &format!("\n[treasury]\nstate_dir={state:?}\n");
+    let path = write_config(dir.path(), &config);
+    let deployment = Deployment::load(&path).await.unwrap();
+    let running = deployment.bind(&env()).await.unwrap();
+    let address = running.addresses()[0].1;
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(running.serve(stop.clone()));
+    let listed = rpc(
+        &reqwest::Client::new(),
+        address,
+        "beta-secret",
+        "tools/list",
+        json!({}),
+    )
+    .await;
+    assert!(!listed["result"]["tools"].as_array().unwrap().is_empty());
+    stop.cancel();
+    task.await.unwrap().unwrap();
+    // Neither successful discovery nor identity resolution repairs or discards
+    // the malformed financial observation.
+    assert!(status(&state).is_err());
+    db.execute("UPDATE pools SET name='shared'", []).unwrap();
+    let deployment = Deployment::load(&path).await.unwrap();
+    let error = deployment.bind(&env()).await.err().unwrap();
+    assert!(format!("{error:#}").contains("cannot become static"));
+    db.execute("UPDATE pools SET name='independent'", [])
+        .unwrap();
+    let path = write_config(
+        dir.path(),
+        &(config.clone() + &format!("id={:?}\n", uuid::Uuid::new_v4().to_string())),
+    );
+    let deployment = Deployment::load(&path).await.unwrap();
+    assert!(
+        format!("{:#}", deployment.bind(&env()).await.err().unwrap())
+            .contains("state identity mismatch")
+    );
+    let path = write_config(dir.path(), &config);
+    for version in [15, 17] {
+        db.pragma_update(None, "user_version", version).unwrap();
+        assert!(treasury.runtime_id().is_err());
+        let deployment = Deployment::load(&path).await.unwrap();
+        assert!(
+            format!("{:#}", deployment.bind(&env()).await.err().unwrap())
+                .contains("unsupported state schema")
+        );
+        let persisted: u32 = db
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(persisted, version);
+    }
+}

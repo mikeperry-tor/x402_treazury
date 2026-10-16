@@ -148,6 +148,13 @@ A single embedded Zcash treasury can fund multiple independently accounted manag
 pools. The [wallet architecture](wallet-rotation.md) explains admission, atomic
 promotion, background funding, encrypted persistence and recovery boundaries.
 
+Runtime treasury-ID discovery reads the supported schema and instance identity;
+static-wallet startup additionally reads managed profile names in the same
+transaction. Neither depends on decoding financial reports. Malformed financial
+history remains reportable and cannot remove a managed profile's name binding.
+These read-only checks do not unlock state or establish payment capacity; managed
+opening still authenticates the encrypted snapshot under exclusive ownership.
+
 `src/network.rs` is the shared factory for both direct and optional Tor traffic.
 Connection pools are keyed by identity and destination; enabling Tor does not
 create a second execution stack. Catalog/help/pricing use discovery-origin
