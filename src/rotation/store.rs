@@ -21,6 +21,7 @@ pub(crate) mod bootstrap;
 mod expiry;
 pub mod funding;
 pub(crate) mod history;
+pub(crate) mod inventory;
 mod ownership;
 mod reporting;
 pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvidence};
@@ -207,6 +208,8 @@ impl TreasuryNetwork {
     }
 }
 pub struct Store {
+    #[cfg(test)]
+    inventory_failure: std::sync::Mutex<Option<(inventory::Read, i32)>>,
     funding_restriction: super::restriction::FundingRestriction,
     funding_permits: Option<std::sync::Arc<dyn super::restriction::FundingPermits>>,
     network: TreasuryNetwork,
@@ -407,6 +410,8 @@ impl Store {
             evidence_cache: Default::default(),
             evidence_order: 0,
             funding_conditions: Default::default(),
+            #[cfg(test)]
+            inventory_failure: Default::default(),
             group_gates: Default::default(),
             db,
             _lock: owner,
@@ -470,6 +475,8 @@ impl Store {
             evidence_cache: Default::default(),
             evidence_order: 0,
             funding_conditions: Default::default(),
+            #[cfg(test)]
+            inventory_failure: Default::default(),
             group_gates: Default::default(),
             db,
             _lock: owner,

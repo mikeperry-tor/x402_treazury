@@ -57,12 +57,38 @@ impl<T> Pass<T> {
             decode_failure: None,
         }
     }
+    fn defer_inventory(&mut self, one_pass: bool) {
+        self.due = Instant::now() + CADENCE;
+        if one_pass {
+            self.completed = true;
+        }
+    }
     fn finish(&mut self, delay: Duration) {
         self.through = None;
         self.due = Instant::now() + delay;
         self.completed = true;
     }
 }
+// Only read-only inventory acquisition uses this retry classifier. Financial
+// publication, owner/channel failures and unknown corruption still propagate.
+fn inventory_result<T>(
+    result: Result<T>,
+    first_error: &mut Option<anyhow::Error>,
+) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if crate::rotation::store::inventory::transient_read(&error) => {
+            tracing::warn!(
+                category = "inventory_busy",
+                "inventory observation deferred; active work remains owned"
+            );
+            first_error.get_or_insert(error);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn history_delay(failures: u32) -> Duration {
     Duration::from_secs(if failures == 0 {
         5
@@ -187,9 +213,11 @@ impl ManagedPool {
                         let upper = s.wallet_boundary(&pool)?;
                         s.priority_wallets(&pool, upper)
                     })
-                    .await?;
-                priority_ids = rows.iter().map(|(_, id, _)| id.clone()).collect();
-                priority = rows.into_iter().map(|(_, id, _)| id).collect();
+                    .await;
+                if let Some(rows) = inventory_result(rows, &mut first_error)? {
+                    priority_ids = rows.iter().map(|(_, id, _)| id.clone()).collect();
+                    priority = rows.into_iter().map(|(_, id, _)| id).collect();
+                }
                 priority_due = instant + CADENCE;
             }
             // At most three preferred identities leave room for retained traversal.
@@ -197,8 +225,17 @@ impl ManagedPool {
                 let next = if let Some(id) = priority.pop_front() {
                     Some(id)
                 } else {
-                    self.next_balance(&mut balances, one_pass, &priority_ids)
-                        .await?
+                    match inventory_result(
+                        self.next_balance(&mut balances, one_pass, &priority_ids)
+                            .await,
+                        &mut first_error,
+                    )? {
+                        Some(next) => next,
+                        None => {
+                            balances.defer_inventory(one_pass);
+                            None
+                        }
+                    }
                 };
                 let Some(id) = next else { break };
                 if balance_active.insert(id.clone()) {
@@ -206,7 +243,7 @@ impl ManagedPool {
                 }
             }
             while history_active.len() < HISTORY_READS {
-                let Some(auth) = self
+                let result = self
                     .next_admitted_history(
                         &mut history,
                         one_pass,
@@ -214,10 +251,15 @@ impl ManagedPool {
                         &history_active,
                         Instant::now(),
                     )
-                    .await?
-                else {
-                    break;
+                    .await;
+                let next = match inventory_result(result, &mut first_error)? {
+                    Some(next) => next,
+                    None => {
+                        history.defer_inventory(one_pass);
+                        None
+                    }
                 };
+                let Some(auth) = next else { break };
                 history_active.insert(auth.id.clone());
                 reads.push(
                     self.read_one(Kind::History, auth.id.clone(), Some(auth))
@@ -293,6 +335,9 @@ impl ManagedPool {
         one_pass: bool,
         priority: &BTreeSet<String>,
     ) -> Result<Option<String>> {
+        if (one_pass && pass.completed) || Instant::now() < pass.due {
+            return Ok(None);
+        }
         loop {
             if let Some((sequence, id)) = pass.queued.pop_front() {
                 pass.cursor = sequence;
@@ -302,9 +347,6 @@ impl ManagedPool {
                 continue;
             }
             if pass.through.is_none() {
-                if (one_pass && pass.completed) || Instant::now() < pass.due {
-                    return Ok(None);
-                }
                 let pool = self.pool.clone();
                 pass.through = Some(self.store.call(move |s| s.wallet_boundary(&pool)).await?);
                 pass.cursor = -1;
@@ -374,14 +416,14 @@ impl ManagedPool {
         pass: &mut Pass<HistoryPayload>,
         one_pass: bool,
     ) -> Result<Option<HistoryPayload>> {
+        if (one_pass && pass.completed) || Instant::now() < pass.due {
+            return Ok(None);
+        }
         if let Some((sequence, auth)) = pass.queued.pop_front() {
             pass.cursor = sequence;
             return Ok(Some(auth));
         }
         if pass.through.is_none() {
-            if (one_pass && pass.completed) || Instant::now() < pass.due {
-                return Ok(None);
-            }
             let pool = self.pool.clone();
             pass.through = Some(self.store.call(move |s| s.history_boundary(&pool)).await?);
             pass.cursor = 0;
@@ -595,6 +637,7 @@ mod tests {
         release: Arc<tokio::sync::Notify>,
         slow_started: Arc<tokio::sync::Notify>,
         balance_reads: Arc<AtomicUsize>,
+        balance_payers: Arc<std::sync::Mutex<BTreeSet<String>>>,
         nonce_reads: Arc<AtomicUsize>,
         fail_nonces: Arc<AtomicBool>,
         treasury: String,
@@ -640,12 +683,13 @@ mod tests {
         let release = Arc::new(tokio::sync::Notify::new());
         let slow_started = Arc::new(tokio::sync::Notify::new());
         let balance_reads = Arc::new(AtomicUsize::new(0));
+        let balance_payers = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
         let nonce_reads = Arc::new(AtomicUsize::new(0));
         let fail_nonces = Arc::new(AtomicBool::new(false));
         let app=Router::new().route("/",post({
-            let release=release.clone();let started=slow_started.clone();let balances=balance_reads.clone();let nonces=nonce_reads.clone();let fail=fail_nonces.clone();
+            let release=release.clone();let started=slow_started.clone();let balances=balance_reads.clone();let payers=balance_payers.clone();let nonces=nonce_reads.clone();let fail=fail_nonces.clone();
             move |Json(request):Json<Value>| {
-                let release=release.clone();let started=started.clone();let balances=balances.clone();let nonces=nonces.clone();let fail=fail.clone();
+                let release=release.clone();let started=started.clone();let balances=balances.clone();let payers=payers.clone();let nonces=nonces.clone();let fail=fail.clone();
                 async move {
                     let result=match request["method"].as_str().unwrap() {
                         "eth_chainId"=>json!("0x2105"),
@@ -656,7 +700,7 @@ mod tests {
                         },
                         "eth_call"=>{
                             let data=request["params"][0]["data"].as_str().unwrap();
-                            let value=if data.starts_with("0x70a08231") {balances.fetch_add(1,Ordering::SeqCst);5_000_000}else{
+                            let value=if data.starts_with("0x70a08231") {balances.fetch_add(1,Ordering::SeqCst);payers.lock().unwrap().insert(format!("0x{}",&data[data.len()-40..]));5_000_000}else{
                                 nonces.fetch_add(1,Ordering::SeqCst);
                                 let nonce=u64::from_str_radix(&data[data.len()-64..],16).unwrap();
                                 if nonce==1 {started.notify_one();}
@@ -693,6 +737,7 @@ mod tests {
             release,
             slow_started,
             balance_reads,
+            balance_payers,
             nonce_reads,
             fail_nonces,
             treasury,
@@ -716,6 +761,131 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn transient_inventory_reads_keep_owner_and_independent_observations() {
+        use crate::rotation::store::inventory::Read;
+        for (index, read) in [
+            Read::Priority,
+            Read::WalletBoundary,
+            Read::WalletPage,
+            Read::HistoryBoundary,
+            Read::HistoryPage,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let f = fixture(2).await;
+            let retained = "0x000000000000000000000000000000000000aaaa";
+            if read == Read::WalletPage {
+                let db =
+                    rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+                db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES('retained-observer',?1,99,?2,X'00','1','RETAINED')",rusqlite::params![f.pool.pool,retained]).unwrap();
+            }
+            let code = if index % 2 == 0 {
+                rusqlite::ffi::SQLITE_BUSY
+            } else {
+                rusqlite::ffi::SQLITE_LOCKED
+            };
+            f.store
+                .call(move |s| {
+                    s.fail_next_inventory_read(read, code);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let stop = CancellationToken::new();
+            let task = tokio::spawn({
+                let pool = f.pool.clone();
+                let stop = stop.clone();
+                async move { pool.run_reconciliation(stop).await }
+            });
+            // Balance reads are polled even while history acquisition is deferred.
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while f.balance_reads.load(Ordering::SeqCst) == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            tokio::time::timeout(Duration::from_secs(8), f.slow_started.notified())
+                .await
+                .unwrap();
+            wait_for(&f, 1).await;
+            if read == Read::WalletPage {
+                tokio::time::timeout(Duration::from_secs(8), async {
+                    while !f.balance_payers.lock().unwrap().contains(retained) {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
+            assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
+            assert!(
+                f.pool
+                    .reconcile()
+                    .await
+                    .unwrap_err()
+                    .is::<ReconciliationInProgress>()
+            );
+            stop.cancel();
+            task.await.unwrap().unwrap();
+            assert_eq!(unfinished(&f).await, 1);
+            assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
+            drop(f.pool);
+            drop(f.store);
+            f.worker.await.unwrap();
+            f.server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn inventory_failures_remain_incomplete_for_one_pass_and_corruption_is_not_retried() {
+        use crate::rotation::store::inventory::Read;
+        for read in [
+            Read::Priority,
+            Read::WalletBoundary,
+            Read::WalletPage,
+            Read::HistoryBoundary,
+            Read::HistoryPage,
+        ] {
+            let f = fixture(2).await;
+            f.release.notify_one();
+            f.store
+                .call(move |s| {
+                    s.fail_next_inventory_read(read, rusqlite::ffi::SQLITE_BUSY);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let error = tokio::time::timeout(Duration::from_secs(3), f.pool.reconcile())
+                .await
+                .unwrap()
+                .unwrap_err();
+            assert!(crate::rotation::store::inventory::transient_read(&error));
+            // A genuine corruption is an outer error, not a resumable inventory outage.
+            f.store
+                .call(|s| {
+                    s.fail_next_inventory_read(Read::Priority, rusqlite::ffi::SQLITE_CORRUPT);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let error = tokio::time::timeout(
+                Duration::from_secs(2),
+                f.pool.run_reconciliation(CancellationToken::new()),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert!(!crate::rotation::store::inventory::transient_read(&error));
+            drop(f.pool);
+            drop(f.store);
+            f.worker.await.unwrap();
+            f.server.abort();
+        }
     }
 
     #[tokio::test]
