@@ -71,6 +71,7 @@ sources=["api"]
     .unwrap();
     let wallet_resolution = config.validate().unwrap();
     let deployment = Deployment {
+        prebound: BTreeMap::new(),
         unavailable_sources: Default::default(),
         config,
         wallet_resolution,
