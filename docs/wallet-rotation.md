@@ -597,6 +597,10 @@ Explicit `wallet bootstrap` still waits for its captured enabled reserve claims.
 If shared state authenticates but the Zcash SDK cannot decode its snapshot, ordinary
 serving retains that same store for existing Base payments and reconciliation and
 pauses new funding. Schema, key, identity, authentication and owner failures still
-stop initialization. Funding configuration/preflight remains required in this
-implementation slice; fixing SDK snapshot availability requires restart. Paid relay
-startup and qualification remain strict.
+stop initialization. Funding-only configuration or preflight failures also select this Base-only runtime:
+invalid treasury sync/fee settings, source endpoints or NEAR credentials do not
+prevent existing Base service. Correcting those settings or SDK snapshot availability
+requires restart. Shared identity/path and Base RPC policy remain required; missing
+treasury/funding sections still fail initialization. Paid relay startup, explicit
+bootstrap, config checking and qualification remain strict. The store-only runtime
+does not run source/swap observers; their unresolved obligations remain durable.

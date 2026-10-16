@@ -72,10 +72,27 @@ async fn paid(State(f): State<Fixture>, headers: HeaderMap) -> axum::response::R
 
 #[tokio::test]
 async fn authenticated_sdk_failure_preserves_base_payments_liabilities_and_shutdown() {
+    base_service("sdk").await;
+}
+#[tokio::test]
+async fn funding_only_failures_preserve_base_payments_and_static_service() {
+    for fault in ["credential", "quote", "fee"] {
+        base_service(fault).await;
+    }
+}
+async fn base_service(fault: &str) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
-    let mut store = Store::create(&state, &key, 1, b"invalid SDK snapshot fixture").unwrap();
+    let mut store = if fault == "sdk" {
+        Store::create(&state, &key, 1, b"invalid SDK snapshot fixture").unwrap()
+    } else {
+        let owner = crate::treasury::Treasury::create(state.clone(),key.clone(),2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        let id = owner.status().await.unwrap().treasury_id;
+        owner.close().await.unwrap();
+        Store::open(&state, &key, &id).unwrap()
+    };
     let id = store.id().to_owned();
     let reserves = serde_json::from_value(json!({"small":{"funding_amount_usdc":"5"}})).unwrap();
     let group = store
@@ -102,14 +119,33 @@ async fn authenticated_sdk_failure_preserves_base_payments_liabilities_and_shutd
     let app = Router::new()
         .route("/rpc", post(rpc))
         .route("/read", get(paid))
+        .route("/free", get(|| async { "static-free" }))
         .with_state(f.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    write_spec(dir.path());
+    std::fs::write(
+        dir.path().join("spec.json"),
+        r#"{"operations":[{"method":"GET","path":"/read"},{"method":"GET","path":"/free"}]}"#,
+    )
+    .unwrap();
     let path = dir.path().join("deployment.toml");
-    std::fs::write(&path, format!("{}\n[wallets.static]\nmode='static'\nprivate_key_env='STATIC'\n[servers.static]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='static'\nsources=['api']\n", managed_config().replace("auto_fund=false", "auto_fund=true").replace("http://127.0.0.1:1", &origin))).unwrap();
+    let mut config = managed_config()
+        .replace("auto_fund=false", "auto_fund=true")
+        .replace("http://127.0.0.1:1", &origin);
+    config = match fault {
+        "credential" => config.replace("[funding]", "[funding]\nnear_api_key_env='NEAR'"),
+        "quote" => config.replace("[funding]", "[funding]\nquote_deadline_seconds=1"),
+        "fee" => config.replace(
+            "[treasury]",
+            "[treasury]\nmax_funding_transaction_fee_zec='invalid'",
+        ),
+        _ => config,
+    };
+    config.push_str("\n[wallets.static]\nmode='static'\nprivate_key_env='STATIC'\n[servers.static]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='static'\nsources=['api']\n");
+    std::fs::write(&path, config).unwrap();
     let mut env = env();
     env.insert("BASE".into(), format!("{origin}/rpc"));
     env.insert("STATIC".into(), format!("{:064x}", 1));
+    env.insert("NEAR".into(), "malformed\nheader".into());
     let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
         .await
         .unwrap();
@@ -174,6 +210,11 @@ async fn authenticated_sdk_failure_preserves_base_payments_liabilities_and_shutd
         "{}",
         response.text().await.unwrap()
     );
+    let response = reqwest::Client::new().post(format!("http://{address}/mcp"))
+        .bearer_auth("fixture-token").header("accept","application/json, text/event-stream")
+        .json(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api_free","arguments":{}}}))
+        .send().await.unwrap();
+    assert!(response.text().await.unwrap().contains("static-free"));
     stop.cancel();
     tokio::time::timeout(Duration::from_secs(5), task)
         .await
@@ -328,5 +369,75 @@ async fn store_only_binding_rollback_and_cancelled_serving_release_owner() {
             .await
             .expect("dropped owner did not drain");
         }
+    }
+}
+
+#[tokio::test]
+async fn source_declaration_failures_are_scoped_but_base_and_shared_failures_remain_fatal() {
+    let cases = [
+        ("[treasury]", "confirmations=0", true),
+        ("[treasury]", "max_sync_age_seconds=0", true),
+        (
+            "[treasury]",
+            "max_funding_transaction_fee_zec='invalid'",
+            true,
+        ),
+        ("[treasury]", "max_refund_shielding_fee_zec='invalid'", true),
+        ("[treasury]", "indexer_url='http://untrusted.example'", true),
+        ("[funding]", "near_api_key_env='invalid-name'", true),
+        ("[funding]", "near_user_session_env='MISSING'", true),
+        ("[funding]", "confidentiality='unknown'", true),
+        ("[funding]", "slippage_bps=1001", true),
+        ("[funding]", "poll_seconds=0", true),
+        ("[funding]", "swap_timeout_seconds=0", true),
+        ("[funding]", "quote_deadline_seconds=1", true),
+        ("[funding]", "base_confirmations=0", false),
+        ("[funding]", "base_max_block_age_seconds=0", false),
+    ];
+    for (section, declaration, scoped) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let store = Store::create(&state, &key, 1, b"invalid SDK fixture").unwrap();
+        let id = store.id().to_owned();
+        drop(store);
+        write_spec(dir.path());
+        let path = dir.path().join("deployment.toml");
+        let config = managed_config()
+            .replace("max_refund_shielding_fee_zec='0.001'\n", "")
+            .replace(section, &format!("{section}\n{declaration}"));
+        std::fs::write(&path, config).unwrap();
+        let loaded =
+            Deployment::load_for_serving_with_relay(&path, &env(), Default::default()).await;
+        if !scoped {
+            assert!(loaded.is_err(), "{declaration}");
+            continue;
+        }
+        let deployment = loaded.unwrap();
+        let strict = deployment
+            .initialize_wallets(&env(), Default::default(), None, &BTreeSet::new())
+            .await;
+        assert!(strict.is_err(), "strict preflight accepted {declaration}");
+        let running = deployment.bind(&env()).await.unwrap();
+        assert!(running.store_only.is_some(), "{declaration}");
+        assert!(running.funding_runtime.is_none());
+        // No accepted work exists before serve. Use the normal close sequence
+        // without detaching the owner while checking every declaration.
+        let mut running = running;
+        let owner = running.store_only.take().unwrap();
+        drop(running);
+        owner.close().await.unwrap();
+        let store = Store::open(&state, &key, &id).unwrap();
+        assert!(store.funding_jobs().unwrap().is_empty());
+        drop(store);
+        // The same source fault must never hide a shared authentication fault.
+        std::fs::write(&key, [0u8; 32]).unwrap();
+        let deployment = Deployment::load_for_serving_with_relay(&path, &env(), Default::default())
+            .await
+            .unwrap();
+        assert!(
+            deployment.bind(&env()).await.is_err(),
+            "source fallback hid wrong key: {declaration}"
+        );
     }
 }
