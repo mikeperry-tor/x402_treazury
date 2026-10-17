@@ -614,6 +614,7 @@ impl Treasury {
                 zip32::AccountId::ZERO,
             )
             .map_err(|_| anyhow::anyhow!("treasury key derivation failed"))?;
+            let viewing_key = usk.to_unified_full_viewing_key();
             let prover = zcash_proofs::prover::LocalTxProver::with_default_location()
                 .context("Sapling parameters unavailable")?;
             let ids = create_proposed_transactions::<
@@ -639,18 +640,13 @@ impl Treasury {
                 .wallet_transactions
                 .get(ids.first())
                 .context("shield transaction missing")?;
-            let owned_output = record
-                .orchard_notes()
-                .iter()
-                .try_fold(0u64, |sum, note| sum.checked_add(note.value()))
-                .context("shielding output value overflow")?;
-            ensure!(
-                owned_output
-                    == input
-                        .checked_sub(fee)
-                        .context("shielding output underflow")?,
-                "shielding output is not owned by treasury"
-            );
+            validate_owned_shielding_outputs(
+                record.transaction(),
+                &viewing_key,
+                input
+                    .checked_sub(fee)
+                    .context("shielding output underflow")?,
+            )?;
             let transaction = record.transaction();
             let transparent = transaction
                 .transparent_bundle()
@@ -722,3 +718,32 @@ mod tests;
 #[cfg(all(test, feature = "zcash-testutils"))]
 #[path = "refunds/proving_tests.rs"]
 mod proving_tests;
+
+// Calculate-only records need not contain scanned notes. Validate exact ciphertext,
+// including the consensus-promoted Ironwood change pool.
+fn validate_owned_shielding_outputs(
+    transaction: &zcash_primitives::transaction::Transaction,
+    viewing_key: &zcash_keys::keys::UnifiedFullViewingKey,
+    expected: u64,
+) -> Result<()> {
+    let key = viewing_key
+        .orchard()
+        .context("treasury Orchard key missing")?;
+    let keys = [
+        key.to_ivk(zip32::Scope::External),
+        key.to_ivk(zip32::Scope::Internal),
+    ];
+    let owned = [transaction.orchard_bundle(), transaction.ironwood_bundle()]
+        .into_iter()
+        .flatten()
+        .flat_map(|bundle| bundle.decrypt_outputs_with_keys(&keys))
+        .try_fold(0u64, |sum, (_, _, note, _, _)| {
+            sum.checked_add(note.value().inner())
+        })
+        .context("shielding output value overflow")?;
+    ensure!(
+        owned == expected,
+        "shielding output is not owned by treasury"
+    );
+    Ok(())
+}

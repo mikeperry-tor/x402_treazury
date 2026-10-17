@@ -168,6 +168,33 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
             prepared.check_submission_window(u64::MAX, true).unwrap();
             let fee = prepared.facts().unwrap().fee_zatoshis;
             assert!(fee > 0 && fee < 100_000);
+            let transaction = crate::treasury::submission::decode(prepared.bytes()).unwrap();
+            let viewing_from_phrase = |phrase: &str| {
+                let mnemonic = bip0039::Mnemonic::<bip0039::English>::from_phrase(phrase).unwrap();
+                zcash_keys::keys::UnifiedSpendingKey::from_seed(
+                    &treasury.network.chain(),
+                    &mnemonic.to_seed(""),
+                    zip32::AccountId::ZERO,
+                )
+                .unwrap()
+                .to_unified_full_viewing_key()
+            };
+            validate_owned_shielding_outputs(
+                &transaction,
+                &viewing_from_phrase(SEED),
+                100_000 - fee,
+            )
+            .unwrap();
+            assert!(
+                validate_owned_shielding_outputs(
+                    &transaction,
+                    &viewing_from_phrase(SEED),
+                    100_001 - fee
+                )
+                .is_err()
+            );
+            assert!(validate_owned_shielding_outputs(&transaction, &viewing_from_phrase("legal winner thank year wave sausage worth useful legal winner thank yellow"), 100_000-fee).is_err());
+
             let binding =
                 crate::rotation::store::shielding::Binding::new(policy, vec![selected_input], fee)
                     .unwrap();
