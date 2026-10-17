@@ -18,7 +18,12 @@ contract and P06 covers the supported upload-progress API investigation and reta
 uncertain-outcome boundary. This document remains the detailed evidence for those
 two items; they are not resolved by linking them into the cleanup. P01–P04 separately
 cover redundant receipt-count limits, overload scoping, exact disputed-input selection
-and clock platform capability. Their local work does not wait for P05/P06.
+and remaining clock platform capability. P07's
+[chain-bound freshness investigation](improved_recovery_robustness.md#chain-bound-freshness-investigation-and-removal-plan)
+removes the local treasury-age policy in the proposed design, taking precedence
+over platform work that would merely preserve that policy. It retains external
+quote timestamps and does not close the P05 route/deadline question. Local cleanup
+does not wait for P05/P06.
 
 Keep the contract evidence and accepted limitation below current as those slices
 advance, and record implementation/review/acceptance in their owning addendum entries.

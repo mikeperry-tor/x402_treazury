@@ -3117,9 +3117,10 @@ the boundaries that own mutation and concurrency.
 ### Proposed change sequence and review gates
 
 The earlier H01–H06 identifiers are retained and expanded; H07–H09 cover atomic
-rebinding, context-specific authority and lifecycle transitions. P01–P06 below
+rebinding, context-specific authority and lifecycle transitions. P01–P07 below
 fold progress-policy cleanup and remaining limitations into these same packages.
-All are **proposed**.
+P07 records the investigated replacement of treasury age policy with decision-bound
+chain evidence. All runtime changes remain **proposed**.
 Existing protections described in C01–C22 are starting points, not instructions to
 reimplement them. Each package starts by identifying a concrete remaining duplicate
 calculation, missing boundary or missing acceptance case. If the existing code
@@ -3132,7 +3133,7 @@ documentation change.
 | 2 | H01 one obligation dependency slice, with H04 retention/historical interpretation | Begin with funding source/delivery/return consumers. Commit one shared calculation plus its migrated consumers, obsolete-path deletion and acceptance evidence; repeat by obligation. |
 | 3 | H07 atomic rebinding and H08 explicit execution contexts | Review current admission and serving capabilities against H01 decisions. Land separately by mutation boundary; neither requires a repository-wide rewrite. |
 | 4 | Original C17 actual-task-exit disposition, then H02 accepted-result publication | Resolve the original C17 requirement by audited justified stops or proven eligible handoff; do not count it as new H work. Local publication fixes with no task-handoff dependency may land earlier. |
-| 5 | H03 physical work/independence and H09 lifecycle transitions | Apply to the affected Store/RPC and deployment paths, including P01–P04. P01 can land early; P05 contract acquisition and P06 supported-API investigation proceed independently and cannot block unrelated cleanup. |
+| 5 | H03 physical work/independence and H09 lifecycle transitions | Apply to the affected Store/RPC and deployment paths, including P01–P04/P07, with P07 ahead of P04. P01 can land early; P05 contract acquisition and P06 supported-API investigation proceed independently and cannot block unrelated cleanup. |
 | 6 | Final integration and proposed AGENTS.md rules | Reconcile every package with evidence and remaining limitations; run applicable standard default-build checks. Make the rules below explicit alongside the changes they govern rather than waiting until all runtime work ends. |
 
 Use subagent review at each package commit boundary and any material authority or
@@ -3392,7 +3393,8 @@ spending-capital ceiling or total wallet/history cutoff. New source freshness le
 enforce the existing observation window across suspension and clock correction;
 checks at separate admission/mutation boundaries prevent races rather than impose
 independent policy deadlines. Internal shielding's artificial local 24-hour deadline
-was removed. Slow scan work is retained for incremental catch-up, and missing relay
+was removed. P07 investigates removal of the treasury age policy itself; enforcing
+its existing window correctly is not justification to retain it. Slow scan work is retained for incremental catch-up, and missing relay
 capacity no longer consumes unsigned request attempts. Preserve these improvements.
 
 #### Limit classification and disposition
@@ -3423,15 +3425,17 @@ these are proposed slices, not evidence of implemented removal or qualification.
 | P01 — receipt-count redundancy; H03/H05 | Remove the 4,096-log count veto from both [payment receipts](../../src/rotation/base/receipt.rs#L127) and [funding delivery](../../src/rotation/base/delivery.rs#L296). The branch copied the existing payment policy into the new delivery path; the full response is already byte-bounded before JSON decoding. No distinct resource or contract justification was established for the extra count cutoff. | Exercise both production validators with a valid receipt containing more than 4,096 unrelated logs and one exact valid transfer, within the existing response-byte bound; payment fixtures must also include every scheme-required authorization event. A transfer alone cannot prove payment authorization use. Preserve whole-response byte rejection, full provenance/event validation, ambiguous-transfer negatives and unique financial-event ownership. Do not truncate logs or accept partial evidence. Update fixed diagnostic categories and related fixtures after removing the obsolete rejection. |
 | P02 — overload and historical partitions; H03/H06 | Retain the historical subsets of 63 query owners / 127 callers / 31 active sockets within unchanged aggregate 64 / 128 / 32 limits: they reserve a current-evidence slot at each boundary. Audit the callers' treatment of unsigned capacity rejection and ensure scoped backoff/resumption rather than permanent owner loss or financial abandonment. | Hold historical capacity at all three real boundaries across pools; show current progress and subsequent historical resumption after release. Test multiple current callers, cancellation and permit recovery. One reserved slot is not a promise that every concurrent current caller succeeds. Preserve bounded ownership/queued memory; add no new total-work or capital cap. |
 | P03 — exact selection around disputed inputs; H04/H05/H07 | Investigate and implement exact SDK input exclusion/selection, if supportable, so generic shielded sends can use demonstrably independent inputs while preserving every disputed source claim. The new [generic-send fence](../../src/rotation/store/source_obligations.rs#L64) is broader than the disputed operation because the present selector cannot exclude its exact orphaned inputs. Keep that fence until actual prepared-byte evidence supports narrowing it. | Use real SDK calculation/proving with both disputed and independent inputs; verify every selected input against immutable claims in the actual transaction. Cover reorg, burial, restart, ambiguous ownership, SDK reset-spends behavior and expiry. Independent work may proceed only with disjoint proven inputs; otherwise retain a named SDK limitation. No new financial retry or replacement authority, release of disputed inputs or weakening of pending-outgoing guards. |
-| P04 — suspend-aware clock capability; H08/H09 | Establish the supported platform contract for [suspend-inclusive freshness](../../src/freshness.rs#L164). macOS/Linux implementations exist; other targets currently fail clock acquisition. For any supported additional target, supply a correct implementation and capability diagnostics; otherwise document the explicit platform limitation. Surface failure before dependent financial mutation and preserve independent usable capabilities where proven. | Platform-specific clock tests cover suspend-inclusive elapsed age, wall-clock correction, sticky expiry and unsupported capability errors. No fallback to a clock that excludes suspension or silently renews freshness; no claim that an unsupported target passed. Preserve process-local proof and restart invalidation. This is a capability gap, not justification for another deadline. |
+| P04 — remaining clock capability; H08/H09 | First apply P07: remove unnecessary treasury clock consumers rather than implement platforms solely to preserve a local age gate. Classify remaining Base/shared consumers against protocol authority and chain-bound alternatives. Supply platform support only for a genuinely retained consumer, or document its explicit capability limitation. | Prove P07 treasury decisions are unaffected by wall jumps/suspension. For retained consumers, record their distinct contract and platform tests; do not silently weaken required time semantics. Preserve process ownership and revision invalidation. No portability change may reintroduce a renamed treasury TTL. |
 | P05 — 1Click Zcash deadline allowance; H01/H05/H06/H08 | Complete the authoritative route/deadline investigation in [the remaining contract gate](no_self_sabotage.md#unresolved-gate-the-1click-zcash-deadline-and-route-contract). Establish the exact arrival event, route/connector, confirmations/relay requirements and late-deposit/refund behavior. Remove the blanket 300-second first-submission margin to the extent unsupported, or replace it with the specifically evidenced allowance; change quote, preparation and final durable submission checks together. | Record the authoritative evidence and boundary fixtures before claiming this gate resolved. Preserve returned external expiry, exact prepared bytes and liabilities; refresh only proven untouched quotes. Cover slow preparation and late checks, cancellation/restart and zero duplicate allocation/send. Do not infer timely delivery from local broadcast or derive an allowance from block count alone. The current margin remains unresolved pending that evidence; no live-funded run or private-state inspection is authorized. |
 | P06 — gRPC upload-progress limitation; H02/H05/H08 | Review supported transport APIs for a per-request upload-consumption signal. If available, separate progressing upload from response-header inactivity while retaining connection and response-specific read protection. Otherwise retain the [accepted limitation](no_self_sabotage.md#accepted-limitation-grpc-upload-progress) explicitly; do not introduce speculative vendoring, a larger whole-work deadline or renewal from other HTTP/2 streams/keepalives. | With an actual supported signal, test slow progressing upload, true upload/header stall, unrelated concurrent traffic and cancellation. Without it, test/document the existing uncertain-outcome boundary rather than claim progress awareness. In both cases retain accepted financial work and exact recovery obligations: a timeout cannot prove non-submission or authorize replay. |
+| P07 — remove treasury age authority; H01/H04/H05/H06/H07/H08/H09 | Implement the investigated chain/owner/revision-bound replacement below, including missing post-accounting and preparation anchor checks; remove local wall/elapsed age permission and its configuration/cadence coupling. | Long valid work and unchanged-chain delays beyond the old bound pass; reorgs, stale revisions and wrong/missing anchors reject before mutation. Retain exact-tip expiry proofs, external protocol timestamps and no-replay ownership. |
 
 #### Ordering and completion of progress-policy slices
 
 P01 can land early as a focused removal plus both-path regressions. Integrate P02
-with the scheduler/resource work, P03 with SDK/input ownership and P04 with
-capability assembly; none waits for the external 1Click contract. Begin P05 evidence
+with the scheduler/resource work and P03 with SDK/input ownership. P07 takes
+precedence over P04 clock-portability work and integrates with H01/H07/H08; none
+waits for the external 1Click contract. Begin P05 evidence
 acquisition independently and keep the current unresolved gate explicit until its
 contract is established. P06 is a bounded supported-API investigation with an
 explicit accepted-limitation outcome, not an open-ended transport rewrite.
@@ -3443,6 +3447,149 @@ side effects remain absent. Update maintained behavior and the timer inventory
 alongside implementation. Distinguish implemented cleanup, a proved necessary
 restriction, an accepted capability limitation and an unresolved external-contract
 gate in the completion record; no summary may turn the latter into a passing result.
+
+### Chain-bound freshness investigation and removal plan
+
+**Investigation outcome:** No Zcash consensus or inspected swap contract requirement
+was found for this application's local `max_sync_age_seconds` gate. It measures
+age since our observation, not chain validity or indexer liveness. The proposed
+P07 removes that gate from treasury financial decisions and replaces it with
+chain/owner/revision-bound validation. It does not merely delete `fresh()` calls,
+trust a cached height indefinitely or remove protocol timestamp checks. This is
+an investigated follow-up design, not a claim that runtime removal has landed.
+
+The user's policy is explicit: wall-clock time may gate financial authority only
+where required by the applicable protocol or external contract. Elapsed timers may
+still govern actual transport inactivity and maintenance cadence, and timestamps
+may describe diagnostics; neither supplies another financial validity cutoff.
+Earlier C21 evidence describes the correctness of the current age-policy
+implementation, not proof that the policy itself is necessary. P07 supersedes that
+local treasury-age policy in the proposed design while retaining its structural
+ownership protections. Do not expand P04 clock portability merely to sustain it.
+
+#### Application evidence and missing replacement checks
+
+| Boundary | Inspected implementation | Required change under P07 |
+| --- | --- | --- |
+| Completed scan and accounting publication | [Final tip](../../src/treasury/mod.rs#L789) is read before potentially long refund/source accounting; subsequent age/lag validation reuses that same tip. Snapshot/source-support publication also depends on the elapsed lease. | After retained history work, reacquire chain evidence, verify the scanned anchor remains on the configured chain and evaluate current lag before publishing decision-ready evidence. Preserve history and sealed source passes when their exact dependencies remain valid. |
+| Reuse of completed scan | [Command reuse](../../src/treasury/sync_reuse.rs#L18) already checks network, exact current height/hash against the wallet block, process ownership and snapshot revision, in addition to age. | Remove age as a reuse prerequisite; retain the actual request and anchor checks. An unchanged height is valid only after reacquisition and hash verification. Changed state requires the appropriate incremental scan/reorg handling. |
+| Ordinary preparation | [Preparation preflight](../../src/treasury/send.rs#L64) uses `GetLightdInfo` height and bounded lag, but does not verify the scanned block hash. `check_endpoint` checks tree availability, not anchor identity. | Add canonical scanned-anchor/lineage validation before SDK proposal mutation; bind its result to the exact operation, SDK owner, snapshot and relevant journal/input revisions. Height equality alone is insufficient. |
+| Store admission and source activation | [Runtime certificate](../../src/rotation/store/sync_freshness.rs#L69) combines serialized-observation/revision/revocation binding with a wall/elapsed lease; [source activation](../../src/rotation/store.rs#L595) checks elapsed freshness inside publication. | Retain the essential bindings and atomic activation/revision checks. Replace temporal authority with an opaque decision-bound chain assessment, not an unrestricted persisted-ready flag. |
+| Shielding, submission and expiry recovery | These consumers call runtime `fresh()` alongside exact bytes, inputs, serving authority and recovery checks. | Migrate every consumer together: preparation, reservation, automatic/manual shielding, confirmation, source-support activation and expiry recovery. Keep chain validation before durable intent; do not add unsigned probes after intent that strand never-sent work as uncertain. |
+
+#### Reference comparison and what it establishes
+
+The reference checkouts are comparison evidence, not adopted financial authority.
+Inspection was read-only; no live RPC, wallet state, keys or funds were used.
+Pinned clean inspected revisions: `zodl-ios`
+`6a7dc6b39cb8e8e245021fa98012de66dfeb2790`, `zodl-android`
+`9f4e719e3eeef31eb7c77bd5da8d6b34bb71c654`, `zodl-swift-wallet-sdk`
+`cf07eb228c1b55da928f5b44fc5ec48edf5d7d57`, and `zodl-android-wallet-sdk`
+`ae538fc5b39fbd28d4c319cb40d4e2a51b0a6c27`. iOS selects the adjacent SDK;
+Android supports an included SDK or Maven dependency, and private build selection
+was not inspected. Source anchors below make the findings reviewable. Different
+reference engines and UI policies must not be described as one clock-free design.
+
+| Reference | Relevant observed behavior | Implication and limit |
+| --- | --- | --- |
+| Zodl iOS / Swift SDK | Newer Slipstream `fresh_tip_decision` requires a current-run tip refresh counter advance and completed chain-tip-priority scan (or completed pass), then latches freshness for that run. Sources: `reference_repos/zodl-swift-wallet-sdk/rust/src/lib.rs:5891–5912`, `fresh_tip_decision`, and `:6044`, `tip_fresh_now`; contiguous scan coverage is documented in `Sources/ZcashLightClientKit/Synchronizer.swift:49`. Legacy engine paths also have 120-second restart grace and 600-second tip-refresh cadence (`SDKFlags.swift:62–82`, `Block/Actions/UpdateChainTipAction.swift:43–49`); newer wrappers retain restart grace too (`rust/src/lib.rs:5230`, `:5611`). | A newly acquired unchanged tip is distinguishable from a height merely loaded from a database. This supports an acquisition/scan certificate, not height equality alone or copying a run-wide latch into our mutation authority. |
+| Zodl Android / SDK | Slipstream checks a refresh counter advance or completed pass; the wrappers retain stop/start grace. UI mapping also has a timed stale-tip display fallback. Sources: `reference_repos/zodl-android-wallet-sdk/backend-lib/src/main/rust/slipstream/mod.rs:238–258` and `:459`; display fallback is in `slipstream-lib/src/main/java/com/zodl/slipstream/internal/EngineMapping.kt:55–77` (450 two-second ticks, approximately 15 minutes). | References contain local time heuristics too. Neither a UI fallback nor restart grace proves financial readiness or justifies retaining our age veto. Use actual SDK transaction/anchor checks as evidence. |
+| Zodl proposal/scan paths | Swift `rust/src/lib.rs:2328` and Android `backend-lib/src/main/rust/lib.rs:2254` delegate proposals to librustzcash with wallet/confirmation/spend policy, not a host-age readiness parameter. Swift `Block/Actions/ScanAction.swift:127` recognizes parent-hash, height and commitment-tree continuity failures. | SDK transaction validity depends on actual scan/chain state. These entry points do not prove our additional accounting and recovery obligations, and their lack of a clock parameter alone cannot justify deleting our checks. |
+| Both Zodl swap flows | Request an absolute two-hour 1Click deadline and infer a local expired status for still-pending deposits at returned deadline minus five minutes; traced send paths do not establish an equivalent five-minute pre-broadcast requirement. Detailed source evidence remains in [the prior audit](no_self_sabotage.md#zodl-implementation-evidence-and-its-limits). | The external timestamp cannot be replaced by Zcash height. Their local status heuristic is not settlement, reservation-release or no-future-return evidence, nor justification for our margin. |
+| Near-One bridge components | `bridge-sdk-rs` at `d1361ac1c68fa579ed1a498d30f2124bc16e09cc`, `omni-bridge` at `3f0349044938d42fca080e732098ffe9477551ec`, and `omni-bridge-services` at `00ccb5d1dd893428024b6708f2ef1e21bed980dd`, all clean. Relayer `src/utils/utxo.rs:159–246` derives an inclusion/confirmation target from block hash/height; `src/startup/utxo_lc_poller.rs:55–139` waits for the NEAR light client to reach it. Thirty seconds is poll cadence. | Chain predicates determine progress; polling time need not expire otherwise valid work. These are bridge/relayer implementations, not the 1Click deadline service. No local quote-deadline handling or `zec.omft.near` route was found, so P05's exact arrival-event/route question remains unresolved. |
+
+[ZIP 203](https://zips.z.cash/zip-0203) specifies transaction expiry as a block
+height, not a UNIX timestamp; preserve original zero/non-expiring semantics and
+all existing conservative recovery proof requirements. The
+[NEAR quote guide](https://github.com/near/agent-skills/blob/main/skills/near-intents/rules/api-quote.md)
+identifies a timestamp deadline for deposit arrival, but does not establish the
+specific Zcash watcher event. These sources support separating chain validity from
+external timestamp authority; they do not resolve P05's margin or route contract.
+
+#### P07 — Remove treasury age policy with decision-bound chain validation
+
+**Owners and order:** H01/H04/H05/H07/H08, with H06 acceptance mapping and H09
+lifecycle integration. Establish the chain assessment and its consumer inventory
+first. Migrate a complete decision path, delete its superseded age enforcement and
+record evidence in the same slice; do not leave parallel age and chain gates as
+independent authority. P05's contract investigation does not block this removal.
+
+1. **Define the assessment.** Bind network identity, scanned height/hash, observed
+   tip height/hash and verified lineage to the originating SDK/Store owner, exact
+   committed snapshot/observation, operation and relevant source/input/journal
+   revisions. Obtain it through the configured production indexer at the dependent
+   action boundary. Preserve current three-block ordinary lag; keep both expiry
+   scans at their observed tip. Same-height hash replacement, regression, missing
+   anchor and network mismatch cannot pass by height comparison alone.
+2. **Consume it at the existing owner boundaries.** Perform read-only chain
+   validation before proposal mutation/reservation and before submission intent,
+   rechecking local bindings atomically. Revalidate after intervening work that
+   can invalidate the required chain or local inputs. The network is not atomic
+   with SQLite; name the observed anchors and preserve existing trust/lag policy
+   rather than claiming that a token proves the globally latest chain forever.
+   A new request returning the same valid chain is sufficient without a new block.
+   Confine each assessment to its named decision/path: it cannot authorize another
+   operation, a later command or work after unrelated queue delay. Reacquire chain
+   evidence when that path resumes rather than attach a replacement TTL. An
+   unchanged local snapshot does not by itself detect a later reorg.
+   `funding_source_ready` becomes only a cached scheduling hint;
+   `funding_preparation_context` and `require_spend_ready` supply local structural
+   checks, not independent current-chain permission. Inventory and migrate their
+   Store callers as well as the Treasury methods.
+3. **Retain useful history.** After long scanning/accounting, reobserve and validate
+   the chain, incrementally catching up as necessary. Reuse sealed historical work
+   only after its anchor/inventory checks; do not make wallet count or elapsed scan
+   duration a hidden completion deadline. On contradiction revoke only dependent
+   support and preserve signed ownership until its exact discharge proof.
+4. **Delete temporal financial authority.** Remove treasury elapsed/wall age gates,
+   certificate `valid_until` and `FreshnessLease` dependence from scan completion,
+   reuse, spend readiness, reservation, shielding, source activation and recovery.
+   Keep owner namespace, observation/snapshot binding and mutation revocation.
+   Restart/deserialization alone cannot create admission authority; acquire and
+   validate the chain under the reopened owner first. Preserve restored-state fences.
+5. **Separate configuration, cadence and reporting.** Retire
+   `treasury.max_sync_age_seconds` as a financial-policy setting and remove its
+   positive-age validation/SDK `SyncSettings` plumbing. Specify an explicit offline
+   configuration compatibility/deprecation disposition for old files; no silent
+   repurposing as another financial cutoff. Maintenance currently derives cadence
+   from half that age, clamped to 1–60 seconds: decouple it using the existing
+   maintenance scheduling policy, without introducing a new configuration ceiling.
+   `checked_at`, `checkpoint_at` and elapsed logs may remain diagnostic, but rename
+   or retire `sync_fresh`/wall-age displays so they cannot imply current permission.
+   Preserve historical evidence readers and saved diagnostics.
+6. **Classify remaining shared-clock consumers.** Zcash removal does not by itself
+   remove `src/freshness.rs`: Base admission, delivery and replacement also use it.
+   Audit `base_max_block_age_seconds`, the local future-timestamp allowance and
+   balance-cache leases as application policy, not assumed protocol requirements.
+   Specify their decision-bound chain/revision alternative before removing their
+   authority checks; do not transfer the treasury TTL into another layer or label
+   an unexplained Base age policy mandatory. Keep actual signed x402 timestamp
+   fields and their canonical-chain recovery semantics. P04 covers only genuine
+   remaining clock consumers after this classification.
+
+**Acceptance:** Test scans, history/accounting and proposal stages continuing beyond
+the former age bound, with unchanged chain, wall-clock jumps and suspension; no
+rescan or financial rejection may occur solely because time passed. Explicit sync
+can still perform its requested scan. Test same-height reorg, tip advancement and
+regression, unavailable/malformed anchors, wrong network, stale held assessments,
+concurrent snapshot/phase/input/inventory changes, cancellation and restart. Queue
+an assessment, change the chain at the same height, then execute a later command:
+reacquisition must reject the old anchor without an age cutoff. Failed
+pre-mutation validation leaves proposal/reservation/intent absent; uncertain accepted
+work retains exact bytes and liabilities. Cover manual/automatic shielding, retained
+source passes, every original expiry input, zero expiry and both exact-tip recovery
+scans. A genuinely crossed provider deadline or signed timestamp authority still
+rejects the corresponding new action; elapsed host time cannot establish canonical
+expiry or release liability. A stalled/unavailable indexer supplies no new chain
+assessment; preserve independent service and do not infer objective liveness from
+height, cached hashes or a successful transport connection.
+
+**Closure:** Record migrated consumers, removed checks/fields, exact anchor and
+revision tests, configuration/reporting changes, reviews/fixups, maintained guide
+and timer-inventory updates. All conclusions assume the existing configured-indexer
+trust model and exclusive treasury spending; neither a clock nor height/hash
+revalidation detects an undeclared old backup or reconstructs missing off-chain
+authorizations. No live-funded qualification or private-state repair is authorized.
 
 ### Coverage and completion of the addendum
 
@@ -3461,7 +3608,8 @@ gate in the completion record; no summary may turn the latter into a passing res
 | Concentrated scheduler/refund/deployment responsibilities and remaining complexity warnings | Complexity-guided targets under H01–H09; H06 records every disposition |
 | Internal evidence depends on provider JSON representation | Typed delivery construction under H01/H05, with H04/H07 compatibility and publication gates |
 | Redundant receipt-count veto; overload scope and disputed-input selection | P01–P03 under H03–H07 |
-| Unsupported clock capability; unresolved quote allowance and upload-progress limitation | P04–P06 under H01/H02/H05/H06/H08/H09 |
+| Unnecessary treasury age permission and remaining clock consumers | P07, then P04; chain-bound acquisition/scan/revision evidence replaces local age |
+| Unresolved quote allowance and upload-progress limitation | P05/P06 under H01/H02/H05/H06/H08/H09 |
 | Mechanical feature/lint integration | H06 standard checks; no separate financial redesign |
 
 The addendum is ready to guide implementation, not evidence that these changes have
@@ -3472,7 +3620,7 @@ H01 is the central architectural change, supported by H04's lifetime separation,
 H07's atomic binding and H08's explicit capabilities. The remaining packages make
 those contracts survive SDK, owner, resource and deployment boundaries. The
 complexity-guided target inventory and typed delivery-construction slice are part
-of their owning packages, not a separate score-reduction project. P01–P06 likewise
+of their owning packages, not a separate score-reduction project. P01–P07 likewise
 share those owners; unresolved contract/capability limits remain explicitly named.
 
 ### Rules to make explicit in AGENTS.md
@@ -3541,9 +3689,17 @@ modify AGENTS.md.
     none may silently become abandonment or replacement authority. Keep the timer
     inventory and explicit external-contract/capability limitations current.
 
+14. **Chain validity versus time policy:** Financial wall-clock gates require a
+    named protocol/external timestamp constraint. Treasury scan readiness uses
+    newly acquired chain/anchor and owner/revision evidence, not observation age
+    or a required height advance. Preserve lineage, scan coverage, exact input
+    ownership and expiry-release proofs. Cadence, transport inactivity and
+    diagnostic timestamps cannot become another financial-validity lease.
+
 Apply rules 1 and 10 with H01/H04; rule 2 with H02; rules 3 and 5 with H03;
 rule 4 with H04; rule 6 with H05; rules 7 and 12 with H06; rule 8 with H07;
-rule 9 with H08; rule 11 with H09; and rule 13 with P01–P06/H03/H06. Extend the relevant existing AGENTS.md
+rule 9 with H08; rule 11 with H09; rule 13 with P01–P07/H03/H06; and
+rule 14 with P07/P04/P05. Extend the relevant existing AGENTS.md
 paragraphs instead of repeating them as another independent policy layer.
 
 ## Supporting review findings
