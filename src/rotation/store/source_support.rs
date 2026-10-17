@@ -281,7 +281,12 @@ impl Store {
         confirmed(&self.db, operation)
     }
     pub(crate) fn source_observation_current(&self, operation: &str) -> Result<bool> {
-        current(&self.db, operation, false)
+        if !current(&self.db, operation, false)? {
+            return Ok(false);
+        }
+        // A semantic return/source inventory change needs one new canonical
+        // pass. An unchanged pass remains reusable even when it found an issue.
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM source_support_current c JOIN source_support_passes p ON p.id=c.pass_id WHERE p.inventory_revision=c.inventory_revision)", [], |r| r.get(0))?)
     }
 }
 /// No lookup of an older pass can restore support lost in a newer canonical scan.

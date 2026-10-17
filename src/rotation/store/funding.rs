@@ -139,6 +139,7 @@ impl FundingFacts {
     }
     pub fn source_reconciliation_needed(&self) -> bool {
         self.source_accounting_pending
+            || (self.return_pending && self.source_submission.as_deref() == Some("CONFIRMED"))
             || self.hidden_prepared
             || self.source_attempts > 0
                 && self

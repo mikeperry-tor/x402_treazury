@@ -378,3 +378,49 @@ pub(crate) fn cleanup(store: &mut Store) {
         cursor = next;
     }
 }
+
+#[test]
+fn return_inventory_change_reobserves_once_without_repeating_unresolved_pass() {
+    let (_dir, mut store) = fixture(1);
+    let id = "operation-0000";
+    let pass = stage_return(&mut store, Disposition::Confirmed(5), Some(U256::ZERO));
+    activate_pass(&mut store, &pass);
+    assert!(store.source_observation_current(id).unwrap());
+    store
+        .db
+        .execute(
+            "INSERT INTO refund_outputs VALUES('return',0,?1,1,5,1)",
+            [id],
+        )
+        .unwrap();
+    assert!(!store.source_observation_current(id).unwrap());
+    assert!(
+        store.source_confirmation_supported(id).unwrap(),
+        "return inventory does not erase canonical gross source accounting"
+    );
+    assert!(returned(&store.db, id).unwrap().is_none());
+    let pass = stage(&mut store, Disposition::Confirmed(5));
+    activate_pass(&mut store, &pass);
+    for _ in 0..3 {
+        assert!(
+            store.source_observation_current(id).unwrap(),
+            "observed unresolved return must reuse the same pass"
+        );
+        assert!(returned(&store.db, id).unwrap().is_none());
+        store
+            .db
+            .execute(
+                "UPDATE refund_outputs SET amount=amount WHERE operation_id=?1",
+                [id],
+            )
+            .unwrap();
+    }
+    store
+        .db
+        .execute(
+            "UPDATE refund_outputs SET amount=2 WHERE operation_id=?1",
+            [id],
+        )
+        .unwrap();
+    assert!(!store.source_observation_current(id).unwrap());
+}
