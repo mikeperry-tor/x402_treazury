@@ -14,9 +14,12 @@ impl Store {
         let closed: Option<bool> = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0) FROM expired_operations WHERE id=?1",
             [id], |row| row.get(0)).optional()?;
+        let disputed = source_obligations::disputed(&self.db, id)?;
         if let Some(closed) = closed {
             ensure!(closed, "expired operation accounting conflict");
-            return Ok(());
+            if !disputed {
+                return Ok(());
+            }
         }
         let observation: String = self.db.query_row(
             "SELECT observation FROM treasury_sync WHERE singleton=1",
@@ -43,33 +46,61 @@ impl Store {
         let op = self.operation(id)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
-            height >= u64::from(op.facts.expiry_height) + u64::from(sync.confirmations),
+            crate::rotation::transaction::expiry_buried(
+                op.facts.expiry_height,
+                height,
+                sync.confirmations
+            ),
             crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         let tx = self.db.transaction()?;
-        ensure!(
+        let (state, consumed, reserved, submission): (String, i64, i64, String) = tx.query_row(
+            "SELECT x.state,b.consumed,b.reserved,o.submission FROM outgoing x JOIN budget_entries b ON b.id=x.id JOIN treasury_operations o ON o.id=x.id WHERE x.id=?1",
+            [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)))?;
+        if closed.is_none() {
+            if state == "RESOLVED" {
+                let gross = op
+                    .facts
+                    .amount_zatoshis
+                    .checked_add(op.facts.fee_zatoshis)
+                    .context("source gross expenditure overflow")?;
+                ensure!(
+                    disputed
+                        && submission == "CONFIRMED"
+                        && reserved == 0
+                        && consumed > 0
+                        && u64::try_from(consumed)? == gross,
+                    "expired operation accounting conflict"
+                );
+            } else {
+                ensure!(
+                    state == "PREPARED" && consumed == 0,
+                    "operation is not pending"
+                );
+            }
+            tx.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1", [id])?;
             tx.execute(
-                "UPDATE outgoing SET state='RESOLVED' WHERE id=?1 AND state='PREPARED'",
-                [id]
-            )? == 1,
-            "operation is not pending"
-        );
-        ensure!(
+                "UPDATE budget_entries SET reserved=0,consumed=0 WHERE id=?1",
+                [id],
+            )?;
             tx.execute(
-                "UPDATE budget_entries SET reserved=0 WHERE id=?1 AND consumed=0",
-                [id]
-            )? == 1,
-            "operation already consumed"
-        );
-        tx.execute(
-            "INSERT INTO expired_operations VALUES (?1,?2,?3)",
-            params![id, i64::try_from(height)?, revision],
-        )?;
+                "INSERT INTO expired_operations(id,height,revision,reversed_consumed) VALUES (?1,?2,?3,?4)",
+                params![id, i64::try_from(height)?, revision, consumed],
+            )?;
+        } else {
+            // A contradicted old proof cannot release ownership. Only this new
+            // exact-input proof, tied to the current snapshot, can clear it.
+            tx.execute(
+                "UPDATE expired_operations SET height=?2,revision=?3 WHERE id=?1",
+                params![id, i64::try_from(height)?, revision],
+            )?;
+        }
+        tx.execute("DELETE FROM source_obligations WHERE operation_id=?1", [id])?;
         // Canonical closure does not grant another attempt. Preserve the original
         // operation, quote, refund binding and exact bytes until a separate
         // current-authority check permits reauthorization on the same job.
         let job: Option<String> = tx.query_row("SELECT job_id FROM funding_progress WHERE operation_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",[id],|r|r.get(0)).optional()?;
-        if let Some(job) = job {
+        if let Some(job) = job.filter(|_| closed.is_none()) {
             tx.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[&job])?;
             tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1",[&job])?;
         }

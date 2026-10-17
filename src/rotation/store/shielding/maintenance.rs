@@ -35,7 +35,7 @@ pub(crate) struct AddressPage {
 impl Store {
     pub(crate) fn shielding_inputs_available(&self, inputs: &[(String, u32)]) -> Result<bool> {
         for (txid, index) in inputs {
-            let owned: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM shielding_inputs i WHERE i.txid=?1 AND i.output_index=?2 AND NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=i.operation_id))", params![txid,index], |r| r.get(0))?;
+            let owned: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM shielding_inputs i WHERE i.txid=?1 AND i.output_index=?2 AND (NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=i.operation_id) OR EXISTS(SELECT 1 FROM active_source_obligations o WHERE o.operation_id=i.operation_id)))", params![txid,index], |r| r.get(0))?;
             if owned {
                 return Ok(false);
             }

@@ -35,6 +35,7 @@ pub mod refunds;
 pub(crate) mod scheduling;
 pub(crate) mod selection;
 pub(crate) mod shielding;
+mod source_obligations;
 pub(crate) mod source_support;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
@@ -410,6 +411,7 @@ impl Store {
         tx.execute_batch(include_str!("store/shielding_schema.sql"))?;
         tx.execute_batch(include_str!("store/restoration_schema.sql"))?;
         tx.execute_batch(include_str!("store/source_support_schema.sql"))?;
+        tx.execute_batch(include_str!("store/source_obligations_schema.sql"))?;
         tx.execute_batch(include_str!("store/return_support_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
@@ -462,7 +464,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 25,
+                version == 26,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -690,6 +692,7 @@ impl Store {
     }
     pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
         self.require_complete_provenance()?;
+        self.require_source_inputs_available()?;
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
         let outgoing_pending: bool = self.db.query_row(
@@ -949,6 +952,8 @@ impl Store {
         }
         if let Some(binding) = shielding {
             self.require_current_shielding_policy(binding)?;
+        } else {
+            self.require_source_inputs_available()?;
         }
         self.require_complete_provenance()?;
         self.funding_restriction
@@ -1170,7 +1175,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 25,
+        schema == 26,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1387,7 +1392,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 25,
+        version == 26,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
@@ -2025,6 +2030,7 @@ impl Store {
         self.require_complete_provenance()?;
         ensure!(self.operation_pending(id)?, "transaction is not pending");
         let operation = self.operation(id)?;
+        self.require_submission_inputs_available(id, &operation.facts)?;
         super::transaction::SubmissionWindow::load(self, id, &operation.facts)?
             .check(now, operation.attempts == 0)?;
         ensure!(

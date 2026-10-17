@@ -488,7 +488,26 @@ new policy obstruction.
 An uncertain broadcast retains the saved bytes and transaction identity. Recovery
 reconciles that operation; explicit rebroadcast uses the same bytes. A timeout,
 indexer omission or provider status is insufficient proof to release source inputs.
-Expiry recovery additionally requires canonical chain/input evidence. Source
+Expiry recovery additionally requires canonical chain/input evidence.
+
+A live source transaction that loses its original confirmation retains an
+operation-specific input dispute across burial and restart. Independent sync work
+can finish, but generic shielded sends remain blocked while their input selector
+cannot exclude those original inputs. Internal shielding uses its exact transparent
+outpoint claims independently. Missing buried archival history alone creates no new
+input dispute. Exact re-confirmation clears a dispute only with the matching final
+sync publication; an incomplete scan cannot clear it.
+
+A previously confirmed transaction can be closed by the same two-sync, zero-lag
+expiry proof as a pending transaction. Recovery checks the original signed expiry
+(zero means no finite expiry), indexer inclusion, SDK invalidation and every owned
+input. It preserves the original bytes, facts and confirmation record, records the
+reversed debit in the expiry proof, and sets the current consumed amount to zero
+once. Shielding recovery reverses its fee only. A later contradiction reopens input
+ownership; the old expiry proof cannot release inputs again without a new exact
+proof. Recovery does not authorize a replacement or rebroadcast.
+
+Source
 confirmation and destination credit are independent: a NEAR success response alone
 cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with

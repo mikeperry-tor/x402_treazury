@@ -159,7 +159,14 @@ impl Treasury {
         let operation = id.clone();
         let durable = self
             .store
-            .call(move |s| PreparedTransaction::load(s, &operation))
+            .call(move |s| {
+                let prepared = PreparedTransaction::load(s, &operation)?;
+                s.require_submission_inputs_available(
+                    &operation,
+                    prepared.facts().context("operation facts missing")?,
+                )?;
+                Ok(prepared)
+            })
             .await?;
         tokio::select! {
             biased;

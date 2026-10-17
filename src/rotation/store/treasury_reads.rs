@@ -117,7 +117,10 @@ mod tests {
         }
         store
             .db
-            .execute("INSERT INTO expired_operations VALUES ('op-000',20,1)", [])
+            .execute(
+                "INSERT INTO expired_operations(id,height,revision) VALUES ('op-000',20,1)",
+                [],
+            )
             .unwrap();
         // Unrelated unfinished source data is not decoded by the historical pass.
         insert("unrelated", "PREPARED", "not JSON");

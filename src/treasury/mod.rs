@@ -875,8 +875,7 @@ impl SyncSession {
 }
 
 fn source_expiry_buried(expiry: u32, scanned_height: u64, confirmations: u32) -> bool {
-    // Consensus zero expiry has no finite authority boundary.
-    expiry != 0 && scanned_height >= u64::from(expiry) + u64::from(confirmations)
+    crate::rotation::transaction::expiry_buried(expiry, scanned_height, confirmations)
 }
 
 async fn address_info(client: &LightClient) -> Result<serde_json::Value> {

@@ -72,7 +72,7 @@ fn stage_return(store: &mut Store, disposition: Disposition, returned: Option<U2
         for operation in page {
             let raw = store.prepared_bytes(&operation.operation_id).unwrap();
             store
-                .stage_source_support(&pass, &operation, &raw, disposition)
+                .stage_source_support(&pass, &operation, &raw, disposition, false)
                 .unwrap();
             if let Some(amount) = returned {
                 store
@@ -214,7 +214,7 @@ fn pages_and_cleanup_are_bounded_and_incomplete_pass_cannot_publish() {
     let operation = &page[0];
     let raw = store.prepared_bytes(&operation.operation_id).unwrap();
     store
-        .stage_source_support(&pass, operation, &raw, Disposition::Confirmed(5))
+        .stage_source_support(&pass, operation, &raw, Disposition::Confirmed(5), false)
         .unwrap();
     assert!(store.seal_source_support(&pass).is_err());
     let start = SyncObservationStart::capture(300).unwrap();
@@ -229,24 +229,24 @@ fn pages_and_cleanup_are_bounded_and_incomplete_pass_cannot_publish() {
             )
             .is_err()
     );
-    while !store.cleanup_source_support_page().unwrap() {}
+    cleanup(&mut store);
     let complete = stage(&mut store, Disposition::Confirmed(5));
     let mut calls = 0;
+    let mut cursor = CleanupCursor::default();
     loop {
         let before: i64 = store
             .db
             .query_row("SELECT count(*) FROM source_support_rows", [], |r| r.get(0))
             .unwrap();
-        let done = store.cleanup_source_support_page().unwrap();
+        let next = store.cleanup_source_support_page(cursor).unwrap();
         let after: i64 = store
             .db
             .query_row("SELECT count(*) FROM source_support_rows", [], |r| r.get(0))
             .unwrap();
         assert!(before - after <= 64);
         calls += 1;
-        if done {
-            break;
-        }
+        let Some(next) = next else { break };
+        cursor = next;
     }
     assert!(calls >= 4);
     let start = SyncObservationStart::capture(300).unwrap();
@@ -370,4 +370,11 @@ fn sealed_history_continues_after_stale_checkpoint_without_restaging() {
             .unwrap()
             .is_none()
     );
+}
+
+pub(crate) fn cleanup(store: &mut Store) {
+    let mut cursor = CleanupCursor::default();
+    while let Some(next) = store.cleanup_source_support_page(cursor).unwrap() {
+        cursor = next;
+    }
 }

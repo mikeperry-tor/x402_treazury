@@ -36,26 +36,76 @@ impl Disposition {
         })
     }
 }
+pub(crate) enum CleanupCursor {
+    Markers(String),
+    Passes(String),
+}
+impl Default for CleanupCursor {
+    fn default() -> Self {
+        Self::Markers(String::new())
+    }
+}
+
 impl Store {
     pub(crate) fn revoke_return_support(&self, operation: &str) -> Result<()> {
         self.db.execute("UPDATE source_support_rows SET return_issue=1 WHERE pass_id=(SELECT pass_id FROM source_support_current WHERE singleton=1) AND operation_id=?1",[operation])?;
         Ok(())
     }
-
-    /// Reclaim at most one physical page of abandoned or superseded observations.
-    /// The serialized treasury owner calls this before acquiring a new pass.
-    pub(crate) fn cleanup_source_support_page(&mut self) -> Result<bool> {
-        let id: Option<String> = self.db.query_row(
-            "SELECT id FROM source_support_passes WHERE id IS NOT (SELECT pass_id FROM source_support_current WHERE singleton=1) LIMIT 1",
-            [], |r| r.get(0)).optional()?;
-        let Some(id) = id else { return Ok(true) };
-        let tx = self.db.transaction()?;
-        let changed=tx.execute("DELETE FROM source_support_rows WHERE pass_id=?1 AND operation_id IN (SELECT operation_id FROM source_support_rows WHERE pass_id=?1 ORDER BY operation_id LIMIT 64)",[&id])?;
-        if changed == 0 {
-            tx.execute("DELETE FROM source_support_passes WHERE id=?1", [id])?;
+    /// Reclaim a physical page, including ineligible rows, before yielding.
+    pub(crate) fn cleanup_source_support_page(
+        &mut self,
+        cursor: CleanupCursor,
+    ) -> Result<Option<CleanupCursor>> {
+        match cursor {
+            CleanupCursor::Markers(after) => {
+                let rows = self.db.prepare("SELECT o.operation_id,COALESCE(p.activated,0) FROM source_obligations o LEFT JOIN source_support_passes p ON p.id=o.clear_pass_id WHERE o.operation_id>?1 ORDER BY o.operation_id LIMIT 64")?
+                    .query_map([after], |row| Ok((row.get::<_,String>(0)?,row.get::<_,bool>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let Some((last, _)) = rows.last() else {
+                    return Ok(Some(CleanupCursor::Passes(String::new())));
+                };
+                let next = CleanupCursor::Markers(last.clone());
+                let tx = self.db.transaction()?;
+                for (operation, resolved) in rows {
+                    if resolved {
+                        tx.execute(
+                            "DELETE FROM source_obligations WHERE operation_id=?1",
+                            [operation],
+                        )?;
+                    }
+                }
+                tx.commit()?;
+                Ok(Some(next))
+            }
+            CleanupCursor::Passes(after) => {
+                let id: Option<String> = self.db.query_row(
+                    "SELECT id FROM source_support_passes WHERE id>?1 AND id IS NOT (SELECT pass_id FROM source_support_current WHERE singleton=1) ORDER BY id LIMIT 1",
+                    [&after], |row| row.get(0)).optional()?;
+                let Some(id) = id else { return Ok(None) };
+                let retained: bool = self.db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM source_obligations WHERE clear_pass_id=?1)",
+                    [&id],
+                    |row| row.get(0),
+                )?;
+                let tx = self.db.transaction()?;
+                // Referenced headers retain staged-clear identity only. Removed
+                // inventory can never be continued or activated as a full pass.
+                tx.execute(
+                    "UPDATE source_support_passes SET complete=0 WHERE id=?1",
+                    [&id],
+                )?;
+                let changed = tx.execute("DELETE FROM source_support_rows WHERE pass_id=?1 AND operation_id IN (SELECT operation_id FROM source_support_rows WHERE pass_id=?1 ORDER BY operation_id LIMIT 64)",[&id])?;
+                if changed == 0 && !retained {
+                    tx.execute("DELETE FROM source_support_passes WHERE id=?1", [&id])?;
+                }
+                tx.commit()?;
+                Ok(Some(CleanupCursor::Passes(if changed == 0 {
+                    id
+                } else {
+                    after
+                })))
+            }
         }
-        tx.commit()?;
-        Ok(false)
     }
     pub(crate) fn begin_source_support(&mut self, revision: i64, anchor: Anchor) -> Result<Pass> {
         ensure!(anchor.height > 0, "source anchor height missing");
@@ -117,6 +167,7 @@ impl Store {
         operation: &OperationStatus,
         raw: &[u8],
         disposition: Disposition,
+        live_obligation: bool,
     ) -> Result<()> {
         self.check_source_pass(pass)?;
         let after: String = self.db.query_row(
@@ -143,10 +194,15 @@ impl Store {
         let (facts,revision):(String,i64)=self.db.query_row("SELECT o.facts,x.revision FROM treasury_operations o JOIN outgoing x ON x.id=o.id WHERE o.id=?1",[&operation.operation_id],|r|Ok((r.get(0)?,r.get(1)?)))?;
         let (kind, height) = disposition.columns()?;
         let tx = self.db.transaction()?;
-        // A demonstrated contradiction revokes current support immediately,
-        // even if a later live-input guard prevents completing this sync.
+        // A demonstrated contradiction revokes current support and retains
+        // input ownership before independently useful sync work can complete.
         if !matches!(disposition, Disposition::Confirmed(_)) {
             revoke(&tx, &operation.operation_id)?;
+            if live_obligation || matches!(disposition, Disposition::Conflict) {
+                super::source_obligations::retain(&tx, &operation.operation_id)?;
+            }
+        } else {
+            super::source_obligations::stage_clear(&tx, &operation.operation_id, &pass.id)?;
         }
         tx.execute("INSERT INTO source_support_rows(pass_id,operation_id,facts,outgoing_revision,disposition,confirmed_height) VALUES(?1,?2,?3,?4,?5,?6)",params![pass.id,operation.operation_id,facts,revision,kind,height])?;
         tx.execute(
@@ -217,6 +273,7 @@ pub(super) fn activate(
     );
     let changed=db.execute("UPDATE source_support_current SET pass_id=?1,snapshot_revision=?2 WHERE singleton=1 AND inventory_revision=?3 AND EXISTS(SELECT 1 FROM source_support_passes WHERE id=?1 AND complete=1 AND base_revision=?4 AND inventory_revision=?3)",params![pass.id,revision,pass.inventory_revision,pass.base_revision])?;
     ensure!(changed == 1, "source support pass incomplete or changed");
+    super::source_obligations::activate(db, &pass.id)?;
     Ok(())
 }
 impl Store {
@@ -241,7 +298,7 @@ pub(super) fn returned(db: &Connection, operation: &str) -> Result<Option<U256>>
         .transpose()
 }
 fn current(db: &Connection, operation: &str, confirmed_only: bool) -> Result<bool> {
-    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM source_support_current c JOIN treasury_sync t ON t.singleton=1 AND c.snapshot_revision=CAST(json_extract(t.observation,'$.snapshot_revision') AS INTEGER) JOIN source_support_rows r ON r.pass_id=c.pass_id JOIN treasury_operations o ON o.id=r.operation_id AND o.facts=r.facts JOIN outgoing x ON x.id=o.id AND x.revision=r.outgoing_revision WHERE r.operation_id=?1 AND (?2=0 OR r.disposition='CONFIRMED') AND r.revoked=0 AND o.submission='CONFIRMED' AND NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id))",params![operation,confirmed_only],|r|r.get(0))?)
+    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM source_support_current c JOIN treasury_sync t ON t.singleton=1 AND c.snapshot_revision=CAST(json_extract(t.observation,'$.snapshot_revision') AS INTEGER) JOIN source_support_rows r ON r.pass_id=c.pass_id JOIN treasury_operations o ON o.id=r.operation_id AND o.facts=r.facts JOIN outgoing x ON x.id=o.id AND x.revision=r.outgoing_revision WHERE r.operation_id=?1 AND (?2=0 OR r.disposition='CONFIRMED') AND r.revoked=0 AND (?2=0 OR (o.submission='CONFIRMED' AND NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id))))",params![operation,confirmed_only],|r|r.get(0))?)
 }
 #[cfg(test)]
 pub(crate) mod tests;

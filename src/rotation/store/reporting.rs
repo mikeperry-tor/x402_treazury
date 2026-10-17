@@ -56,11 +56,11 @@ impl RetirementAccounting {
             }
         }
         Ok(Self {
-            automatic_recorded_confirmed_atomic: (matches!(schema, 16..=25))
+            automatic_recorded_confirmed_atomic: (matches!(schema, 16..=26))
                 .then(|| total.to_string()),
-            automatic_count: (matches!(schema, 16..=25)).then_some(automatic),
-            manual_recorded_confirmed_atomic: (matches!(schema, 16..=25)).then(|| "0".into()),
-            manual_count: (matches!(schema, 16..=25)).then_some(0),
+            automatic_count: (matches!(schema, 16..=26)).then_some(automatic),
+            manual_recorded_confirmed_atomic: (matches!(schema, 16..=26)).then(|| "0".into()),
+            manual_count: (matches!(schema, 16..=26)).then_some(0),
             historical_unknown_count: unknown,
         })
     }
@@ -126,7 +126,7 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
     for row in rows {
         let mut pool = row?;
         pool.addresses = read_addresses(db, &pool.id)?;
-        if matches!(version, 19..=25) {
+        if matches!(version, 19..=26) {
             populate_current_pool(db, &mut pool, version)?;
         } else if matches!(version, 16..=18) {
             // Historical accounting is independent of current admission fields.

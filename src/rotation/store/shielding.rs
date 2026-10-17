@@ -154,7 +154,7 @@ impl Binding {
     }
     pub(crate) fn check_claims(&self, db: &Connection, operation: &str) -> Result<()> {
         for input in &self.inputs {
-            let claimed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM shielding_inputs i WHERE i.txid=?1 AND i.output_index=?2 AND i.operation_id!=?3 AND NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=i.operation_id))",params![input.txid,input.output_index,operation],|r|r.get(0))?;
+            let claimed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM shielding_inputs i WHERE i.txid=?1 AND i.output_index=?2 AND i.operation_id!=?3 AND NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=i.operation_id AND NOT EXISTS(SELECT 1 FROM active_source_obligations d WHERE d.operation_id=e.id)))",params![input.txid,input.output_index,operation],|r|r.get(0))?;
             // Confirmation does not release an outpoint claim: a reorg can make
             // an old input unspent while its original signed bytes remain live.
             ensure!(!claimed, "shielding input already owned");

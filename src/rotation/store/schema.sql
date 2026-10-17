@@ -1,4 +1,4 @@
--- Fresh schema25 only. Older state requires separately reviewed conversion.
+-- Fresh schema26 only. Older state requires separately reviewed conversion.
 -- Older schema16 stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -19,7 +19,7 @@ CREATE TABLE funding_progress(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id
 CREATE TABLE funding_refunds(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),address BLOB NOT NULL);
 CREATE TABLE funding_recovery(operation_id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES funding_jobs(id),phase TEXT NOT NULL,quote BLOB,refund BLOB, provider_success INTEGER NOT NULL DEFAULT 0, provider_failed INTEGER NOT NULL DEFAULT 0, provider_refunded INTEGER NOT NULL DEFAULT 0, provider_incomplete INTEGER NOT NULL DEFAULT 0, provider_observed_at INTEGER, quote_target TEXT, quote_ceiling TEXT, accepted_output TEXT, accepted_recipient TEXT);
 CREATE TABLE refund_outputs(txid TEXT NOT NULL,output_index INTEGER NOT NULL,operation_id TEXT NOT NULL REFERENCES treasury_operations(id),amount INTEGER NOT NULL CHECK(amount>0),height INTEGER NOT NULL,credited INTEGER NOT NULL CHECK(credited>=0),PRIMARY KEY(txid,output_index));
-CREATE TABLE expired_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),height INTEGER NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
+CREATE TABLE expired_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),height INTEGER NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision),reversed_consumed INTEGER NOT NULL DEFAULT 0 CHECK(reversed_consumed>=0));
 CREATE TABLE funding_health(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),started_at INTEGER,error_streak INTEGER NOT NULL DEFAULT 0,timed_out INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT NOT NULL);
 CREATE TABLE payment_resolutions(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),outcome TEXT NOT NULL CHECK(outcome IN ('USED','EXPIRED_UNUSED')),height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL, support TEXT);
@@ -77,7 +77,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=25;
+PRAGMA user_version=26;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';

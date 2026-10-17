@@ -11,6 +11,11 @@ use zeroize::Zeroizing;
 // All pre-preparation and first-submission gates use this one policy constant.
 pub const MIN_QUOTE_VALIDITY_SECONDS: u64 = 300;
 
+pub(crate) fn expiry_buried(expiry: u32, height: u64, confirmations: u32) -> bool {
+    // Consensus zero expiry has no finite authority boundary.
+    expiry != 0 && height >= u64::from(expiry) + u64::from(confirmations)
+}
+
 /// Local canonical proof failures. Display text is diagnostic only; recovery
 /// consumers downcast this type rather than interpreting upstream prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +103,12 @@ impl PreparedTransaction {
             store.operation_pending(operation_id)?,
             "transaction is not pending"
         );
+        Self::load_observation(store, operation_id)
+    }
+    /// Read original bytes for canonical observation, including resolved sources.
+    /// Submission still requires `BroadcastTransaction::request`, whose loader
+    /// independently requires pending state before publishing broadcast intent.
+    pub(crate) fn load_observation(store: &Store, operation_id: &str) -> Result<Self> {
         let facts = store.operation_facts(operation_id)?;
         let window = facts
             .as_ref()

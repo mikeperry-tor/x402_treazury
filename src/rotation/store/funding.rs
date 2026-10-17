@@ -312,6 +312,10 @@ pub fn dispute_endpoint_support(db: &Connection, endpoint: &str) -> Result<()> {
 }
 
 pub(super) fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version >= 26 && super::source_obligations::disputed(db, operation)? {
+        return Ok(false);
+    }
     let (_, owner_unclosed) = super::preparation::source_state(db, operation)?;
     Ok(db.query_row("SELECT (NOT ?2 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",params![operation,owner_unclosed],|r|r.get(0))?)
 }
@@ -684,6 +688,11 @@ fn source_accounted(db: &Connection, operation: &str) -> Result<bool> {
 // Loading the complete runtime facts here would couple read-only reporting to
 // unrelated provider facts and process-local payment evidence generations.
 fn source_accounting_pending(db: &Connection, operation: &str) -> Result<bool> {
+    let expired: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM expired_operations e JOIN outgoing x ON x.id=e.id JOIN budget_entries b ON b.id=e.id WHERE e.id=?1 AND x.state='RESOLVED' AND b.reserved=0 AND b.consumed=0)", [operation], |row| row.get(0))?;
+    if expired {
+        let version: u32 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        return Ok(version >= 26 && super::source_obligations::disputed(db, operation)?);
+    }
     let confirmed: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1 AND submission='CONFIRMED')",
         [operation],
@@ -2795,7 +2804,7 @@ mod completion_tests {
                         store
                             .db
                             .execute(
-                                "INSERT INTO expired_operations VALUES(?1,100,1)",
+                                "INSERT INTO expired_operations(id,height,revision) VALUES(?1,100,1)",
                                 [&job.operation_id],
                             )
                             .unwrap();

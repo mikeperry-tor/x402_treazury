@@ -82,7 +82,7 @@ impl Treasury {
         let (prepared, original, shielding_inputs) = self
             .store
             .call(move |s| {
-                let prepared = PreparedTransaction::load(s, &lookup)?;
+                let prepared = PreparedTransaction::load_observation(s, &lookup)?;
                 let inputs = s.shielding_expiry_inputs(
                     &lookup,
                     prepared.facts().context("operation facts missing")?,
@@ -100,7 +100,7 @@ impl Treasury {
         );
         let facts = prepared.facts().context("operation facts missing")?;
         ensure!(
-            height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
+            source_expiry_buried(facts.expiry_height, height, sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         ensure!(!stop.is_cancelled(), "expiry recovery cancelled");
@@ -122,7 +122,7 @@ impl Treasury {
         let height = sync.height.context("missing recovery height")?;
         ensure!(
             sync.fresh(now()?, status.snapshot_revision)?
-                && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
+                && source_expiry_buried(facts.expiry_height, height, sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ChainChanged
         );
         let original = LightClient::from_reader(

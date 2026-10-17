@@ -684,7 +684,12 @@ impl FundingBackend for Backend {
         let id = job.operation_id.clone();
         if self
             .store
-            .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
+            .call(move |s| {
+                Ok(matches!(
+                    s.operation(&id)?.submission.as_str(),
+                    "CONFIRMED" | "EXPIRED"
+                ))
+            })
             .await?
         {
             return self

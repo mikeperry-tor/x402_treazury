@@ -52,7 +52,16 @@ impl SyncSession {
                 hash: block.block_hash().0,
             })
             .context("source historical anchor missing")?;
-        while !self.store.call(|s| s.cleanup_source_support_page()).await? {
+        let mut cleanup = crate::rotation::store::source_support::CleanupCursor::default();
+        loop {
+            let Some(next) = self
+                .store
+                .call(move |s| s.cleanup_source_support_page(cleanup))
+                .await?
+            else {
+                break;
+            };
+            cleanup = next;
             tokio::task::yield_now().await;
         }
         let revision = self.revision;
@@ -118,7 +127,9 @@ impl SyncSession {
                 let captured = pass.clone();
                 let staged = operation.clone();
                 self.store
-                    .call(move |s| s.stage_source_support(&captured, &staged, &raw, disposition))
+                    .call(move |s| {
+                        s.stage_source_support(&captured, &staged, &raw, disposition, !buried)
+                    })
                     .await?;
                 let captured = pass.clone();
                 let id = operation.operation_id.clone();
@@ -133,26 +144,6 @@ impl SyncSession {
                         )
                     })
                     .await?;
-                // Canonical accounting never invents current support from buried
-                // history, but archival absence does not veto independent capacity.
-                // Preserve the existing live-input protection until exact ownership
-                // and expiry recovery can scope it safely.
-                if !buried {
-                    if operation.submission == "EXPIRED" {
-                        ensure!(
-                            matches!(disposition, Disposition::Expired)
-                                && height
-                                    >= u64::from(operation.facts.expiry_height)
-                                        + u64::from(confirmations),
-                            "treasury_expiry_reorg: recovered source requires review"
-                        );
-                    } else {
-                        ensure!(
-                            matches!(disposition, Disposition::Confirmed(_)),
-                            "treasury_confirmed_spend_reorg: source spend requires recovery"
-                        );
-                    }
-                }
             }
             tokio::task::yield_now().await;
         }
@@ -165,6 +156,32 @@ impl SyncSession {
 }
 
 impl Treasury {
+    /// Observation-only closure of retained original inputs. The caller's sender
+    /// is used solely for lookup; this path cannot prepare or submit a replacement.
+    pub(super) async fn reconcile_source_obligation(
+        &mut self,
+        operation: String,
+        sender: &mut impl crate::rotation::transaction::TransactionSubmission,
+        stop: &CancellationToken,
+    ) -> Result<bool> {
+        if self
+            .reconcile_source_confirmation(operation.clone(), stop)
+            .await?
+        {
+            return Ok(true);
+        }
+        let id = operation.clone();
+        if self
+            .store
+            .call(move |s| s.source_expiry_recovery_needed(&id))
+            .await?
+        {
+            self.recover_expired(operation, sender, stop).await?;
+        }
+        // This result means canonical confirmation, not generic progress.
+        Ok(false)
+    }
+
     /// Existing freshness and canonical tip checks coalesce source accounting
     /// reads. A completed pass includes unavailable observations: repeating the
     /// same whole-history scan for every unavailable operation adds no evidence.

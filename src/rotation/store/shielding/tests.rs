@@ -101,7 +101,7 @@ fn canonical_outpoints_exact_fee_and_confirmed_claims_are_enforced() {
     store
         .db
         .execute(
-            "INSERT INTO expired_operations VALUES('first',100,?1)",
+            "INSERT INTO expired_operations(id,height,revision) VALUES('first',100,?1)",
             [revision],
         )
         .unwrap();

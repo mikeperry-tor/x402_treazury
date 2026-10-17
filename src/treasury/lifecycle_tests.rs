@@ -1,5 +1,6 @@
 //! Local synthetic-chain coverage of the real treasury owner and signed journal.
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
+mod confirmed_expiry;
 mod worker;
 use super::*;
 use crate::rotation::{
@@ -441,11 +442,11 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         "reorg must force a scan: {error:#}"
     );
     assert!(
-        format!("{error:#}").contains("treasury_confirmed_spend_reorg"),
+        format!("{error:#}").contains("treasury_source_inputs_disputed"),
         "scan result: {error:#}; phase={:?}",
         after.sync.as_ref().unwrap().phase
     );
-    assert_eq!(after.sync.unwrap().phase, SyncPhase::Failed);
+    assert_eq!(after.sync.unwrap().phase, SyncPhase::Ready);
     // New work cannot consume the resurrected source notes while historical
     // confirmed expenses lack canonical support. No new proposal or send intent.
     let third = store
@@ -471,7 +472,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         .unwrap();
     assert!(error.is::<PreparationDeferred>(), "{error:#}");
     assert!(
-        format!("{error:#}").contains("treasury_confirmed_spend_reorg"),
+        format!("{error:#}").contains("treasury_source_inputs_disputed"),
         "{error:#}"
     );
     let unstarted = third.operation_id;
@@ -588,18 +589,14 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         assert_eq!(chain.reorg_to(23), vec![prepared.bytes().to_vec()]);
         chain.mine_empty_blocks(1);
     }
-    let error = owner.sync_for_command(&stop).await.unwrap_err();
-    assert!(
-        error.to_string().contains("treasury_confirmed_spend_reorg"),
-        "{error:#}"
-    );
+    owner.sync_for_command(&stop).await.unwrap();
     let id = job.operation_id.clone();
     store
         .call(move |s| {
             assert_eq!(s.operation(&id)?.attempts, 1);
             assert!(
                 !s.source_confirmation_supported(&id)?,
-                "failed live scan must revoke prior support"
+                "canonical contradiction must revoke prior support"
             );
             assert!(s.require_spend_ready(now()?, 1).is_err());
             Ok(())
@@ -634,13 +631,12 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         chain.reorg_to(23);
         chain.mine_empty_blocks((buried - 1 - 23).try_into().unwrap());
     }
+    owner.sync_for_command(&stop).await.unwrap();
     assert!(
-        owner
-            .sync_for_command(&stop)
+        store
+            .call(|s| s.require_source_inputs_available())
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("treasury_confirmed_spend_reorg")
+            .is_err()
     );
     net.chain.write().await.mine_empty_blocks(1);
     // Public metadata cannot shorten signed authority or substitute a different
@@ -681,8 +677,8 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
             )
             .unwrap();
     }
-    // Exact original expiry now ends its spending authority. Missing original
-    // confirmation cannot block the independent, freshly scanned source funds.
+    // Buried expiry no longer blocks scanning independent funds. Exact owned
+    // inputs must still be proven before generic preparation can reuse them.
     owner.sync_for_command(&stop).await.unwrap();
     let sync = owner.status().await.unwrap().sync.unwrap();
     assert_eq!(sync.phase, SyncPhase::Ready);
@@ -714,8 +710,9 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
                 !s.source_confirmation_supported(&operation)?,
                 "buried absence is incomplete accounting, not canonical confirmation"
             );
-            assert!(!s.treasury_sync_state()?.outgoing_pending);
-            s.require_spend_ready(now()?, 100_000)
+            assert!(s.require_source_inputs_available().is_err());
+            assert!(s.require_spend_ready(now()?, 100_000).is_err());
+            Ok(())
         })
         .await
         .unwrap();
@@ -741,19 +738,35 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         chain.reorg_to(23);
         chain.mine_empty_blocks(1);
     }
+    owner.sync_once(&stop).await.unwrap();
     assert!(
         owner
-            .sync_once(&stop)
+            .store_handle()
+            .call(|s| s.require_source_inputs_available())
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("treasury_confirmed_spend_reorg")
+            .is_err()
     );
     net.chain
         .write()
         .await
         .mine_empty_blocks((buried - 24).try_into().unwrap());
     owner.sync_once(&stop).await.unwrap();
+    owner
+        .recover_expired(job.operation_id.clone(), &mut sender, &stop)
+        .await
+        .unwrap();
+    assert_eq!(
+        confirmed_expiry::saved_accounting(&dir.path().join("state"), &job.operation_id),
+        (
+            0,
+            0,
+            i64::try_from(
+                prepared.facts().unwrap().amount_zatoshis + prepared.facts().unwrap().fee_zatoshis
+            )
+            .unwrap(),
+            0
+        )
+    );
     let pool = owner
         .ensure_capacity_group(
             "after_expiry".into(),
@@ -780,7 +793,10 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
     save_quotes(&store, vec![next.clone()], deadline).await;
     let next_prepared = owner.prepare(request(&next, deadline)).await.unwrap();
     pending(&store, &next, next_prepared.bytes()).await;
-    accounting(&dir.path().join("state"), &prepared, true);
+    assert_eq!(
+        confirmed_expiry::saved_accounting(&dir.path().join("state"), &job.operation_id).1,
+        0
+    );
     accounting(&dir.path().join("state"), &next_prepared, false);
     drop(store);
     owner.close().await.unwrap();

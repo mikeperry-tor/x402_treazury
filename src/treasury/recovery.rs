@@ -123,10 +123,25 @@ impl Treasury {
         if crate::qualification::active() {
             return Ok(OperatorRequired("qualification_recovery_requires_review"));
         }
-        let (job, operation) = self
+        let lookup = job_id.clone();
+        let (mut job, mut operation) = self
             .store
-            .call(move |s| s.funding_recovery_context(&job_id))
+            .call(move |s| s.funding_recovery_context(&lookup))
             .await?;
+        let original = job.operation_id.clone();
+        if self
+            .store
+            .call(move |s| s.source_inputs_disputed(&original))
+            .await?
+        {
+            *source_observed = true;
+            self.reconcile_source_obligation(job.operation_id.clone(), sender, stop)
+                .await?;
+            (job, operation) = self
+                .store
+                .call(move |s| s.funding_recovery_context(&job_id))
+                .await?;
+        }
         let completed_job = job.id.clone();
         let completed_operation = job.operation_id.clone();
         if self

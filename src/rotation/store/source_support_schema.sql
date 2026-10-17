@@ -8,7 +8,8 @@ CREATE TABLE source_support_passes(
  inventory_revision INTEGER NOT NULL,
  boundary INTEGER NOT NULL,
  after_id TEXT NOT NULL DEFAULT '',
- complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1))
+ complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1)),
+ activated INTEGER NOT NULL DEFAULT 0 CHECK(activated IN (0,1))
 );
 CREATE TABLE source_support_current(
  singleton INTEGER PRIMARY KEY CHECK(singleton=1),

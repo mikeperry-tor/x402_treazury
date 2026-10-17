@@ -3169,3 +3169,32 @@ the original USED audit row and single authorization remain intact. The focused
 default-build test passed. Together with shared sticky clock/suspend freshness,
 treasury late-checkpoint catch-up and future-poll restart tests, this covers the
 separate time domains without replacing canonical expiry with local elapsed time.
+
+**C13/C18 retained source ownership and exact expiry correction (implemented and reviewed):**
+Fresh schema26 retains operation-specific source input disputes independently of
+historical scan retention. Live confirmation loss or concrete contradictory history
+revokes accounting support immediately without failing independent sync work.
+Burial/restart cannot release that ownership; buried archival absence alone creates
+no new dispute. Staged exact re-confirmation clears ownership only with final sync
+publication. Cleanup advances over physical 64-row pages and retains only needed
+pass headers, invalidating abandoned inventories before reclaiming their rows.
+Generic shielded preparation and submission recheck input ownership; exact internal
+shielding retains independent immutable transparent claims.
+
+Previously confirmed operations use the existing two-sync zero-lag expiry/input
+proof. Original consensus expiry zero is non-expiring. Every owned input must remain
+confirmed, matching and unspent; shielding additionally checks every immutable exact
+outpoint. The expiry proof records the reversed original debit while preserving
+signed bytes, facts, attempts and original confirmation label. Current consumed cost
+is corrected once; repeated/reopened recovery cannot recharge or duplicate it.
+A contradiction of an old expiry proof retains ownership until a new exact proof.
+Ordinary source observation and recovery invoke this proof without preparing,
+submitting or authorizing a replacement. Existing current-policy recovery limits
+remain separate.
+
+Validation: five focused ownership tests, five source-support tests, and three
+real synthetic-chain lifecycle regressions passed, including ordinary recovery
+with new-attempt authority disabled and restart/idempotence. Independent review
+found physical-page cleanup, zero-expiry and pre-existing generic submission guard
+issues; these were addressed before the gate passed. Automatic shielding activation,
+remaining production-build acceptance and final repository checks remain pending.

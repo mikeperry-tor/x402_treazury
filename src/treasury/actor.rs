@@ -143,7 +143,7 @@ impl Treasury {
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
-                        Command::SourceConfirmation(id, reply) => { let _ = reply.send(self.reconcile_source_confirmation(id, &stop).await); }
+                        Command::SourceConfirmation(id, reply) => { let _ = reply.send(self.reconcile_source_obligation(id, &mut submission, &stop).await); }
                         Command::Prepare(request, reply) => {
                             let result = match self.sync_for_command(&stop).await {
                                 Ok(()) if !stop.is_cancelled() => self.prepare(request).await,
