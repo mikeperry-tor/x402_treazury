@@ -234,7 +234,13 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .call(move |s| {
             assert_eq!(
                 s.funding_job(&original.id)?.unwrap().phase,
-                FundingPhase::VerifyingCredit
+                FundingPhase::RefundPending
+            );
+            let facts = s.funding_facts(&original.id, &original.operation_id)?;
+            assert!(facts.readiness_recorded && facts.provider_success);
+            assert!(
+                facts.return_pending,
+                "status-only success has no exact return proof"
             );
             let operation = s.operation(&original.operation_id)?;
             assert_eq!(operation.attempts, 1);

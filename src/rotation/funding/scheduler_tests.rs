@@ -612,25 +612,20 @@ async fn malformed_readiness_is_local_while_independent_source_work_drains() {
         let stop = stop.clone();
         async move { worker.schedule(1000, stop, false).await }
     });
-    assert_eq!(
-        tokio::time::timeout(std::time::Duration::from_secs(5), source_events.recv())
-            .await
-            .unwrap()
-            .unwrap(),
-        healthy.id
-    );
+    let first_source = event(&mut source_events).await;
+    if first_source != healthy.id {
+        // A saved CONFIRMED label does not certify current source/return
+        // accounting. Its independent observation must not be hidden either.
+        assert_eq!(first_source, damaged.id);
+        gate.add_permits(1);
+        assert_eq!(event(&mut source_events).await, healthy.id);
+    }
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let (bad, good) = (damaged.clone(), healthy.clone());
+            let good = healthy.clone();
             if store
                 .call(move |s| {
-                    let bad = s.funding_job(&bad.id)?.unwrap();
-                    Ok(bad.last_error.as_deref().is_some_and(|error| {
-                        error.starts_with(
-                            "funding_integrity_conflict; malformed_durable_evidence_support",
-                        )
-                    }) && s
-                        .funding_facts(&good.id, &good.operation_id)?
+                    Ok(s.funding_facts(&good.id, &good.operation_id)?
                         .provider_success)
                 })
                 .await
@@ -662,6 +657,16 @@ async fn malformed_readiness_is_local_while_independent_source_work_drains() {
                 }];
                 assert_eq!(retry.streak, 1);
                 assert!(retry.due > 1000);
+                // The display prioritizes return accounting; the scoped status
+                // owner still retains the exact malformed-readiness diagnostic.
+                assert!(
+                    retry
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.starts_with(
+                            "funding_integrity_conflict; malformed_durable_evidence_support"
+                        ))
+                );
                 break;
             }
             tokio::task::yield_now().await;
@@ -684,15 +689,29 @@ async fn malformed_readiness_is_local_while_independent_source_work_drains() {
         assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
         assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
     }
-    assert!(
+    assert_eq!(
         reopened
             .funding_job(&damaged.id)
             .unwrap()
             .unwrap()
             .last_error
-            .unwrap()
-            .contains("malformed_durable_evidence_support")
+            .as_deref(),
+        Some("return_accounting_pending")
     );
+    let db = rusqlite::Connection::open_with_flags(
+        state_path.join("state.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let support: String = db
+        .query_row(
+            "SELECT readiness_support FROM funding_jobs WHERE id=?1",
+            [&damaged.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(support, "{}", "observation never repairs malformed proof");
+    drop(db);
     assert_eq!(
         reopened
             .operation(&healthy.operation_id)
@@ -1793,7 +1812,7 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
             while let Ok(id) = source_events.try_recv() {
                 assert!(sources.insert(id));
             }
-            assert_eq!(sources, BTreeSet::from([initial[1].id.clone()]));
+            assert_eq!(sources, initial.iter().map(|job| job.id.clone()).collect());
         } else {
             // An occupied mutable lane cannot prevent exhausted observation lanes
             // from capturing the new upper boundary on their next pass.
@@ -1983,7 +2002,13 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
                 assert_ne!(id, bad.id);
                 observed.insert(id);
             }
-            assert_eq!(observed.len(), 1);
+            assert_eq!(
+                observed,
+                jobs.iter()
+                    .filter(|job| job.id != bad.id)
+                    .map(|job| job.id.clone())
+                    .collect()
+            );
             observed.clear();
             while let Ok(id) = status_events.try_recv() {
                 assert_ne!(id, bad.id);
@@ -2056,7 +2081,7 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
             let (statuses, mut status_events) = mpsc::unbounded_channel();
             let (started, mut source_events) = mpsc::unbounded_channel();
             let credits = Arc::new(AtomicUsize::new(0));
-            let gate = Arc::new(Semaphore::new(if once { 1 } else { 0 }));
+            let gate = Arc::new(Semaphore::new(if once { jobs.len() } else { 0 }));
             let worker = FundingWorker::new(
                 store.clone(),
                 Source {
@@ -2090,12 +2115,19 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                     .unwrap_err();
                 assert!(transient_read(&error));
                 if read == Read::FundingPage {
-                    assert_eq!(source_events.try_recv().unwrap(), jobs[1].id);
+                    let observed: BTreeSet<_> =
+                        std::iter::from_fn(|| source_events.try_recv().ok()).collect();
+                    assert_eq!(observed, jobs.iter().map(|job| job.id.clone()).collect());
                     let observed = event(&mut status_events).await;
                     assert!(jobs.iter().any(|job| job.id == observed));
                 }
             } else {
-                assert_eq!(event(&mut source_events).await, jobs[1].id);
+                let first_source = event(&mut source_events).await;
+                if first_source != jobs[1].id {
+                    assert_eq!(first_source, jobs[0].id);
+                    gate.add_permits(1);
+                    assert_eq!(event(&mut source_events).await, jobs[1].id);
+                }
                 wait_until(|| credits.load(Ordering::SeqCst) >= 2).await;
                 let observed = event(&mut status_events).await;
                 assert!(jobs.iter().any(|job| job.id == observed));
@@ -2254,7 +2286,7 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
     let second_status = event(&mut status_events).await;
     let source = event(&mut source_events).await;
     assert_ne!(first_status, second_status);
-    assert_eq!(source, jobs[1].id);
+    assert!(jobs.iter().any(|job| job.id == source));
     assert!(!running.is_finished());
     delivery_gate.add_permits(jobs.len());
     tokio::time::timeout(std::time::Duration::from_secs(5), running)
@@ -2272,7 +2304,7 @@ async fn completed_projection_cannot_hide_submitted_obligations_after_reopen() {
     while let Ok(id) = status_events.try_recv() {
         statuses.insert(id);
     }
-    assert_eq!(sources, [jobs[1].id.clone()].into_iter().collect());
+    assert_eq!(sources, expected);
     assert_eq!(statuses, expected);
     drop(worker);
     drop(store);
@@ -2552,13 +2584,16 @@ async fn completion_read_contention_retains_exact_observations_without_replay() 
                 let worker = worker.clone();
                 async move { worker.tick(1000).await }
             });
+            let mut observed_sources = BTreeSet::new();
             if kind == Kind::Quote {
                 for _ in 0..2 {
-                    event(&mut source_events).await;
+                    assert!(observed_sources.insert(event(&mut source_events).await));
                     event(&mut quote_events).await.finish.send(Ok(())).unwrap();
                 }
             } else {
-                assert_eq!(event(&mut source_events).await, jobs[1].id);
+                let source = event(&mut source_events).await;
+                assert!(jobs.iter().any(|job| job.id == source));
+                assert!(observed_sources.insert(source));
                 // Both provider reads and credit lanes progress while the source
                 // or one status completion keeps its original permit.
                 for _ in 0..2 {
@@ -2572,9 +2607,12 @@ async fn completion_read_contention_retains_exact_observations_without_replay() 
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            assert!(
-                source_events.try_recv().is_err(),
-                "source work was replayed"
+            while let Ok(source) = source_events.try_recv() {
+                assert!(observed_sources.insert(source), "source work was replayed");
+            }
+            assert_eq!(
+                observed_sources,
+                jobs.iter().map(|job| job.id.clone()).collect()
             );
             assert!(
                 status_events.try_recv().is_err(),
@@ -2739,11 +2777,11 @@ async fn confirmed_source_without_current_support_keeps_observation_lane_after_c
     let raw = Store::open(&state, &key, &treasury).unwrap();
     let saved = raw.funding_job(&job.id).unwrap().unwrap();
     let facts = raw.funding_facts(&job.id, &job.operation_id).unwrap();
-    assert!(facts.source_accounting_pending && facts.observations_needed());
+    assert!(facts.source_accounting_pending && facts.return_pending && facts.observations_needed());
     assert!(applicable_work(&saved, &facts)[2]);
     assert_eq!(
         saved.last_error.as_deref(),
-        Some("source_accounting_pending")
+        Some("return_accounting_pending")
     );
     let (store, actor) = StoreHandle::spawn(raw);
     let (started, mut events) = mpsc::unbounded_channel();
