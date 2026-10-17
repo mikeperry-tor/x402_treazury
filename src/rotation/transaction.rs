@@ -190,6 +190,21 @@ impl BroadcastTransaction {
             attempt,
         })
     }
+    /// First automatic submission is minted under the same serialized Store job
+    /// as its current serving-policy check. Historical flags alone grant nothing.
+    pub(crate) fn request_automatic_shielding(
+        store: &mut Store,
+        id: &str,
+        now: u64,
+        height: u64,
+        authority: &super::store::shielding::ServingAuthority,
+    ) -> Result<Self> {
+        ensure!(
+            store.automatic_shielding_submission_candidate(id, authority)?,
+            "automatic shielding submission not authorized"
+        );
+        Self::request(store, id, now, height, false)
+    }
     pub fn transaction(&self) -> &PreparedTransaction {
         &self.transaction
     }

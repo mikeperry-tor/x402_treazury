@@ -204,6 +204,9 @@ async fn shielding_calculates_fee_only_and_restores_exact_owned_bytes() {
                 .store
                 .call(move |s| {
                     let (revision, snapshot) = s.snapshot()?;
+                    let authority = s.capture_serving_shielding(&std::collections::BTreeMap::from([("shield".into(),50_000)]), true)?.context("serving authority missing")?;
+                    assert!(crate::rotation::transaction::BroadcastTransaction::request_automatic_shielding(s,"shield",now()?,TIP.into(),&authority).is_err());
+                    assert_eq!(s.operation("shield")?.attempts,0);
                     s.pause_new_funding();
                     // A lost acknowledgement is a read of the exact accepted commit,
                     // not new preparation authority after policy is disabled.

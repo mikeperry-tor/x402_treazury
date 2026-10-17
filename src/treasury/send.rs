@@ -148,6 +148,29 @@ impl Treasury {
         rebroadcast: bool,
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<SubmissionOutcome> {
+        self.submit_prepared_with_policy(id, sender, rebroadcast, None, stop)
+            .await
+    }
+
+    pub(crate) async fn submit_automatic_shielding(
+        &mut self,
+        id: String,
+        authority: crate::rotation::store::shielding::ServingAuthority,
+        sender: &mut impl TransactionSubmission,
+        stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<SubmissionOutcome> {
+        self.submit_prepared_with_policy(id, sender, false, Some(authority), stop)
+            .await
+    }
+
+    async fn submit_prepared_with_policy(
+        &mut self,
+        id: String,
+        sender: &mut impl TransactionSubmission,
+        rebroadcast: bool,
+        authority: Option<crate::rotation::store::shielding::ServingAuthority>,
+        stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<SubmissionOutcome> {
         ensure!(self.healthy, "treasury requires reopen");
         // Reuse only an unchanged in-process scan after rechecking the chain.
         // Restart/mutation still requires scanning; a pending send stays owned.
@@ -157,9 +180,16 @@ impl Treasury {
         ensure!(observation.fresh(now()?, revision)?, "treasury_sync_stale");
         let height = observation.height.context("missing sync height")?;
         let operation = id.clone();
+        let initial_policy = authority.clone();
         let durable = self
             .store
             .call(move |s| {
+                if let Some(authority) = initial_policy {
+                    ensure!(
+                        s.automatic_shielding_submission_candidate(&operation, &authority)?,
+                        "automatic shielding submission not authorized"
+                    );
+                }
                 let prepared = PreparedTransaction::load(s, &operation)?;
                 s.require_submission_inputs_available(
                     &operation,
@@ -179,8 +209,18 @@ impl Treasury {
         let (prepared, attempt) = self
             .store
             .call(move |s| {
-                let prepared =
-                    BroadcastTransaction::request(s, &operation, now()?, height, rebroadcast)?;
+                let prepared = match authority {
+                    Some(authority) => BroadcastTransaction::request_automatic_shielding(
+                        s,
+                        &operation,
+                        now()?,
+                        height,
+                        &authority,
+                    )?,
+                    None => {
+                        BroadcastTransaction::request(s, &operation, now()?, height, rebroadcast)?
+                    }
+                };
                 let attempt = prepared.attempt();
                 Ok((prepared, attempt))
             })

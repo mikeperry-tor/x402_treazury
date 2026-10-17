@@ -52,6 +52,14 @@ pub(crate) fn tip_failure(status: tonic::Status, operation: &'static str) -> any
     .into()
 }
 
+/// A sanitized remote indexer observation failure, never a Store/SDK corruption
+/// classification. The caller must also retain a healthy SDK before continuing.
+pub(super) fn indexer_observation_failure(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<SyncDiagnostic>()
+        .is_some_and(|diagnostic| diagnostic.grpc_code.is_some())
+}
+
 #[derive(Debug)]
 pub(crate) struct SyncProgress {
     pub phase: &'static str,

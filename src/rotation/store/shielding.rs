@@ -308,9 +308,7 @@ impl Store {
         }))
     }
 
-    // Staged entry point for actor maintenance; scheduling waits for exact
-    // confirmed-input reorg/expiry accounting. Remove this annotation at activation.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn begin_automatic_shielding(
         &mut self,
         operation: &str,

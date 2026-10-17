@@ -1,6 +1,5 @@
 //! Read-only maintenance inventory. Pages carry no submission or settlement authority.
-//! Activation waits for operation-scoped canonical orphan/expiry accounting.
-#![allow(dead_code)]
+//! Canonical orphan/expiry accounting retains exact original input claims.
 use super::*;
 
 const PAGE_SIZE: i64 = 64;
@@ -45,6 +44,15 @@ impl Store {
             }
         }
         Ok(true)
+    }
+
+    /// The shared send slot is observed promptly even if its new UUID sorts
+    /// before the retained historical scan cursor.
+    pub(crate) fn pending_shielding_operation(&self) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .query_row(PENDING_OPERATION, [], |r| r.get(0))
+            .optional()?)
     }
 
     /// Includes manual, disabled-profile, archived and already confirmed IDs.

@@ -1619,6 +1619,25 @@ historical addresses. The pending-slot query uses the existing unique
 `one_outgoing` partial index. Query-plan assertions and a sparse 130-row history
 regression pass with the 14-test shielding Store suite; no activation is included.
 
+**C20 automatic maintenance activation (implemented and independently reviewed):**
+After a successful persisted scan, the serialized serving actor observes bounded
+pages of original shielding operations before selecting exact confirmed owned
+transparent inputs. Only captured serving authority can prepare automatic bytes;
+first submission atomically rechecks the current enabled policy, actual fee cap,
+automatic header and zero attempts. Manual bytes and already-attempted bytes never
+receive an automatic submission. Disabled profiles and absent capability retain
+observation/recovery of original IDs. Typed per-operation indexer outages preserve
+independent history progress without advancing a prefix from the prioritized
+pending slot; storage/ownership failures and retired SDK capability remain fatal.
+Actual local-chain gates pass for fresh actor preparation/submission/confirmation,
+exact fee-only accounting and spendable increase, policy change before intent,
+restart without replay, and disabled-profile observation (two tests, 53.57s).
+The injected pending-outage/prefix regression also passes. A separate review fixup
+validates original UFVK ownership directly from exact Orchard/Ironwood ciphertext,
+including consensus-promoted change, with wrong-key/wrong-value controls passing
+in the actual proving regression (22.97s). These are unfunded local fixtures, not
+live qualification. Broad repository validation remains the final gate.
+
 **C20 exact shielding expiry inputs (implemented and reviewed):**
 The ordinary two-sync expiry path additionally reloads the validated immutable
 shielding binding and checks every journaled outpoint against the current SDK wallet.

@@ -30,10 +30,7 @@ pub struct TreasuryHandle {
 }
 pub struct TreasuryCommands {
     receiver: mpsc::Receiver<Command>,
-    // Retained for upcoming actor maintenance; no automatic scheduling yet.
-    #[allow(dead_code)]
     shielding: Option<crate::rotation::store::shielding::ServingAuthority>,
-    #[allow(dead_code)] // Scheduled only after canonical orphan/expiry recovery is scoped.
     shielding_maintenance: super::refunds::maintenance::ShieldingMaintenance,
 }
 pub fn channel() -> (TreasuryHandle, TreasuryCommands) {
@@ -163,6 +160,24 @@ impl Treasury {
                             super::diagnostics::warn_sync_failure(&error);
                     }
                 }
+            }
+            // Reply publication above precedes maintenance. Reused scans and
+            // unrelated commands cannot start another preparation pass.
+            if !stop.is_cancelled()
+                && self.healthy
+                && self.last_completed_sync.is_some()
+                && self.last_completed_sync != scheduled_sync
+                && let Err(error) = self
+                    .maintain_shielding(
+                        &mut commands.shielding_maintenance,
+                        commands.shielding.as_ref(),
+                        &mut submission,
+                        &stop,
+                    )
+                    .await
+                && !stop.is_cancelled()
+            {
+                super::diagnostics::warn_sync_failure(&error);
             }
             // Only an actual successfully persisted scan moves maintenance.
             // Reused evidence, failed scans and unrelated commands do not.
