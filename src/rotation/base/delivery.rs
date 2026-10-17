@@ -1,7 +1,9 @@
 //! Canonical delivery evidence. Provider correlation remains an explicit input;
 //! this proof establishes the transfer, not bridge attribution or source closure.
 use super::*;
+#[cfg(feature = "zcash")]
 use crate::rotation::near::{Quote, StatusObservation};
+#[cfg(feature = "zcash")]
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub struct FundingDeliveryExpectation {
     recipient: Address,
     amount: U256,
 }
+#[cfg(feature = "zcash")]
 impl FundingDeliveryExpectation {
     pub fn from_observation(
         operation: uuid::Uuid,

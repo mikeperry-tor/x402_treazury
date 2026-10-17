@@ -14,7 +14,7 @@ mod query_tests;
 pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod test_vfs;
-#[cfg(feature = "zcash")]
+// These reads use only the durable journal, including compatibility consumers.
 mod treasury_reads;
 pub use capacity::AllocationKind;
 mod evidence;
