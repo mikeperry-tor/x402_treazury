@@ -3117,7 +3117,9 @@ the boundaries that own mutation and concurrency.
 ### Proposed change sequence and review gates
 
 The earlier H01–H06 identifiers are retained and expanded; H07–H09 cover atomic
-rebinding, context-specific authority and lifecycle transitions. All are **proposed**.
+rebinding, context-specific authority and lifecycle transitions. P01–P06 below
+fold progress-policy cleanup and remaining limitations into these same packages.
+All are **proposed**.
 Existing protections described in C01–C22 are starting points, not instructions to
 reimplement them. Each package starts by identifying a concrete remaining duplicate
 calculation, missing boundary or missing acceptance case. If the existing code
@@ -3130,7 +3132,7 @@ documentation change.
 | 2 | H01 one obligation dependency slice, with H04 retention/historical interpretation | Begin with funding source/delivery/return consumers. Commit one shared calculation plus its migrated consumers, obsolete-path deletion and acceptance evidence; repeat by obligation. |
 | 3 | H07 atomic rebinding and H08 explicit execution contexts | Review current admission and serving capabilities against H01 decisions. Land separately by mutation boundary; neither requires a repository-wide rewrite. |
 | 4 | Original C17 actual-task-exit disposition, then H02 accepted-result publication | Resolve the original C17 requirement by audited justified stops or proven eligible handoff; do not count it as new H work. Local publication fixes with no task-handoff dependency may land earlier. |
-| 5 | H03 physical work/independence and H09 lifecycle transitions | Apply to the affected Store/RPC and deployment paths. Independent slices may land earlier once their owner and authority contracts are explicit. |
+| 5 | H03 physical work/independence and H09 lifecycle transitions | Apply to the affected Store/RPC and deployment paths, including P01–P04. P01 can land early; P05 contract acquisition and P06 supported-API investigation proceed independently and cannot block unrelated cleanup. |
 | 6 | Final integration and proposed AGENTS.md rules | Reconcile every package with evidence and remaining limitations; run applicable standard default-build checks. Make the rules below explicit alongside the changes they govern rather than waiting until all runtime work ends. |
 
 Use subagent review at each package commit boundary and any material authority or
@@ -3374,6 +3376,74 @@ Neither successful construction nor old saved evidence grants freshness, canonic
 confirmation, new execution permission or closure of another financial obligation.
 Use existing local fixtures; no extra provider probes or financial requests.
 
+### Progress-policy integration and limitation cleanup
+
+Fold the remaining progress-policy work into H01–H09 using the slices below.
+[Remaining progress-policy limitations](no_self_sabotage.md) retains the detailed
+1Click/Zcash source audit and accepted gRPC upload limitation; this addendum owns
+the integrated implementation sequence and acceptance record. Do not duplicate the
+external-contract investigation or treat either unresolved item as a prerequisite
+for unrelated local cleanup. Keep both documents until their respective remaining
+work and evidence have a maintained home; this review artifact remains retained at
+the user's request.
+
+The branch audit against `main` found no new production whole-operation timeout,
+spending-capital ceiling or total wallet/history cutoff. New source freshness leases
+enforce the existing observation window across suspension and clock correction;
+checks at separate admission/mutation boundaries prevent races rather than impose
+independent policy deadlines. Internal shielding's artificial local 24-hour deadline
+was removed. Slow scan work is retained for incremental catch-up, and missing relay
+capacity no longer consumes unsigned request attempts. Preserve these improvements.
+
+#### Limit classification and disposition
+
+For each touched timer, count limit, readiness fence or failure switch, record its
+owner, protected resource/external contract/correctness invariant, existing guards,
+and exact consequence on saturation or expiry. Distinguish:
+
+- Unsigned acquisition saturation: scoped rejection or deferred observation with
+  eventual resumption; no reservation, signature or deployment-wide financial stop.
+- Stale admission evidence: retain completed historical work and acquire fresh
+  decision-specific evidence; do not renew old observations or invent authority.
+- Uncertain mutation/submission: retain exact bytes, input ownership, liabilities
+  and accepted-work ownership; no new request, replacement or replay permission.
+- Lost exclusive ownership or shared corruption: stop the affected capability under
+  its concrete invariant; do not blindly retry or relabel it as benign saturation.
+
+Remove redundant policy when another guard already supplies the intended bound.
+Do not add configuration, larger deadlines, counters or recovery machinery to
+preserve an unjustified second ceiling. Conversely, do not remove repeated checks
+at distinct trust/concurrency boundaries or financial input-ownership safeguards.
+Update the [timer and budget inventory](../network-egress.md#remaining-timers-and-budgets)
+when runtime policy changes. H06 records each disposition and its acceptance scope;
+these are proposed slices, not evidence of implemented removal or qualification.
+
+| Slice and owner | Concrete proposed change | Acceptance and retained boundary |
+| --- | --- | --- |
+| P01 — receipt-count redundancy; H03/H05 | Remove the 4,096-log count veto from both [payment receipts](../../src/rotation/base/receipt.rs#L127) and [funding delivery](../../src/rotation/base/delivery.rs#L296). The branch copied the existing payment policy into the new delivery path; the full response is already byte-bounded before JSON decoding. No distinct resource or contract justification was established for the extra count cutoff. | Exercise both production validators with a valid receipt containing more than 4,096 unrelated logs and one exact valid transfer, within the existing response-byte bound; payment fixtures must also include every scheme-required authorization event. A transfer alone cannot prove payment authorization use. Preserve whole-response byte rejection, full provenance/event validation, ambiguous-transfer negatives and unique financial-event ownership. Do not truncate logs or accept partial evidence. Update fixed diagnostic categories and related fixtures after removing the obsolete rejection. |
+| P02 — overload and historical partitions; H03/H06 | Retain the historical subsets of 63 query owners / 127 callers / 31 active sockets within unchanged aggregate 64 / 128 / 32 limits: they reserve a current-evidence slot at each boundary. Audit the callers' treatment of unsigned capacity rejection and ensure scoped backoff/resumption rather than permanent owner loss or financial abandonment. | Hold historical capacity at all three real boundaries across pools; show current progress and subsequent historical resumption after release. Test multiple current callers, cancellation and permit recovery. One reserved slot is not a promise that every concurrent current caller succeeds. Preserve bounded ownership/queued memory; add no new total-work or capital cap. |
+| P03 — exact selection around disputed inputs; H04/H05/H07 | Investigate and implement exact SDK input exclusion/selection, if supportable, so generic shielded sends can use demonstrably independent inputs while preserving every disputed source claim. The new [generic-send fence](../../src/rotation/store/source_obligations.rs#L64) is broader than the disputed operation because the present selector cannot exclude its exact orphaned inputs. Keep that fence until actual prepared-byte evidence supports narrowing it. | Use real SDK calculation/proving with both disputed and independent inputs; verify every selected input against immutable claims in the actual transaction. Cover reorg, burial, restart, ambiguous ownership, SDK reset-spends behavior and expiry. Independent work may proceed only with disjoint proven inputs; otherwise retain a named SDK limitation. No new financial retry or replacement authority, release of disputed inputs or weakening of pending-outgoing guards. |
+| P04 — suspend-aware clock capability; H08/H09 | Establish the supported platform contract for [suspend-inclusive freshness](../../src/freshness.rs#L164). macOS/Linux implementations exist; other targets currently fail clock acquisition. For any supported additional target, supply a correct implementation and capability diagnostics; otherwise document the explicit platform limitation. Surface failure before dependent financial mutation and preserve independent usable capabilities where proven. | Platform-specific clock tests cover suspend-inclusive elapsed age, wall-clock correction, sticky expiry and unsupported capability errors. No fallback to a clock that excludes suspension or silently renews freshness; no claim that an unsupported target passed. Preserve process-local proof and restart invalidation. This is a capability gap, not justification for another deadline. |
+| P05 — 1Click Zcash deadline allowance; H01/H05/H06/H08 | Complete the authoritative route/deadline investigation in [the remaining contract gate](no_self_sabotage.md#unresolved-gate-the-1click-zcash-deadline-and-route-contract). Establish the exact arrival event, route/connector, confirmations/relay requirements and late-deposit/refund behavior. Remove the blanket 300-second first-submission margin to the extent unsupported, or replace it with the specifically evidenced allowance; change quote, preparation and final durable submission checks together. | Record the authoritative evidence and boundary fixtures before claiming this gate resolved. Preserve returned external expiry, exact prepared bytes and liabilities; refresh only proven untouched quotes. Cover slow preparation and late checks, cancellation/restart and zero duplicate allocation/send. Do not infer timely delivery from local broadcast or derive an allowance from block count alone. The current margin remains unresolved pending that evidence; no live-funded run or private-state inspection is authorized. |
+| P06 — gRPC upload-progress limitation; H02/H05/H08 | Review supported transport APIs for a per-request upload-consumption signal. If available, separate progressing upload from response-header inactivity while retaining connection and response-specific read protection. Otherwise retain the [accepted limitation](no_self_sabotage.md#accepted-limitation-grpc-upload-progress) explicitly; do not introduce speculative vendoring, a larger whole-work deadline or renewal from other HTTP/2 streams/keepalives. | With an actual supported signal, test slow progressing upload, true upload/header stall, unrelated concurrent traffic and cancellation. Without it, test/document the existing uncertain-outcome boundary rather than claim progress awareness. In both cases retain accepted financial work and exact recovery obligations: a timeout cannot prove non-submission or authorize replay. |
+
+#### Ordering and completion of progress-policy slices
+
+P01 can land early as a focused removal plus both-path regressions. Integrate P02
+with the scheduler/resource work, P03 with SDK/input ownership and P04 with
+capability assembly; none waits for the external 1Click contract. Begin P05 evidence
+acquisition independently and keep the current unresolved gate explicit until its
+contract is established. P06 is a bounded supported-API investigation with an
+explicit accepted-limitation outcome, not an open-ended transport rewrite.
+
+Use the existing package commit/review/fixup protocol for each slice. For changed
+policies, test slow valid progress beyond the old bound, true stalls, unrelated
+progress and cancellation/restart where applicable, asserting forbidden financial
+side effects remain absent. Update maintained behavior and the timer inventory
+alongside implementation. Distinguish implemented cleanup, a proved necessary
+restriction, an accepted capability limitation and an unresolved external-contract
+gate in the completion record; no summary may turn the latter into a passing result.
+
 ### Coverage and completion of the addendum
 
 | Observed hazard | Owning proposed changes |
@@ -3390,6 +3460,8 @@ Use existing local fixtures; no extra provider probes or financial requests.
 | Reorgs or late claims invalidate prior conclusions | H01, H04 |
 | Concentrated scheduler/refund/deployment responsibilities and remaining complexity warnings | Complexity-guided targets under H01–H09; H06 records every disposition |
 | Internal evidence depends on provider JSON representation | Typed delivery construction under H01/H05, with H04/H07 compatibility and publication gates |
+| Redundant receipt-count veto; overload scope and disputed-input selection | P01–P03 under H03–H07 |
+| Unsupported clock capability; unresolved quote allowance and upload-progress limitation | P04–P06 under H01/H02/H05/H06/H08/H09 |
 | Mechanical feature/lint integration | H06 standard checks; no separate financial redesign |
 
 The addendum is ready to guide implementation, not evidence that these changes have
@@ -3400,7 +3472,8 @@ H01 is the central architectural change, supported by H04's lifetime separation,
 H07's atomic binding and H08's explicit capabilities. The remaining packages make
 those contracts survive SDK, owner, resource and deployment boundaries. The
 complexity-guided target inventory and typed delivery-construction slice are part
-of their owning packages, not a separate score-reduction project.
+of their owning packages, not a separate score-reduction project. P01–P06 likewise
+share those owners; unresolved contract/capability limits remain explicitly named.
 
 ### Rules to make explicit in AGENTS.md
 
@@ -3460,9 +3533,17 @@ modify AGENTS.md.
     recovery, task replacement and live qualification are distinct. Keep uncovered
     requirements open despite related passing tests.
 
+13. **Limit disposition:** Apply the existing no-double-enforcement rule to each
+    touched timer, count bound and readiness/failure gate: identify its owner,
+    distinct protected invariant and existing guards, remove redundant policy, and
+    preserve checks at separate race boundaries. Distinguish unsigned deferment,
+    stale evidence, uncertain mutation and fatal ownership loss in code and tests;
+    none may silently become abandonment or replacement authority. Keep the timer
+    inventory and explicit external-contract/capability limitations current.
+
 Apply rules 1 and 10 with H01/H04; rule 2 with H02; rules 3 and 5 with H03;
 rule 4 with H04; rule 6 with H05; rules 7 and 12 with H06; rule 8 with H07;
-rule 9 with H08; and rule 11 with H09. Extend the relevant existing AGENTS.md
+rule 9 with H08; rule 11 with H09; and rule 13 with P01–P06/H03/H06. Extend the relevant existing AGENTS.md
 paragraphs instead of repeating them as another independent policy layer.
 
 ## Supporting review findings

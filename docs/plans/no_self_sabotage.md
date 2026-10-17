@@ -10,6 +10,21 @@ Background catalog publication remains in its existing
 [independent startup plan](deferred/independent_provider_startup.md).
 These changes do not establish the cause of the original connectivity incident.
 
+## Integration with recovery hazard cleanup
+
+The [recovery hazard addendum](improved_recovery_robustness.md#progress-policy-integration-and-limitation-cleanup)
+owns the follow-on implementation sequence: P05 covers the 1Click route/deadline
+contract and P06 covers the supported upload-progress API investigation and retained
+uncertain-outcome boundary. This document remains the detailed evidence for those
+two items; they are not resolved by linking them into the cleanup. P01–P04 separately
+cover redundant receipt-count limits, overload scoping, exact disputed-input selection
+and clock platform capability. Their local work does not wait for P05/P06.
+
+Keep the contract evidence and accepted limitation below current as those slices
+advance, and record implementation/review/acceptance in their owning addendum entries.
+No new timeout policy, financial replay or live-funded qualification is authorized
+by this documentation integration.
+
 ## Accepted limitation: gRPC upload progress
 
 The response-header inactivity timer includes uploading the request. A slow
@@ -64,8 +79,9 @@ application and SDK transaction paths had no working-tree changes.
   `deadline = now + 120 * 60`; Android
   `ui-lib/src/main/java/co/electriccoin/zcash/ui/common/datasource/NearSwapDataSource.kt`
   uses `Clock.System.now() + 2.hours`. This is the requested deadline, not proof
-  that every returned quote grants that entire window. Compare our 1,800-second
-  default separately from the submission margin; a longer requested window may
+  that every returned quote grants that entire window. Compare the historical 1,800-second
+  audit-time default separately from the submission margin (the current default is
+  7,200 seconds); a longer requested window may
   accommodate preparation without changing any authority after signing.
 - **Five minutes is a client-side pending-status rule.** iOS `Near1Click.swift`
   and Android `common/model/near/NearSwapQuoteStatus.kt` synthesize `expired` only
