@@ -3117,10 +3117,10 @@ the boundaries that own mutation and concurrency.
 ### Proposed change sequence and review gates
 
 The earlier H01–H06 identifiers are retained and expanded; H07–H09 cover atomic
-rebinding, context-specific authority and lifecycle transitions. P01–P07 below
+rebinding, context-specific authority and lifecycle transitions. P01–P08 below
 fold progress-policy cleanup and remaining limitations into these same packages.
-P07 records the investigated replacement of treasury age policy with decision-bound
-chain evidence. All runtime changes remain **proposed**.
+P07/P08 record the investigated replacement of treasury and Base age policy with
+decision-bound chain evidence. All runtime changes remain **proposed**.
 Existing protections described in C01–C22 are starting points, not instructions to
 reimplement them. Each package starts by identifying a concrete remaining duplicate
 calculation, missing boundary or missing acceptance case. If the existing code
@@ -3425,16 +3425,19 @@ these are proposed slices, not evidence of implemented removal or qualification.
 | P01 — receipt-count redundancy; H03/H05 | Remove the 4,096-log count veto from both [payment receipts](../../src/rotation/base/receipt.rs#L127) and [funding delivery](../../src/rotation/base/delivery.rs#L296). The branch copied the existing payment policy into the new delivery path; the full response is already byte-bounded before JSON decoding. No distinct resource or contract justification was established for the extra count cutoff. | Exercise both production validators with a valid receipt containing more than 4,096 unrelated logs and one exact valid transfer, within the existing response-byte bound; payment fixtures must also include every scheme-required authorization event. A transfer alone cannot prove payment authorization use. Preserve whole-response byte rejection, full provenance/event validation, ambiguous-transfer negatives and unique financial-event ownership. Do not truncate logs or accept partial evidence. Update fixed diagnostic categories and related fixtures after removing the obsolete rejection. |
 | P02 — overload and historical partitions; H03/H06 | Retain the historical subsets of 63 query owners / 127 callers / 31 active sockets within unchanged aggregate 64 / 128 / 32 limits: they reserve a current-evidence slot at each boundary. Audit the callers' treatment of unsigned capacity rejection and ensure scoped backoff/resumption rather than permanent owner loss or financial abandonment. | Hold historical capacity at all three real boundaries across pools; show current progress and subsequent historical resumption after release. Test multiple current callers, cancellation and permit recovery. One reserved slot is not a promise that every concurrent current caller succeeds. Preserve bounded ownership/queued memory; add no new total-work or capital cap. |
 | P03 — exact selection around disputed inputs; H04/H05/H07 | Investigate and implement exact SDK input exclusion/selection, if supportable, so generic shielded sends can use demonstrably independent inputs while preserving every disputed source claim. The new [generic-send fence](../../src/rotation/store/source_obligations.rs#L64) is broader than the disputed operation because the present selector cannot exclude its exact orphaned inputs. Keep that fence until actual prepared-byte evidence supports narrowing it. | Use real SDK calculation/proving with both disputed and independent inputs; verify every selected input against immutable claims in the actual transaction. Cover reorg, burial, restart, ambiguous ownership, SDK reset-spends behavior and expiry. Independent work may proceed only with disjoint proven inputs; otherwise retain a named SDK limitation. No new financial retry or replacement authority, release of disputed inputs or weakening of pending-outgoing guards. |
-| P04 — remaining clock capability; H08/H09 | First apply P07: remove unnecessary treasury clock consumers rather than implement platforms solely to preserve a local age gate. Classify remaining Base/shared consumers against protocol authority and chain-bound alternatives. Supply platform support only for a genuinely retained consumer, or document its explicit capability limitation. | Prove P07 treasury decisions are unaffected by wall jumps/suspension. For retained consumers, record their distinct contract and platform tests; do not silently weaken required time semantics. Preserve process ownership and revision invalidation. No portability change may reintroduce a renamed treasury TTL. |
+| P04 — remaining clock capability; H08/H09 | First apply P07/P08: remove unnecessary treasury/Base clock consumers rather than implement platforms solely to preserve local age gates. P08 records Base provenance and its chain-bound replacement; classify any genuinely remaining shared consumer against protocol authority. Supply platform support only for a genuinely retained consumer, or document its explicit capability limitation. | Prove P07/P08 treasury/Base decisions are unaffected by wall jumps/suspension. For retained consumers, record their distinct contract and platform tests; do not silently weaken required time semantics. Preserve process ownership and revision invalidation. No portability change may reintroduce a renamed treasury TTL. |
 | P05 — 1Click Zcash deadline allowance; H01/H05/H06/H08 | Complete the authoritative route/deadline investigation in [the remaining contract gate](no_self_sabotage.md#unresolved-gate-the-1click-zcash-deadline-and-route-contract). Establish the exact arrival event, route/connector, confirmations/relay requirements and late-deposit/refund behavior. Remove the blanket 300-second first-submission margin to the extent unsupported, or replace it with the specifically evidenced allowance; change quote, preparation and final durable submission checks together. | Record the authoritative evidence and boundary fixtures before claiming this gate resolved. Preserve returned external expiry, exact prepared bytes and liabilities; refresh only proven untouched quotes. Cover slow preparation and late checks, cancellation/restart and zero duplicate allocation/send. Do not infer timely delivery from local broadcast or derive an allowance from block count alone. The current margin remains unresolved pending that evidence; no live-funded run or private-state inspection is authorized. |
 | P06 — gRPC upload-progress limitation; H02/H05/H08 | Review supported transport APIs for a per-request upload-consumption signal. If available, separate progressing upload from response-header inactivity while retaining connection and response-specific read protection. Otherwise retain the [accepted limitation](no_self_sabotage.md#accepted-limitation-grpc-upload-progress) explicitly; do not introduce speculative vendoring, a larger whole-work deadline or renewal from other HTTP/2 streams/keepalives. | With an actual supported signal, test slow progressing upload, true upload/header stall, unrelated concurrent traffic and cancellation. Without it, test/document the existing uncertain-outcome boundary rather than claim progress awareness. In both cases retain accepted financial work and exact recovery obligations: a timeout cannot prove non-submission or authorize replay. |
 | P07 — remove treasury age authority; H01/H04/H05/H06/H07/H08/H09 | Implement the investigated chain/owner/revision-bound replacement below, including missing post-accounting and preparation anchor checks; remove local wall/elapsed age permission and its configuration/cadence coupling. | Long valid work and unchanged-chain delays beyond the old bound pass; reorgs, stale revisions and wrong/missing anchors reject before mutation. Retain exact-tip expiry proofs, external protocol timestamps and no-replay ownership. |
+| P08 — replace Base local age authority; H01/H03/H04/H05/H06/H07/H08 | Remove locally originated 120-second block-age, host +30-second and derived evidence-lease gates with a coherent decision-bound chain/liability replacement; see the provenance investigation below. | Retain protocol signed timestamps, canonical nonce expiry, confirmation/debit checks and atomic admission. Test old-but-newly-acquired chain views and skewed host clocks without local age veto; stale/mixed/reorged evidence cannot authorize work. |
 
 #### Ordering and completion of progress-policy slices
 
 P01 can land early as a focused removal plus both-path regressions. Integrate P02
 with the scheduler/resource work and P03 with SDK/input ownership. P07 takes
-precedence over P04 clock-portability work and integrates with H01/H07/H08; none
+precedence over P04 clock-portability work and integrates with H01/H07/H08.
+P08 completes the Base provenance audit and coordinates removal of remaining
+local-age consumers before shared clock code is deleted; none
 waits for the external 1Click contract. Begin P05 evidence
 acquisition independently and keep the current unresolved gate explicit until its
 contract is established. P06 is a bounded supported-API investigation with an
@@ -3564,8 +3567,9 @@ independent authority. P05's contract investigation does not block this removal.
    Specify their decision-bound chain/revision alternative before removing their
    authority checks; do not transfer the treasury TTL into another layer or label
    an unexplained Base age policy mandatory. Keep actual signed x402 timestamp
-   fields and their canonical-chain recovery semantics. P04 covers only genuine
-   remaining clock consumers after this classification.
+   fields and their canonical-chain recovery semantics. P08 below records this
+   provenance investigation and its replacement work; P04 covers only genuine
+   remaining clock consumers after that cleanup.
 
 **Acceptance:** Test scans, history/accounting and proposal stages continuing beyond
 the former age bound, with unchanged chain, wall-clock jumps and suspension; no
@@ -3591,6 +3595,112 @@ trust model and exclusive treasury spending; neither a clock nor height/hash
 revalidation detects an undeclared old backup or reconstructs missing off-chain
 authorizations. No live-funded qualification or private-state repair is authorized.
 
+### Base age-policy provenance and follow-up
+
+**Investigation outcome:** The available Git history identifies the Base age and
+host-clock skew thresholds as application design choices. No external protocol or
+reference justification was recorded where they were introduced, and no matching
+policy was found in the inspected reference paths. This does not prove that an
+author never consulted an unrecorded source. It does establish that these thresholds
+must not be treated as mandatory Base/x402 requirements merely because the code,
+local plan and later tests agree on them.
+
+| Policy | Provenance and present consumers | Disposition |
+| --- | --- | --- |
+| `base_max_block_age_seconds`, default 120 | Initial rotation plan `c45afe8` names the 120-second cutoff; implementation `acc9bb7` sets `block_age() -> 120` and rejects old latest-block timestamps. Current configuration: [default](../../src/rotation/config.rs#L40), [field](../../src/rotation/config.rs#L439). | Local endpoint/evidence age policy, not a signed protocol field. Remove as financial authority under P08 with a decision-bound chain-state replacement. |
+| Block timestamp no more than 30 seconds ahead of host time | Original inline implementation in `acc9bb7`; `fd6aefb` only extracted it into [validate_timestamp](../../src/rotation/base.rs#L972) and added boundary tests. No threshold source was recorded. | Local host-clock plausibility allowance. It is not an implementation of OP consensus timestamp rules or an external payment deadline. Include in removal, preserving structural chain timestamp checks. |
+| `admission_valid_until = latest_block_timestamp + max_age` | Earlier progress-policy implementation `cccf322` separated retained historical work from expiring admission evidence; [balance observations](../../src/rotation/base.rs#L908) and [Store admission](../../src/rotation/store.rs#L1768) consume this derived deadline. | Another representation of the local age window, not independent protocol authority. Remove it together with its callers, not only initial RPC rejection. |
+| Sticky wall/elapsed `FreshnessLease` | Branch commit `7c4f0ae` enforced the existing local window across suspend, wall corrections, clones and cache merges. OS-clock references document measurement semantics, not the financial need for 120 or 30 seconds. | Retain owner/capture/generation protections; replace temporal permission, including balance, delivery and replacement consumers. Do not keep leases solely to avoid touching their callers. |
+| History-only future timestamp rejection | Branch commit `45fae44` removed old-block-age rejection for history-only reads but kept the [host +30-second check](../../src/rotation/base.rs#L707). | Still a local wall-clock dependency in historical reconciliation. It must be included explicitly; deleting `validate_timestamp` alone would leave it behind. |
+
+#### Protocol and reference comparison
+
+The [ERC-3009 specification](https://eips.ethereum.org/EIPS/eip-3009) defines
+signed Unix `validAfter` and `validBefore`; its reference implementation compares
+contract execution time with those fields. The
+[Permit2 SignatureTransfer implementation](https://github.com/Uniswap/permit2/blob/main/src/SignatureTransfer.sol)
+checks chain `block.timestamp` against the signed deadline. These are real
+protocol timestamp constraints. Neither establishes our maximum evidence age or
+host-clock future allowance. Canonical expiry/non-use recovery must continue using
+the appropriate chain evidence, never elapsed host time alone.
+
+The inspected current [Coinbase x402 EIP-3009 client helper](https://github.com/coinbase/x402/blob/main/typescript/packages/mechanisms/evm/src/exact/client/eip3009.ts)
+uses local time plus the seller's `maxTimeoutSeconds` to construct the signed
+`validBefore`, and sets `validAfter` to zero; that payload helper imposes no block-age
+gate. The [Permit2 helper](https://github.com/coinbase/x402/blob/main/typescript/packages/mechanisms/evm/src/shared/permit2.ts)
+also contains client timing heuristics, including backdating signed `validAfter`
+for skew. These upstream examples are not clock-free, and their heuristics do not
+supply provenance for our evidence-age thresholds. Upstream files were inspected
+on 2026-10-17; these moving-head links are comparison evidence, not pins of our
+compiled dependency or the deployed contracts.
+
+Local `reference_repos/SecretPay` at
+`9dab2d7a974d7f64cde41a5f42ba6ecbf8cf82e6` delegates Base Sepolia signing to
+`@x402/evm` in `src/core/payment.ts:21`, with dependency range `^2.9.0`; its wrapper
+has no corresponding block-age gate and does not vendor that dependency. Bounded
+searches of SecretPay, Zodl, Near-One, Slipstream and Zimppy found no matching
+120-second/30-second Base evidence policy. Zodl and the Near-One swap paths are
+not Base payment-admission reference implementations.
+
+The [OP Stack derivation specification](https://specs.optimism.io/protocol/derivation.html)
+relates L2 timestamps to the previous L2 timestamp and L1 origin under its protocol
+parameters. Our host-time +30-second check does not verify those relationships and
+must not be described as consensus validation. Keep existing structural
+confirmed/latest timestamp ordering and configured endpoint/chain checks; do not
+turn this cleanup into an unrequested consensus-verification or RPC-quorum system.
+
+#### P08 — Replace Base local age authority
+
+**Owners:** H01/H03/H04/H05/H06/H07/H08; coordinate with P07 before deleting shared
+clock code. This extends P07's remaining-consumer audit with concrete provenance
+and removal targets. Runtime changes remain proposed. Historical C21 checks prove
+enforcement of the old policy, not necessity of that policy.
+
+**Change:** Replace block-age, host-future-skew and derived evidence-deadline gates
+with newly acquired decision-bound confirmed/latest chain evidence, exact anchors
+and endpoint provenance, wallet/endpoint generations, current complete journal
+liabilities and atomic admission bindings. An unchanged chain can be reacquired
+without requiring height advancement. Revalidate after unrelated queued work or
+changes to dependencies; no indefinitely reusable cached balance certificate or
+relabeled old observation may authorize a later decision. Preserve coherent paired
+balance reads and existing confirmation/debit/nonce checks. Reuse completed
+historical reconciliation and independent current evidence rather than repeat the
+whole historical sweep when only admission evidence needs recapture. Keep bounded
+coalesced acquisition and proactive maintenance where authority permits; do not
+justify a new serial probe per consumer when an existing coherent current
+acquisition can supply the same decision.
+
+**Consumer inventory:** Include initial and refreshed admission headers,
+`BalanceObservation.valid_until`, `ChainView.admission_valid_until`, balance
+certificate cache/merge/selection, Store preparation and final admission, canonical
+replacement staging/activation, payment receipt verification, funding delivery
+acquisition/publication and the history-only future check. Preserve immutable saved
+observations and schema-aware report readers; a historical expiry field remains
+interpretable history, never present admission authority. Specify configuration
+compatibility/deprecation for `base_max_block_age_seconds` without silently turning
+it into another policy gate. Once P07/P08 consumers are migrated, remove unused
+shared temporal-lease/platform machinery rather than extend it under P04.
+
+**Acceptance:** Use newly acquired coherent chain views with a latest timestamp
+older than the former 120-second default, and host clocks more than 30 seconds
+behind the chain, without rejecting solely for those differences. Test unchanged
+chains, slow valid acquisitions beyond the old window, clock jumps/suspension,
+queued stale captures, same-height reorgs, regressing/wrong-chain or mixed-endpoint
+views, generation changes, concurrent liabilities, cancellation and restart.
+Preserve exact event/nonce and unique ownership negatives for both receipt paths.
+Expired *signed* authority still rejects new signing/admission; stalled canonical
+time cannot release an authorization merely because the host passed its deadline.
+Partial/unavailable RPC evidence supplies no new admission permission. Assert no
+signature/reservation/intent on failed pre-acceptance validation and no abandonment
+or replay after uncertain accepted work. Record per-consumer migrated boundaries,
+removed competing checks, reviews/fixups and maintained-guide/timer updates.
+
+**Trust limit:** Requerying the configured endpoint establishes its returned chain
+view, not independent network liveness. Neither a successful request nor a local
+clock cutoff proves an endpoint globally current. Preserve the existing trust
+model and contradictions/ownership controls; do not add a second age policy to
+pretend to solve that separate trust limitation.
+
 ### Coverage and completion of the addendum
 
 | Observed hazard | Owning proposed changes |
@@ -3608,7 +3718,7 @@ authorizations. No live-funded qualification or private-state repair is authoriz
 | Concentrated scheduler/refund/deployment responsibilities and remaining complexity warnings | Complexity-guided targets under H01–H09; H06 records every disposition |
 | Internal evidence depends on provider JSON representation | Typed delivery construction under H01/H05, with H04/H07 compatibility and publication gates |
 | Redundant receipt-count veto; overload scope and disputed-input selection | P01–P03 under H03–H07 |
-| Unnecessary treasury age permission and remaining clock consumers | P07, then P04; chain-bound acquisition/scan/revision evidence replaces local age |
+| Unnecessary treasury/Base age permission and remaining clock consumers | P07/P08 before P04; chain-bound acquisition/scan/revision evidence replaces local age |
 | Unresolved quote allowance and upload-progress limitation | P05/P06 under H01/H02/H05/H06/H08/H09 |
 | Mechanical feature/lint integration | H06 standard checks; no separate financial redesign |
 
@@ -3620,7 +3730,7 @@ H01 is the central architectural change, supported by H04's lifetime separation,
 H07's atomic binding and H08's explicit capabilities. The remaining packages make
 those contracts survive SDK, owner, resource and deployment boundaries. The
 complexity-guided target inventory and typed delivery-construction slice are part
-of their owning packages, not a separate score-reduction project. P01–P07 likewise
+of their owning packages, not a separate score-reduction project. P01–P08 likewise
 share those owners; unresolved contract/capability limits remain explicitly named.
 
 ### Rules to make explicit in AGENTS.md
@@ -3690,7 +3800,7 @@ modify AGENTS.md.
     inventory and explicit external-contract/capability limitations current.
 
 14. **Chain validity versus time policy:** Financial wall-clock gates require a
-    named protocol/external timestamp constraint. Treasury scan readiness uses
+    named protocol/external timestamp constraint. Treasury/Base readiness uses
     newly acquired chain/anchor and owner/revision evidence, not observation age
     or a required height advance. Preserve lineage, scan coverage, exact input
     ownership and expiry-release proofs. Cadence, transport inactivity and
@@ -3698,8 +3808,8 @@ modify AGENTS.md.
 
 Apply rules 1 and 10 with H01/H04; rule 2 with H02; rules 3 and 5 with H03;
 rule 4 with H04; rule 6 with H05; rules 7 and 12 with H06; rule 8 with H07;
-rule 9 with H08; rule 11 with H09; rule 13 with P01–P07/H03/H06; and
-rule 14 with P07/P04/P05. Extend the relevant existing AGENTS.md
+rule 9 with H08; rule 11 with H09; rule 13 with P01–P08/H03/H06; and
+rule 14 with P07/P08/P04/P05. Extend the relevant existing AGENTS.md
 paragraphs instead of repeating them as another independent policy layer.
 
 ## Supporting review findings
