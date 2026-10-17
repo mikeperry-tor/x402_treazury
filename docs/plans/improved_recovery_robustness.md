@@ -3127,23 +3127,145 @@ calculation, missing boundary or missing acceptance case. If the existing code
 already meets the contract, record evidence and make only the necessary test or
 documentation change.
 
-| Order | Reviewable change | Dependencies and commit boundary |
-| --- | --- | --- |
-| 1 | H06 acceptance/evidence discipline and H05 production-path fixtures | Establish before using new passing checks to declare a package complete; extend throughout the sequence. Commit focused harness/documentation changes separately from runtime behavior. |
-| 2 | H01 one obligation dependency slice, with H04 retention/historical interpretation | Begin with funding source/delivery/return consumers. Commit one shared calculation plus its migrated consumers, obsolete-path deletion and acceptance evidence; repeat by obligation. |
-| 3 | H07 atomic rebinding and H08 explicit execution contexts | Review current admission and serving capabilities against H01 decisions. Land separately by mutation boundary; neither requires a repository-wide rewrite. |
-| 4 | Original C17 actual-task-exit disposition, then H02 accepted-result publication | Resolve the original C17 requirement by audited justified stops or proven eligible handoff; do not count it as new H work. Local publication fixes with no task-handoff dependency may land earlier. |
-| 5 | H03 physical work/independence and H09 lifecycle transitions | Apply to the affected Store/RPC and deployment paths, including P01–P04/P07, with P07 ahead of P04. P01 can land early; P05 contract acquisition and P06 supported-API investigation proceed independently and cannot block unrelated cleanup. |
-| 6 | Final integration and proposed AGENTS.md rules | Reconcile every package with evidence and remaining limitations; run applicable standard default-build checks. Make the rules below explicit alongside the changes they govern rather than waiting until all runtime work ends. |
+### First review gate: RG0 — Contracts and implementation baseline
 
-Use subagent review at each package commit boundary and any material authority or
-ownership design gate. Address findings as fixup commits. Record the exact invariant,
-production consumer, removed competing path, focused test and limitation under the
-owning H entry. Include the implementation commit, review result and any fixup
-commits; leave the entry proposed until that evidence is recorded. Avoid parallel
-source mutation during pinned validation. No package
-adds a spending budget, blanket deadline, financial replay authority or automatic
-replacement after a refund; live-funded qualification remains separately authorized.
+The following items must be explicit in the first review record. RG0 is a development
+review gate, not a runtime readiness switch. It must produce concrete decisions,
+source locations and acceptance cases for the first slice; it does not require a
+new repository-wide framework or resolution of P05 before independent work starts.
+
+1. **Replacement chain assessment:** Specify acquisition and revalidation points,
+   chain/network identity, hashes/lineage, scan coverage, SDK/Store owner, snapshot
+   and journal/input revisions, named decision/operation and atomic consumption.
+   State when a queued or later decision must reacquire evidence. Include unchanged
+   height, same-height reorg and unavailable/mixed-endpoint evidence. A shared
+   calculation must not become another collection of independently writable
+   "current chain" flags or an indefinitely reusable capability.
+2. **Configuration/reporting compatibility:** Decide retirement behavior for
+   `max_sync_age_seconds` and `base_max_block_age_seconds`, including offline
+   inspection, old configuration files, cadence decoupling and honest replacement
+   of time-based `fresh` labels. Inventory persisted fields and historical readers;
+   no private-state migration or reinterpretation of old evidence as new authority.
+3. **Original C17 task ownership:** Classify known actual task exits and identify
+   the retained owner, accepted work, cancellation and shutdown boundaries. Record
+   which stops are justified and what eligible handoff still requires implementation
+   and acceptance. In-owner reconstruction and listener survival are not replacement
+   evidence. RG0 need not pretend C17 is closed; RG3 verifies its actual disposition.
+4. **SDK input-selection feasibility:** Identify the exact exclusion/selection API
+   and actual-byte proof needed by P03. Record the real SDK experiment and expected
+   invariant before narrowing the current fence. If the capability is unavailable,
+   retain a named limitation; neither a score reduction nor an unrelated passing
+   fixture authorizes independent-input claims.
+5. **Protocol timestamps versus heuristics:** Inventory each remaining financial
+   wall-clock check and cite its external field/contract, separating signed validity
+   and returned quote deadlines from local age/skew/margin policy. P05's missing
+   route/arrival-event contract remains explicit and does not block P01/P07/P08.
+   Preserve transport inactivity, polling and diagnostics in their distinct roles.
+6. **Acceptance and complexity baseline:** Capture the exact implementation baseline
+   revision, merge base, relevant source hashes, analyzer/settings and complete
+   CogC/CycC output. Existing saved analysis may be reused only with verified matching
+   analyzed inputs; retain durable summary evidence instead of relying on a mutable
+   `target/complexity` link. Map each planned slice to real production consumers,
+   focused tests, forbidden side effects and known limits. Review the call graph,
+   duplicate predicates, mutable projections, owners and shared resource paths.
+
+RG0 closes when the first slice has an implementable contract and all six items
+have a disposition, including explicitly unresolved independent requirements.
+Update the record when later evidence changes a decision. Broader authority changes
+return to the appropriate gate; routine local choices do not require repeated user
+approval. All financial policy removals already specified by the user remain the
+approved direction, subject to their concrete replacement safeguards.
+
+### Recommended implementation commits
+
+Use HC identifiers to distinguish these proposed commits from the original C01–C22
+history. The sequence below replaces the earlier broad priority list as the default
+implementation order. Split an oversized row into explicitly numbered subcommits
+(e.g. HC03a/HC03b) only at reviewable invariant boundaries. Each must state whether
+it is inactive preparation or active behavior; inactive groundwork cannot be reported
+as completed runtime acceptance. Independent rows may move earlier when their stated
+contracts hold, with the reason recorded. Tests and maintained behavior accompany
+their owning behavior commit rather than wait until the end.
+
+| Commit | Recommended scope | Prerequisite / wider gate |
+| --- | --- | --- |
+| HC01 — record contracts and focused acceptance setup | RG0 decisions, baseline evidence and minimal production-path fixture gaps under H05/H06. Add no parallel runtime decision engine. Apply relevant AGENTS.md clarifications with the change they govern. | RG0; focused setup only, not a comprehensive pre-implementation test project. |
+| HC02 — remove redundant receipt-count vetoes | P01 removal in both payment/delivery paths, byte-bound and scheme-event regressions, obsolete diagnostics and policy documentation. | RG0/P01; can land before chain-assessment refactoring. |
+| HC03 — replace treasury scan/reuse age permission | P07 chain-assessment substrate and first complete consumer path: final post-accounting anchor validation, retained history, unchanged-chain reuse and owner/revision publication. Delete superseded temporal permission for that path. | RG0 assessment contract; RG1 after this coherent first slice. |
+| HC04 — migrate remaining treasury financial consumers | P07 preparation, reservation, source-support activation, manual/automatic shielding, confirmation and both expiry-recovery scans. Preserve exact inputs, accepted bytes and pre-intent checks. Complete treasury configuration/reporting/cadence disposition as consumers migrate. | HC03; RG2 treasury closure before treating P07 complete. |
+| HC05 — replace Base admission/cache age permission | P08 coherent current confirmed/latest chain assessment, complete liabilities, capture/generation binding, cache/selection and atomic admission. Remove old-block-age, host-skew and derived lease authority from the migrated paths. | RG0/HC03 design evidence; RG1-style review for the first Base slice. |
+| HC06 — migrate Base historical proof consumers | P08 history-only future check, payment receipts, funding delivery, replacement staging/activation, saved readers and remaining clock consumers. Remove obsolete shared temporal-lease machinery only after all consumers are accounted for; close configuration compatibility. | HC05; RG2 Base/shared-clock closure. |
+| HC07 — consolidate obligation dependencies | H01 source, delivery and return validity/invalidation/scheduler consumers, one obligation per reviewable subcommit. Remove superseded phase predicates and writable projections while preserving independent conclusions. | Reuse HC03–HC06 contracts; independent obligation slices may land earlier. RG1 applies to any new shared decision shape. |
+| HC08 — separate refund assessment responsibilities | H04/H05 historical-credit assessment, attribution and new-output/totals discovery, preserving deduplication and one resident SDK traversal. Record historical retention/decoder cleanup with its consumers. | HC07 relevant dependency slice; RG2 ownership/closure regressions. |
+| HC09 — construct delivery evidence through checked typed facts | H01/H05 shared semantic constructor for external decoding and authenticated saved hints; remove synthetic provider JSON without weakening saved-format or canonical publication checks. | Relevant HC07/H04 contracts; RG2 external/saved equivalence and historical compatibility. |
+| HC10 — resolve actual task exits and retained publication | Original C17 audit-backed stop or eligible handoff with shutdown races; H02 retained results/permits through local publication failures. Split task disposition from unrelated local retry fixes if needed. | RG0 owner classification; RG3 before declaring actual task-exit recovery/disposition closed. |
+| HC11 — separate scheduler/lane state and physical work | H03/P02 scheduling, retained completions, publication/health separation and reconciliation lane state; indexed physical paging and process-resource fairness. Keep one coordinating owner where it owns financial work. | HC07/HC10 where affected; independent query/fairness corrections may land earlier. RG3 shared-resource and drain gate. |
+| HC12 — assemble explicit deployment capabilities | H08/H09 Store/Base/SDK capability establishment versus pool/worker assembly, one cleanup owner, bind/publication/drain ordering and partial-failure behavior. | HC10 ownership contract; RG3 lifecycle gate. |
+| HC13 — narrow disputed-input fencing only with exact proof | P03 real SDK selection/exclusion and actual transaction input binding; otherwise record the proved limitation and retained fence. | RG0 feasibility experiment; RG2 financial proof plus RG3 owner/SDK integration. |
+| HC14 — dispose of remaining clock capability | P04 only after P07/P08 migration: remove unused platform clock requirements or implement/document a genuinely required remaining capability. | HC04/HC06 consumer inventory; no work solely to preserve removed policy. |
+| HC15 — resolve 1Click allowance when authoritative evidence exists | P05 route/deadline evidence and synchronized quote/preparation/submission policy change with boundary regressions. Otherwise commit an accurate unresolved disposition, not invented allowance or qualification. | External evidence; independent investigation can start after RG0 and never blocks unrelated rows. |
+| HC16 — address supported upload-progress capability | P06 supported-API investigation, targeted transport change if justified, or explicit retained limitation with uncertain-outcome acceptance. | Independent after RG0; RG3 retained accepted-work ownership if behavior changes. |
+| HC17 — final integration, guidance and completion evidence | Remaining applicable AGENTS.md rules, maintained guides/timer inventory, full package/consumer/disposition reconciliation, standard checks and complexity comparison. Behavior docs should already have landed with each owning commit. | RG4 integration; explicitly retain unresolved external/SDK limitations and C17 if not actually resolved. |
+| HC18 — analyze review fixups and residual hazards | Compare the complete cleanup series and its preserved fixups against the RG0 baseline, explain recurring causes and any resulting design changes, and leave concrete residual work. Retain the review artifact. | RG5 retrospective after per-commit and wider reviews; record review of HC18 itself before final closure. |
+
+### Per-commit independent review and fixup provenance
+
+Every implementation, refactoring, test and documentation commit in this cleanup
+series receives an independent subagent review of its exact committed SHA and
+relevant caller/consumer context. This review is **in addition to**, never a
+substitute for, RG0–RG5. The author must not be the sole reviewer; give the reviewer
+the contract and test evidence while allowing independent inspection and conclusions.
+Reviewers remain read-only during the reviewed snapshot. Coordinate implementation
+and review work so shared files, pinned sources and the executable are not mutated
+under a review or frozen validation run.
+
+For each commit, record under its HC/H/P owner: SHA/parent, intended change,
+production boundaries, tests and limits, independent reviewer, findings/disposition,
+complexity measurements where applicable and resulting fixup SHAs. Review can pass
+with a justified retained limitation; an unmet acceptance requirement stays open.
+Do not advance a dependent slice with unresolved correctness/authority findings.
+Independent work can continue when it does not invalidate the reviewed state.
+
+Address findings in commits created with `git commit --fixup=<reviewed-SHA>`.
+Target the commit that introduced the issue; if a finding spans commits, name all
+involved SHAs and preserve a clear target plus cross-references. Do not hide review
+changes in the next feature commit. Independently re-review each fixup and the
+resulting combined change; repeat until actionable findings are resolved or a
+justified explicit limitation is accepted. Record findings that need no code change
+with their rationale, not a misleading empty fixup.
+
+Preserve original and fixup commits throughout development and RG5: do not squash,
+autosquash or otherwise rewrite away this evidence before the final hazard analysis
+is recorded. Any later history rewrite is a separate user decision. Keep review
+summaries in the retained plan so the final analysis does not depend solely on
+subagent transcripts or temporary files. Record each review at the next natural
+checkpoint or fixup rather than create commits solely to include their own hashes.
+For the last review-only checkpoint, attach the final independent disposition to
+its exact commit as a Git note; retain that note with the review evidence if the
+branch is transferred. This closes the record without a self-referential chain of
+documentation commits. Git notes supplement, not replace, the retained plan's
+implementation findings and final hazard analysis.
+
+### Wider architecture, integration and complexity gates
+
+| Gate and placement | Required review beyond the individual commit | Architecture/complexity evidence |
+| --- | --- | --- |
+| RG0 — before the first runtime slice | The six contracts above, exact baseline and acceptance scope. Name genuinely independent unresolved work. | Baseline complete analyzer output; target call graphs, duplicate decisions, projections and ownership/resource boundaries. No score-only redesign. |
+| RG1 — first complete treasury/Base shared-decision slice and each materially new dependency shape | Follow every affected validity, refresh, admission and publication consumer. Confirm shared calculation replaces competing paths and preserves separately usable evidence. | Before/after CogC/CycC for changed callables and newly extracted helpers under the same analyzer/settings; inspect the full resulting call chain. Reject scattered writable "current" flags, universal all-or-nothing readiness, renamed TTLs and moving complexity into an unreviewed helper. |
+| RG2 — each financial authority/evidence migration, including refund/SDK proof changes | Actual production-path and real SDK tests as applicable: hashes/lineage, revision races, unchanged-chain long progress, scoped failures, exact inputs, protocol expiry, cancellation/restart and historical readers. | Verify fewer independently maintained predicates and no broadened authority. Keep final validation/publication atomic; complexity extraction must not add awaited gaps, remove race checks or mistake a wrapper for deletion. Record concentrated complexity intentionally retained for one atomic invariant. |
+| RG3 — owner/scheduler/resource/deployment integration, including C17 | Test actual task-exit disposition, retained publication, shutdown/drain, one SDK/Store owner, historical/current resource independence, partial initialization and bind-before-financial-work. | Compare scheduler, reconciliation and deployment targets with RG0 and their pre-slice baseline. Review lane state and capability outcomes for invalid combinations; reject added independent tasks, queues or flags that duplicate ownership or conceal a shared bottleneck. |
+| RG4 — final integrated behavior and standard validation | Reconcile every H/P/HC requirement and consumer with implementation or explicit limitation. Use frozen source/executable windows and applicable standard default-build checks; report segmented results accurately. | Complete complexity analysis against both RG0 implementation baseline and merge base with `main`; retain full warnings and all target dispositions. Scores remain advisory; incomplete analysis fails evidence. No arbitrary numerical reduction target or claim that lower scores prove correctness. |
+| RG5 — final fixup/hazard retrospective | Audit original commits plus fixups, repeated failure mechanisms, missed consumers and limits. Determine whether shared contracts reduced the identified hazards or merely relocated them. | Classify fixups by hazard/phase and correlate hotspots with actual findings. Separate code simplification from score redistribution and fixture/tooling corrections. Propose concrete residual changes and AGENTS.md updates without retroactively calling unmet requirements complete. |
+
+For code-changing commits, run the focused complexity comparison appropriate to the
+slice and record changed functions, helper scores and advisory warnings; a formatting-
+only or documentation commit records that no analyzed runtime source changed rather
+than rebuilding the analyzer needlessly. Reuse source-matched cached baseline results
+where valid. Broader gates inspect cumulative structure in addition to individual
+scores. CogC > 20 or CycC > 40 triggers explicit responsibility review, never an
+automatic rejection or arbitrary production limit. Preserve complete reports/summary
+provenance and review all 18 original warning dispositions, including unchanged or
+intentionally retained hotspots.
 
 #### H01 — Shared obligation dependencies and revocable support
 
@@ -3336,9 +3458,9 @@ Do not extract helpers merely to lower a score or add a general workflow framewo
 | [Store::capture_funding_delivery](../../src/rotation/store/funding_delivery.rs#L177), 11 / 55, unmatched | Separate candidate selection, authenticated saved-hint decoding, validated delivery expectation construction and read-ticket capture. Replace the internal provider-shaped JSON round trip through the common typed construction path described below. | H01/H05/H07: current-event/queued-correction fairness, exact correlation, malformed hints, saved-schema compatibility, revocation and publication races. |
 | Remaining warnings: `source_step`, `collect_inventory`, `dispatch_pending`, `ManagedPool::pay_with_cover_observed`, `Store::prepare_bound`, `Store::return_inventory_page`, `Treasury::calculate_owned_refund`, deferred `Runtime::run`, `RunningDeployment::serve`, and wallet CLI `run_args` | Review their affected call chains in the packages above: source/quote progression and inventory under H01–H03; payment/preparation under H07/H08; returns and SDK calculation under H04/H05; deferred startup/serving under H09 and C17; CLI context dispatch under H08. Record a concrete mixed responsibility or missing gate before changing a function. | H06 records disposition for each warning: refactor with owning package and acceptance, or retain with its concrete cohesive responsibility and applicable evidence. A score alone does not require a code change. |
 
-Prioritize funding scheduling/publication, then refund assessment, then deployment
-capability establishment. This prioritizes slices within the dependency sequence
-above; it does not defer H06/H05 acceptance setup or move implementation ahead of
+Within the later complexity-refactoring work, prioritize funding scheduling/
+publication, refund assessment and deployment capability establishment. Follow the
+HC sequence and dependencies above for earlier policy removal and chain evidence; it does not defer H06/H05 acceptance setup or move implementation ahead of
 its authority/ownership contract. Reconciliation and Store support/delivery slices
 may proceed independently when their contracts are established. Never move the
 final authority check outside its transaction or introduce a new asynchronous gap
@@ -3443,7 +3565,8 @@ acquisition independently and keep the current unresolved gate explicit until it
 contract is established. P06 is a bounded supported-API investigation with an
 explicit accepted-limitation outcome, not an open-ended transport rewrite.
 
-Use the existing package commit/review/fixup protocol for each slice. For changed
+Use the HC per-commit independent-review/fixup protocol and the applicable wider
+RG gates for each slice. For changed
 policies, test slow valid progress beyond the old bound, true stalls, unrelated
 progress and cancellation/restart where applicable, asserting forbidden financial
 side effects remain absent. Update maintained behavior and the timer inventory
