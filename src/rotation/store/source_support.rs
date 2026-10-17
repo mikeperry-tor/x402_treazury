@@ -37,6 +37,11 @@ impl Disposition {
     }
 }
 impl Store {
+    pub(crate) fn revoke_return_support(&self, operation: &str) -> Result<()> {
+        self.db.execute("UPDATE source_support_rows SET return_issue=1 WHERE pass_id=(SELECT pass_id FROM source_support_current WHERE singleton=1) AND operation_id=?1",[operation])?;
+        Ok(())
+    }
+
     /// Reclaim at most one physical page of abandoned or superseded observations.
     /// The serialized treasury owner calls this before acquiring a new pass.
     pub(crate) fn cleanup_source_support_page(&mut self) -> Result<bool> {
@@ -168,6 +173,31 @@ impl Store {
         )?;
         Ok(())
     }
+    pub(crate) fn stage_return_support(
+        &mut self,
+        pass: &Pass,
+        operation: &str,
+        returned: U256,
+        issue: bool,
+    ) -> Result<()> {
+        self.check_source_pass(pass)?;
+        let tx = self.db.transaction()?;
+        if issue {
+            tx.execute("UPDATE source_support_rows SET return_issue=1 WHERE pass_id=(SELECT pass_id FROM source_support_current WHERE singleton=1) AND operation_id=?1",[operation])?;
+        }
+        ensure!(tx.execute("UPDATE source_support_rows SET returned_amount=?3,return_issue=?4 WHERE pass_id=?1 AND operation_id=?2 AND EXISTS(SELECT 1 FROM source_support_passes WHERE id=?1 AND complete=0)",params![pass.id,operation,returned.to_string(),issue])?==1,"return source row missing");
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn source_pass_return_inventory(&self, pass: &Pass, revision: i64) -> Result<()> {
+        self.check_source_pass(pass)?;
+        ensure!(
+            pass.inventory_revision == revision,
+            "return inventory changed"
+        );
+        Ok(())
+    }
 }
 fn revoke(db: &Connection, operation: &str) -> Result<()> {
     db.execute("UPDATE source_support_rows SET revoked=1 WHERE pass_id=(SELECT pass_id FROM source_support_current WHERE singleton=1) AND operation_id=?1",[operation])?;
@@ -200,6 +230,15 @@ impl Store {
 /// No lookup of an older pass can restore support lost in a newer canonical scan.
 pub(super) fn confirmed(db: &Connection, operation: &str) -> Result<bool> {
     current(db, operation, true)
+}
+pub(super) fn returned(db: &Connection, operation: &str) -> Result<Option<U256>> {
+    if !confirmed(db, operation)? {
+        return Ok(None);
+    }
+    let amount:Option<String>=db.query_row("SELECT r.returned_amount FROM source_support_rows r JOIN source_support_current c ON c.pass_id=r.pass_id WHERE r.operation_id=?1 AND r.return_issue=0",[operation],|row|row.get(0)).optional()?.flatten();
+    amount
+        .map(|value| U256::from_str_radix(&value, 10).context("invalid canonical return amount"))
+        .transpose()
 }
 fn current(db: &Connection, operation: &str, confirmed_only: bool) -> Result<bool> {
     Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM source_support_current c JOIN treasury_sync t ON t.singleton=1 AND c.snapshot_revision=CAST(json_extract(t.observation,'$.snapshot_revision') AS INTEGER) JOIN source_support_rows r ON r.pass_id=c.pass_id JOIN treasury_operations o ON o.id=r.operation_id AND o.facts=r.facts JOIN outgoing x ON x.id=o.id AND x.revision=r.outgoing_revision WHERE r.operation_id=?1 AND (?2=0 OR r.disposition='CONFIRMED') AND r.revoked=0 AND o.submission='CONFIRMED' AND NOT EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id))",params![operation,confirmed_only],|r|r.get(0))?)

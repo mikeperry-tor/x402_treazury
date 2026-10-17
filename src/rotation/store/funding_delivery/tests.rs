@@ -640,7 +640,7 @@ async fn late_return_claim_reopens_current_observation_without_rewriting_success
     let mut f = Fixture::new();
     let mut value = json!({"status":"SUCCESS","quoteResponse":f.quote.response,"swapDetails":{
   "originChainTxHashes":[{"hash":f.store.operation(&f.job.operation_id).unwrap().facts.txid}],
-  "destinationChainTxHashes":[{"hash":B256::repeat_byte(1).to_string()}],"amountOut":f.job.target}});
+  "destinationChainTxHashes":[{"hash":B256::repeat_byte(1).to_string()}],"amountOut":f.job.target,"refundedAmount":"0"}});
     let observation = crate::rotation::near::restore_status_observation(&f.quote, &value).unwrap();
     f.store
         .record_delivery_observation(&f.job.id, &f.job.operation_id, &observation, 1)
@@ -675,7 +675,7 @@ async fn late_return_claim_reopens_current_observation_without_rewriting_success
         )
         .unwrap();
     f.store.db.execute("UPDATE funding_jobs SET readiness_requirement=target,readiness_support='historical',readiness_operation=?2 WHERE id=?1",params![f.job.id,f.job.operation_id]).unwrap();
-    super::super::source_support::tests::publish_confirmed(&mut f.store);
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::ZERO);
     assert!(funding::finish_if_proven(&f.store.db, &f.job.id, &f.job.operation_id).unwrap());
     super::super::source_support::tests::publish_unavailable(&mut f.store);
     let facts = f
@@ -689,7 +689,7 @@ async fn late_return_claim_reopens_current_observation_without_rewriting_success
         f.store.funding_job(&f.job.id).unwrap().unwrap().phase,
         super::super::funding::FundingPhase::Complete
     );
-    super::super::source_support::tests::publish_confirmed(&mut f.store);
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::ZERO);
     value["swapDetails"]["destinationChainTxHashes"] = Value::Null;
     value["swapDetails"]["refundedAmount"] = json!("500");
     let observation = crate::rotation::near::restore_status_observation(&f.quote, &value).unwrap();
@@ -760,6 +760,138 @@ fn malformed_return_amount_is_unknown_obligation_not_zero() {
 }
 
 #[test]
+fn declared_return_does_not_hide_original_source_storage_failure() {
+    let mut f = Fixture::new();
+    let value = json!({"status":"SUCCESS","quoteResponse":f.quote.response,"swapDetails":{"refundedAmount":"0"}});
+    let observation = crate::rotation::near::restore_status_observation(&f.quote, &value).unwrap();
+    f.store
+        .db
+        .execute(
+            "UPDATE outgoing SET raw=x'00' WHERE id=?1",
+            [&f.job.operation_id],
+        )
+        .unwrap();
+    assert!(
+        f.store
+            .record_delivery_observation(&f.job.id, &f.job.operation_id, &observation, 1)
+            .is_err()
+    );
+    let retained: i64 = f
+        .store
+        .db
+        .query_row(
+            "SELECT count(*) FROM funding_delivery_hints WHERE operation_id=?1",
+            [&f.job.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        retained, 0,
+        "storage failure must not become a successful incomplete observation"
+    );
+}
+
+#[tokio::test]
+async fn exact_zero_requires_canonical_return_pass_and_new_output_reopens_completed_job() {
+    let mut f = Fixture::new();
+    let mut value = json!({"status":"FAILED","quoteResponse":f.quote.response,"swapDetails":{
+        "originChainTxHashes":[{"hash":f.store.operation(&f.job.operation_id).unwrap().facts.txid}],
+        "destinationChainTxHashes":[{"hash":B256::repeat_byte(1).to_string()}],"amountOut":f.job.target}});
+    let observe = |f: &mut Fixture, value: &Value| {
+        let observation =
+            crate::rotation::near::restore_status_observation(&f.quote, value).unwrap();
+        f.store
+            .record_delivery_observation(
+                &f.job.id,
+                &f.job.operation_id,
+                &observation,
+                now().unwrap(),
+            )
+            .unwrap();
+    };
+    observe(&mut f, &value);
+    for status in [
+        crate::rotation::near::SwapStatus::Refunded,
+        crate::rotation::near::SwapStatus::IncompleteDeposit,
+    ] {
+        f.store
+            .record_provider_outcome(&f.job.id, &f.job.operation_id, &status, 1)
+            .unwrap();
+    }
+    let (base, server) = rpc(&f.job.recipient, &f.job.target).await;
+    let read = f.capture();
+    let proof = base
+        .verify_funding_delivery(&read.expected, read.capture.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    f.store.commit_funding_delivery(&read, &proof).unwrap();
+    f.store
+        .confirm_spend(&f.job.operation_id, 101000, 0)
+        .unwrap();
+    f.store.db.execute("UPDATE funding_jobs SET readiness_requirement=target,readiness_support='historical',readiness_operation=?2 WHERE id=?1",params![f.job.id,f.job.operation_id]).unwrap();
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::ZERO);
+    assert!(
+        return_pending(&f.store.db, &f.job.operation_id).unwrap(),
+        "absent amount is unknown"
+    );
+    assert!(!funding::finish_if_proven(&f.store.db, &f.job.id, &f.job.operation_id).unwrap());
+    value["swapDetails"]["refundedAmount"] = json!("0");
+    observe(&mut f, &value);
+    assert!(
+        return_pending(&f.store.db, &f.job.operation_id).unwrap(),
+        "new claim invalidates prior inventory"
+    );
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::ZERO);
+    let revision = f.store.return_inventory_revision().unwrap();
+    observe(&mut f, &value);
+    assert_eq!(
+        f.store.return_inventory_revision().unwrap(),
+        revision,
+        "identical status must not invalidate retained history"
+    );
+    assert!(funding::finish_if_proven(&f.store.db, &f.job.id, &f.job.operation_id).unwrap());
+    let facts = f
+        .store
+        .funding_facts(&f.job.id, &f.job.operation_id)
+        .unwrap();
+    assert!(
+        !facts.provider_success
+            && facts.provider_failed
+            && facts.provider_refunded
+            && facts.provider_incomplete
+    );
+    assert!(
+        !facts.status_needed(),
+        "historical labels are audit, not a veto after exact proofs"
+    );
+    f.store
+        .record_refund(super::super::refunds::RefundStatus {
+            txid: "new canonical output".into(),
+            output_index: 0,
+            operation_id: f.job.operation_id.clone(),
+            amount: 1,
+            height: 100,
+        })
+        .unwrap();
+    assert!(return_pending(&f.store.db, &f.job.operation_id).unwrap());
+    assert_eq!(
+        f.store.funding_job(&f.job.id).unwrap().unwrap().phase,
+        funding::FundingPhase::RecoveryRequired
+    );
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::from(1));
+    assert!(
+        return_pending(&f.store.db, &f.job.operation_id).unwrap(),
+        "positive known output contradicts retained zero"
+    );
+    f = f.reopen();
+    assert!(return_pending(&f.store.db, &f.job.operation_id).unwrap());
+    let (outcome,gross):(String,i64)=f.store.db.query_row("SELECT f.completion_outcome,b.consumed FROM funding_jobs f JOIN budget_entries b ON b.id=?2 WHERE f.id=?1",params![f.job.id,f.job.operation_id],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!((outcome.as_str(), gross), ("SUCCESS", 101000));
+    server.abort();
+}
+
+#[test]
 fn exact_external_source_closure_survives_provider_claim_but_label_alone_does_not() {
     let mut f = Fixture::new();
     let value = json!({"status":"SUCCESS","quoteResponse":f.quote.response,"swapDetails":{"refundedAmount":"500"}});
@@ -806,4 +938,67 @@ fn exact_external_source_closure_survives_provider_claim_but_label_alone_does_no
         )
         .unwrap();
     assert_eq!(claim, "500");
+}
+
+#[tokio::test]
+async fn positive_return_needs_full_canonical_coverage_and_exact_delivery_correlation() {
+    let mut f = Fixture::new();
+    let mut value = json!({"status":"SUCCESS","quoteResponse":f.quote.response,"swapDetails":{
+        "originChainTxHashes":[{"hash":f.store.operation(&f.job.operation_id).unwrap().facts.txid}],
+        "destinationChainTxHashes":[{"hash":B256::repeat_byte(1).to_string()}],"amountOut":f.job.target,"refundedAmount":"500"}});
+    let observe = |f: &mut Fixture, value: &Value| {
+        let observation =
+            crate::rotation::near::restore_status_observation(&f.quote, value).unwrap();
+        f.store
+            .record_delivery_observation(
+                &f.job.id,
+                &f.job.operation_id,
+                &observation,
+                now().unwrap(),
+            )
+            .unwrap();
+    };
+    observe(&mut f, &value);
+    let (base, server) = rpc(&f.job.recipient, &f.job.target).await;
+    let read = f.capture();
+    let proof = base
+        .verify_funding_delivery(&read.expected, read.capture.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    f.store.commit_funding_delivery(&read, &proof).unwrap();
+    f.store
+        .confirm_spend(&f.job.operation_id, 101000, 0)
+        .unwrap();
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::from(499));
+    assert!(return_pending(&f.store.db, &f.job.operation_id).unwrap());
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::from(500));
+    assert!(!return_pending(&f.store.db, &f.job.operation_id).unwrap());
+    value["swapDetails"]["destinationChainTxHashes"] =
+        json!([{"hash":B256::repeat_byte(2).to_string()}]);
+    observe(&mut f, &value);
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::from(500));
+    assert!(
+        return_pending(&f.store.db, &f.job.operation_id).unwrap(),
+        "another delivery correlation cannot close this original"
+    );
+    value["swapDetails"]["destinationChainTxHashes"] =
+        json!([{"hash":B256::repeat_byte(1).to_string()}]);
+    observe(&mut f, &value);
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::from(500));
+    assert!(!return_pending(&f.store.db, &f.job.operation_id).unwrap());
+    f.store.revoke_return_support(&f.job.operation_id).unwrap();
+    assert!(
+        return_pending(&f.store.db, &f.job.operation_id).unwrap(),
+        "canonical contradiction revokes before replacement pass activation"
+    );
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::from(500));
+    value["swapDetails"]["refundedAmount"] = json!("0");
+    observe(&mut f, &value);
+    super::super::source_support::tests::publish_confirmed_returns(&mut f.store, U256::ZERO);
+    assert!(
+        return_pending(&f.store.db, &f.job.operation_id).unwrap(),
+        "later zero cannot erase retained positive claim"
+    );
+    server.abort();
 }

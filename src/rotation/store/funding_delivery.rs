@@ -122,6 +122,27 @@ impl Store {
                 deposited: s.deposited_amount,
                 refunded: s.refunded_amount,
             });
+        let return_binding = if observation.reported_refund().is_some() {
+            let (_, _, bound_quote, source) = self.delivery_binding(job, operation)?;
+            if FundingDeliveryExpectation::from_observation(
+                operation.parse()?,
+                &bound_quote,
+                observation,
+                source,
+            )
+            .is_ok()
+            {
+                let destination = observation
+                    .settlement()
+                    .expect("validated correlation")
+                    .destination_transactions[0];
+                Some(return_correlation(source, destination, &quote_digest))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let encrypted = hint
             .map(|hint| -> Result<Vec<u8>> {
                 seal(
@@ -136,10 +157,7 @@ impl Store {
         } else {
             1i64
         };
-        let declared_return = observation
-            .reported_refund()
-            .filter(|value| *value > U256::ZERO)
-            .map(|value| value.to_string());
+        let declared_return = observation.reported_refund().map(|value| value.to_string());
         let return_conflict = observation
             .issues()
             .contains(&crate::rotation::near::SettlementIssue::InvalidRefundedAmount);
@@ -147,7 +165,7 @@ impl Store {
         let tx = self.db.transaction()?;
         let changed=tx.execute("UPDATE funding_progress SET provider_success=MAX(provider_success,?3),provider_failed=MAX(provider_failed,?4),provider_refunded=MAX(provider_refunded,?5),provider_incomplete=MAX(provider_incomplete,?6),provider_observed_at=MAX(COALESCE(provider_observed_at,0),?7) WHERE job_id=?1 AND operation_id=?2 AND quote IS NOT NULL",params![job,operation,matches!(status,SwapStatus::Success),matches!(status,SwapStatus::Failed),matches!(status,SwapStatus::Refunded),matches!(status,SwapStatus::IncompleteDeposit),i64::try_from(observed_at)?])?;
         ensure!(changed == 1, "delivery operation changed");
-        let retained=tx.execute("INSERT INTO funding_delivery_hints(operation_id,job_id,quote_digest,queued,issue_bits,declared_return,return_conflict) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(operation_id) DO UPDATE SET queued=COALESCE(excluded.queued,queued),issue_bits=issue_bits|excluded.issue_bits,declared_return=COALESCE(declared_return,excluded.declared_return),return_conflict=MAX(return_conflict,excluded.return_conflict,CASE WHEN declared_return IS NOT NULL AND excluded.declared_return IS NOT NULL AND declared_return!=excluded.declared_return THEN 1 ELSE 0 END) WHERE job_id=excluded.job_id AND quote_digest=excluded.quote_digest",params![operation,job,quote_digest.as_slice(),encrypted,issues,declared_return,return_conflict])?;
+        let retained=tx.execute("INSERT INTO funding_delivery_hints(operation_id,job_id,quote_digest,queued,issue_bits,declared_return,return_conflict,return_binding) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(operation_id) DO UPDATE SET queued=COALESCE(excluded.queued,queued),issue_bits=issue_bits|excluded.issue_bits,declared_return=COALESCE(declared_return,excluded.declared_return),return_binding=CASE WHEN declared_return IS NULL OR declared_return=excluded.declared_return THEN COALESCE(excluded.return_binding,return_binding) ELSE return_binding END,return_conflict=MAX(return_conflict,excluded.return_conflict,CASE WHEN declared_return IS NOT NULL AND excluded.declared_return IS NOT NULL AND declared_return!=excluded.declared_return THEN 1 ELSE 0 END) WHERE job_id=excluded.job_id AND quote_digest=excluded.quote_digest",params![operation,job,quote_digest.as_slice(),encrypted,issues,declared_return,return_conflict,return_binding.as_ref().map(|value|value.as_slice())])?;
         ensure!(retained == 1, "delivery hint binding changed");
         funding::derive_operation_phase(&tx, job, operation)?;
         tx.commit()?;
@@ -338,13 +356,57 @@ pub(super) fn dispute_anchor(db: &Connection, wallet: &str, hash: &str) -> Resul
     Ok(())
 }
 
-/// This slice cannot discharge a declared return: current exact treasury return
-/// accounting is a separate proof obligation, never a provider amount credit.
+/// Correlation is finite provider evidence, not proof that future returns cannot
+/// occur. Every newly discovered canonical output invalidates this accounting.
+fn return_correlation(
+    source: alloy_primitives::B256,
+    destination: alloy_primitives::B256,
+    quote: &[u8],
+) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"funding-return-v1");
+    hash.update(source.as_slice());
+    hash.update(destination.as_slice());
+    hash.update(quote);
+    hash.finalize().into()
+}
+fn return_complete(db: &Connection, operation: &str) -> Result<bool> {
+    let claim:Option<(Option<String>,Option<Vec<u8>>,bool)>=db.query_row("SELECT declared_return,return_binding,return_conflict FROM funding_delivery_hints WHERE operation_id=?1",[operation],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+    let Some((Some(amount), Some(binding), false)) = claim else {
+        return Ok(false);
+    };
+    let amount = U256::from_str_radix(&amount, 10).context("invalid retained return amount")?;
+    let event:Option<(String,String,Vec<u8>)>=db.query_row("SELECT e.source_transaction,e.transaction_hash,e.quote_digest FROM funding_delivery_current c JOIN funding_delivery_events e ON e.id=c.event_id AND e.operation_id=c.operation_id WHERE c.operation_id=?1",[operation],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+    let Some((source, destination, quote)) = event else {
+        return Ok(false);
+    };
+    let exact = return_correlation(source.parse()?, destination.parse()?, &quote);
+    if binding.as_slice() != exact.as_slice() {
+        return Ok(false);
+    }
+    let Some(returned) = super::source_support::returned(db, operation)? else {
+        return Ok(false);
+    };
+    // Explicit zero closes only the currently known finite obligation. A newly
+    // observed positive output contradicts zero and reopens the operation.
+    Ok(if amount == U256::ZERO {
+        returned == U256::ZERO
+    } else {
+        returned >= amount
+    })
+}
 pub(super) fn return_pending(db: &Connection, operation: &str) -> Result<bool> {
     let (claimed,external):(bool,bool)=db.query_row("SELECT EXISTS(SELECT 1 FROM funding_delivery_hints WHERE operation_id=?1 AND (declared_return IS NOT NULL OR return_conflict=1)),EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE j.operation_id=?1 AND f.state='COMPLETE' AND f.completion_outcome IN ('EXTERNAL','RECOVERED'))",[operation],|r|Ok((r.get(0)?,r.get(1)?)))?;
-    // Exact closed original source authority is independent of a later
-    // contradictory provider claim. A label alone cannot prove that closure.
-    Ok(claimed && !(external && funding::source_attempt_closed(db, operation)?))
+    if external && funding::source_attempt_closed(db, operation)? {
+        return Ok(false);
+    }
+    let version: u32 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version < 25 {
+        return Ok(claimed);
+    }
+    let required:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM funding_progress WHERE operation_id=?1 AND (provider_success=1 OR provider_refunded=1)) OR EXISTS(SELECT 1 FROM refund_outputs WHERE operation_id=?1) OR EXISTS(SELECT 1 FROM funding_delivery_current WHERE operation_id=?1)",[operation],|row|row.get(0))?;
+    Ok((claimed || required) && !return_complete(db, operation)?)
 }
 #[cfg(all(test, feature = "zcash"))]
 mod tests;

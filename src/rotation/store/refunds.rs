@@ -1,5 +1,6 @@
 //! Confirmed returned principal, keyed by outpoint; never inferred from API status.
 use super::*;
+pub(crate) mod inventory;
 #[derive(Clone, Debug, Serialize)]
 pub struct RefundStatus {
     pub txid: String,
@@ -17,6 +18,7 @@ pub(super) fn read_refunds(db: &Connection) -> Result<Vec<RefundStatus>> {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub(crate) enum ReturnAccountingIssue {
+    PendingObservedReturn { operation_id: String },
     MissingOriginalBinding { operation_id: String },
     AmbiguousOriginalBinding { operation_id: String },
     InvalidCreditedIdentity { operation_id: String },
@@ -30,7 +32,8 @@ pub(crate) enum ReturnAccountingIssue {
 impl ReturnAccountingIssue {
     pub(crate) fn operation_id(&self) -> &str {
         match self {
-            Self::MissingOriginalBinding { operation_id }
+            Self::PendingObservedReturn { operation_id }
+            | Self::MissingOriginalBinding { operation_id }
             | Self::AmbiguousOriginalBinding { operation_id }
             | Self::InvalidCreditedIdentity { operation_id }
             | Self::MissingCreditedTransaction { operation_id }
@@ -48,6 +51,7 @@ pub(crate) struct ReturnAccounting {
     pub bindings: std::collections::HashMap<String, std::collections::BTreeSet<String>>,
     pub confirmed: std::collections::HashSet<String>,
     pub credited: Vec<RefundStatus>,
+    pub credited_totals: std::collections::HashMap<String, i64>,
     pub ambiguous_operations: std::collections::HashSet<String>,
     pub issues: Vec<ReturnAccountingIssue>,
 }
@@ -153,8 +157,26 @@ impl Store {
     /// Called only by the synchronized treasury owner after checking confirmation
     /// depth. Repeated observations cannot credit the same output twice. Excess
     /// payments cannot refund fees or unrelated operation exposure.
-    #[cfg(any(feature = "zcash", test))]
+    #[cfg(test)]
     pub(crate) fn record_refund(&mut self, refund: RefundStatus) -> Result<()> {
+        let credited = self.db.query_row(
+            "SELECT COALESCE(SUM(credited),0) FROM refund_outputs WHERE operation_id=?1",
+            [&refund.operation_id],
+            |row| row.get(0),
+        )?;
+        self.record_refund_with_total(refund, credited).map(|_| ())
+    }
+    pub(crate) fn record_observed_refund(
+        &mut self,
+        refund: RefundStatus,
+        revision: i64,
+        credited: i64,
+    ) -> Result<(i64, i64)> {
+        self.check_return_inventory(revision)?;
+        let credited = self.record_refund_with_total(refund, credited)?;
+        Ok((self.return_inventory_revision()?, credited))
+    }
+    fn record_refund_with_total(&mut self, refund: RefundStatus, credited: i64) -> Result<i64> {
         let (submission, facts): (String, String) = self.db.query_row(
             "SELECT submission,facts FROM treasury_operations WHERE id=?1",
             [&refund.operation_id],
@@ -170,21 +192,21 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
+        let mut total = credited;
         if let Some((op, amount)) = existing {
             ensure!(
                 op == refund.operation_id && amount == refund.amount,
                 "refund conflict"
             );
         } else {
-            let credited: i64 = tx.query_row(
-                "SELECT COALESCE(SUM(credited),0) FROM refund_outputs WHERE operation_id=?1",
-                [&refund.operation_id],
-                |r| r.get(0),
-            )?;
             ensure!(refund.amount > 0, "invalid refund value");
             let credit = refund
                 .amount
                 .min(i64::try_from(facts.amount_zatoshis)?.saturating_sub(credited));
+            ensure!(credit >= 0, "return credit exceeds original principal");
+            total = credited
+                .checked_add(credit)
+                .context("return credit overflow")?;
             tx.execute(
                 "INSERT INTO refund_outputs VALUES (?1,?2,?3,?4,?5,?6)",
                 params![
@@ -197,8 +219,18 @@ impl Store {
                 ],
             )?;
         }
+        let job: Option<String> = tx
+            .query_row(
+                "SELECT job_id FROM funding_progress WHERE operation_id=?1",
+                [&refund.operation_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(job) = job {
+            funding::derive_operation_phase(&tx, &job, &refund.operation_id)?;
+        }
         tx.commit()?;
-        Ok(())
+        Ok(total)
     }
 }
 

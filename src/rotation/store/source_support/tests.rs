@@ -51,6 +51,9 @@ fn observation(start: &SyncObservationStart, revision: i64) -> SyncObservation {
     }
 }
 fn stage(store: &mut Store, disposition: Disposition) -> Pass {
+    stage_return(store, disposition, None)
+}
+fn stage_return(store: &mut Store, disposition: Disposition, returned: Option<U256>) -> Pass {
     let pass = store
         .begin_source_support(
             store.snapshot().unwrap().0,
@@ -71,6 +74,11 @@ fn stage(store: &mut Store, disposition: Disposition) -> Pass {
             store
                 .stage_source_support(&pass, &operation, &raw, disposition)
                 .unwrap();
+            if let Some(amount) = returned {
+                store
+                    .stage_return_support(&pass, &operation.operation_id, amount, false)
+                    .unwrap();
+            }
         }
     }
     store.seal_source_support(&pass).unwrap();
@@ -279,6 +287,11 @@ fn current_contradiction_and_new_scan_never_fall_back_to_old_support() {
 /// Store-only fixtures explicitly publish the canonical evidence their test owns.
 pub(crate) fn publish_confirmed(store: &mut Store) {
     let pass = stage(store, Disposition::Confirmed(5));
+    activate_pass(store, &pass);
+}
+
+pub(crate) fn publish_confirmed_returns(store: &mut Store, returned: U256) {
+    let pass = stage_return(store, Disposition::Confirmed(5), Some(returned));
     activate_pass(store, &pass);
 }
 

@@ -410,6 +410,7 @@ impl Store {
         tx.execute_batch(include_str!("store/shielding_schema.sql"))?;
         tx.execute_batch(include_str!("store/restoration_schema.sql"))?;
         tx.execute_batch(include_str!("store/source_support_schema.sql"))?;
+        tx.execute_batch(include_str!("store/return_support_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
             params![id, birthday, network.name()],
@@ -461,7 +462,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 24,
+                version == 25,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -1169,7 +1170,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 24,
+        schema == 25,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1386,7 +1387,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 24,
+        version == 25,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
     db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;

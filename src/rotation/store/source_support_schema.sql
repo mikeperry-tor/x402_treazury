@@ -24,6 +24,8 @@ CREATE TABLE source_support_rows(
  outgoing_revision INTEGER NOT NULL,
  disposition TEXT NOT NULL CHECK(disposition IN ('CONFIRMED','UNAVAILABLE','CONFLICT','EXPIRED')),
  confirmed_height INTEGER,
+ returned_amount TEXT CHECK(returned_amount IS NULL OR (length(returned_amount) BETWEEN 1 AND 78 AND returned_amount NOT GLOB '*[^0-9]*')),
+ return_issue INTEGER NOT NULL DEFAULT 1 CHECK(return_issue IN (0,1)),
  revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
  PRIMARY KEY(pass_id,operation_id),
  CHECK((disposition='CONFIRMED')=(confirmed_height IS NOT NULL))

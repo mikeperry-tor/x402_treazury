@@ -38,6 +38,7 @@ impl SyncSession {
         &self,
         height: u64,
         confirmations: u32,
+        returns: refunds::ReturnReconciliation,
     ) -> Result<Pass> {
         let anchor = self
             .client
@@ -58,6 +59,11 @@ impl SyncSession {
         let pass = self
             .store
             .call(move |s| s.begin_source_support(revision, anchor))
+            .await?;
+        let checked = pass.clone();
+        let return_revision = returns.inventory_revision;
+        self.store
+            .call(move |store| store.source_pass_return_inventory(&checked, return_revision))
             .await?;
         let mut cursor = String::new();
         loop {
@@ -113,6 +119,19 @@ impl SyncSession {
                 let staged = operation.clone();
                 self.store
                     .call(move |s| s.stage_source_support(&captured, &staged, &raw, disposition))
+                    .await?;
+                let captured = pass.clone();
+                let id = operation.operation_id.clone();
+                let returned = returns.canonical.get(&id).copied();
+                self.store
+                    .call(move |store| {
+                        store.stage_return_support(
+                            &captured,
+                            &id,
+                            returned.unwrap_or_default(),
+                            returned.is_none(),
+                        )
+                    })
                     .await?;
                 // Canonical accounting never invents current support from buried
                 // history, but archival absence does not veto independent capacity.

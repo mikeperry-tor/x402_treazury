@@ -67,6 +67,9 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
             .len(),
         1
     );
+    let pending = collect_refunds(&wallet, &accounting, 3, 2).unwrap();
+    assert!(!pending.canonical.contains_key("op"));
+    assert!(pending.issues.iter().any(|issue|matches!(issue,ReturnAccountingIssue::PendingObservedReturn { operation_id } if operation_id=="op")));
     let refunds = collect_refunds(&wallet, &accounting, 4, 2).unwrap().credits;
     assert_eq!(refunds.len(), 2);
     store.record_refund(refunds[0].clone()).unwrap();
@@ -101,6 +104,10 @@ fn refund_observations_require_confirmed_origins_even_after_shielding() {
     assert!(
         shielded.credits.is_empty(),
         "known outputs need no duplicate publication"
+    );
+    assert_eq!(
+        shielded.canonical.get("op"),
+        Some(&alloy_primitives::U256::from(300))
     );
     accounting
         .bindings
@@ -527,5 +534,31 @@ fn unidentified_historical_credit_stops_attribution_and_shielding_without_failin
     assert_eq!(
         serde_json::to_value(&accounting.credited[0]).unwrap(),
         serde_json::to_value(original).unwrap()
+    );
+}
+
+#[test]
+fn failed_uncredited_output_does_not_permanently_veto_return_accounting() {
+    let mut wallet=SyntheticWalletBuilder::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").transparent_coin(100).build();
+    let coin = wallet.wallet_outputs::<pepper_sync::wallet::TransparentCoin>()[0];
+    let txid = coin.output_id().txid();
+    let mut accounting = crate::rotation::store::refunds::ReturnAccounting::default();
+    accounting.confirmed.insert("original".into());
+    accounting
+        .bindings
+        .entry(coin.address().to_owned())
+        .or_default()
+        .insert("original".into());
+    wallet
+        .wallet_transactions
+        .get_mut(&txid)
+        .unwrap()
+        .update_status(ConfirmationStatus::Failed(20.into()), 0, true);
+    let observation = collect_refunds(&wallet, &accounting, 20, 2).unwrap();
+    assert!(observation.credits.is_empty());
+    assert!(observation.issues.is_empty());
+    assert_eq!(
+        observation.canonical.get("original"),
+        Some(&alloy_primitives::U256::ZERO)
     );
 }

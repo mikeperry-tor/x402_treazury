@@ -5,6 +5,35 @@ Working sections: [gate inventory](#gate-inventory-and-implementation-evidence),
 The [target design](#target-design) and [findings](#supporting-review-findings)
 provide supporting context.
 
+## C18 canonical return closure checkpoint — 2026-10-17
+
+Schema25 binds finite return accounting to the same bounded historical source pass.
+Production loads original return bindings and immutable credits in pages, publishes
+one discovered output per Store job, and carries exact credited totals under the
+shared inventory revision. Duplicate provider observations do not invalidate useful
+history. Canonical original outputs remain accounting evidence after shielding or
+spending; pending positive outputs are scoped incomplete, and invalidated never-
+credited outputs do not create permanent obligations.
+
+SUCCESS now requires exact canonical destination delivery and current source/return
+proofs. Unknown amounts are not zero. Explicit zero or a positive amount must bind
+to the original source, accepted quote and delivered transaction; positive amounts
+need complete canonical owned-output coverage. Historical provider terminal labels
+remain audit rather than a permanent veto after all proofs discharge the obligations.
+Changed or malformed claims remain incomplete. New outputs or canonical contradictions
+reopen accounting without erasing historical completion or duplicating return credit.
+Explicit zero describes the current finite claim, never absence of future returns.
+
+Independent review covered financial correlation, revision coverage, bounded
+publication and historical readers. Focused gates: delivery/return13, completion21,
+source Store5 and synthetic SDK refund6 passed; the latter includes spent origins,
+ambiguity isolation, pending positives and the failed-output negative control.
+The follow-up storage-error propagation regression also passed (1 test).
+Cross-layer funding-worker acceptance (T48) remains next. Full returned-principal
+accounting does not authorize a replacement attempt: refunded retry still requires
+review under the explicit repository instructions. Operation-scoped live orphan
+recovery is a separate schema26 slice; this checkpoint does not claim plan completion.
+
 ## C18 canonical source support checkpoint — 2026-10-16
 
 Schema23 adds bounded inactive source observations, activated with the final

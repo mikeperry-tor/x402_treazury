@@ -10,6 +10,7 @@ CREATE TABLE funding_delivery_hints(
  issue_bits INTEGER NOT NULL DEFAULT 0,
  prefer_event INTEGER NOT NULL DEFAULT 1 CHECK(prefer_event IN (0,1)),
  declared_return TEXT CHECK(declared_return IS NULL OR (length(declared_return) BETWEEN 1 AND 78 AND declared_return NOT GLOB '*[^0-9]*')),
+ return_binding BLOB CHECK(return_binding IS NULL OR length(return_binding)=32),
  return_conflict INTEGER NOT NULL DEFAULT 0 CHECK(return_conflict IN (0,1)),
  CHECK((active IS NULL)=(ticket IS NULL))
 );

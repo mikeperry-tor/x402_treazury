@@ -36,6 +36,8 @@ pub(crate) struct ReturnReconciliation {
     pub observed_outputs: usize,
     pub attribution: ReturnAttribution,
     pub issues: Vec<ReturnAccountingIssue>,
+    pub inventory_revision: i64,
+    pub canonical: std::collections::HashMap<String, alloy_primitives::U256>,
 }
 #[derive(Debug)]
 struct ReturnObservation {
@@ -43,6 +45,7 @@ struct ReturnObservation {
     attribution: ReturnAttribution,
     credits: Vec<RefundStatus>,
     issues: Vec<ReturnAccountingIssue>,
+    canonical: std::collections::HashMap<String, alloy_primitives::U256>,
 }
 impl SyncSession {
     pub(super) async fn reconcile_refunds(
@@ -50,14 +53,30 @@ impl SyncSession {
         height: u64,
         confirmations: u32,
     ) -> Result<ReturnReconciliation> {
-        let accounting = self.store.call(|s| s.return_accounting()).await?;
+        let (mut revision, mut accounting) =
+            crate::rotation::store::refunds::inventory::load(&self.store).await?;
         let wallet = self.client.wallet().read().await;
         let observation = collect_refunds(&wallet, &accounting, height, confirmations)?;
         drop(wallet);
-        let report = ReturnReconciliation {
+        // Known contradictions revoke only dependent return support immediately;
+        // a later source guard, cancellation or stale checkpoint cannot leave a
+        // previously accepted return projection authoritative.
+        for operation in accounting
+            .confirmed
+            .iter()
+            .filter(|operation| !observation.canonical.contains_key(*operation))
+        {
+            let operation = operation.clone();
+            self.store
+                .call(move |store| store.revoke_return_support(&operation))
+                .await?;
+        }
+        let mut report = ReturnReconciliation {
             observed_outputs: observation.observed_outputs,
             attribution: observation.attribution,
             issues: observation.issues,
+            inventory_revision: revision,
+            canonical: observation.canonical,
         };
         if report.attribution == ReturnAttribution::Unidentifiable {
             tracing::warn!(
@@ -66,16 +85,25 @@ impl SyncSession {
                 "Refund attribution incomplete; new credits and refund shielding remain blocked"
             );
         }
-        if !observation.credits.is_empty() {
-            self.store
-                .call(move |s| {
-                    for refund in observation.credits {
-                        s.record_refund(refund)?;
-                    }
-                    Ok(())
-                })
+        for refund in observation.credits {
+            let operation = refund.operation_id.clone();
+            let prior = accounting
+                .credited_totals
+                .get(&operation)
+                .copied()
+                .unwrap_or(0);
+            let (next, total) = self
+                .store
+                .call(move |store| store.record_observed_refund(refund, revision, prior))
                 .await?;
+            revision = next;
+            accounting.credited_totals.insert(operation, total);
+            tokio::task::yield_now().await;
         }
+        self.store
+            .call(move |store| store.check_return_inventory(revision))
+            .await?;
+        report.inventory_revision = revision;
         // Only fixed categories/counts go to stderr. Exact operation identities
         // remain in the typed result for dependent accounting/status consumers.
         for (reason, count) in [
@@ -224,14 +252,28 @@ fn collect_refunds(
         .iter()
         .map(|issue| issue.operation_id().to_owned())
         .collect();
+    let mut canonical = std::collections::HashMap::new();
+    if attribution == ReturnAttribution::Scoped {
+        for owners in accounting
+            .bindings
+            .values()
+            .filter(|owners| owners.len() == 1)
+        {
+            let operation = owners.first().expect("one owner");
+            if accounting.confirmed.contains(operation)
+                && !accounting.ambiguous_operations.contains(operation)
+                && !affected_operations.contains(operation)
+            {
+                canonical.insert(operation.clone(), alloy_primitives::U256::ZERO);
+            }
+        }
+    }
     let mut refunds = vec![];
     let mut observed_outputs = 0;
     // The pinned dependency has no incremental unknown-output feed. Inspect its
     // resident history once without copying it; matching is keyed by address.
     for record in wallet.wallet_transactions.values() {
-        let Some(h) = canonical_height(record) else {
-            continue;
-        };
+        let canonical_height = canonical_height(record);
         for coin in record.transparent_coins() {
             let Some(owners) = accounting.bindings.get(coin.address()) else {
                 continue;
@@ -248,7 +290,21 @@ fn collect_refunds(
             {
                 continue;
             }
+            let Some(h) = canonical_height else {
+                if coin.value() > 0 && !record.status().is_failed() {
+                    canonical.remove(operation);
+                    issues.insert(ReturnAccountingIssue::PendingObservedReturn {
+                        operation_id: operation.clone(),
+                    });
+                }
+                continue;
+            };
             observed_outputs += 1;
+            if let Some(total) = canonical.get_mut(operation) {
+                *total = total
+                    .checked_add(alloy_primitives::U256::from(coin.value()))
+                    .context("canonical return total overflow")?;
+            }
             // Known outputs retain their original accounting even when disputed.
             // Only previously uncredited discoveries may be published.
             if attribution == ReturnAttribution::Unidentifiable
@@ -271,6 +327,7 @@ fn collect_refunds(
         attribution,
         credits: refunds,
         issues: issues.into_iter().collect(),
+        canonical,
     })
 }
 fn require_refund_shielding_evidence(
@@ -304,6 +361,7 @@ impl Treasury {
     ) -> Result<PreparedTransaction> {
         self.sync_once(stop).await?;
         let policy_job = job.clone();
+        let (_, accounting) = crate::rotation::store::refunds::inventory::load(&self.store).await?;
         let (address, recipient, funding_operation, accounting) = self
             .store
             .call(move |s| {
@@ -311,7 +369,6 @@ impl Treasury {
                     .funding_job(&job)?
                     .context("network_identity_missing: refund job")?;
                 let address = s.refund_address(&job)?.context("unknown refund address")?;
-                let accounting = s.return_accounting()?;
                 ensure!(
                     accounting
                         .bindings

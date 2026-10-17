@@ -817,7 +817,10 @@ impl SyncSession {
         self.source_pass = Some(match retained {
             Some(pass) => pass,
             None => {
-                self.recheck_source_support(height, settings.confirmations.get())
+                let returns = self
+                    .reconcile_refunds(height, settings.confirmations.get())
+                    .await?;
+                self.recheck_source_support(height, settings.confirmations.get(), returns)
                     .await?
             }
         });
@@ -844,9 +847,7 @@ impl SyncSession {
             .map_err(|_| anyhow::anyhow!("treasury spendable balance unavailable"))?
             .into_u64();
         drop(wallet);
-        tracing::debug!("treasury sync: spending and balances checked; reconciling refunds");
-        self.reconcile_refunds(height, settings.confirmations.get())
-            .await?;
+        tracing::debug!("treasury sync: spending and balances checked");
         freshness::validate(
             target_height,
             height,

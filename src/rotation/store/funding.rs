@@ -125,9 +125,7 @@ impl FundingFacts {
         self.accepted_quote
             && !self.archived
             && self.source_attempts > 0
-            && (self.return_pending
-                || !self.delivery_verified
-                || (!self.provider_success && !self.provider_refunded))
+            && (self.return_pending || !self.delivery_verified)
     }
     pub(crate) fn observations_needed(&self) -> bool {
         !self.readiness_recorded
@@ -706,11 +704,9 @@ fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<Pro
 }
 
 pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> Result<bool> {
-    let (ready, correlation, quote, flags, confirmed, gross):
-            (bool, Option<String>, bool, rusqlite::Result<ProviderFlags>, bool, bool) = tx.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
-    let (success, failed, refunded, incomplete) =
-        flags.context(super::scheduling::FundingDecodeFailure)?;
+    let (ready, correlation, quote, confirmed, gross):
+            (bool, Option<String>, bool, bool, bool) = tx.query_row(
+            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
     let wallet: String = tx.query_row(
         "SELECT wallet_id FROM funding_jobs WHERE id=?1",
         [job],
@@ -733,13 +729,10 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
         Some(if signed { "RECOVERED" } else { "EXTERNAL" })
     } else if ready
         && correlation.as_deref() == Some(operation)
-        && success
-        && !failed
-        && !refunded
-        && !incomplete
         && confirmed
         && gross
         && source_accounted(tx, operation)?
+        && super::funding_delivery::delivered(tx, job, operation)?
         && !super::funding_delivery::return_pending(tx, operation)?
     {
         Some("SUCCESS")
@@ -784,7 +777,7 @@ pub(super) fn derive_operation_phase(db: &Connection, job: &str, operation: &str
         // Completion outcome remains historical audit. New exact-operation
         // return evidence makes current accounting incomplete independently
         // of the provider's status label or destination spending capacity.
-        db.execute("UPDATE funding_progress SET phase='\"REFUND_PENDING\"',last_error='return_accounting_pending' WHERE job_id=?1 AND operation_id=?2", params![job,operation])?;
+        db.execute("UPDATE funding_progress SET phase='\"REFUND_PENDING\"',last_error='return_accounting_pending' WHERE job_id=?1 AND operation_id=?2 AND phase!='\"RECOVERY_REQUIRED\"'", params![job,operation])?;
     }
     Ok(())
 }
@@ -2381,7 +2374,7 @@ mod completion_tests {
 
     #[cfg(feature = "zcash")]
     #[test]
-    fn success_requires_source_accounting_and_keeps_original_credit_after_spending() {
+    fn success_requires_delivery_and_return_proof_even_after_source_and_readiness() {
         use crate::rotation::near::SwapStatus;
         let (_dir, mut store, job) = fixture();
         store
@@ -2453,7 +2446,7 @@ mod completion_tests {
                 .unwrap()
                 .last_error
                 .as_deref(),
-            Some("source_accounting_pending")
+            Some("return_accounting_pending")
         );
         super::super::source_support::tests::publish_confirmed(&mut store);
         assert!(
@@ -2470,12 +2463,12 @@ mod completion_tests {
             )
             .unwrap();
         assert!(
-            store
+            !store
                 .finish_funding_if_proven(&job.id, &job.operation_id)
                 .unwrap()
         );
         assert!(
-            store
+            !store
                 .finish_funding_if_proven(&job.id, &job.operation_id)
                 .unwrap()
         );
@@ -2486,10 +2479,10 @@ mod completion_tests {
         assert!(facts.source_accounting_pending && facts.source_reconciliation_needed());
         assert!(facts.observations_needed());
         let current = store.funding_job(&job.id).unwrap().unwrap();
-        assert_eq!(current.phase, FundingPhase::Complete);
+        assert_eq!(current.phase, FundingPhase::RefundPending);
         assert_eq!(
             current.last_error.as_deref(),
-            Some("source_accounting_pending")
+            Some("return_accounting_pending")
         );
         assert!(
             !store

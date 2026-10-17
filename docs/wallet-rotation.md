@@ -303,7 +303,7 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema 24
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema 25
 derives payment exposure from authoritative journals; no independently writable
 exposure total remains. It preserves original payer role, consumed slot/generation
 and exact balance support;
@@ -494,13 +494,23 @@ cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with
 an obsolete persistence warning; genuine source-reconciliation errors remain visible.
 
-Successful financial completion combines three independent facts: the operation's
-applicable immutable destination-readiness proof, canonical source confirmation,
-and validated provider fulfillment. Destination readiness alone publishes the funded
-wallet role and may permit payments before the other facts arrive. Consumption does
-not erase that historical proof or require rebuilding the original funding balance.
-Conflicting terminal outcomes preserve review-required work; provider fulfillment
-is not canonical source or return evidence.
+Successful financial completion requires the original destination-readiness proof,
+current canonical source support, exact canonical destination delivery, and complete
+accounting for the exact operation-bound finite return claim. Missing return
+amounts remain unknown. An explicit normalized zero must correlate to the original
+source, accepted quote and delivered transaction; a positive claim requires enough
+canonical owned return outputs and no unresolved accounting issues. Spent or shielded
+outputs still count when their original canonical evidence remains available.
+
+Explicit zero is the provider's finite claim, not proof that future returns are
+impossible. Return evidence retains its original historical anchor while a completed
+pass catches up for fresh spending evidence. Ordinary sync continues observing the
+original addresses after completion. A new output, changed claim or canonical
+contradiction reopens affected accounting without erasing the historical completion
+outcome or crediting an output twice. Destination readiness may permit payments
+before financial completion; it never substitutes for source, delivery or return
+proof. Historical provider labels remain audit evidence; unresolved or conflicting
+financial proofs remain review-required.
 
 One retained funding owner schedules independent status, credit and prerequisite-
 complete unsigned quote observations in bounded lanes, alongside serialized treasury
