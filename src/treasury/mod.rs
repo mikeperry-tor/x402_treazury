@@ -49,6 +49,8 @@ use zingolib::{
 
 pub struct Treasury {
     #[cfg(test)]
+    accounting_test_hook: Option<std::sync::Arc<source_support::AccountingTestGate>>,
+    #[cfg(test)]
     final_checkpoint_test_hook: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     network: TreasuryNetwork,
     _scratch: tempfile::TempDir,
@@ -183,6 +185,8 @@ impl Treasury {
             sync_owner: None,
             #[cfg(test)]
             final_checkpoint_test_hook: None,
+            #[cfg(test)]
+            accounting_test_hook: None,
             store,
             worker,
             revision: 1,
@@ -257,6 +261,8 @@ impl Treasury {
             sync_owner: None,
             #[cfg(test)]
             final_checkpoint_test_hook: None,
+            #[cfg(test)]
+            accounting_test_hook: None,
             store,
             worker,
             revision,
@@ -513,6 +519,8 @@ impl Treasury {
             tracing::info!("treasury sync: synchronizing wallet with indexer");
             self.checkpoint(observation.clone()).await?;
             let session = SyncSession {
+                #[cfg(test)]
+                accounting_test_hook: self.accounting_test_hook.clone(),
                 identity: crate::network::IsolationId::treasury(
                     &self.store.call(|s| Ok(s.id().to_owned())).await?,
                 ),
@@ -630,6 +638,8 @@ impl Treasury {
 }
 
 struct SyncSession {
+    #[cfg(test)]
+    accounting_test_hook: Option<std::sync::Arc<source_support::AccountingTestGate>>,
     source_pass: Option<crate::rotation::store::source_support::Pass>,
     observation_start: Option<crate::rotation::store::SyncObservationStart>,
     identity: crate::network::IsolationId,

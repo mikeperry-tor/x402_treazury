@@ -1,4 +1,5 @@
 //! Real scheduler + Backend + treasury actor; only the chains and bridge are local fixtures.
+mod accounting;
 use super::*;
 use crate::rotation::{
     base::BaseRpc,

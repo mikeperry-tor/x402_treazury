@@ -2,6 +2,23 @@
 use super::*;
 use crate::rotation::store::source_support::{Anchor, Disposition, Pass};
 
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct AccountingTestGate {
+    used: std::sync::atomic::AtomicBool,
+    pub(super) entered: CancellationToken,
+    pub(super) release: CancellationToken,
+}
+#[cfg(test)]
+impl AccountingTestGate {
+    async fn hold_once(&self) {
+        if !self.used.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            self.entered.cancel();
+            self.release.cancelled().await;
+        }
+    }
+}
+
 impl SyncSession {
     pub(super) async fn retain_source_support(
         &self,
@@ -124,6 +141,10 @@ impl SyncSession {
                     Disposition::Unavailable
                 };
                 drop(wallet);
+                #[cfg(test)]
+                if let Some(gate) = &self.accounting_test_hook {
+                    gate.hold_once().await;
+                }
                 let captured = pass.clone();
                 let staged = operation.clone();
                 self.store
