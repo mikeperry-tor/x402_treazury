@@ -3306,6 +3306,74 @@ shutdown does not start a replacement owner. Notifications trigger fresh admissi
 never grant authority. Keep task-exit containment distinct from the original C17
 recovery acceptance and test the applicable actual deployment path.
 
+### Complexity-guided refactoring targets
+
+The completed 2026-10-17 source analysis compared with merge base
+`638eca4e108f41b380deb143ed430e9a0f2c716c` on `main`: 18 production callables
+received advisory warnings (25 metric warnings), with 23 production callables above
+either threshold and no excluded files. At inspection, all analyzed source hashes
+still matched the checkout. Saved evidence is under
+`target/complexity-runs/20261017T133731Z-675114d9/`; retain this measured baseline
+when recording follow-up changes rather than depending on the mutable latest link.
+
+CogC > 20 and CycC > 40 are review triggers, not acceptance failures. Scores include
+nested callable spaces and parse source feature branches rather than one compiled
+configuration. “Unmatched” includes ambiguous identities and renamed/reorganized
+functions; it does not mean all measured complexity was introduced by this branch.
+These findings locate responsibilities to separate, not new demonstrated defects.
+Do not extract helpers merely to lower a score or add a general workflow framework.
+
+| Target and measured CogC / CycC | Concrete refactoring scope | Owning packages and behavioral gate |
+| --- | --- | --- |
+| [Deployment::initialize_wallets_mode](../../src/deployment.rs#L817), 58 / 64, unmatched | Separate establishment of Store/Base/SDK capabilities from pool and worker assembly. Replace ambiguous capability combinations with explicit usable outcomes while preserving independent static/Base service and one cleanup owner. | H08/H09: capability/context negatives, partial setup failure, bind-before-financial-work, exclusive Store ownership and owned drain. |
+| [FundingWorker::schedule_owned](../../src/rotation/funding/scheduler.rs#L224), 40 / 55 (was 22 / 36), and [publish_current_observation](../../src/rotation/funding/scheduler.rs#L759), 16 / 48, unmatched | Separate lane scheduling, retained completion handling and financial publication decisions within the current coordinating owner. Make result/permit handoff explicit; separate health rendering from financial applicability. Do not turn each responsibility into an independently cancelling task. | H01/H02/H03: terminal-label refresh, local publication contention, cancellation, one-pass completeness, shutdown drain and independent lanes. Original C17 task-exit closure has its own gate. |
+| [collect_refunds](../../src/treasury/refunds.rs#L160), 53 / 44 (was 20 / 21) | Produce an explicit historical-credit assessment before current-output discovery and total/new-credit selection. Preserve deduplication before revalidation and one traversal of the resident SDK history; do not copy the history or scan it once per operation. | H01/H04/H05: scoped and unidentifiable attribution, conflicting owners, missing/noncanonical historical credits, explicit zero versus missing totals, no duplicate credit, restart and retained input claims. |
+| [ReconciliationOwner::maintenance](../../src/rotation/manager/maintenance.rs#L172), 37 / 47, unmatched, and [read_one](../../src/rotation/manager/maintenance.rs#L548), 25 / 34, unmatched | Group each lane's cursor, active identities, retry state and completion state under its existing owner. Make invalid combinations harder to construct without merging balance/history/repair resources or hiding different retry semantics behind a universal lane abstraction. | H03/H06: sparse traversal, priority fairness, scoped failures, one-pass completion, held historical I/O with current admission progress and cancellation. |
+| [Store::replacement_support_page](../../src/rotation/store/evidence/replacement.rs#L457), 27 / 53, unmatched | Separate typed support-source traversal and support validation while retaining the bounded physical cursor, original/effective provenance coverage and final snapshot/liability revision checks. | H01/H03/H07: every support consumer participates in invalidation; stale activation rolls back; inactive/sparse rows remain bounded; disputed old proofs cannot regain authority. |
+| [Store::capture_funding_delivery](../../src/rotation/store/funding_delivery.rs#L177), 11 / 55, unmatched | Separate candidate selection, authenticated saved-hint decoding, validated delivery expectation construction and read-ticket capture. Replace the internal provider-shaped JSON round trip through the common typed construction path described below. | H01/H05/H07: current-event/queued-correction fairness, exact correlation, malformed hints, saved-schema compatibility, revocation and publication races. |
+| Remaining warnings: `source_step`, `collect_inventory`, `dispatch_pending`, `ManagedPool::pay_with_cover_observed`, `Store::prepare_bound`, `Store::return_inventory_page`, `Treasury::calculate_owned_refund`, deferred `Runtime::run`, `RunningDeployment::serve`, and wallet CLI `run_args` | Review their affected call chains in the packages above: source/quote progression and inventory under H01–H03; payment/preparation under H07/H08; returns and SDK calculation under H04/H05; deferred startup/serving under H09 and C17; CLI context dispatch under H08. Record a concrete mixed responsibility or missing gate before changing a function. | H06 records disposition for each warning: refactor with owning package and acceptance, or retain with its concrete cohesive responsibility and applicable evidence. A score alone does not require a code change. |
+
+Prioritize funding scheduling/publication, then refund assessment, then deployment
+capability establishment. This prioritizes slices within the dependency sequence
+above; it does not defer H06/H05 acceptance setup or move implementation ahead of
+its authority/ownership contract. Reconciliation and Store support/delivery slices
+may proceed independently when their contracts are established. Never move the
+final authority check outside its transaction or introduce a new asynchronous gap
+merely to separate responsibilities.
+
+For each changed target, record before/after CogC and CycC under the same analyzer
+and comparison settings, review the resulting call chain, and report whether
+complexity was reduced, redistributed or intentionally retained. Preserve the
+behavioral gate as the completion criterion. New high-scoring helpers require the
+same responsibility review; reducing the parent score alone is insufficient.
+
+### Typed construction of internal delivery evidence
+
+`capture_funding_delivery` currently builds provider-shaped JSON, including a
+synthetic `UNKNOWN` status, then calls `restore_status_observation`. This reuses
+validation but couples durable internal evidence to an external response format.
+Treat removal of that representation dependency as an H01/H05 implementation slice,
+with H04 historical compatibility and H07 publication checks retained.
+
+**Change:** Identify the common validated facts and introduce a narrow checked typed
+constructor used by both the external response adapter and authenticated durable
+hint restoration. External parsing remains responsible for untrusted provider
+syntax; saved hints retain their decryption/AAD, version and operation binding
+checks. Both paths use the same semantic validation for accepted quote/source,
+recipient, asset, amount, transaction identity and optional return claims. Remove
+the synthetic provider JSON round trip after migrating its consumers. A typed
+constructor must not be an unchecked bypass or a new form of spending authority.
+
+**Acceptance:** Equivalent external and saved inputs produce equivalent validated
+facts and the same rejection of conflicting/malformed correlation. Preserve absent,
+explicit zero, positive and malformed return distinctions and historical diagnostics.
+Cover wrong operation/source/quote/recipient/asset/amount, changed destinations,
+conflicting current/queued candidates, unsupported saved layouts and restart. Keep
+exact unique-event ownership, current revocation checks and final publication CAS.
+Neither successful construction nor old saved evidence grants freshness, canonical
+confirmation, new execution permission or closure of another financial obligation.
+Use existing local fixtures; no extra provider probes or financial requests.
+
 ### Coverage and completion of the addendum
 
 | Observed hazard | Owning proposed changes |
@@ -3320,6 +3388,8 @@ recovery acceptance and test the applicable actual deployment path.
 | Authority crosses execution contexts | H08 |
 | Barrier removal exposes publication, startup and shutdown ordering | H09 |
 | Reorgs or late claims invalidate prior conclusions | H01, H04 |
+| Concentrated scheduler/refund/deployment responsibilities and remaining complexity warnings | Complexity-guided targets under H01–H09; H06 records every disposition |
+| Internal evidence depends on provider JSON representation | Typed delivery construction under H01/H05, with H04/H07 compatibility and publication gates |
 | Mechanical feature/lint integration | H06 standard checks; no separate financial redesign |
 
 The addendum is ready to guide implementation, not evidence that these changes have
@@ -3328,7 +3398,9 @@ acceptance limits are recorded and reviewed. Preserve any demonstrated unmet
 requirement explicitly; do not close it through a broader completion summary.
 H01 is the central architectural change, supported by H04's lifetime separation,
 H07's atomic binding and H08's explicit capabilities. The remaining packages make
-those contracts survive SDK, owner, resource and deployment boundaries.
+those contracts survive SDK, owner, resource and deployment boundaries. The
+complexity-guided target inventory and typed delivery-construction slice are part
+of their owning packages, not a separate score-reduction project.
 
 ### Rules to make explicit in AGENTS.md
 
