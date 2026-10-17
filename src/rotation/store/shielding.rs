@@ -1,6 +1,8 @@
 //! Immutable shielding provenance; the ordinary outgoing journal owns its lifecycle.
 use super::*;
 
+pub(crate) mod maintenance;
+
 #[derive(Clone)]
 pub(crate) struct Policy {
     pool: String,
@@ -354,16 +356,27 @@ impl Store {
         source: PolicySource<'_>,
     ) -> Result<(preparation::Preparation, Policy)> {
         ensure!(
+            self.refund_address(job)?.as_deref() == Some(address),
+            "shielding address binding changed"
+        );
+        self.begin_bound_shielding(operation, revision, job, address, source)
+    }
+
+    fn begin_bound_shielding(
+        &mut self,
+        operation: &str,
+        revision: i64,
+        job: &str,
+        address: &str,
+        source: PolicySource<'_>,
+    ) -> Result<(preparation::Preparation, Policy)> {
+        ensure!(
             self.funding_permits.is_none(),
             AdmissionError::FundingPermitDenied
         );
         self.require_complete_provenance()?;
         self.funding_restriction
             .require_new_funding("shielding_preparation")?;
-        ensure!(
-            self.refund_address(job)?.as_deref() == Some(address),
-            "shielding address binding changed"
-        );
         let (pool, wallet): (String, String) = self.db.query_row(
             "SELECT pool_id,wallet_id FROM funding_jobs WHERE id=?1",
             [job],

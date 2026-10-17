@@ -1,5 +1,10 @@
 //! Per-address shielding through the backend's public calculate-only API.
 use super::*;
+
+pub(crate) mod maintenance;
+
+// Existing backend proposal threshold, shared by read-only automatic selection.
+const SHIELDING_THRESHOLD: u64 = 10_000;
 use crate::rotation::{
     store::refunds::{RefundStatus, ReturnAccountingIssue},
     transaction::{PreparedTransaction, TransactionFacts},
@@ -438,7 +443,7 @@ impl Treasury {
                 &chain,
                 &selector,
                 &strategy,
-                Zatoshis::const_from_u64(10_000),
+                Zatoshis::const_from_u64(SHIELDING_THRESHOLD),
                 &[receiver],
                 zip32::AccountId::ZERO,
                 ConfirmationsPolicy::new_symmetrical(confirmations, false),

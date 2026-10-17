@@ -33,6 +33,8 @@ pub struct TreasuryCommands {
     // Retained for upcoming actor maintenance; no automatic scheduling yet.
     #[allow(dead_code)]
     shielding: Option<crate::rotation::store::shielding::ServingAuthority>,
+    #[allow(dead_code)] // Scheduled only after canonical orphan/expiry recovery is scoped.
+    shielding_maintenance: super::refunds::maintenance::ShieldingMaintenance,
 }
 pub fn channel() -> (TreasuryHandle, TreasuryCommands) {
     let (sender, receiver) = mpsc::channel(8);
@@ -41,6 +43,7 @@ pub fn channel() -> (TreasuryHandle, TreasuryCommands) {
         TreasuryCommands {
             receiver,
             shielding: None,
+            shielding_maintenance: Default::default(),
         },
     )
 }

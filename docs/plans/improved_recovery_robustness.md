@@ -1547,6 +1547,21 @@ paused to qualify lost-acknowledgement handling.
 Ten focused Store cases and the real SDK shielding regression passed; independent
 review is clear. No automatic scheduling or live-funded qualification was run.
 
+**C20 inactive maintenance substrate (implemented and reviewed):** Bounded original
+journal pages retain every shielding operation for observation and current/historical
+refund addresses independent of funding-job completion or provider attribution.
+An opaque address candidate rechecks its exact journal binding and current serving
+policy before C16 ownership. The staged preparation helper selects confirmed,
+unspent SDK inputs, excludes retained input claims, and shares the existing proposal
+minimum before any mutation; it uses the same calculate-only atomic publication.
+The command owner retains the address cursor across SDK reconstruction, but no actor
+schedule or automatic submission is enabled in this commit. First-submit candidate
+inspection excludes manual bytes and all attempted bytes; actual intent still needs
+the forthcoming atomic serving-policy gate. Validation:13 Store tests, both real SDK
+manual/automatic proving tests, and repeated dust-only passes with no preparation,
+reservation, snapshot mutation or SDK retirement. Activation follows the separately
+reviewed scoped canonical orphan/expiry recovery gate.
+
 **C20 exact shielding expiry inputs (implemented and reviewed):**
 The ordinary two-sync expiry path additionally reloads the validated immutable
 shielding binding and checks every journaled outpoint against the current SDK wallet.

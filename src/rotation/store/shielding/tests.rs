@@ -520,3 +520,158 @@ fn accepted_owner_rechecks_policy_before_reservation_and_publication() {
     assert_eq!(store.snapshot().unwrap().0, revision);
     assert!(store.close_retired_preparation(&owner).unwrap());
 }
+
+#[test]
+fn maintenance_inventory_keeps_historical_addresses_without_provider_closure() {
+    let (_dir, mut store, job, _) = fixture();
+    let authority = store
+        .capture_serving_shielding(
+            &std::collections::BTreeMap::from([("shield".into(), 10)]),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+    store.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,refund) SELECT operation_id,job_id,phase,address FROM funding_progress JOIN funding_refunds USING(job_id) WHERE job_id=?1", [&job]).unwrap();
+    store
+        .db
+        .execute("DELETE FROM funding_refunds WHERE job_id=?1", [&job])
+        .unwrap();
+    store
+        .db
+        .execute(
+            "UPDATE funding_jobs SET state='COMPLETE' WHERE id=?1",
+            [&job],
+        )
+        .unwrap();
+    let before = store.snapshot().unwrap().0;
+    let page = store
+        .shielding_address_page(&authority, &maintenance::AddressCursor::default())
+        .unwrap();
+    assert_eq!(page.candidates.len(), 1);
+    let candidate = &page.candidates[0];
+    assert_eq!(candidate.address, "test-address");
+    assert_eq!(store.snapshot().unwrap().0, before);
+    assert!(
+        store
+            .shielding_address_page(&authority, page.next.as_ref().unwrap())
+            .unwrap()
+            .next
+            .is_none()
+    );
+    let (owner, policy) = store
+        .begin_shielding_candidate("historical-shield", before, candidate, &authority)
+        .unwrap();
+    assert!(policy.automatic);
+    assert_eq!(policy.address, "test-address");
+    store.close_retired_preparation(&owner).unwrap();
+    store.db.execute("UPDATE pools SET enabled=0", []).unwrap();
+    assert!(
+        store
+            .shielding_address_page(&authority, &maintenance::AddressCursor::default())
+            .unwrap()
+            .candidates
+            .is_empty()
+    );
+    assert!(
+        store
+            .begin_shielding_candidate("disabled-shield", before, candidate, &authority)
+            .is_err()
+    );
+}
+
+#[test]
+fn maintenance_operation_inventory_does_not_depend_on_serving_policy() {
+    let (_dir, mut store, _job, policy) = fixture();
+    outgoing(&mut store, "manual-old");
+    let binding = Binding::new(policy, vec![input()], 10).unwrap();
+    binding
+        .insert(
+            &store.db,
+            &store.key,
+            &store.id,
+            store.network.name(),
+            "manual-old",
+        )
+        .unwrap();
+    let authority = store
+        .capture_serving_shielding(
+            &std::collections::BTreeMap::from([("shield".into(), 10)]),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+    assert!(
+        !store
+            .automatic_shielding_submission_candidate("manual-old", &authority)
+            .unwrap()
+    );
+    store.db.execute("UPDATE pools SET enabled=0", []).unwrap();
+    store.confirm_spend("manual-old", 10, 1).unwrap();
+    assert_eq!(
+        store.shielding_operation_page("").unwrap(),
+        vec!["manual-old"]
+    );
+    assert!(
+        store
+            .shielding_operation_page("manual-old")
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn maintenance_address_pages_are_bounded_and_stale_candidates_cannot_mutate() {
+    let (_dir, mut store, job, _) = fixture();
+    for index in 0..70 {
+        store.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,refund) SELECT ?1,job_id,phase,address FROM funding_progress JOIN funding_refunds USING(job_id) WHERE job_id=?2", params![format!("old-{index:03}"),job]).unwrap();
+    }
+    let authority = store
+        .capture_serving_shielding(
+            &std::collections::BTreeMap::from([("shield".into(), 10)]),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+    let first = store
+        .shielding_address_page(&authority, &maintenance::AddressCursor::default())
+        .unwrap();
+    assert_eq!(first.candidates.len(), 64);
+    let second = store
+        .shielding_address_page(&authority, first.next.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(second.candidates.len(), 7);
+    assert!(
+        store
+            .shielding_address_page(&authority, second.next.as_ref().unwrap())
+            .unwrap()
+            .next
+            .is_none()
+    );
+    let stale = &first.candidates[0];
+    store
+        .db
+        .execute("DELETE FROM funding_refunds WHERE job_id=?1", [&job])
+        .unwrap();
+    let revision = store.snapshot().unwrap().0;
+    assert!(
+        store
+            .begin_shielding_candidate("stale-candidate", revision, stale, &authority)
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .db
+            .query_row("SELECT COUNT(*) FROM treasury_preparations", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        store
+            .db
+            .query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
