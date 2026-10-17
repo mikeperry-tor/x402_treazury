@@ -104,7 +104,9 @@ max_refund_shielding_fee_zec = "0.0003"
 
 Gross source expenditure, canonically confirmed returned principal and derived
 net cost remain distinct. Returned principal cannot erase source fees or credit
-another operation. Refund shielding is explicit and charges only its fee. Reported
+another operation. Owned-output shielding charges only its fee. Managed serving
+can shield confirmed owned transparent returns under the current enabled profile
+and fee policy; wallet administration requires an explicit shielding command. Reported
 or expected returns are not spendable capacity, and successful funding never waits
 for a speculative surplus return.
 
@@ -112,8 +114,9 @@ Return attribution uses the original operation/address binding, including archiv
 recovery records. Known credited outpoints are rechecked by transaction ID and
 output index even after spending or shielding. Missing or ambiguous attribution
 preserves the affected accounting obligation while independent returns and otherwise
-valid treasury readiness can progress. It grants no guessed credit, shielding,
-reservation release or retry. Canonical contradictions affecting inputs or shared
+valid treasury readiness can progress. Exact confirmed owned transparent outputs
+may be shielded despite incomplete attribution; this grants no guessed refund
+credit, reservation release, swap completion or replacement attempt. Canonical contradictions affecting inputs or shared
 financial state, and storage failures, still block the affected treasury work.
 
 The pinned Zingolib exposes an in-memory transaction map. Discovering unknown late
@@ -303,7 +306,7 @@ remainders remain. Pausing funding does not prevent spending existing capacity.
 One evidence-race refresh and one definitely rolled-back unpublished signature
 replacement are separate invocation allowances. They remain on the same payer
 and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema 25
+outcome or a missing acknowledgement grants no favorable retry. Fresh schema 26
 derives payment exposure from authoritative journals; no independently writable
 exposure total remains. It preserves original payer role, consumed slot/generation
 and exact balance support;
@@ -470,14 +473,26 @@ Before preparation, the shared treasury verifies fresh sync, spendable funds,
 actual reservations, per-operation safeguards and its single unresolved outgoing-operation gate.
 Zingolib calculates/proves without automatic broadcast. The post-calculation wallet
 snapshot, prepared bytes and accounting facts must commit before submission.
-Calculation followed by persistence failure invalidates that in-memory owner for
-further preparation; reopening restores the last durable state rather than making
-a conflicting send.
+A versioned preparation record binds accepted calculation to the exact operation,
+funding job when present, and starting snapshot. Calculation or persistence failure
+retires the affected SDK without saving its possibly mutated memory. The retained
+sync owner must finish and accepted Store jobs must settle before cleanup can prove
+that this exact preparation never committed. Missing outgoing records alone do not
+supply that proof. Unknown preparation contracts remain unresolved.
+
+The command owner reconstructs the SDK from the committed snapshot while retaining
+the same live Store and its Base readers. A cancelled sync waiter cannot detach its
+scan or permit a second SDK owner. If preparation committed before its acknowledgement
+was lost, reconstruction preserves its exact bytes, input ownership and reservation;
+it cannot discard the operation or authorize a replacement. Ordinary exclusive reopen
+applies the same known-preparation handoff. It does not convert incompatible state or
+clear a declared restored-backup provenance restriction.
 
 A quote crossing its delivery margin before the concrete backend dispatches a
-treasury preparation command is a typed pre-preparation deferral. The store
-requires proof of no outgoing or budget record before returning it to `Quoted`;
-ordinary untouched-quote refresh does not consume transaction recovery attempts.
+treasury preparation command is a typed pre-preparation deferral. Returning it to
+`Quoted` requires an untouched preparation boundary and absence of source effects;
+accepted preparation ownership cannot be hidden by a stale phase or missing result.
+Ordinary untouched-quote refresh does not consume transaction recovery attempts.
 
 Recovery eligibility comes from the original operation and its bound closure
 archive, with liabilities rechecked before reuse. Saved error messages grant no
@@ -593,8 +608,14 @@ identities and the remaining upstream timeout boundaries.
 
 Each swap uses a persisted unique high-index transparent refund address derived
 from the treasury. Refund visibility does not make funds automatically spendable
-for another deposit. Refund shielding is an explicit operation with observed
-inputs, fee caps, prepared-byte recovery and its original recipient network binding.
+for another deposit. Managed serving maintenance observes historical shielding
+operations before selecting confirmed owned inputs. Only serving authority captured
+after listener binding can create automatic shielding or submit its previously
+unattempted bytes; current policy is rechecked before durable intent. Manual bytes
+are never automatically submitted, attempted bytes are never automatically retried,
+and qualification permits grant no automatic shielding authority. All paths retain
+exact input claims, fee caps, prepared-byte recovery and recipient network binding.
+Disabling a profile stops new work while existing operations remain observable.
 Deep finalized-chain rollback requires operator investigation rather than an
 automatic balance/budget reset.
 

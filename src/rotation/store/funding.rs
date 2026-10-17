@@ -149,7 +149,7 @@ impl FundingFacts {
     }
 }
 
-/// Historical conversion preflight fixture. Runtime opens now require schema17
+/// Historical conversion preflight fixture. Runtime opens require the current schema
 /// before any mutation; this preserves the original unsupported-proof regression.
 #[cfg(test)]
 pub(super) fn preflight_funding_upgrade(db: &Connection, version: u32) -> Result<()> {

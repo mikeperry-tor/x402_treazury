@@ -527,12 +527,20 @@ All declared managed pools initialize, including those unused by selected tools.
 - Treasury commands serialize under exclusive ownership. Persist encrypted wallet
   snapshots and outgoing operations atomically; revision CAS prevents stale saves.
   Never use upstream plaintext saves or quick-send helpers. Failed/cancelled
-  preparation or persistence requires owner teardown/reopen, not reuse.
+  mutation retires the affected SDK without saving poisoned memory. Drain the
+  retained sync owner and settle accepted Store jobs before reconstructing from
+  the committed snapshot on the same live Store; Base readers need not close.
+  Waiter cancellation cannot detach the scan or create a second mutation owner.
 - Calculate-only preparation checks current quote, exact output/fee/expiry, actual
   spendable capacity and applicable operation/run authority. Calculate proposal fees before reserving exact principal plus
   fee (refund shielding reserves only its fee), but reserve before creating signed
-  bytes. Proposal mutation/cancellation poisons the owner until reopen. Read-only
-  submission preflight precedes durable intent; the preflighted send path performs
+  bytes. Versioned preparation provenance binds the accepted operation, funding
+  job when present and starting snapshot. Exact retired-owner cleanup may close
+  proven precommit work only after accepted jobs settle; absent bytes alone prove
+  nothing. A commit before a lost acknowledgement retains its exact bytes,
+  reservation and input ownership through reconstruction. Unknown preparation
+  contracts remain unresolved. Read-only submission preflight precedes durable
+  intent; the preflighted send path performs
   no further unsigned tip read. Post-intent failures stay unknown.
   Commit prepared bytes and costs before broadcast intent;
   submission consumes a single-use capability. Unknown sends remain possibly
@@ -540,7 +548,17 @@ All declared managed pools initialize, including those unused by selected tools.
 - Absence, expiry or seller responses never release financial exposure. Recovery
   needs fresh canonical evidence; expired-source recovery verifies unspent inputs
   against retained preparation. Refund shielding charges only its fee, not returned
-  principal twice. Reorgs quarantine accounting instead of silently repairing it.
+  principal twice. Reorgs withdraw affected canonical support and retain scoped
+  input ownership. Exact canonical re-confirmation or two-sync expiry/input proof
+  can resolve that ownership; neither permits an accounting reset or guessed credit.
+- Automatic shielding requires serving-installed authority, enabled auto-funding
+  and an enabled original profile; generic sync and wallet inspection cannot grant
+  it, and qualification never permits it. Recheck current policy before preparation
+  and durable broadcast intent. Bind every transparent input and prove the exact
+  signed shielded output belongs to this treasury; reserve and charge only the fee.
+  Retain exact bytes and observe accepted operations after disablement or restart,
+  without automatic rebroadcast. Shielding owned returns does not settle swap
+  accounting or authorize replacement funding after a refund.
 - Double buffering promotes once under the pool gate, retains old liabilities and
   queues a fresh recipient. Local signing creates no unsigned reservation; atomic
   signed admission rechecks current balance/block/generation and commits exposure
@@ -548,10 +566,13 @@ All declared managed pools initialize, including those unused by selected tools.
   store waiters. Only definite expiry rollback permits one unpublished replacement;
   lost acknowledgement never permits dispatch or retry. Late credit must not overwrite newer roles/evidence;
   completed funding credit is idempotent. Retired balances are not active capacity.
-- `PreparationDeferred` alone certifies that preparation never began; only this
-  typed result plus no outgoing/budget record can rewind PREPARING. Missing bytes
-  or error prose cannot establish retry safety. Quote-window expiry before the
-  concrete backend dispatches preparation uses this typed deferral.
+- `PreparationDeferred` identifies a proven pre-preparation boundary. Returning
+  PREPARING to Quoted additionally requires untouched ownership and no source
+  effects; accepted preparation provenance overrides stale phase labels. Missing
+  bytes, an absent result or error prose cannot establish retry safety. Quote-window
+  expiry before the concrete backend dispatches preparation uses this typed
+  deferral. Reconstruction and canonical accounting never authorize replacement
+  funding after a refund; the existing operator-review policy remains separate.
 - Base RPC failover restarts a complete read-only view, never mixes providers or
   retries signed work. Data-validation/TLS failures do not trigger fallback.
   Balance sweeps finish once and retain canonical evidence; the store checks the

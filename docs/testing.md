@@ -115,6 +115,23 @@ scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.
 These are unfunded/local tests, not evidence of live
 1Click delivery or a resolution of its Zcash quote-deadline contract.
 
+A separate production-worker fixture retains conflicting provider status labels,
+then removes provider availability after an exact quote-bound settlement hint has
+been saved. Canonical Base delivery, SDK source support and the operation's finite
+return-accounting proof complete the job without another quote, source send or
+provider SUCCESS label. Missing proofs keep it incomplete. The fixture validates
+our acquisition, scheduling and commit boundaries; it does not establish provider
+no-refund guarantees or authorize replacement funding after a refund.
+
+Serving-shielding lifecycle fixtures start with a newly confirmed owned transparent
+return and no prepared operation. The real actor prepares, submits and confirms
+exact bytes once, then reopens with shielded spendability increased by the return
+less its actual fee. A separate fixture changes policy after network preflight:
+no broadcast intent is accepted, original bytes survive reopen, and fresh serving
+authority permits their first submission. Disabling the profile afterward still
+allows confirmation/accounting without replay. These local synthetic-chain tests
+do not authorize refund replacement funding or establish live settlement behavior.
+
 Managed-capacity fixtures exercise actual local HTTP signing and canonical Base
 observations: a $10 balance with $4 unresolved authority cannot pay $8; canonical
 USED evidence leaves $6, while canonical expired-unused evidence releases the
@@ -140,7 +157,21 @@ expiry proof. Expiry reverses only its recorded debit, once, while preserving th
 original confirmation and bytes across reopen. SDK reconstruction tests drain the
 retained scan owner and accepted Store work before replacing the SDK; live Base
 handles keep using the same Store. These are local ownership and accounting
-checks, not external settlement qualification.
+checks, not external settlement qualification. A retained residual-accounting
+fixture holds the real scan owner after its wallet read guard is released: Store
+reads and Base RPC still finish, while a queued refund-address command waits for
+that same owner and completes after release despite cancellation of the original
+sync waiter. Original transaction bytes, attempt count and accounting remain
+unchanged. This verifies queued SDK progress after release, not concurrent SDK
+mutation or incremental discovery inside the pinned SDK's transaction map.
+
+A real SDK proving regression checks the immutable submission window at
+**simulated late command times** supplied to the production serialized authority
+API. It verifies both the shared 300-second first-submission margin and the
+original deadline after proving, then repeats the checks after reopen. No
+submission capability or attempt is created; exact prepared bytes and the
+actual-cost reservation remain. It is deterministic boundary testing, not a
+measurement of how long proving takes or a new runtime deadline.
 
 Managed payment crash fixtures use SIGKILL on an owned signing subprocess at
 private-signature, journal-acknowledgement and provider-receipt boundaries. They
