@@ -2725,7 +2725,7 @@ contracts or live finality.
 The original implementation criteria are retained here for review. Implemented
 dispositions and the unresolved original C17 / stage 6 task-exit follow-up are
 recorded in the gate inventory, C01–C22 contracts and stage evidence.
-The proposed H01–H06 hazard-reduction follow-up below is a separate review scope.
+The proposed H01–H09 hazard-reduction follow-up below is a separate review scope.
 
 Per-slice stage-1 review permits incremental delivery; it does not reduce final
 scope. Completion includes foreground payer and funding-page isolation,
@@ -3087,24 +3087,248 @@ too broadly as completion of actual worker-generation recovery. The original C17
 stage 6 follow-up remains explicit above. Acceptance summaries must state which
 boundary a passing test crosses, rather than infer adjacent lifecycle guarantees.
 
-### Recommended follow-up design and acceptance sequence
+### Architectural direction
 
-| ID and priority | Recommendation | Acceptance and integration gate |
+Separate **durable obligations**, **revocable evidence**, and **current execution
+authority** in the existing journals, adapters and decision boundaries:
+
+- Obligations retain exact operation identity, signed bytes, inputs, liabilities
+  and accepted-work ownership until their specific discharge proof exists. Cache
+  eviction, historical burial, a completion label or a restored balance cannot
+  discharge them.
+- Evidence states what was observed, its provenance and dependencies, and whether
+  it still supports a particular decision. Historical observations remain
+  immutable; canonical contradiction or changed inputs can revoke current support.
+  Missing, explicit zero, disputed and positively established facts stay distinct.
+- Execution authority states what may start now in this process and context.
+  Serving, administration, qualification and recovery have different capabilities.
+  Evidence of spendability or completion cannot mint a capability or renew an old
+  permit. Already accepted work retains its own exact recovery obligations.
+
+Implement this separation incrementally through decision-specific calculations
+and opaque capabilities at existing mutation boundaries. Reuse journals and owner
+lifecycles; do not introduce a second ledger, generic supervisor, universal
+assessment object or whole-treasury readiness gate. A calculation may expose
+independent source, delivery and return decisions without requiring every one to
+succeed before unrelated service proceeds. Share evidence-dependency logic between
+validation and refresh scheduling, while keeping current authorization checks at
+the boundaries that own mutation and concurrency.
+
+### Proposed change sequence and review gates
+
+The earlier H01–H06 identifiers are retained and expanded; H07–H09 cover atomic
+rebinding, context-specific authority and lifecycle transitions. All are **proposed**.
+Existing protections described in C01–C22 are starting points, not instructions to
+reimplement them. Each package starts by identifying a concrete remaining duplicate
+calculation, missing boundary or missing acceptance case. If the existing code
+already meets the contract, record evidence and make only the necessary test or
+documentation change.
+
+| Order | Reviewable change | Dependencies and commit boundary |
 | --- | --- | --- |
-| H01 — first | Consolidate each obligation's evidence dependencies, invalidation, and refresh eligibility into one shared calculation. Begin with funding source/delivery/return facts and their scheduler consumers. Keep operation-specific failures separately readable; phases remain summaries. | For every input change, test both loss of dependent validity and eligibility of its owner to refresh, including after terminal workflow labels. Repeated unchanged unresolved polls reuse the completed observation rather than restarting a scan. Preserve source, delivery, and return distinctions, scoped failures, and all original financial authority. Integrate incrementally, starting with one obligation rather than replacing all recovery logic at once. |
-| H02 — next | Strengthen the existing owned-completion and treasury-reconstruction mechanisms so the accepted operation carries its identity, permit, completed result, and publication disposition through terminal publication or exact recovery. | Inject local read/publication/cleanup contention after external completion, then cancellation and restart where durable work applies. Assert no repeated external request, released financial ownership, lost bytes, duplicate credit, or second SDK mutation owner. Extend existing owners; do not introduce a generic supervisor or another durable status ledger without a concrete missing invariant. |
-| H03 — next | Establish a physical keyset-paging convention for serialized Store maintenance, with predicates and indexes that bound rows visited before filtering. Review the shared RPC/queue resources behind claims of independent progress. | Include sparse long prefixes, pending-priority work plus independent history, cursor progress after scoped failures, and query-plan assertions. Use event barriers to hold the actual historical operation while a current read/admission completes through its production path. Retain justified existing resource partitions; add no generic second policy ceiling. |
-| H04 — next | Keep schema-aware historical decoding separate from live admission validation. Reuse historical fixture contracts across changes that affect evidence representation. | Read committed historical evidence fixtures under their saved-schema contracts without wallet credentials or current admission prerequisites. Preserve saved diagnostics and unknowns. Assert that read-only interpretation grants no preparation, submission, replay, or replacement authority. |
-| H05 — ongoing | Define the SDK stage contract alongside each adapter and move real SDK/ordinary production-path gates earlier in implementation. Make fixture credit publication idempotent by operation identity. | Cover exact serialized inputs and outputs, actual output ownership verification, lost acknowledgement, expiry during proving, restart, status conflict, and zero versus missing return evidence. Keep destination readiness distinct from complete financial closure. A repeated status poll must not mint additional fake credit. |
-| H06 — validation process | Reserve an exclusive source/executable window for suites that pin build identity; coordinate Cargo and CLI tests that share an executable path. | Record the source/executable pins before launch, prevent mutation until drain completes, and rerun an invalidated gate against a frozen checkout. Use owned process handles and explicit event barriers. Do not treat a fixture timing failure as justification for changing runtime deadlines without a reproduced runtime cause. |
+| 1 | H06 acceptance/evidence discipline and H05 production-path fixtures | Establish before using new passing checks to declare a package complete; extend throughout the sequence. Commit focused harness/documentation changes separately from runtime behavior. |
+| 2 | H01 one obligation dependency slice, with H04 retention/historical interpretation | Begin with funding source/delivery/return consumers. Commit one shared calculation plus its migrated consumers, obsolete-path deletion and acceptance evidence; repeat by obligation. |
+| 3 | H07 atomic rebinding and H08 explicit execution contexts | Review current admission and serving capabilities against H01 decisions. Land separately by mutation boundary; neither requires a repository-wide rewrite. |
+| 4 | Original C17 actual-task-exit disposition, then H02 accepted-result publication | Resolve the original C17 requirement by audited justified stops or proven eligible handoff; do not count it as new H work. Local publication fixes with no task-handoff dependency may land earlier. |
+| 5 | H03 physical work/independence and H09 lifecycle transitions | Apply to the affected Store/RPC and deployment paths. Independent slices may land earlier once their owner and authority contracts are explicit. |
+| 6 | Final integration and proposed AGENTS.md rules | Reconcile every package with evidence and remaining limitations; run applicable standard default-build checks. Make the rules below explicit alongside the changes they govern rather than waiting until all runtime work ends. |
 
-H01 is the strongest redesign candidate because a shared dependency calculation
-prevents a class of safety/liveness disagreement rather than documenting each
-instance. H02–H05 are targeted strengthening of boundaries already established by
-this branch. They should not collapse independently usable evidence into a
-whole-treasury validation gate or replace retained obligations with another
-omnibus state enum. None requires a new spending budget, blanket deadline,
-financial retry authority, or automatic replacement after a refund.
+Use subagent review at each package commit boundary and any material authority or
+ownership design gate. Address findings as fixup commits. Record the exact invariant,
+production consumer, removed competing path, focused test and limitation under the
+owning H entry. Include the implementation commit, review result and any fixup
+commits; leave the entry proposed until that evidence is recorded. Avoid parallel
+source mutation during pinned validation. No package
+adds a spending budget, blanket deadline, financial replay authority or automatic
+replacement after a refund; live-funded qualification remains separately authorized.
+
+#### H01 — Shared obligation dependencies and revocable support
+
+**Starting evidence:** C09, C14 and C18 (journal membership, replacement support and source/delivery/return consumers).
+
+**Change:** Inventory the source, delivery and return predicates used by accounting,
+effective completion and scheduler membership. Consolidate one obligation at a time
+into a shared dependency calculation consumed by both validity and refresh
+eligibility. Preserve immutable observations and derive current support from their
+exact dependencies; remove superseded phase-based predicates and parallel writable
+projections in the same slice. Do not merge the independent obligations into one
+all-or-nothing success result.
+
+**Acceptance:** Changed inputs revoke dependent support and schedule its owner even
+after terminal labels. Repeated unchanged unresolved observations reuse completed
+work. Late return claims and canonical contradictions withdraw effective completion
+without rewriting history or falling back to an older disputed proof. Explicit zero
+is distinct from missing or malformed evidence. Test all migrated consumers,
+including restart and independent service while one obligation remains unresolved.
+
+#### H02 — Accepted results through local publication and recovery
+
+**Starting evidence:** C05, C16 and C17 (retained completion, preparation provenance and reconstruction).
+
+**Change:** Trace the existing funding completion, preparation and repair owners
+from external completion through local validation, commit, acknowledgement and
+publication. Close demonstrated gaps by retaining identity, original permit,
+completed result and publication disposition in the existing owner. Retry only
+classified idempotent local boundaries. Where process loss is supported, recover
+from the existing exact durable journal rather than pretending in-memory results
+or concurrency permits survive restart.
+
+**Acceptance:** Inject Busy/Locked contention at the actual local boundary after
+external completion, then cancel the waiter. Add restart coverage where durable
+recovery applies. Assert no second external request, lost committed bytes, duplicate
+credit, premature permit release or overlapping SDK owner. Ambiguous mutation and
+lost ownership remain explicit stops. C17 task-generation closure is independently
+evidenced; an in-owner retry or listener-survival test cannot satisfy it.
+
+#### H03 — Physical maintenance bounds and actual resource independence
+
+**Starting evidence:** C04, C15 and C20 (physical paging, shared RPC resources and maintenance inventory).
+
+**Change:** Audit affected serialized Store queries and shared RPC/queue resources.
+Use indexed physical keyset traversal before filtering, with bounded Store turns,
+and eliminate duplicate or unbounded fallback paths. Preserve existing justified
+resource partitions and distinguish linear SDK output-map traversal from bounded
+SQLite work. Add another partition only for a demonstrated distinct resource need.
+
+**Acceptance:** Sparse bad/ineligible prefixes, pending-priority work plus old
+history, and scoped failures all advance cursors. Verify relevant query plans and
+rows visited through appropriate instrumentation, not just result counts. Hold the
+actual historical RPC/Store boundary with event barriers while independent current
+read/admission progresses through production paths. Retain the documented SDK
+serialization limit; no benchmark or second ceiling substitutes for this proof.
+
+#### H04 — Obligation retention, historical decoding and restoration limits
+
+**Starting evidence:** C13, C18 and C22 (input ownership, unique financial attribution and historical/restored state).
+
+**Change:** Separate retention of disposable observations from retention of signed
+input ownership, liabilities, unique event ownership and exact operation bindings.
+Review cleanup and archival consumers against those dependencies. Keep historical
+saved-schema readers separate from live admission validation, sharing fixtures
+where representations overlap. Preserve the declared-restoration fence and its
+explicit inability to discover unknown off-chain authorizations.
+
+**Acceptance:** Eviction, burial, cleanup and reopen cannot erase a live obligation
+or permit reuse of a financial event. Committed historical evidence remains readable
+without live credentials or current admission prerequisites, preserving diagnostics
+and unknowns. A restored balance or scan cannot clear missing provenance. Tests
+supply the restoration declaration explicitly and never claim automatic rollback
+detection, migration, or reconstruction of missing authorization journals.
+
+#### H05 — SDK stage contracts and faithful financial fixtures
+
+**Starting evidence:** C11–C14, C16 and C20; T12/T33/T39/T48 acceptance limits.
+
+**Change:** Document adapter inputs and outputs at calculation, proving, committed
+publication, submission, scan and canonical recovery. Verify transaction identity
+and ownership against exact serialized facts at the appropriate stage. Extend real
+SDK and ordinary-library fixtures early; make fake financial credit idempotent by
+operation identity. Keep provider status, readiness, delivery, returns and financial
+closure as separate fixture facts.
+
+**Acceptance:** Cover exact inputs/outputs, real ownership verification, lost
+acknowledgement, restart, status conflict, every-input expiry recovery and zero
+versus missing returns. Preserve T12's actual-proof/simulated-later-time distinction;
+claim a real wall-clock proving overrun only if measured. Repeated polls cannot
+mint credit. Do not treat pending-input SDK guards as removable without new proof.
+
+#### H06 — Precise acceptance evidence and reproducible validation
+
+**Starting evidence:** the acceptance-evidence interpretation table, the C17 gap and recorded final validation limits.
+
+**Change:** Maintain an acceptance-to-evidence map under each package: requirement,
+actual production boundary exercised, fixture/build context, result and limitation.
+Distinguish design review, focused unit predicates, ordinary-library paths, real
+SDK work, containment, recovery and external qualification. Freeze source and
+executable identity for suites that pin either; coordinate builds and CLI tests
+sharing the binary.
+
+**Acceptance:** An intentionally incomplete requirement remains open despite related
+passing checks. Record source/executable pins and invalidate results if they change
+before owned drain completes. Report segmented repository runs accurately; never
+infer an uninterrupted wrapper success. Run focused checks per change and applicable
+standard checks at integration, without adding unrequested feature configurations.
+Fixture timing failures do not justify runtime policy changes without a reproduced
+cause. C17's task-exit requirement remains open until its own proof is recorded.
+
+#### H07 — Atomic rebinding after validation changes state
+
+**Starting evidence:** C11 readiness/claim rebinding and C21 final-commit freshness revocation.
+
+**Change:** Audit preparation/admission boundaries where freshness, readiness or
+repair publication can alter role, claim, generation or evidence revision after a
+caller captures them. Bind the final decision to post-publication ownership in the
+same transaction, or use the existing revision/CAS protocol across necessary
+asynchronous boundaries. Reuse the shared authority calculation while retaining
+checks at separate race boundaries; do not add a second spending ceiling.
+
+**Acceptance:** Exercise readiness promotion, claim transition, concurrent policy or
+ownership change, and held stale captures. At most one operation commits for a
+uniquely claimed action; when authority remains valid and dependencies permit
+progress, one succeeds. Reject stale pre-acceptance decisions without a signature,
+broadcast or surviving new reservation/intent. Preserve accepted or uncertain
+intent and its exact work rather than rolling it back or reclassifying it as an
+unauthorized new start.
+
+#### H08 — Context-specific execution capabilities
+
+**Starting evidence:** C20 serving capability and C22 declared-restoration fencing.
+
+**Change:** Enumerate the commands that can create preparation, reservation,
+submission intent or new automatic maintenance. Check their serving, administration,
+bootstrap, qualification and recovery contexts against existing opaque capabilities.
+Close any demonstrated implicit-authority path; credentials, successful sync,
+spendability, historical permits and positive funding limits cannot substitute for
+permission for a different action. Recheck effective policy at its owning boundary.
+
+**Acceptance:** A context/action matrix includes paused/removed profiles, declared
+restoration, namespace mismatch, qualification limits and SDK reconstruction/reopen.
+Forbidden starts leave preparation, reservation and intent unchanged. Independently
+permitted observations and exact accepted-work recovery continue. Manual or already
+attempted bytes cannot become automatic first-submit candidates; shielding cannot
+authorize replacement funding or close unresolved attribution.
+
+#### H09 — Lifecycle ordering when removing barriers
+
+**Starting evidence:** C06–C08 scoped startup/deferred publication and C17 task ownership.
+
+**Change:** For each moved or deferred startup/maintenance step, trace listener
+reservation, shared Store ownership, capability installation, registry publication,
+financial work and shutdown draining. Reuse existing snapshot publication and owned
+drain mechanisms. Define which resources and accepted operations remain owned after
+partial initialization, concurrent registry changes or publisher failure. Apply
+this review to changed paths, not a new universal startup coordinator.
+
+**Acceptance:** Bind failure and partial initialization create no unauthorized
+financial work. Concurrent static/dynamic publication retains both changes. Failure
+or cancellation preserves accepted-work drain and exact durable recovery obligations;
+shutdown does not start a replacement owner. Notifications trigger fresh admission,
+never grant authority. Keep task-exit containment distinct from the original C17
+recovery acceptance and test the applicable actual deployment path.
+
+### Coverage and completion of the addendum
+
+| Observed hazard | Owning proposed changes |
+| --- | --- |
+| Phases/projections substitute for obligations; evidence invalidation and scheduling disagree | H01 |
+| Accepted work loses ownership before publication | H02; original C17 for actual task exits |
+| Logical lanes conceal shared bottlenecks or unbounded scans | H03 |
+| Historical readers inherit live contracts; retention/restoration loses financial knowledge | H04, with H01 obligation dependencies |
+| SDK projections and fixtures substitute for financial facts | H05 |
+| Validation changes its own source/executable; passing evidence is overgeneralized | H06 |
+| Readiness/validation changes captured ownership | H07 |
+| Authority crosses execution contexts | H08 |
+| Barrier removal exposes publication, startup and shutdown ordering | H09 |
+| Reorgs or late claims invalidate prior conclusions | H01, H04 |
+| Mechanical feature/lint integration | H06 standard checks; no separate financial redesign |
+
+The addendum is ready to guide implementation, not evidence that these changes have
+landed. A package closes only when its concrete code/test/documentation delta and
+acceptance limits are recorded and reviewed. Preserve any demonstrated unmet
+requirement explicitly; do not close it through a broader completion summary.
+H01 is the central architectural change, supported by H04's lifetime separation,
+H07's atomic binding and H08's explicit capabilities. The remaining packages make
+those contracts survive SDK, owner, resource and deployment boundaries.
 
 ### Rules to make explicit in AGENTS.md
 
@@ -3144,10 +3368,30 @@ modify AGENTS.md.
    with those suites; coordinate CLI tests sharing a binary path and invalidate
    results if their declared pins changed.
 
-Rules 1–4 close gaps not stated explicitly by the existing high-level policy.
-Rule 5 makes the existing scope/independence requirement testable. Rule 6 adds an
-adapter-specific check to the existing financial-proof discipline. Rule 7 extends
-the existing shared-executable test instruction to the full pinned-run lifecycle.
+8. **Atomic rebinding:** Validation or evidence publication that changes ownership,
+   role, claim or generation must bind subsequent mutation to the resulting state
+   atomically, or through the existing revision/CAS protocol. Test stale captures
+   and validation-induced transitions; caller-side checks alone are insufficient.
+9. **Context-specific authority:** Reusable financial machinery must require the
+   capability for its actual action and execution context. Credentials, sync,
+   recovered capital or a permit for a different action cannot supply it. Preserve
+   exact accepted-work recovery separately from authority for new starts.
+10. **Obligation lifetimes and revocation:** Cache retention and archival cleanup
+    cannot discharge durable obligations. Preserve historical facts while revoking
+    disproven current support; missing evidence and explicit zero remain distinct.
+    Neither old proofs nor restored balances reconstruct missing authority.
+11. **Lifecycle transitions:** Moving work across a startup or publication barrier
+    requires review of bind, capability, publication and owned-drain ordering under
+    partial failure and shutdown. Progress notifications require fresh admission.
+12. **Acceptance scope:** Each completion claim must name the requirement and actual
+    boundary its evidence demonstrates, plus its limits. Containment, in-owner
+    recovery, task replacement and live qualification are distinct. Keep uncovered
+    requirements open despite related passing tests.
+
+Apply rules 1 and 10 with H01/H04; rule 2 with H02; rules 3 and 5 with H03;
+rule 4 with H04; rule 6 with H05; rules 7 and 12 with H06; rule 8 with H07;
+rule 9 with H08; and rule 11 with H09. Extend the relevant existing AGENTS.md
+paragraphs instead of repeating them as another independent policy layer.
 
 ## Supporting review findings
 
