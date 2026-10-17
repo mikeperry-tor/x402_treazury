@@ -49,11 +49,14 @@ mod tests {
             test_support::declare_two_reserves(&mut store, "restore", "1", Some(U256::from(10)), 0)
                 .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
+        let revision = store
+            .save_refund_address(&job.id, "owned-refund", 1, b"snapshot with refund address")
+            .unwrap();
         store.reserve("known", None, 1, 2).unwrap();
         store
             .prepare_with_facts(
                 "known",
-                1,
+                revision,
                 b"signed snapshot",
                 b"exact saved bytes",
                 Some(TransactionFacts {
@@ -109,7 +112,8 @@ mod tests {
         denied(restored.reauthorize_closed_funding(&job.id, 3));
         denied(restored.refresh_unprepared_quote(&job.id));
         denied(restored.require_preparation_authority("direct-send", None));
-        denied(restored.begin_manual_shielding("shield", 2, &job.id, "unused", 1));
+        let revision = restored.snapshot().unwrap().0;
+        denied(restored.begin_manual_shielding("shield", revision, &job.id, "owned-refund", 1));
         assert_eq!(restored.operation("known").unwrap().attempts, 1);
         assert_eq!(
             restored.prepared_bytes("known").unwrap().as_slice(),
@@ -145,7 +149,9 @@ mod tests {
         );
         // Observation/accounting still commits, without clearing missing history.
         restored.confirm_spend("known", 2, 1).unwrap();
-        restored.save_snapshot(2, b"observed snapshot").unwrap();
+        restored
+            .save_snapshot(revision, b"observed snapshot")
+            .unwrap();
         let copy = dir.path().join("marked-backup");
         restored.backup(&copy).unwrap();
         drop(restored);

@@ -197,6 +197,7 @@ pub(crate) enum ObservedCommand {
     Prepare(PrepareRequest),
     Submit(String, bool),
     Reconcile(String),
+    SourceConfirmation(String),
 }
 #[cfg(test)]
 impl TreasuryCommands {
@@ -225,6 +226,10 @@ impl TreasuryCommands {
             Command::Reconcile(id, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
                 ObservedCommand::Reconcile(id)
+            }
+            Command::SourceConfirmation(id, reply) => {
+                let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
+                ObservedCommand::SourceConfirmation(id)
             }
             _ => panic!("unexpected treasury command"),
         }

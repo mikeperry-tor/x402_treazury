@@ -381,7 +381,18 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .call(move |s| s.confirm_spend(&id, 110000, 1))
         .await
         .unwrap();
-    assert!(backend.reconcile(&job).await.unwrap());
+    // The historical confirmation label cannot replace current canonical support.
+    // Service the actual actor command and keep its unavailable proof unresolved.
+    let (result, observed) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(backend.reconcile(&job), commands.test_observe())
+    })
+    .await
+    .unwrap();
+    assert!(result.is_err());
+    let ObservedCommand::SourceConfirmation(id) = observed else {
+        panic!("confirmed source requires current canonical observation")
+    };
+    assert_eq!(id, job.operation_id);
     assert!(commands.test_is_empty());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
