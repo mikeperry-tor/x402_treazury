@@ -125,14 +125,19 @@ async fn removed_disabled_pool_keeps_only_observation_ownership_after_reopen() {
         .await
         .unwrap();
         assert!(reads.load(Ordering::SeqCst) > 0);
-        let response = reqwest::Client::new()
-            .post(format!("http://{address}/mcp"))
-            .bearer_auth("fixture-token")
-            .header("accept", "application/json, text/event-stream")
-            .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
-            .send()
-            .await
-            .unwrap();
+        let url = format!("http://{address}/mcp");
+        let response =
+            crate::network::NetworkContext::new(crate::network::NetworkPolicy::default())
+                .unwrap()
+                .discovery(&url, None)
+                .unwrap()
+                .post(url)
+                .bearer_auth("fixture-token")
+                .header("accept", "application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
+                .send()
+                .await
+                .unwrap();
         assert!(response.status().is_success());
         drop(store);
         stop.cancel();

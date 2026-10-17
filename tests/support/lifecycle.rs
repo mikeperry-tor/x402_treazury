@@ -1,4 +1,5 @@
 //! Real payment admission/signing/RPC plus a deterministic funding adapter.
+//! Coarse swap labels do not supply canonical source, delivery or return proofs.
 //! Consensus calculation, shielding and expiry are qualified separately in regtest.
 use super::*;
 use anyhow::Result;
@@ -61,10 +62,14 @@ impl FundingObservations for Funding {
         if self.refund_pool.as_deref() == quote.request["pool"].as_str() {
             return Ok(SwapStatus::Refunded);
         }
-        self.fake.balances.lock().unwrap().insert(
-            quote.request["recipient"].as_str().unwrap().into(),
-            quote.request["target"].as_str().unwrap().parse()?,
-        );
+        // The synthetic deposit happens once. Continued status observations,
+        // including after reopen, must not replace balances already spent.
+        self.fake
+            .balances
+            .lock()
+            .unwrap()
+            .entry(quote.request["recipient"].as_str().unwrap().into())
+            .or_insert(quote.request["target"].as_str().unwrap().parse()?);
         Ok(SwapStatus::Success)
     }
     async fn credit(&self, job: FundingJob) -> Result<()> {
@@ -216,6 +221,25 @@ pub(super) fn funder(
 pub(super) async fn tick(worker: &mut FundingWorker<Funding>, instant: &mut u64) {
     worker.tick(*instant).await.unwrap();
     *instant += 100;
+}
+
+pub(super) fn destination_credited(s: &Store, job: &FundingJob) -> Result<bool> {
+    let facts = s.funding_facts(&job.id, &job.operation_id)?;
+    Ok(facts.readiness_recorded && !facts.readiness_disputed)
+}
+
+pub(super) fn credited_total(s: &Store, pool: &str) -> Result<u64> {
+    s.funding_jobs()?
+        .into_iter()
+        .filter(|job| job.pool_id == pool)
+        .try_fold(0_u64, |total, job| {
+            Ok(total
+                + if destination_credited(s, &job)? {
+                    job.target.parse::<u64>()?
+                } else {
+                    0
+                })
+        })
 }
 
 #[tokio::test]
@@ -378,10 +402,12 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
         tick(&mut worker, &mut instant).await;
         if h.store
             .call(|s| {
-                Ok(s.status()?
-                    .funding_jobs
-                    .iter()
-                    .all(|j| j.phase == FundingPhase::Complete))
+                for job in s.funding_jobs()? {
+                    if !destination_credited(s, &job)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             })
             .await
             .unwrap()
@@ -390,12 +416,21 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
         }
     }
     let status = h.store.call(|s| s.status()).await.unwrap();
-    assert!(
-        status
-            .funding_jobs
-            .iter()
-            .all(|j| j.phase == FundingPhase::Complete)
-    );
+    h.store
+        .call(|s| {
+            for job in s.funding_jobs()? {
+                assert!(destination_credited(s, &job)?);
+                let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                if facts.accepted_quote {
+                    assert!(facts.source_accounting_pending && facts.return_pending);
+                    assert!(!facts.delivery_verified);
+                    assert_eq!(job.phase, FundingPhase::RefundPending);
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(sends.lock().unwrap().len(), 6);
     assert!(sends.lock().unwrap().contains(&replacement.operation_id));
     let research = status.pools.iter().find(|p| p.id == h.pool).unwrap();

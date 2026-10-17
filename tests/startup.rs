@@ -421,10 +421,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
                 "unexpected visibility for {message}: {log}"
             );
         }
-        for message in [
-            "Catalog ready",
-            "Catalog startup finished; required inventory complete",
-        ] {
+        for message in ["Catalog ready", "Initial catalog loading finished"] {
             assert!(log.contains(message), "missing {message}: {log}");
         }
         assert!(log.contains("elapsed_ms"));

@@ -665,6 +665,7 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(move || sink.clone())
         .finish();
     async {

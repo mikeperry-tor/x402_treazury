@@ -115,6 +115,27 @@ sources = ["observed"]
     let result = run(&path, true, &["serve"]);
     assert!(!result.status.success()); // No credentials: never binds a listener.
     let err = String::from_utf8(result.stderr).unwrap();
+    assert!(err.contains("MISSING_TEST_TOKEN"), "{err}");
+    assert!(!err.contains("Provider reliability observation:"), "{err}");
+
+    // Credential preflight precedes catalog work. With valid fixture credentials,
+    // a missing bound catalog exposes its warning without binding either listener.
+    let deployment = std::fs::read_to_string(&path).unwrap().replacen(
+        "spec = \"spec.json\"",
+        "spec = \"missing.json\"",
+        1,
+    );
+    std::fs::write(&path, deployment).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .args(["serve", "--config"])
+        .arg(&path)
+        .env_clear()
+        .env("MISSING_TEST_KEY", format!("0x{:064x}", 1))
+        .env("MISSING_TEST_TOKEN", "fixture-token")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let err = String::from_utf8(result.stderr).unwrap();
     assert_eq!(
         err.matches("Provider reliability observation:").count(),
         1,

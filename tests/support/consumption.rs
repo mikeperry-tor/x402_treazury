@@ -62,24 +62,27 @@ pub(super) async fn fill(
     for _ in 0..30 {
         super::lifecycle::tick(worker, instant).await;
         let pool = h.pool.clone();
-        let complete = h
+        let credited = h
             .store
             .call(move |s| {
-                Ok(s.status()?
-                    .funding_jobs
-                    .iter()
-                    .filter(|j| j.pool_id == pool)
-                    .all(|j| {
-                        j.phase == x402_treazury::rotation::store::funding::FundingPhase::Complete
-                    }))
+                for job in s
+                    .funding_jobs()?
+                    .into_iter()
+                    .filter(|job| job.pool_id == pool)
+                {
+                    if !super::lifecycle::destination_credited(s, &job)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             })
             .await
             .unwrap();
-        if complete {
+        if credited {
             return;
         }
     }
-    panic!("funding did not complete within fixture passes");
+    panic!("destination credit was not verified within fixture passes");
 }
 pub(super) async fn paid_and_settled(h: &Harness, amount: u64) {
     *h.f.challenge.lock().unwrap() = challenge(&amount.to_string());
@@ -200,15 +203,11 @@ async fn accounting(h: &Harness, gross: u64, spent: u64, holdings: u64) {
     let pool = h.pool.clone();
     let state = h.store.call(|s| s.status()).await.unwrap();
     let group = state.pools.iter().find(|p| p.id == pool).unwrap();
-    let allocated: u64 = state
-        .funding_jobs
-        .iter()
-        .filter(|j| {
-            j.pool_id == pool
-                && j.phase == x402_treazury::rotation::store::funding::FundingPhase::Complete
-        })
-        .map(|j| j.target.parse::<u64>().unwrap())
-        .sum();
+    let allocated = h
+        .store
+        .call(move |s| super::lifecycle::credited_total(s, &pool))
+        .await
+        .unwrap();
     let held: u64 = group
         .addresses
         .iter()
@@ -675,17 +674,12 @@ async fn learned_mixed_operation_keys_choose_actual_smallest_available_wallet() 
             }
             settle_last(&h, price).await;
             spent += price;
-            let state = h.store.call(|s| s.status()).await.unwrap();
-            let gross = state
-                .funding_jobs
-                .iter()
-                .filter(|j| {
-                    j.pool_id == h.pool
-                        && j.phase
-                            == x402_treazury::rotation::store::funding::FundingPhase::Complete
-                })
-                .map(|j| j.target.parse::<u64>().unwrap())
-                .sum();
+            let pool = h.pool.clone();
+            let gross = h
+                .store
+                .call(move |s| super::lifecycle::credited_total(s, &pool))
+                .await
+                .unwrap();
             accounting(&h, gross, spent, gross - spent).await;
         }
     }

@@ -5,7 +5,7 @@ chains. None spends mainnet funds or contacts NEAR's production API.
 
 | Coverage | Test | Evidence and limits |
 | --- | --- | --- |
-| Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. |
+| Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend tracks six fixture source submissions across bootstrap and refill, with stable operation identity across restart. Verified destination readiness leaves missing source/return proofs open; repeated status polls cannot replenish spent balances. |
 | Refund status and pool isolation | `managed::lifecycle::failed_swap_keeps_source_expense_while_another_pool_serves` | API refund status cannot manufacture treasury credit; another funded pool keeps paying. |
 | Quote refresh, empty treasury, timeouts and backoff | `tests/funding.rs` | Unprepared-only bounded refresh, independent persisted status-error streaks, sanitized diagnostics, degraded timeout with continued reconciliation and no repeated send. |
 | Payment ambiguity and admission | `tests/managed.rs` | One signed attempt, durable liabilities across restart/cancellation, canonical balance checks, nonce reconciliation, pool isolation and atomic promotion. |
