@@ -1,172 +1,36 @@
 # Improved recovery robustness
 
-Working sections: [gate inventory](#gate-inventory-and-implementation-evidence),
-[stages](#implementation-sequence-and-acceptance-gates), and [acceptance cases](#test-matrix).
-The [target design](#target-design) and [findings](#supporting-review-findings)
-provide supporting context.
+## Review status and navigation
 
-## C18/T48 production worker acceptance — 2026-10-17
+This plan is retained at the user's explicit request as a **review artifact**.
+The C01–C22 / stages 1–9 implementation and local validation evidence are
+consolidated below. One original C17 / stage 6 follow-up remains unresolved:
+classify actual treasury/funding task exits and either justify their retained
+restart boundary or complete eligible worker-generation handoff and shutdown-race
+acceptance. Eligible SDK reconstruction and audited read retries recover inside
+retained owners; an actual treasury/funding task exit still requires restart for that capability,
+while listeners and Base reconciliation remain available. This distinction prevents
+a blanket claim that every original acceptance requirement is complete.
+The [hazard-reduction follow-up](#hazard-reduction-follow-up) records
+proposed design work and candidate AGENTS.md rules; it has not been implemented
+or granted new financial authority by restoring this document.
 
-The real funding worker, treasury actor and synthetic chains now exercise persisted
-FAILED, REFUNDED and INCOMPLETE observations followed by exactly correlated delivery
-hints, a missing-receipt control, and provider outage. Completion occurs only after
-canonical destination, original source and finite return proofs are present. Original
-bytes, operation facts, gross debit and one submission remain unchanged; no SUCCESS
-label or replacement attempt supplies authority.
+Progress and review notes are consolidated under their owning
+[implementation contracts](#implementation-contracts-and-evidence), with final
+[gate decisions](#gate-inventory-and-implementation-evidence) and stage completion
+evidence. Superseded reboot instructions and incremental pass-count journals are
+removed; commit references retain traceability. Earlier schema numbers in
+implementation evidence identify intermediate commits, while runtime state now
+supports schema26 only. Saved historical reports remain read-only and schema-aware.
 
-This acceptance exposed a missing refresh dependency: semantic return-inventory
-changes revoked return proof but did not schedule its canonical reobservation.
-Fixup `bdc90b5` routes confirmed sources with pending returns through the existing
-source lane. Reuse requires the original pass's inventory revision; an unchanged
-observed issue remains reusable and does not trigger repeated historical scans.
-
-Independent review and focused validation passed: T48 worker (1), source support
-(6), and existing concurrent bootstrap/rotation worker (1). The latter retains
-actual lookup-progress and unchanged-snapshot assertions while allowing existing
-poll jitter. These local fixtures do not establish an external provider contract
-or prove absence of future returns. Refund replacement still requires review.
-
-## C18 canonical return closure checkpoint — 2026-10-17
-
-Schema25 binds finite return accounting to the same bounded historical source pass.
-Production loads original return bindings and immutable credits in pages, publishes
-one discovered output per Store job, and carries exact credited totals under the
-shared inventory revision. Duplicate provider observations do not invalidate useful
-history. Canonical original outputs remain accounting evidence after shielding or
-spending; pending positive outputs are scoped incomplete, and invalidated never-
-credited outputs do not create permanent obligations.
-
-SUCCESS now requires exact canonical destination delivery and current source/return
-proofs. Unknown amounts are not zero. Explicit zero or a positive amount must bind
-to the original source, accepted quote and delivered transaction; positive amounts
-need complete canonical owned-output coverage. Historical provider terminal labels
-remain audit rather than a permanent veto after all proofs discharge the obligations.
-Changed or malformed claims remain incomplete. New outputs or canonical contradictions
-reopen accounting without erasing historical completion or duplicating return credit.
-Explicit zero describes the current finite claim, never absence of future returns.
-
-Independent review covered financial correlation, revision coverage, bounded
-publication and historical readers. Focused gates: delivery/return13, completion21,
-source Store5 and synthetic SDK refund6 passed; the latter includes spent origins,
-ambiguity isolation, pending positives and the failed-output negative control.
-The follow-up storage-error propagation regression also passed (1 test).
-Cross-layer funding-worker acceptance (T48) remains next. Full returned-principal
-accounting does not authorize a replacement attempt: refunded retry still requires
-review under the explicit repository instructions. Operation-scoped live orphan
-recovery is a separate schema26 slice; this checkpoint does not claim plan completion.
-
-## C18 canonical source support checkpoint — 2026-10-16
-
-Schema23 adds bounded inactive source observations, activated with the final
-wallet snapshot only after exact inventory and fresh observation checks. Saved
-CONFIRMED labels and immutable gross debit entries alone no longer grant source
-accounting support. Known canonical loss revokes support immediately; completed
-jobs remain observable with `source_accounting_pending`, without new submission.
-The existing sync reuse path shares current unavailable observations across jobs.
-
-A sealed historical pass retains its original scanned block anchor across an
-expired observation window. Incremental catch-up rechecks that hash and unchanged
-inventory before binding publication to the fresh snapshot; original balance
-freshness is never renewed. Restart cannot adopt an inactive pass.
-
-Independent review passed. Focused validation: source Store5, completed-job source
-scheduler1, accounting1, canonical-delivery/source-loss1, and real synthetic-chain
-lifecycle1. The latter checks one historical staging pass across expiry/catch-up,
-eight unavailable observations without another scan, canonical reorg/reappearance,
-and unchanged gross debit, original bytes and submission attempts. Earlier
-completion20 and delivery10 siblings passed before localized fixture corrections.
-The declaration-only restoration schema substrate shares this version; restoration
-behavior is a separate commit. Full canonical return closure and operation-scoped
-live orphan recovery remain pending; the existing generic live-input guard stays.
-
-## Reboot checkpoint — 2026-10-16
-
-Checkpoint saved at the user's request for a laptop reboot after the C10 review
-fixup. Work resumed on 2026-10-16 with independent commit-gate review.
-There is no implementation blocker. Branch: `improved_recovery_robustness_impl`.
-Resume from the committed checkout; do not restart or replay completed work.
-
-- C01–C08 implementation slices and their independent review fixups are committed;
-  the contracts below describe their exact scope and remaining acceptance gaps.
-  Ordinary serving now binds before funding and remote discovery, isolates unusable
-  dependencies, and publishes deferred catalogs without restarting. The gate table
-  is not a blanket completion claim.
-- C09's payment-exposure slice is committed as `2229598` and review fixup `8384e4e`.
-  Outstanding payment journals are authoritative; production no longer reads or
-  updates the obsolete wallet aggregate for admission. Validation: 252 rotation
-  tests passed (four ignored subprocess helpers), payment-saturation regression,
-  and all-target Clippy. Disputed-release membership and funding-obligation
-  inventory still need implementation.
-- C10's archival-dependency slice is committed as `ff9db28`. Current captures no
-  longer require historical funding/retirement balances, while current checkpoint,
-  debit, generation and dispute protections remain. Thirty selection tests passed;
-  the added current-header assertion and migrated historical retirement regression
-  passed. The store run passed 125 tests with two ignored helpers and one obsolete
-  retirement expectation; that expectation was migrated and its focused rerun passed.
-  All-target Clippy passed for the main slice.
-- The accompanying C10 review fixup shares explicit inventory ownership between
-  bootstrap and status. Malformed archival support reports incomplete inventory
-  with a fixed warning; current serving identity stays independent. Shared SQL
-  errors propagate. Independent review found no remaining issues in this fixup.
-  Validation: startup/status parity and shared SQL-error regressions passed,
-  all-target Clippy passed, and formatting/diff checks passed.
-
-Since the reboot checkpoint, C10 resolution-only observation separation landed in
-`3904c78`; C09 funding-observation traversal and its review fixup landed in
-`29bc0d2` and `08a5c5d`. Schema17 disputed authorization membership landed in
-`a0f5f2b`, with historical reporting review fixup `6bfdf75`. Invalidated resolved
-authorizations now retain their full exposure and original audit proofs. The
-contracts below record remaining inventory and endpoint-membership gaps.
-
-C12's narrow all-releases-reserved capacity contract is implemented in `f7ec2b0`,
-with the reviewed additive-index reopen fixup recorded below.
-C11 initial-capacity eligibility is implemented in `8760345` with its reviewed
-readiness-publication ownership fixup recorded below.
-C13 source-expiry isolation landed in `de6d93e`; scoped refund observations and
-their attribution fixup landed in `46489cf` and `c172c62`. Unidentifiable refund
-accounting is separated from SDK synchronization in `2ea6762`. Durable payment
-endpoint membership landed in `2f43075`. The C14 canonical replacement gate below
-records the reviewed schema19 implementation and passing validation.
-The separate C15 repair-owner slice landed in `07b5cad`; its database-turn
-fairness work remains explicit below. C21's Base freshness lease landed in
-`7c4f0ae` after focused tests, independent review and all-feature Clippy.
-C21 funding authority time is separated from scheduling in `06af797`; C10
-malformed ownership isolation is committed as `e559f28`. C16 preparation
-provenance is committed as `d4d5407` after focused tests and independent review.
-C09 hidden prepared-obligation observation is committed as `1ef6616` with 27
-funding tests passing. C21 treasury freshness is committed as `d8b4dbc` and C17
-live SDK reconstruction as `929b6ca`, with snapshot-read continuation `3639bbb`.
-C19 durable observation ownership is committed as `8bdcc3e`; retired-liability
-repair as `8b7d78b`. C18 external closure is `33689ec` with fixture fixup `9e7396f`.
-C05 completion admission-read retention is `dd64f58`, with independent-review
-cancellation coverage fixup `1a8dc14`. These slices passed their focused tests and
-reviews. The 55-test deployment suite and all-target/all-feature Clippy passed.
-The resumed full check passed tooling/complexity/vendor gates, then ran 645 library
-tests successfully with ten ignored helpers and one obsolete readiness-error fixture
-failure. The reviewed fixture correction passed its focused rerun; full all-target,
-and synthetic lifecycle acceptance remain outstanding. Subsequent all-target/all-feature
-Clippy and dependency compatibility checks passed. C15 bounded publication is committed
-as `55d5b3b`, with cleanup ownership fixup `0f36e2f` and historical reporting fixup
-`110f2e0`. Its final manager gate passed 72 tests with one ignored helper. The remaining
-exact-revalidation fallback was removed in `525069f` after six repair and 17
-replacement tests passed. C18 validated provider observations (`891f848`) and canonical Base delivery verification
-(`63354df`) are committed prerequisites; durable delivery publication is committed
-as `4585782`. C20 owned manual-shielding calculation is implemented below; automatic
-shielding and canonical source/return support remain under implementation.
-Next: continue remaining C09–C10 obligations and C13–C22 in the recommended
-sequence. No live-funded qualification or private-state repair has been performed
-or authorized by these changes.
-
-Continue independent reviews at commit gates and land findings as separate fixup
-commits. Full `scripts/check.sh` and final acceptance closure remain outstanding. The next
-all-target run passed 667 library tests with ten ignored helpers, then stopped on
-an obsolete CLI fixture using diagnostic text as unprepared-closure authority.
-The reviewed production-closure fixture correction (`26e502d`) passed its focused
-process test; subsequent all-target integration targets remain to run.
-The resumed work also passed all 35 Python tooling tests and both vendor
-provenance verifiers; these do not substitute for the remaining Rust acceptance
-checks. Preserve unrelated untracked user files (`TODO`, local deployment overrides,
-`run_servers.sh`, `similar_projects.md`, and `slow_bootstrap_log.txt`).
+Review the [commit sequence](#recommended-commit-sequence),
+[acceptance cases](#test-matrix), [completion criteria](#completion-criteria),
+[target design](#target-design), and [original findings](#supporting-review-findings)
+alongside the consolidated evidence. Maintained behavior and qualification limits
+also appear in [wallet rotation](../wallet-rotation.md),
+[testing](../testing.md), and [lifecycle fixtures](../../tests/LIFECYCLE.md).
+No live-funded qualification, private-state repair, replay, or migration is
+authorized or claimed by this artifact.
 
 ## Recommendation and scope
 
@@ -222,31 +86,29 @@ identity, not from declaring the local journal disposable.
 
 ## Scope constraints and single-schema rollout
 
-Refund closure is not restoration of usable funding capital. Current
-[`shield_refund`](../../src/treasury/refunds.rs) is operator-requested, while funding
-admission uses shielded spendable funds. Automatic shielding of eligible, exactly
-attributed transparent returns is required by this plan. Stage 1 must specify its
-effective spending authority, per-operation fee safeguards, exact input/output
-accounting and committed-byte recovery contract before implementation. Reuse the
-serialized treasury owner and transaction journal; enforce auto-funding controls
-and qualification restrictions on new shielding work. Also decide whether confirmed,
-unspent, treasury-owned transparent outputs can be shielded while partial-return or
-swap attribution remains unresolved. Receipt alone is insufficient, but incomplete
-attribution must not be an automatic veto when input ownership, reservations,
-current authority, privacy boundaries and exact internal-transfer accounting suffice.
-Preserve unresolved attribution through shielding without closing the swap or counting
-returned principal twice. Implement this separation where proven; otherwise document
-the concrete invariant requiring the narrower eligibility rule. Observation-only closure itself
-authorizes neither shielding nor replacement funding. Accounting-only closure with
-manual shielding remaining does not satisfy the supported automatic-capital-recovery
-acceptance case. This plan does not authorize live shielding or private-state repair.
+Refund accounting and usable funding capital are separate obligations. C20 implements
+automatic shielding of confirmed, unspent, treasury-owned transparent outputs under
+current serving-installed authority, enabled auto-funding, an enabled original
+profile and the existing fee safeguard. Exact owned inputs may be shielded while
+return attribution remains incomplete; shielding preserves that accounting issue
+and does not create refund credit or close a swap. One original transparent address,
+immutable selected inputs, exact signed shielded output ownership and fee-only
+accounting remain mandatory.
 
-- Target one supported database schema. There is one operator and no requirement
-  for long-lived backward compatibility, old-schema readers, legacy recovery
-  interpreters, or a migration compatibility matrix. Remove obsolete compatibility
-  paths and obsolete schema-conversion fixtures; preserve their underlying safety
-  regressions as supported-schema tests. Reject incompatible schemas before mutation.
-  Version checks must prevent incompatible binaries from silently ignoring financial guards.
+The serialized treasury owner and existing outgoing journal retain calculated bytes
+and accepted work. Manual bytes and previously attempted bytes are excluded from
+automatic first submission. Existing operations remain observable after disablement
+or restart. Qualification grants no automatic shielding authority. C18 canonical
+closure and C20 shielding do not authorize replacement funding after a refund;
+that remains an operator-review decision. See their consolidated contracts below.
+No live shielding or private-state repair is authorized by this review artifact.
+
+- Runtime state has one supported database schema: **26**. Reject incompatible
+  schemas before mutation; no on-open migration or legacy financial interpreter
+  was added. Remove obsolete runtime compatibility paths while preserving their
+  safety regressions. Historical read-only reports retain saved-schema readers;
+  this compatibility grants neither migration nor present execution authority.
+  Version checks prevent incompatible binaries from silently ignoring financial guards.
 - If preserving the operator's existing funded state requires conversion, handle
   it as a separately reviewed one-time operation with a backup, exact liability
   preservation and validation of the result. Do not add permanent runtime migration
@@ -292,30 +154,29 @@ acceptance case. This plan does not authorize live shielding or private-state re
 
 ## Gate inventory and implementation evidence
 
-This is the initial inventory, not a completed proof specification. Stage 1 expands
-grouped entries into individual predicates/fields and records their exact release
-conditions. “Proposed” dispositions require that proof before implementation;
-“decide” is an unresolved design gate. Add newly discovered predicates here rather
-than creating a separate deletion list. Evidence entries are partial unless explicitly completed; record
-commit, removed predicates, retained invariants and executed tests as work lands.
+This inventory preserves the original review obligations and proposed dispositions.
+The final column records implemented decisions and evidence. “Proposed” and “decide”
+in the disposition column describe the design question at review time; they do not
+mean that its implementation is still pending. Slice-specific contracts below record
+the concrete predicates removed, retained invariants and acceptance boundaries.
 
 | ID | Source predicate or field; finding | Live obligation / authority | Disposition and release rule | Owning stages | Acceptance | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | G01 | `funding.rs` recovery prefixes, `recovery.rs::evidence_outcome`, `bootstrap.rs::disposition`, scheduling diagnostics; F1/F5 | Exact preparation/submission facts and current policy | Delete prose-based authority; derive consumer-specific assessments from shared typed facts | 2 | T15, T21, T34 | Implemented C02 typed recovery/startup/observation assessments; prose is diagnostic only. See boundary and closure contracts below |
-| G02 | `Treasury::prepare`, PREPARING phase, sync/refund-address mutation, owner health, `Treasury::close` and supervisor cancellation; F2/F6 | Snapshot, address binding, reservation, bytes and possible submission; exclusive SDK/store ownership | Replace ambiguous phase inference with minimal boundary provenance; separate SDK retirement from shared-store shutdown and recoverable worker exit from process shutdown; retain exact commit/owner checks | 3, 6 | T08–T12, T23, T35 | Partial: C16 provenance `d4d5407`, C17 live SDK recovery `929b6ca` and read-contention fix `3639bbb`; scheduler completion contention is addressed by `dd64f58` and cancellation fixup `1a8dc14`. See exact contracts below |
+| G02 | `Treasury::prepare`, PREPARING phase, sync/refund-address mutation, owner health, `Treasury::close` and supervisor cancellation; F2/F6 | Snapshot, address binding, reservation, bytes and possible submission; exclusive SDK/store ownership | Replace ambiguous phase inference with minimal boundary provenance; separate SDK retirement from shared-store shutdown and recoverable worker exit from process shutdown; retain exact commit/owner checks | 3, 6 | T08–T12, T23, T35 | Implemented: C16 versioned preparation provenance `d4d5407`, C17 retained-Store SDK reconstruction `929b6ca`, and reviewed read/completion ownership fixups `3639bbb`, `dd64f58`, `1a8dc14`. T08–T12/T23/T35 retain exact bytes, reservations and one owner through crash/cancellation. T12 `f188ecb` uses actual SDK proving with simulated later authority-check times, not measured slow proving |
 | G03 | `evidence.rs::check_capture`, wallet repair flag and invalidation generation; F4/F8 | Affected resolution/debit support | Proposed removal of blanket observation veto; retain only decision-specific disputes until sufficient release evidence commits | 2, 4 | T01, T02, T04, T19, T27 | Implemented C12 conservative capacity and C14/C15 sole canonical repair path; T44/T04 actual paid HTTP during held repair, concurrent liability preservation and reopen passed in `b3a9a28` |
-| G04 | `capture_evidence`, original readiness anchors and `capacity.rs` role publication; F8/F15 | Current owned capacity, exposure and debit floor | Proposed derivation from current canonical support; retire obsolete readiness dependencies without rewriting audit | 2, 4 | T05, T17, T18, T26, T32 | Partial: C10 archival-anchor removal `ff9db28` and C11 initial-capacity serving `8760345` with reviewed fixture correction `4c876b9`; remaining role/repair acceptance follows the contracts below |
-| G05 | `repair_snapshot` ACTIVE/RETAINED, completed-job and undisputed-readiness exclusions; F10 | Role/claim ownership and unresolved funding obligations | Delete exclusions lacking a live dependency; separate current capacity from swap completion | 2, 4 | T18, T26, T27 | Implemented role-independent physical repair inventory and phase-independent funding observations; remaining source/return obligations are tracked separately |
+| G04 | `capture_evidence`, original readiness anchors and `capacity.rs` role publication; F8/F15 | Current owned capacity, exposure and debit floor | Proposed derivation from current canonical support; retire obsolete readiness dependencies without rewriting audit | 2, 4 | T05, T17, T18, T26, T32 | Implemented: C10 removes archival readiness authority (`ff9db28`); C11 serves initial payment-sized capacity (`8760345`, fixture `4c876b9`); C12/C14–C15 retain bounded exposure and canonical replacement without rewriting audit. T39 `c582bba` exercises actual PaidClient/manager admission in the normal library build |
+| G05 | `repair_snapshot` ACTIVE/RETAINED, completed-job and undisputed-readiness exclusions; F10 | Role/claim ownership and unresolved funding obligations | Delete exclusions lacking a live dependency; separate current capacity from swap completion | 2, 4 | T18, T26, T27 | Implemented role-independent physical repair inventory and phase-independent funding observations; distinct source/return obligations are tracked separately |
 | G06 | `base.rs::original_endpoint`, historical verifier selection; F9 | Approved chain/transport trust and exact support | Decide sufficient current replacement or approved alternate verification; retain original provenance | 4 | T06, T17, T19 | Implemented explicitly configured replacement endpoint selection before a pass, with no mid-pass switching; original-endpoint-removed reopen acceptance added below |
-| G07 | `treasury::sync` source-history checks and `source_recheck_page`; F13 | Affected inputs, reservations and source accounting | Proposed removal of whole-sync historical veto; retain scoped live obligations | 2, 4 | T24, T27, T32 | Pending |
-| G08 | `refunds.rs::collect_refunds` credited-output validation; F14 | Exact return credit, expenditure and remaining liability | Proposed removal of unrelated sync veto; reconcile affected accounting without double credit | 2, 4 | T14, T25, T32 | Partial: scoped refund observations `46489cf` / `c172c62` and unidentifiable-attribution sync separation `2ea6762`; automatic shielding and its accounting acceptance remain |
-| G09 | `early_job_disposition`, RefundPending/operator-only classification; F7/F11 | Exact closure proof and current new-work authority | Derive temporary waits and supported closure; automatically shield eligible returns under separate current authority; decide whether unresolved attribution must restrict shielding owned outputs | 7 | T14, T16, T20, T23, T27, T30 | Pending |
+| G07 | `treasury::sync` source-history checks and `source_recheck_page`; F13 | Affected inputs, reservations and source accounting | Proposed removal of whole-sync historical veto; retain scoped live obligations | 2, 4 | T24, T27, T32 | Implemented: C13 canonical source passes `05b8346` are staged, inventory-bound and activated with the final sync snapshot. Source loss revokes only affected support; schema26 `c3d4d5a` retains exact input ownership through burial/restart and existing two-sync expiry correction. Unknown/deep-history limits remain explicit |
+| G08 | `refunds.rs::collect_refunds` credited-output validation; F14 | Exact return credit, expenditure and remaining liability | Proposed removal of unrelated sync veto; reconcile affected accounting without double credit | 2, 4 | T14, T25, T32 | Implemented: scoped return observations `46489cf`/`c172c62`/`2ea6762`, canonical return closure `f8c8194`, and automatic owned shielding `9863d95` preserve independent sync. Returned principal, gross debit and shielding fee count separately. One resident SDK output-map traversal remains linear; SQLite paging does not bound it |
+| G09 | `early_job_disposition`, RefundPending/operator-only classification; F7/F11 | Exact closure proof and current new-work authority | Derive temporary waits and supported closure; automatically shield eligible returns under separate current authority; decide whether unresolved attribution must restrict shielding owned outputs | 7 | T14, T16, T20, T23, T27, T30 | Implemented: canonical closure discharges only fully proven obligations (`f8c8194`, T48 `2d434a8`); eligible owned outputs can be shielded under separately captured current serving authority (`9863d95`). Attribution uncertainty stays scoped; no guessed return credit, manual-byte submission, automatic attempted-byte retry or replacement-funding authority |
 | G10 | `Deployment::load` bootstrap-before-discovery and `initialize_discovery_relay`; F12 | Listener/source binding, relay payment ownership, per-call admission and explicit bootstrap completeness | Replace ordinary global barriers with scoped readiness, including no initially usable payer and implemented deferred relay publication; establish binding-before-new-funding and rollback; retain qualification completeness | 8 | T15, T22, T41 | Implemented ordinary deferred discovery and canonical-capacity wake in the same serving process; actual listener-before-origin, late-source isolation, accepted relay drain and panic cleanup tests in `deployment/deferred.rs` preserve explicit bootstrap/qualification completeness |
 | G11 | `require_spend_ready`, outgoing commit checks and funding refresh `outgoing_pending`; F16 | SDK input/snapshot ownership and exact pending bytes | Decide required scope; remove only proven redundant global waiting, retain commit race checks | 2, 3 | T29 | Retained with concrete SDK invariant: C16 real two-note preparation test shows Pepper Sync reset_spends can clear pending input markers. Exact live-input exclusion is required before relaxing this gate |
-| G12 | Repair snapshot/commit scans, maintenance balance lane, treasury wallet read guard and process-wide Base RPC resources; F3 | Coherent final commit and exclusive mutation owner | Remove avoidable actor/lock occupancy; retain CAS and ownership | 5 | T03, T04, T07, T33 | Implemented separate repair lane `07b5cad`, bounded inactive canonical publication `55d5b3b`, sole repair path `525069f`, and shared historical-resource partition `6bdc853`. T03 multi-pool saturation preserves current query/RPC/socket progress at unchanged aggregate limits; T04 concurrent paid liability survives activation |
-| G13 | Disabled/removed pool and listener scheduling, retired-wallet observation selection; ownership audit | Durable unresolved obligations independent of service demand | Audit/derive observation eligibility; retain prohibitions on new funding and retired capacity | 7 | T16, T31 | Partial: durable policy-free Base owners `8bdcc3e` survive profile removal; retired disputed-liability repair passed its focused tests and root review. No new funding or retired admission authority |
-| G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Implemented journal-derived pending/disputed exposure, endpoint membership `2f43075`, hidden PREPARED observation `1ef6616`, declared-restoration fence `78c3b0c`, and fresh schema24 projection removal `dc284e2`. Undeclared backup rollback is not automatically detectable; qualification/journal-loss acceptance must retain that limit |
-| G15 | Base maintenance inventory-read error propagation and deployment log-only exit; funding-scheduler exit audit; F17 | Observation ownership and durable unresolved obligations | Resume recoverable observation work under existing ownership/backoff; justify stops for corruption or lost ownership | 6 | T37 | Implemented audited read resumption: Base `753d25a`/`827668b`, funding inventory `201bebd`/`5aee0a4`, completion admission `dd64f58`/`1a8dc14`. Retained owners retry only Busy/Locked reads; corruption, publication and lost ownership remain scoped fatal boundaries |
+| G12 | Repair snapshot/commit scans, maintenance balance lane, treasury wallet read guard and process-wide Base RPC resources; F3 | Coherent final commit and exclusive mutation owner | Remove avoidable actor/lock occupancy; retain CAS and ownership | 5 | T03, T04, T07, T33 | Implemented: separate repair lane `07b5cad`, bounded inactive canonical publication `55d5b3b`, sole repair path `525069f`, and unchanged-aggregate RPC resource partition `6bdc853`. T03/T04 cover cross-pool current work and concurrent liability; T33 `8abcfcc` releases the SDK read guard during residual Store accounting while retaining the serialized treasury owner after waiter cancellation, without concurrent SDK mutation |
+| G13 | Disabled/removed pool and listener scheduling, retired-wallet observation selection; ownership audit | Durable unresolved obligations independent of service demand | Audit/derive observation eligibility; retain prohibitions on new funding and retired capacity | 7 | T16, T31 | Implemented: policy-free Base owners `8bdcc3e` and retired-wallet observation `8b7d78b` retain unresolved obligations after profile/listener removal and restart. Existing shielding remains observable without current creation authority. New funding and retired admission stay prohibited |
+| G14 | Derived phases/totals/caches, including `wallets.unresolved_exposure`, scheduling predicates and schema readers; F25 | Authoritative journals, signed authority and liabilities | Define exposure fault model and pre-admission detection/derivation contract; rebuild derived state; derive observation inventory from outstanding obligations so completion labels cannot hide work; delete competing authority and obsolete compatibility paths | 2, 6, 9 | T21, T28, T36, T45, T47 | Implemented: journal-derived pending/disputed exposure, endpoint membership `2f43075`, hidden PREPARED observation `1ef6616`, declared-restoration fence `78c3b0c`, projection removal `dc284e2`, and final fresh schema26. No on-open migration; historical reports retain saved-schema readers. Undeclared rollback is not automatically detectable and missing off-chain authority cannot be reconstructed from chain scans |
+| G15 | Base maintenance inventory-read error propagation and deployment log-only exit; funding-scheduler exit audit; F17 | Observation ownership and durable unresolved obligations | Resume recoverable observation work under existing ownership/backoff; justify stops for corruption or lost ownership | 6 | T37 | Implemented audited read resumption: Base `753d25a`/`827668b`, funding inventory `201bebd`/`5aee0a4`, completion admission `dd64f58`/`1a8dc14`. Retained owners retry only Busy/Locked reads; corruption, publication and lost ownership remain scoped fatal boundaries. Actual treasury/funding task-exit restart handling remains unresolved under C17 / stage 6 |
 | G16 | `history_page` whole-page decoding and failure propagation; F18 | Malformed live authority and identifiable affected scope | Keep affected liability blocked; allow independent wallets in the same pool to progress when scope is provable | 2, 6 | T38 | Implemented `281279f` with physical-page fairness fixup `5f6f852`; malformed identifiable rows retain liability while healthy peers progress. Unknown ownership and shared storage faults remain fatal |
 | G17 | `TreasuryConfig::runtime_id`, `validate_static_identities`, full `store::status` reporting; F19 | Treasury identity, supported schema and managed/static ownership binding | Replace operational full-report reads with narrow identity/ownership queries; unrelated report decoding cannot gate opening or recovery | 2, 8 | T32, T38, T40 | C01 implemented in b4a3b48; see implementation contracts and evidence below |
 | G18 | `validate_resolved_funding`, `managed_connection_preflight`, `initialize_wallets`, `Treasury::open` SDK reconstruction before store-worker creation; F20 | Exclusive store/key ownership, Base journal integrity, dependency-specific connection policy and SDK mutation ownership | Isolate independent static service; decide safe Base/store initialization without a usable Zcash SDK or funding-only configuration, including declaration validation before connection setup; retain justified shared-state stops | 8 | T22, T41 | Implemented scoped startup slices `51c4aef`/`151369f`, `59f9b83`, `fc7fed1`, `3d3305a`/`68e5ef4`; independent static/Base service survives unavailable SDK or funding configuration. See C06 contracts and final cross-layer acceptance limits |
@@ -323,14 +184,15 @@ commit, removed predicates, retained invariants and executed tests as work lands
 | G20 | `record_readiness`, `payment_ownership`, candidate discovery/selection, balance scheduling and `consume_reserve`; F22 | Per-payment capacity, exact claim ownership and pending funding authority | Separate payment-sized capacity from funding-target satisfaction; specify initial role/claim transition without closing or duplicating funding | 2, 4 | T26, T43 | Implemented `8760345` and reviewed fixture correction `4c876b9`. T43 actual PaidClient `initial_partial_credit_pays_after_restart_without_completing_funding` passes with $2 capacity/$10 target, claim-race and insufficient-capacity negatives; original funding remains open |
 | G21 | Wallet-wide admission halt for disputed authorization resolutions; F23 | Complete bounded exposure, compatible current balances and debit accounting | Decide whether full conservative exposure permits use of remaining capacity; retain broader stops for unbounded or unidentifiable liabilities | 2, 4 | T19, T27, T44 | C12 conservative remaining-capacity service and C14 canonical release implemented; immutable audit proofs retained. C15 bounded canonical publication `55d5b3b` and review fixups are implemented; the exact-revalidation fallback was removed in `525069f` |
 | G22 | `eligible_payment_evidence` exposure-read failure, cached candidate scan, pre-filter certificate merging and `candidate_for` propagation; F24 | Identifiable wallet-local liability versus shared store integrity | Isolate affected candidates without treating their exposure as zero; retain diagnostics and try independent usable wallets | 2 | T38, T46 | Implemented C03/C10 wallet-local exposure, ownership and certificate-merge isolation across cache/hint paths; shared storage failures remain explicit |
-| G23 | `FundingFacts::provider_review_required`, `status_needed`, `record_provider_outcome`, phase derivation and closure predicates; F26 | Exact accepted operation correlation and remaining source/destination/refund obligations | Decide which provider observations are terminal, provisional or superseded; retain audit facts without an unjustified permanent veto or premature end to required observation | 2, 7 | T13, T14, T48 | Partial: exact external-satisfaction closure `33689ec` passed 21 completion tests and independent review. Canonical delivery publication is implemented below; current source/return support remains pending, and balances/status labels are insufficient |
-| G24 | Wall-clock evidence/authority checks, elapsed-time scheduling and persisted polling times; F27 | Canonical expiry, original evidence age, signed deadlines and executable observation ownership | Audit clock correction, suspend/resume and restart semantics; remove any durable halt caused only by a temporary clock condition without adding a timer | 2, 6 | T02, T20, T49 | Base lease `7c4f0ae`, scheduling/authority time separation `06af797`, original treasury lease `d8b4dbc`, and persisted future-poll restart `43abf6a` are tested. Clock/suspend/clone/reopen and late-checkpoint catch-up gates pass; T49 production repair retains liability while canonical time stalls despite expired host time, then releases only after canonical advancement |
+| G23 | `FundingFacts::provider_review_required`, `status_needed`, `record_provider_outcome`, phase derivation and closure predicates; F26 | Exact accepted operation correlation and remaining source/destination/refund obligations | Decide which provider observations are terminal, provisional or superseded; retain audit facts without an unjustified permanent veto or premature end to required observation | 2, 7 | T13, T14, T48 | Implemented: exact external-satisfaction assessment `33689ec`, canonical delivery, source `05b8346`, returns `f8c8194`, and refresh dependency `bdc90b5`. Real worker T48 `2d434a8` closes across retained conflicting statuses/provider outage only with exact canonical source, destination and finite return proof. New inventory revokes dependent reuse and schedules reobservation; unchanged unresolved observations reuse the pass. Refund replacement still requires review |
+| G24 | Wall-clock evidence/authority checks, elapsed-time scheduling and persisted polling times; F27 | Canonical expiry, original evidence age, signed deadlines and executable observation ownership | Audit clock correction, suspend/resume and restart semantics; remove any durable halt caused only by a temporary clock condition without adding a timer | 2, 6 | T02, T20, T49 | Implemented: Base lease `7c4f0ae`, scheduling/authority separation `06af797`, original treasury lease `d8b4dbc`, persisted future-poll restart `43abf6a`, and T49 `8ffb521`. Clock/suspend/clone/reopen and late-checkpoint gates pass; the real repair owner retains liability while canonical time stalls despite expired host time and releases only after canonical advancement |
 
 ## Implementation sequence and acceptance gates
 
 Deliver small reviewable commits with their tests. Stage numbers identify work,
 not a mandatory serial delivery order; prerequisites below govern execution.
-After the applicable stage-1 contract is reviewed, prioritize stage 2 gate removal
+The sequence below records the reviewed implementation method. After the applicable
+stage-1 contract is reviewed, prioritize stage 2 gate removal
 and stage 8 scoped startup as early tracks. Stage 8 requires only its applicable
 readiness changes from stages 2/4,
 not completion of treasury reconstruction, refund shielding or all historical
@@ -363,7 +225,8 @@ cases for these results rather than adding another framework or broad audit phas
 Resolve each inventory row before completion; retained restrictions require a
 concrete invariant, not an indefinite promise of later investigation. Stage 1 records
 reviewed contracts and fixture findings; later stages record implementation commits
-and executed test results. The pending evidence fields track implementation acceptance.
+and executed test results. The completion-evidence fields now record the implemented
+decisions and executed acceptance, rather than intermediate resume checkpoints.
 
 Replacement machinery is conditional on a surviving dependency. Before adding a
 certificate, durable incident field, verifier or repair action, record which retained
@@ -443,1038 +306,1219 @@ qualification, replay or private-state repair.
 
 ### Implementation contracts and evidence
 
-**C01 / G17 contract:** Runtime omitted-ID resolution reads only the sole instance
-identity and supported schema16. Static service reads that identity and the pool
-name bindings in one read transaction. Retain private-path checks, UUID/network/
-account/record-version validation, explicit configured-ID equality and rejection
-of a static profile sharing any managed pool name (including disabled pools).
-The store owner still authenticates the encrypted snapshot before managed use.
-Delete `TreasuryConfig::runtime_id -> status` and
-`Deployment::validate_static_identities -> status`: sync observations, payment
-exposure, readiness, funding jobs and refunds are not identity or name-ownership
-inputs. These reads neither repair malformed liabilities nor authorize spending.
-No schema mutation, migration, key access or network observation is required.
-Implementation: b4a3b48; `static_startup_ignores_unrelated_financial_reports_but_retains_identity_guards`
-passes through actual `Deployment::load`, binding and MCP discovery (default Zcash
-build, localhost fixture). It also checks omitted-ID resolution, conflicting managed
-names, explicit ID mismatch, schema15/schema17 rejection without conversion and
-continued reporting failure for the untouched malformed observation. T32/T38 here cover only the startup/report dependency; their admission
-and reconciliation cases remain pending.
+The following sections consolidate the implementation and review record by its owning
+commit point, including the unresolved original C17 / stage 6 task-exit requirement.
+References to schema16–25 identify intermediate committed formats and their tests; the final supported runtime
+schema is **26**, with no runtime or private-state migration. Historical reports retain
+explicit saved-schema read-only contracts. Focused test counts below describe the tests
+executed at each boundary, not separate present-day qualification claims. Final
+repository checks passed; all chain/provider scenarios here use local, unfunded
+fixtures. No live-funded qualification, private-state repair, provider settlement
+contract or absence of future returns is established.
 
-**C02 / G01 first boundary contract:** Expiry recovery must classify local proof
-failures by typed source errors, including errors wrapped in context. Preserve all
-existing exact-tip, age, burial, input identity/value/unspent and canonical inclusion
-predicates. A freshness/burial failure waits for ordinary observation; contradictory
-input/transaction evidence requires review. Diagnostic text, even an exact copy of
-a local message, cannot select either recovery disposition. This slice deletes the
-`evidence_outcome` string interpreter; durable preparation provenance and the
-remaining job diagnostic-prefix interpreters still require subsequent C02 work.
-No new persisted facts or schema are needed for this error boundary. Implemented
-in 6a79697. Five `treasury::recovery::tests` and
+#### C01 — Narrow runtime identity and static ownership
+
+Implementation provenance: `b4a3b48`. Schema16 was this slice's intermediate format;
+final runtime schema is 26.
+
+**Contract:** Runtime omitted-ID resolution reads only the sole instance identity
+and the supported runtime schema (schema16 at the original C01 gate; schema26 in
+the final implementation). Static service reads that identity and the pool name
+bindings in one read transaction. Retain private-path checks, UUID/network/ account/record-version
+validation, explicit configured-ID equality and rejection of a static profile sharing
+any managed pool name (including disabled pools). The Store owner still authenticates
+the encrypted snapshot before managed use. Delete `TreasuryConfig::runtime_id -> status`
+and `Deployment::validate_static_identities -> status`: sync observations, payment
+exposure, readiness, funding jobs and refunds are not identity or name-ownership inputs.
+These reads neither repair malformed liabilities nor authorize spending. No schema
+mutation, migration, key access or network observation is required. Implementation:
+b4a3b48;
+`static_startup_ignores_unrelated_financial_reports_but_retains_identity_guards` passes
+through actual `Deployment::load`, binding and MCP discovery (default Zcash build,
+localhost fixture). It also checks omitted-ID resolution, conflicting managed names,
+explicit ID mismatch, schema15/schema17 rejection without conversion and continued
+reporting failure for the untouched malformed observation. This fixture establishes the
+startup/report dependency; production admission and reconciliation evidence is recorded
+under C03, C12 and C14.
+
+#### C02 — Typed recovery and startup authority
+
+Implementation provenance: typed source errors `6a79697`, closure `3491cc6`, and
+startup/observation authority `e27a5bd`. Later CLI fixture correction `26e502d` replaces
+diagnostic prose with actual production closure provenance.
+
+**First boundary contract:** Expiry recovery must classify local proof failures by typed
+source errors, including errors wrapped in context. Preserve all existing exact-tip,
+age, burial, input identity/value/unspent and canonical inclusion predicates. A
+freshness/burial failure waits for ordinary observation; contradictory input/transaction
+evidence requires review. Diagnostic text, even an exact copy of a local message, cannot
+select either recovery disposition. This boundary deletes the `evidence_outcome` string
+interpreter. The closure and startup contracts below remove the remaining
+diagnostic-prefix authority; C16 establishes durable preparation provenance. No new
+persisted facts or schema are needed for this error boundary. Implemented in 6a79697.
+Five `treasury::recovery::tests` and
 `rotation::store::expiry::tests::expiry_release_is_revision_guarded_and_preserves_job_identity`
 pass in the default Zcash build. The latter verifies the typed exact-tip failure,
 retained pending operation, revision checks, later release and recovery restrictions.
-C02/G01 remains partial: this does not remove durable diagnostic-prefix authority
-or establish preparation provenance.
+This boundary is one part of C02/G01; the other typed-authority boundaries follow here,
+and preparation provenance belongs to C16.
 
-**C03 / G22 contract:** A decimal exposure parse failure is wallet-local only
-when the wallet row was successfully read by exact ID; SQLite and ownership errors
-remain shared failures. Reject that payer without treating exposure as zero, retain
-its malformed value and report the fixed category through candidate traversal.
-Cached, hinted and challenge-time selection must continue with independent payers.
-Certificate merging compares complete proofs before ranking. A conflict invalidates
-only the affected wallet/anchor through the existing generation/dispute mechanism,
-excludes that wallet for the whole merge and retains independent certificates.
-Normal selection stays read-only; discovering a contradiction may invalidate
-support but cannot reserve, sign, change roles or start funding. No new persistent
-incident record is needed. A shared database failure still propagates. C09 remains
-responsible for authoritative exposure derivation; this slice supplies isolation.
-Implementation: 07529ca plus review fixup a1817b8. The sub-agent review identified lost
-merge-failure metadata and a cached-hint fallback regression. The fixup retains
-typed failure through traversal exhaustion, scopes merge/invalidation to the captured
-group, and keeps unsigned hint fallback separate from admission. All 29 selection
-tests and the added uncached-hint regression passed. Tests include
-cache churn, repeated/reordered conflicting proofs, foreign-scope exclusion, all
-malformed exposures, shared SQL errors, cancellation and independent capacity.
-C01 and the typed-evidence C02 slice also received a read-only sub-agent review
-with no actionable findings.
+**Closure contract:** Real unsigned quote failures retain `Allocated`; refreshes archive
+their exact operation then return to `Allocated`. A `RecoveryRequired` row plus
+quote-error prose is not a production proof of an unstarted preparer. Delete those
+exceptions in `safely_unprepared` and transactional closure. Safe closure uses
+`Allocated`/`Quoted`, or the exact job/operation archive joined with
+`source_attempt_closed`; absence of bytes alone remains insufficient. Remove generic
+operator-prefix and historical conflict-prefix vetoes. Current contradictions are
+rechecked against original inputs/exact bytes by canonical confirmation or two-sync
+expiry recovery; every failed proof retains ownership, bytes and reservations. A fresh
+full proof may discharge the original obligation. The sub-agent audit found no distinct
+invariant requiring a new sticky conflict field. New-work permission and durable
+recovery count remain separate checks. Fixtures must create real archive provenance
+rather than simulate it with prose. Startup/health classification is specified below;
+C16 owns safe cleanup of interrupted `Preparing` work. Implementation: 3491cc6.
+Validation: nine focused `recovery_` tests, the extended archive/liability regression,
+and the normal-library
+`confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn` test pass. A
+sub-agent review found no code defects; its archive-plus-reservation negative control
+was added and passes. Signed conflict/canonical-replacement lifecycle evidence belongs
+to C14.
 
-**C02 / G01 closure contract (reviewed):** Real unsigned quote failures retain
-`Allocated`; refreshes archive their exact operation then return to `Allocated`.
-A `RecoveryRequired` row plus quote-error prose is not a production proof of an
-unstarted preparer. Delete those exceptions in `safely_unprepared` and transactional
-closure. Safe closure uses `Allocated`/`Quoted`, or the exact job/operation archive
-joined with `source_attempt_closed`; absence of bytes alone remains insufficient.
-Remove generic operator-prefix and historical conflict-prefix vetoes. Current
-contradictions are rechecked against original inputs/exact bytes by canonical
-confirmation or two-sync expiry recovery; every failed proof retains ownership,
-bytes and reservations. A fresh full proof may discharge the original obligation.
-The sub-agent audit found no distinct invariant requiring a new sticky conflict
-field. New-work permission and durable recovery count remain separate checks.
-Fixtures must create real archive provenance rather than simulate it with prose.
-The remaining startup/health diagnostic interpreters are a separate C02 sub-slice;
-C16 still owns safe cleanup of interrupted `Preparing` work.
-Implementation: 3491cc6. Validation: nine focused `recovery_` tests, the extended archive/liability regression,
-and the normal-library `confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn`
-test pass. A sub-agent review found no code defects; its archive-plus-reservation
-negative control was added and passes. This slice does not claim the full signed
-conflict/canonical-replacement lifecycle acceptance, which remains pending.
-
-**C02 / G01 startup and observation contract:** Replace `funding_shortages` and
+**Startup and observation contract:** Replace `funding_shortages` and
 `StartupPath::disposition`'s diagnostic category parser with typed, operation-bound
 current-process observations. Actual funding restriction supplies current pause and
 qualification status. Cost, amount, input-cap, shortage and authentication producers
-return typed errors; unsigned outages remain ordinary retryable observations.
-The scheduler retains the type beside diagnostics in its existing bounded records
-and publishes it under the same operation check. Reopen does not reconstruct a
-policy obstruction from saved prose. Delete source-operator diagnostic append/
-preservation and scheduler integrity-prefix priority; retained provider flags and
-original journals remain the authority. Ordinary health text can be replaced or
-cleared without changing closure eligibility. Remove the credit-wait string branch:
-its sole producer is the test-only `record_credit` helper; production funding credit
-publication already returns successful observation while credit is insufficient.
-No additional timer, funding permission, durable incident field or schema is needed.
-Validation: all 26 bootstrap tests, eight startup tests, five scheduling tests and
-14 scheduler tests pass; library/funding-test Clippy passes with warnings denied.
-The funding integration suite passed 23 cases; its remaining historical-diagnostic
-assertion was updated to check unknown-preparation ownership after diagnostic clearing
-and a later tick, and that focused case passes. Read-only sub-agent review found no
-actionable runtime defect. Review follow-up adds a sibling-lane condition
-retention/clearing regression and corrects the later-tick assertion to inspect
-the later treasury-operation snapshot. Implementation: e27a5bd plus review fixup.
+return typed errors; unsigned outages remain ordinary retryable observations. The
+scheduler retains the type beside diagnostics in its existing bounded records and
+publishes it under the same operation check. Reopen does not reconstruct a policy
+obstruction from saved prose. Delete source-operator diagnostic append/ preservation and
+scheduler integrity-prefix priority; retained provider flags and original journals
+remain the authority. Ordinary health text can be replaced or cleared without changing
+closure eligibility. Remove the credit-wait string branch: its sole producer is the
+test-only `record_credit` helper; production funding credit publication already returns
+successful observation while credit is insufficient. No additional timer, funding
+permission, durable incident field or schema is needed. Validation: all 26 bootstrap
+tests, eight startup tests, five scheduling tests and 14 scheduler tests pass;
+library/funding-test Clippy passes with warnings denied. The funding integration suite
+passed 23 cases; its remaining historical-diagnostic assertion was updated to check
+unknown-preparation ownership after diagnostic clearing and a later tick, and that
+focused case passes. Read-only sub-agent review found no actionable runtime defect. The
+review fixup adds a sibling-lane condition retention/clearing regression and corrects
+the later-tick assertion to inspect the later treasury-operation snapshot.
+Implementation: e27a5bd plus review fixup.
 
-**C04 / G16 Base history contract:** Advance the bounded cursor past an identifiable
-malformed payload only after decoding the sequence, attempt ID, wallet ID and exact
-wallet/pool ownership. Payload conversion failures produce a typed scoped outcome;
-SQL stepping failures, unknown ownership and cursor failures remain shared errors.
-No malformed row receives RPC, resolution, exposure subtraction or replacement.
-Existing exposure and atomic admission remain unchanged; this slice does not infer
-that an unknown liability is bounded or repair corrupted liability amounts. An
-all-malformed page is not an empty page. Independent balance/history reads continue;
-a one-pass caller receives the scoped failure after independent work drains. The
-continuous owner revisits durable malformed rows on its existing cadence. Buffered
-valid records retain their exact pre-I/O revalidation. No new durable marker,
-quarantine, retry ceiling, timer or schema is needed. Funding inventory isolation
-is a separate C04 boundary with separately reviewed source-liability dependencies.
-Validation: the 20 history-focused tests pass, including cancellation, retained
-active work, retry saturation, all-malformed-page continuation, unchanged malformed
-liabilities, unknown-ownership/storage failures and restart. Sub-agent review found
-an acquisition fairness issue for long malformed prefixes. Implementation 281279f
-plus a separate fixup yields after PAGE_SIZE scanned rows, retaining the cursor and
-resuming immediately while polling independent reads/cancellation. All ten maintenance
-tests pass (nine together plus the corrected multi-page regression separately).
-The expanded test retains 256 malformed obligations, resolves seven later records
-and completes within a three-second harness deadline (existing cadence is five).
-The reviewer confirmed the fairness fix with no additional actionable findings.
+**Recurring review lesson.** Diagnostic wording had accumulated control-flow authority
+at several independent consumers. Typed production provenance had to reach closure,
+startup and scheduler decisions together; updating just one interpreter left the hazard
+in adjacent paths. A CLI fixture using prose as authority was a test-contract
+correction, not evidence to retain the interpreter.
 
-**C04 / G19 funding inventory contract (reviewed):** Only typed decoding failures
-from scheduler payloads (phase/provider observation fields) may become local inventory
-outcomes. Validate exact job/wallet/pool/current-operation ownership and intact
-source-journal correspondence before scoping the error. Unknown ownership, source
-liabilities and SQL failures remain shared errors. Existing fresh SDK spendability
-and prepared-outgoing checks, not funding inventory totals, guard source preparation.
-Keep source bytes, reservations, archives, counters and operation identity unchanged.
-Advance every lane's bounded ID cursor past malformed entries, including entirely
-malformed pages. Retain a first error for one-pass completion after healthy work
-drains; continuous observation revisits the original rows on its existing cadence.
-Apply the same classification to post-capture completion decoding failures, without
-swallowing store writes or granting new work. No additional quarantine ledger,
-funding budget, retry mechanism or schema is required.
-Validation: 16 scheduler tests pass, including post-capture phase/provider corruption,
+#### C03 — Wallet-local selection failures
+
+**Contract:** A decimal exposure parse failure is wallet-local only when the wallet row
+was successfully read by exact ID; SQLite and ownership errors remain shared failures.
+Reject that payer without treating exposure as zero, retain its malformed value and
+report the fixed category through candidate traversal. Cached, hinted and challenge-time
+selection must continue with independent payers. Certificate merging compares complete
+proofs before ranking. A conflict invalidates only the affected wallet/anchor through
+the existing generation/dispute mechanism, excludes that wallet for the whole merge and
+retains independent certificates. Normal selection stays read-only; discovering a
+contradiction may invalidate support but cannot reserve, sign, change roles or start
+funding. No new persistent incident record is needed. A shared database failure still
+propagates. C09 remains responsible for authoritative exposure derivation; this slice
+supplies isolation. Implementation: 07529ca plus review fixup a1817b8. The sub-agent
+review identified lost merge-failure metadata and a cached-hint fallback regression. The
+fixup retains typed failure through traversal exhaustion, scopes merge/invalidation to
+the captured group, and keeps unsigned hint fallback separate from admission. All 29
+selection tests and the added uncached-hint regression passed. Tests include cache
+churn, repeated/reordered conflicting proofs, foreign-scope exclusion, all malformed
+exposures, shared SQL errors, cancellation and independent capacity. C01 and the
+typed-evidence C02 slice also received a read-only sub-agent review with no actionable
+findings.
+
+#### C04 — Scoped malformed inventories
+
+**Base history contract:** Advance the bounded cursor past an identifiable malformed
+payload only after decoding the sequence, attempt ID, wallet ID and exact wallet/pool
+ownership. Payload conversion failures produce a typed scoped outcome; SQL stepping
+failures, unknown ownership and cursor failures remain shared errors. No malformed row
+receives RPC, resolution, exposure subtraction or replacement. Existing exposure and
+atomic admission remain unchanged; this slice does not infer that an unknown liability
+is bounded or repair corrupted liability amounts. An all-malformed page is not an empty
+page. Independent balance/history reads continue; a one-pass caller receives the scoped
+failure after independent work drains. The continuous owner revisits durable malformed
+rows on its existing cadence. Buffered valid records retain their exact pre-I/O
+revalidation. No new durable marker, quarantine, retry ceiling, timer or schema is
+needed. Funding inventory isolation is a separate C04 boundary with separately reviewed
+source-liability dependencies. Validation: the 20 history-focused tests pass, including
+cancellation, retained active work, retry saturation, all-malformed-page continuation,
+unchanged malformed liabilities, unknown-ownership/storage failures and restart.
+Sub-agent review found an acquisition fairness issue for long malformed prefixes.
+Implementation 281279f plus a separate fixup yields after PAGE_SIZE scanned rows,
+retaining the cursor and resuming immediately while polling independent
+reads/cancellation. All ten maintenance tests pass (nine together plus the corrected
+multi-page regression separately). The expanded test retains 256 malformed obligations,
+resolves seven later records and completes within a three-second harness deadline
+(existing cadence is five). The reviewer confirmed the fairness fix with no additional
+actionable findings.
+
+**Funding inventory contract:** Only typed decoding failures from scheduler payloads
+(phase/provider observation fields) may become local inventory outcomes. Validate exact
+job/wallet/pool/current-operation ownership and intact source-journal correspondence
+before scoping the error. Unknown ownership, source liabilities and SQL failures remain
+shared errors. Existing fresh SDK spendability and prepared-outgoing checks, not funding
+inventory totals, guard source preparation. Keep source bytes, reservations, archives,
+counters and operation identity unchanged. Advance every lane's bounded ID cursor past
+malformed entries, including entirely malformed pages. Retain a first error for one-pass
+completion after healthy work drains; continuous observation revisits the original rows
+on its existing cadence. Apply the same classification to post-capture completion
+decoding failures, without swallowing store writes or granting new work. No additional
+quarantine ledger, funding budget, retry mechanism or schema is required. Validation: 16
+scheduler tests pass, including post-capture phase/provider corruption,
 same-pool/other-pool observation progress, source-byte retention, no new recovery,
-restart, cancellation, saturation and fatal store-error ownership controls. Five
-initial scheduling tests and the added all-malformed-page/reopen/ownership regression
-pass. Completion's provider decoder uses the same typed conversion as inventory;
-its SQL and transactional writes remain shared failures. Sub-agent review found no
-blocking defect. Implementation c27987c plus a separate review fixup binds late
-completion diagnostics to their captured operation; the rollover/reopen regression
-passes and the reviewer confirmed the correction. Health-field conversions remain a following C04 scope extension; source
-facts/attempts with unknown liabilities are intentionally shared failures.
+restart, cancellation, saturation and fatal store-error ownership controls. Five initial
+scheduling tests and the added all-malformed-page/reopen/ownership regression pass.
+Completion's provider decoder uses the same typed conversion as inventory; its SQL and
+transactional writes remain shared failures. Sub-agent review found no blocking defect.
+Implementation c27987c plus a separate review fixup binds late completion diagnostics to
+their captured operation; the rollover/reopen regression passes and the reviewer
+confirmed the correction. The health-field extension below applies the same decoder.
+Source facts/attempts with unknown liabilities intentionally remain shared failures.
 
-**C04 health-field extension contract (reviewed):** Apply the same scoped decoder
-to funding health field conversions and negative started-at/next-poll values. These
-are scheduling observations, not source spending authority. Preserve malformed
-values and current operation identity, retain missing-health-row behavior, and keep
-SQL execution/stepping errors shared. The existing ownership/source guard remains
-mandatory; do not default bad values to zero or create an incident record.
-Validation: six malformed health representations retain exact SQL values across
-reopen with healthy-peer continuation and missing-table failure. The runtime
-pre/post-capture regression also passes for health streak and next-poll corruption.
-Library Clippy passes. Read-only sub-agent review found no actionable issues.
+**Health-field extension contract:** Apply the same scoped decoder to funding health
+field conversions and negative started-at/next-poll values. These are scheduling
+observations, not source spending authority. Preserve malformed values and current
+operation identity, retain missing-health-row behavior, and keep SQL execution/stepping
+errors shared. The existing ownership/source guard remains mandatory; do not default bad
+values to zero or create an incident record. Validation: six malformed health
+representations retain exact SQL values across reopen with healthy-peer continuation and
+missing-table failure. The runtime pre/post-capture regression also passes for health
+streak and next-poll corruption. Library Clippy passes. Read-only sub-agent review found
+no actionable issues.
 
-**C05 / G15 Base inventory resumption contract (reviewed):** Retry only typed
-SQLite Busy/Locked failures at read-only priority, wallet and history inventory
-boundaries. Keep the same owner guard, captured cursor, active futures and history
-retry metadata. Use the existing five-second cadence; acquired independent reads
-continue while the failed inventory waits. A one-pass caller drains independent
-work then reports incomplete observation. Preserve existing handling of per-wallet
-RPC failures. SQL corruption, unknown ownership, channel/task failure and financial
-publication failures still propagate. Do not restart the whole owner, replay a
-mutation or add a deadline. Funding inventory resumption follows separately under
-the same audited-read restriction; treasury generation replacement remains C17.
-Validation: 19 inventory-focused tests and library Clippy pass, including injected
-Busy/Locked at all five Base boundaries, independent observations, retained owner,
-no duplicate active nonce, cancellation, incomplete one-pass and corruption controls.
-Implementation: 753d25a. Review found no implementation defect; its test fixup
-records actual balance RPC payer addresses and requires observation of an added
-non-priority retained wallet after the failed page resumes. The expanded test passes.
+**Recurring review lesson.** Recognizable malformed data may be local only after exact
+ownership and intact source liabilities are established. Cursor progress must count
+scanned physical rows, including bad or ineligible prefixes; returned-row counts alone
+concealed starvation.
 
-**C05 completion admission-read continuation (implemented and reviewed):**
-Completed source/status/quote observations retain their exact payload and original
-lane permit while the initial operation-identity read returns Busy/Locked. Only that
-read retries on existing poll cadence; sibling work continues, and neither I/O nor
-publication repeats. Operation rollover discards stale observations. Source-owned
-completion drains through cancellation; unsigned work retains its prior shutdown
-behavior. Corruption, mutation and later diagnostic errors keep their original
-classification. All 21 scheduler tests passed. Independent review cleared production
-and requested preserving both cancellation-during-I/O and retained-completion tests;
-the parameterized fixup passed separately. One-pass work retains accepted completion
-through read contention rather than abandoning it or imposing a new deadline.
+#### C05 — Retained observation ownership through transient reads
 
-**C05 funding inventory resumption contract (reviewed):** Share Base's typed
-Busy/Locked read classifier, restricted to initial/rolling funding boundaries and
-page reads. Preserve the funding lease, lane cursor, active source/read futures and
-per-operation backoff. Defer only the affected lane under its existing poll cadence;
-other lanes keep observing. A transient initial boundary failure waits with the same
-lease; one-pass requests report it. Never retry `publish_observation`, phase changes,
-timeout writes or accepted source work. Permanent store faults retain existing fatal
-owner behavior and any separately owned source drain. No new worker generation,
-SDK reopen, spending authority, retry ceiling or durable scheduling record is added.
-Validation: all 17 funding scheduler tests and library Clippy pass. New fault cases
-cover both inventory read kinds in continuous and one-pass mode, independent
-credit/status progress, retained source lease through cancellation, unchanged signed
-bytes/attempt counts after reopen, and corruption propagation. Sub-agent review found
-no code defect. Implementation: 201bebd plus a review fixup that injects the rolling
-boundary failure after the source task is held, confirms the fault is consumed,
-then requires new credit/status observations without a duplicate source. The
-expanded regression passes.
+Implementation provenance: Base inventory `753d25a`, funding inventory `201bebd`,
+completed-observation retention `dd64f58`, and independent-review cancellation fixup
+`1a8dc14`.
 
-**C06/C07 shared-state prerequisite contract (reviewed):** Serving fallback must
-not mask shared identity, schema, key, snapshot authentication or exclusive-owner
-failures. Split shared Store opening from SDK reconstruction, retaining the exact
-exclusively owned store only for the typed SDK authenticated-snapshot decode failure.
-SQL, decryption, offline configuration and unexpected network binding errors remain
-fatal. Strict wallet commands still require the SDK and report the same fixed
-failure. No new state, schema, owner generation or financial authority is introduced.
-This narrow prerequisite supplies C06's preflight ordering and C07's live Base store;
-it does not yet publish degraded serving or claim those startup acceptance gates.
+**Base inventory resumption contract:** Retry only typed SQLite Busy/Locked failures at
+read-only priority, wallet and history inventory boundaries. Keep the same owner guard,
+captured cursor, active futures and history retry metadata. Use the existing five-second
+cadence; acquired independent reads continue while the failed inventory waits. A
+one-pass caller drains independent work then reports incomplete observation. Preserve
+existing handling of per-wallet RPC failures. SQL corruption, unknown ownership,
+channel/task failure and financial publication failures still propagate. Do not restart
+the whole owner, replay a mutation or add a deadline. Funding inventory resumption
+follows separately under the same audited-read restriction; treasury generation
+replacement remains C17. Validation: 19 inventory-focused tests and library Clippy pass,
+including injected Busy/Locked at all five Base boundaries, independent observations,
+retained owner, no duplicate active nonce, cancellation, incomplete one-pass and
+corruption controls. Implementation: 753d25a. Review found no implementation defect; its
+test fixup records actual balance RPC payer addresses and requires observation of an
+added non-priority retained wallet after the failed page resumes. The expanded test
+passes.
 
-**C08 no-relay startup contract (reviewed narrow prerequisite):** With no enabled
-serving discovery relay, retain authored-provider and listener-credential preflight,
-load catalogs, initialize dormant managed owners and bind all listeners before
-starting funding. Pool declaration establishes configured claims without allocating
-wallets. Existing managed admission returns typed WalletNotReady before provider I/O
-for empty pools; no new readiness gate or wait is required. Explicit bootstrap is
-unchanged. Enabled relay bootstrap/deferred publication remains pending C08, as do
-C06/C07 capability-local initialization failures. Entry-point fixtures cover enabled
-auto-funding with an empty treasury, no bootstrap wait, typed no-payer failure,
-zero provider requests/allocations/jobs and second-listener rollback.
+**Completion admission-read continuation:** Completed source/status/quote observations
+retain their exact payload and original lane permit while the initial operation-identity
+read returns Busy/Locked. Only that read retries on existing poll cadence; sibling work
+continues, and neither I/O nor publication repeats. Operation rollover discards stale
+observations. Source-owned completion drains through cancellation; unsigned work retains
+its prior shutdown behavior. Corruption, mutation and later diagnostic errors keep their
+original classification. All 21 scheduler tests passed. Independent review cleared
+production and requested preserving both cancellation-during-I/O and retained-completion
+tests; the parameterized fixup passed separately. One-pass work retains accepted
+completion through read contention rather than abandoning it or imposing a new deadline.
 
-**C07 authenticated SDK failure contract (reviewed narrow serving slice):** Ordinary
-non-qualification binding can retain the exact authenticated Store when SDK decoding
-alone fails. Shared schema, key, ciphertext authentication, identity and owner errors
-remain fatal; explicit bootstrap, relay setup and qualification remain strict. Pause
-new funding before configured profile/claim transitions. Existing Base keys,
-journals, admission and reconciliation use the same serialized StoreHandle; no SDK,
-funding actor, source submission or recovery reset is started. Configuring claims
-can apply ordinary cap/target/removal transitions but allocates no wallets. Setup
-errors, binding rollback and normal shutdown drop dependent handles and await the
-owner. Cancellation/drop preserves accepted store work and releases ownership when
-that queue drains. SDK restoration in this slice needs restart; supervised SDK
-reconstruction remains C17. Funding-only configuration/preflight isolation remains
-C06, and enabled relay deferred publication remains C08. Synthetic entry-point
-fixtures cover signed Base payment, unresolved-liability rejection, mixed static
-discovery, unchanged snapshot/funding inventory, strict/shared-failure controls,
-rollback and cancelled/dropped deployment cleanup. These do not constitute live
-funded qualification.
+**Funding inventory resumption contract:** Share Base's typed Busy/Locked read
+classifier, restricted to initial/rolling funding boundaries and page reads. Preserve
+the funding lease, lane cursor, active source/read futures and per-operation backoff.
+Defer only the affected lane under its existing poll cadence; other lanes keep
+observing. A transient initial boundary failure waits with the same lease; one-pass
+requests report it. Never retry `publish_observation`, phase changes, timeout writes or
+accepted source work. Permanent store faults retain existing fatal owner behavior and
+any separately owned source drain. No new worker generation, SDK reopen, spending
+authority, retry ceiling or durable scheduling record is added. Validation: all 17
+funding scheduler tests and library Clippy pass. New fault cases cover both inventory
+read kinds in continuous and one-pass mode, independent credit/status progress, retained
+source lease through cancellation, unchanged signed bytes/attempt counts after reopen,
+and corruption propagation. Sub-agent review found no code defect. Implementation:
+201bebd plus a review fixup that injects the rolling boundary failure after the source
+task is held, confirms the fault is consumed, then requires new credit/status
+observations without a duplicate source. The expanded regression passes.
 
-**C06 funding-only configuration contract (reviewed serving slice):** Ordinary
-no-relay serving validates shared treasury identity/paths and Base environment,
-fallback, confirmation/freshness policy before publishing service. All wallet,
-payment-cap, assignment, registry, listener and network validation remains strict.
-Strict config inspection/check, explicit bootstrap, relay and qualification compose
-all validators. Missing treasury/funding sections and Base initialization failures
-remain fatal in this slice; independent static service for those unavailable managed
-capabilities remains pending C06. After authenticating the single shared Store,
-source-only validation/construction can select the store-only runtime: treasury
-sync/confirmation/fee/endpoints and NEAR credentials/quote/slippage/poll policy.
-No alternate values are substituted. Only this source constructor is caught, never
-shared opening, Base setup or profile reconciliation. Funding remains paused with
-no source observer or preparation worker; liabilities and exact committed snapshots
-remain durable. Corrections take effect on restart. Entry-point tests exercise valid
-SDK snapshots with malformed credentials, invalid quote window and fee, successful
-Base signing and static MCP calls, retained exposure, and a declaration matrix with
+**Recurring review lesson.** Keeping an I/O future alive was insufficient if the
+following local identity read could abandon its accepted result. Owner, exact payload
+and original permit must survive through publication, with read-only contention
+distinguished from writes and corruption.
+
+#### C06 — Capability-local configuration and Base failures
+
+**Shared-state prerequisite contract:** Serving fallback must not mask shared identity,
+schema, key, snapshot authentication or exclusive-owner failures. Split shared Store
+opening from SDK reconstruction, retaining the exact exclusively owned store only for
+the typed SDK authenticated-snapshot decode failure. SQL, decryption, offline
+configuration and unexpected network binding errors remain fatal. Strict wallet commands
+still require the SDK and report the same fixed failure. No new state, schema, owner
+generation or financial authority is introduced. This narrow prerequisite supplies C06's
+preflight ordering and C07's live Base store; C06/C07 serving evidence below exercises
+the resulting degraded capability paths.
+
+**Funding-only configuration contract:** Ordinary no-relay serving validates shared
+treasury identity/paths and Base environment, fallback, confirmation/freshness policy
+before publishing service. All wallet, payment-cap, assignment, registry, listener and
+network validation remains strict. Strict config inspection/check, explicit bootstrap,
+relay and qualification compose all validators. Missing treasury/funding sections remain
+strict dependencies where required. The Base-unavailable path below isolates Base
+capability failures. After authenticating the single shared Store, source-only
+validation/construction can select the store-only runtime: treasury
+sync/confirmation/fee/endpoints and NEAR credentials/quote/slippage/poll policy. No
+alternate values are substituted. Only this source constructor is caught, never shared
+opening, Base setup or profile reconciliation. Funding remains paused with no source
+observer or preparation worker; liabilities and exact committed snapshots remain
+durable. Corrections take effect on restart. Entry-point tests exercise valid SDK
+snapshots with malformed credentials, invalid quote window and fee, successful Base
+signing and static MCP calls, retained exposure, and a declaration matrix with
 shared-key failure controls. This is local synthetic evidence, not live settlement.
 
-**C06 Base-unavailable static-service contract (reviewed incremental slice):**
-Ordinary no-relay serving defers Base dependency validation to its constructor after
-shared Store authentication. A Base declaration/connection failure retains that
-owner with funding paused and installs an explicit unavailable PaidClient for each
-managed binding. Profile/identity reconciliation remains authoritative; no Base
-manager, reconciliation or funding actor starts through invalid Base policy. API
-execution and wallet-identity documentation probes return typed WalletNotReady
-before transport/provider I/O. Static API service, catalog discovery and independent
-unsigned help/import capabilities remain available. Strict validation, explicit
-bootstrap, enabled relay and qualification are unchanged. Missing treasury/funding
-sections and shared-state failures still stop dependent deployment initialization.
-Corrected Base configuration takes effect on restart. Entry-point fixtures cover
-invalid Base limits, missing explicit environment values and insecure endpoints,
-actual managed MCP rejection versus successful static MCP invocation, cloned
-clients/probe identity refusal, no allocation/funding jobs and owner cleanup.
+**Base-unavailable static-service contract:** Ordinary no-relay serving defers Base
+dependency validation to its constructor after shared Store authentication. A Base
+declaration/connection failure retains that owner with funding paused and installs an
+explicit unavailable PaidClient for each managed binding. Profile/identity
+reconciliation remains authoritative; no Base manager, reconciliation or funding actor
+starts through invalid Base policy. API execution and wallet-identity documentation
+probes return typed WalletNotReady before transport/provider I/O. Static API service,
+catalog discovery and independent unsigned help/import capabilities remain available.
+Strict validation, explicit bootstrap, enabled relay and qualification are unchanged.
+Missing treasury/funding sections and shared-state failures still stop dependent
+deployment initialization. Corrected Base configuration takes effect on restart.
+Entry-point fixtures cover invalid Base limits, missing explicit environment values and
+insecure endpoints, actual managed MCP rejection versus successful static MCP
+invocation, cloned clients/probe identity refusal, no allocation/funding jobs and owner
+cleanup.
 
-**C08 shared-publication prerequisite contract (reviewed):** A late static source
-or pricing result must compose with current dynamic registrations under the existing
-Manager mutation lock. Store the static base there, expose an off-lock immutable
-capture and compare its revision when replacing complete static views. Validate
-listener keys, static bindings, reserved names and collisions, then construct the
-combined snapshot and check all generation overflows before changing anything.
-Dynamic registry commits retain durability-before-publication and use the latest
-static base; catalog generations advance across both writers. Unchanged dynamic
-record revisions retain their help cells, and captured snapshots remain immutable.
-An accepted blocking publication survives a cancelled waiter; stale retry/revision
-failure cannot undo a later removal. Static changes are process-local and add no
-registry schema or durable work ledger. Deferred relay scheduling, source status,
-pricing integration, standalone publication and relay drain remain pending C08;
-this prerequisite alone does not enable deferred discovery. Tests cover overlapping
+#### C07 — Usable Store/Base ownership without an initialized SDK
+
+**Authenticated SDK failure contract:** Ordinary non-qualification binding can retain
+the exact authenticated Store when SDK decoding alone fails. Shared schema, key,
+ciphertext authentication, identity and owner errors remain fatal; explicit bootstrap,
+relay setup and qualification remain strict. Pause new funding before configured
+profile/claim transitions. Existing Base keys, journals, admission and reconciliation
+use the same serialized StoreHandle; no SDK, funding actor, source submission or
+recovery reset is started. Configuring claims can apply ordinary cap/target/removal
+transitions but allocates no wallets. Setup errors, binding rollback and normal shutdown
+drop dependent handles and await the owner. Cancellation/drop preserves accepted store
+work and releases ownership when that queue drains. SDK restoration in this slice needs
+restart; supervised SDK reconstruction remains C17. Funding-only configuration/preflight
+isolation remains C06, and enabled relay deferred publication remains C08. Synthetic
+entry-point fixtures cover signed Base payment, unresolved-liability rejection, mixed
+static discovery, unchanged snapshot/funding inventory, strict/shared-failure controls,
+rollback and cancelled/dropped deployment cleanup. These do not constitute live funded
+qualification.
+
+#### C08 — Deferred discovery and listener-first lifecycle
+
+**No-relay startup contract:** With no enabled serving discovery relay, retain
+authored-provider and listener-credential preflight, load catalogs, initialize dormant
+managed owners and bind all listeners before starting funding. Pool declaration
+establishes configured claims without allocating wallets. Existing managed admission
+returns typed WalletNotReady before provider I/O for empty pools; no new readiness gate
+or wait is required. Explicit bootstrap retains its separate captured-claim authority.
+The relay publication and capability-local initialization contracts below complete these
+paths. Entry-point fixtures cover enabled auto-funding with an empty treasury, no
+bootstrap wait, typed no-payer failure, zero provider requests/allocations/jobs and
+second-listener rollback.
+
+**Shared-publication prerequisite contract:** A late static source or pricing result
+must compose with current dynamic registrations under the existing Manager mutation
+lock. Store the static base there, expose an off-lock immutable capture and compare its
+revision when replacing complete static views. Validate listener keys, static bindings,
+reserved names and collisions, then construct the combined snapshot and check all
+generation overflows before changing anything. Dynamic registry commits retain
+durability-before-publication and use the latest static base; catalog generations
+advance across both writers. Unchanged dynamic record revisions retain their help cells,
+and captured snapshots remain immutable. An accepted blocking publication survives a
+cancelled waiter; stale retry/revision failure cannot undo a later removal. Static
+changes are process-local and add no registry schema or durable work ledger. Deferred
+scheduling, source status, pricing integration, standalone publication and relay drain
+use this publication contract as described below. Tests cover overlapping
 registration/publication, stale pricing after removal, view/binding/name/overflow
 failures without partial publication, and accepted-work cancellation.
 
-**C08 relay-readiness and drain prerequisite (reviewed contract):** Check existing
-unsigned identity availability using the same read-only default-identity calculation,
-without payment's retained-role promotion. Only an absent identity becomes typed
-dependency waiting; unavailable configuration, malformed/shared evidence, exhausted
-target attempts and a stopped breaker remain errors. Waiting consumes no relay
-attempt or provider I/O. Every actual request still resolves identity and validates
-fresh payment admission; readiness is not authority. Typed retry dispositions retain
-the existing one-second backoff and three actual pre-submission attempts. Paid
-uncertainty still closes the shared run-wide breaker. Relay drain delegates to the
-existing shared PaidClient owner and is for final deployment shutdown only, never
-an individual target completion. Tests cover repeated empty-payer waits, same-owner
-resumption after canonical fixture evidence, no readiness role mutation, attempt
-exhaustion/backoff, terminal immutable/malformed state, and cancelled paid-waiter
-drain. Deferred scheduling and shutdown wiring remain pending C08.
+**Relay-readiness and drain prerequisite:** Check existing unsigned identity
+availability using the same read-only default-identity calculation, without payment's
+retained-role promotion. Only an absent identity becomes typed dependency waiting;
+unavailable configuration, malformed/shared evidence, exhausted target attempts and a
+stopped breaker remain errors. Waiting consumes no relay attempt or provider I/O. Every
+actual request still resolves identity and validates fresh payment admission; readiness
+is not authority. Typed retry dispositions retain the existing one-second backoff and
+three actual pre-submission attempts. Paid uncertainty still closes the shared run-wide
+breaker. Relay drain delegates to the existing shared PaidClient owner and is for final
+deployment shutdown only, never an individual target completion. Tests cover repeated
+empty-payer waits, same-owner resumption after canonical fixture evidence, no readiness
+role mutation, attempt exhaustion/backoff, terminal immutable/malformed state, and
+cancelled paid-waiter drain. Deferred scheduling and shutdown wiring below retain this
+readiness/drain contract.
 
-**C08 relay listener-ordering prerequisite (reviewed):** Ordinary enabled-relay
-serving validates listener credentials and authored provider composition, then
-reserves every configured socket before opening relay wallets, bootstrapping or
-performing paid discovery. Static payers and `DenyNewFunding` use the same order.
-Binding later consumes the exact sockets, including ephemeral ports, and rejects
-an incomplete listener map. A failed bind releases earlier sockets; later setup
-failure releases sockets and accepted financial owners. Bound sockets are not yet
-serving MCP. Inspection and explicit wallet bootstrap retain their existing scope.
-Tests cover second-socket failure before any wallet can open, both funding policies
-and payer modes, ephemeral socket reuse, later catalog failure, and post-initialization
-credential failure with immediate treasury reopen. Independent listener service and
-deferred publication remain pending; this change removes only the spending-before-bind
-ordering hazard.
+**Relay listener-ordering prerequisite:** Ordinary enabled-relay serving validates
+listener credentials and authored provider composition, then reserves every configured
+socket before opening relay wallets, bootstrapping or performing paid discovery. Static
+payers and `DenyNewFunding` use the same order. Binding later consumes the exact
+sockets, including ephemeral ports, and rejects an incomplete listener map. A failed
+bind releases earlier sockets; later setup failure releases sockets and accepted
+financial owners. Bound sockets are not yet serving MCP. Inspection and explicit wallet
+bootstrap retain their existing scope. Tests cover second-socket failure before any
+wallet can open, both funding policies and payer modes, ephemeral socket reuse, later
+catalog failure, and post-initialization credential failure with immediate treasury
+reopen. This removes the spending-before-bind ordering hazard; the deferred-publication
+contract below establishes independent listener service.
 
-**C08 retained-catalog continuation prerequisite (reviewed contract):** Split
-catalog loading into an unsigned cache/origin phase and an owned relay continuation.
-The unsigned phase retains fresh relay-cache precedence and performs the original
-origin load once. Only remote failures with a configured relay become continuations;
-local and no-relay failures stay immediate. A continuation captures the original typed
-failure, immutable request configuration, same shared relay and exact cache slot.
-Resumption performs relay fetch, parse and cache publication without origin I/O or
-validator refresh. The strict loader composes both phases once, preserving inspection
-and qualification behavior. The HTTP-status/parse-failure fixture matrix verifies zero
-relay calls during preparation, concurrent resumptions sharing one payment, no repeat
-origin requests, immutable caller configuration and relay-only cache provenance.
-Deferred startup scheduling and dependency notifications remain pending.
-A follow-up review found historical readiness restoration omitted the existing pool
-notification. It now notifies that pool after commit; canonical restoration fixtures
-assert the wakeup, unrelated-pool isolation and unchanged balance/provenance.
+**Retained-catalog continuation prerequisite:** Split catalog loading into an unsigned
+cache/origin phase and an owned relay continuation. The unsigned phase retains fresh
+relay-cache precedence and performs the original origin load once. Only remote failures
+with a configured relay become continuations; local and no-relay failures stay
+immediate. A continuation captures the original typed failure, immutable request
+configuration, same shared relay and exact cache slot. Resumption performs relay fetch,
+parse and cache publication without origin I/O or validator refresh. The strict loader
+composes both phases once, preserving inspection and qualification behavior. The
+HTTP-status/parse-failure fixture matrix verifies zero relay calls during preparation,
+concurrent resumptions sharing one payment, no repeat origin requests, immutable caller
+configuration and relay-only cache provenance. Deferred scheduling and dependency
+notifications below use this continuation. A follow-up review found historical readiness
+restoration omitted the existing pool notification. It now notifies that pool after
+commit; canonical restoration fixtures assert the wakeup, unrelated-pool isolation and
+unchanged balance/provenance.
 
-**C08 event-driven relay wait prerequisite (reviewed):** The opt-in deferred-fetch
-API enables existing pool-capacity and shared relay-outcome notifications before
-calling the same serialized fetch/readiness check. Empty identity waits consume no
-attempts or I/O; there is no added polling cadence or deadline. Pre-submission
-failures use the existing finite attempts and returned backoff. A completion guard
-wakes sibling wallet scopes on every accepted relay outcome, including unwind, so
-an empty payer observes a shared terminal failure. Cancellation drops only the
-waiter; accepted paid work remains drainable. Tests exercise cancelled unsigned
-waiting, production reconciliation wakeup, sibling paid-failure disablement and
-cancelled accepted payment drain. Strict fetch remains unchanged; wiring this API
-into deployment-owned deferred publication remains pending.
+**Event-driven relay wait prerequisite:** The opt-in deferred-fetch API enables existing
+pool-capacity and shared relay-outcome notifications before calling the same serialized
+fetch/readiness check. Empty identity waits consume no attempts or I/O; there is no
+added polling cadence or deadline. Pre-submission failures use the existing finite
+attempts and returned backoff. A completion guard wakes sibling wallet scopes on every
+accepted relay outcome, including unwind, so an empty payer observes a shared terminal
+failure. Cancellation drops only the waiter; accepted paid work remains drainable. Tests
+exercise cancelled unsigned waiting, production reconciliation wakeup, sibling
+paid-failure disablement and cancelled accepted payment drain. Strict fetch retains its
+behavior; deployment-owned publication below uses this API.
 
-**C08 deferred-publication integration contract (reviewed incremental slice):**
-Enabled-relay ordinary serving retains eligible origin failures as shared, immutable
-continuations and binds available tools before invoking those continuations. One
-serving-owned publisher schedules relay attempts under the configured catalog
-concurrency, releasing lanes during identity waits; accepted owners retain permits.
-Startup pricing uses its existing source/request limits after binding. Complete
-listener views and instructions publish together through the shared Manager or a
-standalone revision comparison. Late source validation failures remain source-local;
-existing priced definitions, captured calls and help cells survive other publications.
-Pending, unavailable and stopped-publication status is explicit. Shutdown cancels
-unsigned waits, finishes accepted publication, drains foreground calls, then drains
-retained relay owners before closing financial owners. Inspection/qualification and
-warm commands remain strict. Review found and corrected retained-wallet bind cleanup,
-unbounded accepted-work scheduling, reserved-name rejection scope and early return
-on publisher panic. Independent drain handles survive worker failure; its error is
-reported only after financial ownership closes. Tests cover
+**Deferred-publication integration contract:** Enabled-relay ordinary serving retains
+eligible origin failures as shared, immutable continuations and binds available tools
+before invoking those continuations. One serving-owned publisher schedules relay
+attempts under the configured catalog concurrency, releasing lanes during identity
+waits; accepted owners retain permits. Startup pricing uses its existing source/request
+limits after binding. Complete listener views and instructions publish together through
+the shared Manager or a standalone revision comparison. Late source validation failures
+remain source-local; existing priced definitions, captured calls and help cells survive
+other publications. Pending, unavailable and stopped-publication status is explicit.
+Shutdown cancels unsigned waits, finishes accepted publication, drains foreground calls,
+then drains retained relay owners before closing financial owners.
+Inspection/qualification and warm commands remain strict. Review found and corrected
+retained-wallet bind cleanup, unbounded accepted-work scheduling, reserved-name
+rejection scope and early return on publisher panic. Independent drain handles survive
+worker failure; its error is reported only after financial ownership closes. Tests cover
 140 waiting requests with one runnable lane and an independent ready wallet, alias
 coalescing, invalid/valid late-source ordering, healthy calls during accepted relay
 work, price/help retention, and shutdown without replay or late publication, including
-an injected publisher panic followed by immediate store reopen. Enabled-relay initial funding
-bootstrap and the initial unsigned-catalog barrier remain separate pending C08 work;
-this slice does not claim their removal or full T41 acceptance.
+an injected publisher panic followed by immediate store reopen. The serving-bootstrap
+removal and deferred unsigned-origin contracts below remove those remaining startup
+barriers and complete the integrated T41 scope.
 
-**C08 serving-bootstrap removal contract (reviewed):** Delete the serving-only
-FundingSupervisor, bootstrap wait and handoff rather than preserving a dormant second
-startup policy. All ordinary serving, including enabled relay, prepares dormant
-owners and starts funding/reconciliation only after listener binding. Extend the
-same authenticated store/SDK/funding/Base capability isolation to relay initialization;
-shared identity/key/schema/ownership faults remain fatal. Explicit `wallet bootstrap`
-retains its independent captured-claim monitor, accepted-command drain and completeness.
+**Serving-bootstrap removal contract:** Delete the serving-only FundingSupervisor,
+bootstrap wait and handoff rather than preserving a dormant second startup policy. All
+ordinary serving, including enabled relay, prepares dormant owners and starts
+funding/reconciliation only after listener binding. Extend the same authenticated
+store/SDK/funding/Base capability isolation to relay initialization; shared
+identity/key/schema/ownership faults remain fatal. Explicit `wallet bootstrap` retains
+its independent captured-claim monitor, accepted-command drain and completeness.
 Entry-point tests cover enabled auto-funding with an empty managed payer, zero
-pre-serving allocation/provider I/O, immediate managed refusal, SDK/funding/Base
-fault isolation with real static MCP calls, and paused observation after serving
-starts. Obsolete supervisor-handoff tests are replaced by real serving ownership
-coverage. The initial unsigned-catalog barrier and remaining C08 end-to-end
-restoration/status evidence are still tracked separately.
+pre-serving allocation/provider I/O, immediate managed refusal, SDK/funding/Base fault
+isolation with real static MCP calls, and paused observation after serving starts.
+Obsolete supervisor-handoff tests are replaced by real serving ownership coverage. The
+deferred unsigned-origin and observation evidence below complete this scope.
 
-**C08 deferred unsigned-origin slice:** Enabled-relay ordinary serving retains
-remote catalog preparation before origin I/O. Aliases share one immutable
-preparation result; catalog permits cover unsigned requests and are released
-before relay dependency waiting. Cancellation retains the existing unsigned
-OnceCell semantics; accepted relay work retains its independent owner. Local
-authored catalogs and strict inspection/qualification/warm loading are unchanged.
-Focused tests cover deferred I/O, alias coalescing, late publication and shutdown.
-No-relay startup and the remaining recovery/status acceptance remain pending.
+**Deferred unsigned-origin slice:** Enabled-relay ordinary serving retains remote
+catalog preparation before origin I/O. Aliases share one immutable preparation result;
+catalog permits cover unsigned requests and are released before relay dependency
+waiting. Cancellation retains the existing unsigned OnceCell semantics; accepted relay
+work retains its independent owner. Local authored catalogs and strict
+inspection/qualification/warm loading are unchanged. Focused tests cover deferred I/O,
+alias coalescing, late publication and shutdown. The ordinary deferred-discovery and
+recovery/status evidence below includes no-relay startup.
 
-**C08 observation and recovery evidence:** A combined managed-relay fixture now
-waits deterministically for discovery's dependency wait, reconciles canonical Base
-capacity through production code, and observes late publication plus callable
-independent/late tools in the same serving process. It preserves the initial
-allocation count, wallet snapshot and one signed relay request; it is not a full
-entry-point initialization proof. `tools/list` now carries listener-scoped current
-catalog instructions, generation and publication-stopped status in namespaced
-metadata, so status is readable without reinitialization. The response captures
-one snapshot for definitions and instructions. Operator-required readiness
-classification remains pending rather than inferred from a false identity lookup.
+**Observation and recovery evidence:** A combined managed-relay fixture now waits
+deterministically for discovery's dependency wait, reconciles canonical Base capacity
+through production code, and observes late publication plus callable independent/late
+tools in the same serving process. It preserves the initial allocation count, wallet
+snapshot and one signed relay request; it is not a full entry-point initialization
+proof. `tools/list` now carries listener-scoped current catalog instructions, generation
+and publication-stopped status in namespaced metadata, so status is readable without
+reinitialization. The response captures one snapshot for definitions and instructions.
+Operator-dependent discovery below reads allocation policy separately instead of
+inferring operator action from a false identity lookup.
 
-**C08 ordinary deferred-discovery scope:** The same serving publisher now owns
-remote unsigned discovery and pricing for ordinary deployments with or without a
-relay. It retains local authored validation and strict inspection/qualification
-completeness. A real load/bind/serve fixture holds an unsigned origin response
-open while independent tools remain callable, then publishes the late catalog.
-All ordinary listener binding still precedes funding-worker start. This removes
-the initial remote-catalog barrier without introducing another scheduler or
-changing signed relay retry policy.
+**Ordinary deferred-discovery scope:** The same serving publisher now owns remote
+unsigned discovery and pricing for ordinary deployments with or without a relay. It
+retains local authored validation and strict inspection/qualification completeness. A
+real load/bind/serve fixture holds an unsigned origin response open while independent
+tools remain callable, then publishes the late catalog. All ordinary listener binding
+still precedes funding-worker start. This removes the initial remote-catalog barrier
+without introducing another scheduler or changing signed relay retry policy.
 
-**C08 operator-dependent discovery:** No-wallet evidence is read separately from
-identity availability. When this serving owner cannot allocate, that fact reports
-operator-required discovery while retaining the existing notification waiter.
-Committed allocation notifies its pool and clears the diagnostic before Base
-readiness; existing allocated wallets stay recoverable pending. Tests cover both
-paths with no relay request before canonical evidence, then one signed request and
-same-process publication. Diagnostics never grant spending or replacement authority.
+**Operator-dependent discovery:** No-wallet evidence is read separately from identity
+availability. When this serving owner cannot allocate, that fact reports
+operator-required discovery while retaining the existing notification waiter. Committed
+allocation notifies its pool and clears the diagnostic before Base readiness; existing
+allocated wallets stay recoverable pending. Tests cover both paths with no relay request
+before canonical evidence, then one signed request and same-process publication.
+Diagnostics never grant spending or replacement authority.
 
-**C09 payment projection-removal contract (reviewed narrow slice):** Pending
-payment-attempt membership is the durable journal state constrained to
-POSSIBLY_SUBMITTED/RESOLVED; sum exact outstanding amounts with checked U256
-arithmetic using the existing wallet/state index, validating each row's pool
-ownership. Selection, admission, transactional commit and reporting share this
-derivation. The legacy wallet total may remain a compatibility projection, but
-neither malformed/stale totals nor projection underflow control payment/repair
-eligibility. Preserve serialized admission exposure comparisons and all existing
-resolution-support invalidation gates. This slice does not discharge invalidated
-resolved authorizations or claim full C09/G14 completion: durable disputed-release
-membership and funding-obligation inventory remain subsequent work. The fault model
-covers malformed identifiable rows and stale projections, not undetectable deletion
-or internally consistent rewriting of the authoritative journal.
+**Recurring review lesson.** Removing a startup barrier exposed lifecycle seams:
+publication must compose with concurrent registry changes, listener reservation must
+precede financial actions, and shutdown must retain independent drain handles even after
+publisher failure. Readiness notifications are progress signals, never spending
+authority.
 
-C09 review removed production writes to the obsolete exposure column entirely:
-a compatibility refresh must not veto a valid resolution because another liability
-is malformed. A focused canonical-proof test resolves the valid attempt while
-leaving the malformed attempt outstanding and admission-blocking. Reports derive
-from journals; the old column remains only for schema compatibility.
+#### C09 — Journal-derived exposure and obligation-driven inventory
 
-**C09 disputed-resolution membership contract (reviewed chain-conflict slice):**
-Schema17 adds `payment_attempts.resolution_disputed` with a partial `(wallet_id,id)`
-index. Runtime open and identity checks reject schema16 before mutation; historical
-read-only reports remain available, with schema16 no longer claiming current pool
-capacity fields. No private conversion or runtime migration is included.
-Chain/checkpoint invalidation conservatively marks all RESOLVED attempts for that
-wallet in the same transaction as generation invalidation. Amount-only conflicts
-leave nonce membership unchanged. Exposure is an exact checked sum of disjoint
-pending and disputed-resolved sets; missing resolution rows, ownership mismatches,
-malformed amounts and overflow remain failures. No full history scan is added to
-admission. A duplicate same-outcome nonce observation cannot clear membership.
-Exact historical repair includes the marker in its digest/exposure invariant and
-clears it only with the verified repair commit, with rollback on any failed guard.
-Original proof bytes remain immutable. Endpoint-derived membership, alternate
-canonical release and remaining-capacity admission are still pending; the capacity
-repair halt remains authoritative for this prerequisite slice. Validation: 259 rotation
-tests passed (four ignored subprocess helpers), including 31 evidence tests; the
-focused deployment schema/identity rejection regression also passed. Review found
-an old-schema retirement-report regression, addressed in the following fixup.
+Implementation provenance: journal exposure `2229598`, projection-write removal
+`8384e4e`, disputed membership `a0f5f2b`, endpoint dependency `2f43075`, obligation
+traversal `29bc0d2` with `08a5c5d`, and hidden prepared obligations `1ef6616`. C22
+removes the obsolete projection from the final fresh layout.
 
-**C09 qualification exposure followup:** Explicit qualification snapshots now use
-the same pending/disputed exposure authority as payment admission, enumerating
-wallets by actual pool ownership and emitting only positive totals. Corrupted
-journal pool bindings cannot hide a sole obligation. Missing original resolution
-proofs and malformed amounts fail for the affected pool; unrelated wallet amounts
-are not decoded. Focused regression passed; independent review found no findings.
+**Payment projection-removal contract:** Pending payment-attempt membership is the
+durable journal state constrained to POSSIBLY_SUBMITTED/RESOLVED; sum exact outstanding
+amounts with checked U256 arithmetic using the existing wallet/state index, validating
+each row's pool ownership. Selection, admission, transactional commit and reporting
+share this derivation. Before C22 removed it from the fresh layout, the legacy wallet
+total was only a compatibility projection: malformed/stale totals and projection
+underflow could not control payment/repair eligibility. Preserve serialized admission
+exposure comparisons and all existing resolution-support invalidation gates. The
+disputed-release membership and obligation inventory contracts below complete those
+separate C09/G14 boundaries. The fault model covers malformed identifiable rows and
+stale projections, not undetectable deletion or internally consistent rewriting of the
+authoritative journal.
 
-**C09 durable payment endpoint dependency prerequisite:** Typed endpoint distrust
-now finds original resolution dependencies through guarded JSON authority fields.
-It atomically reserves every resolved liability of each affected wallet, preserves
-original proofs and financial/debit anchors, bumps wallet and endpoint generations,
-and evicts affected wallet caches even when acquired through another endpoint.
-Malformed or missing provenance blocks its identifiable owner without treating its
-liability as zero; existing stronger amount/evidence repair is never downgraded.
-Ordinary RPC outages do not invalidate facts. No schema change is needed because
-current compact payment checkpoints originate only from original resolutions.
-C14 must extend this dependency lookup to adopted replacement proofs/checkpoints
-before enabling replacement release. The focused regression passed rollback,
-restart, sibling isolation, malformed provenance and repeated invalidation checks;
-independent review found no actionable findings.
+C09 review removed production writes to the obsolete exposure column entirely: a
+compatibility refresh must not veto a valid resolution because another liability is
+malformed. A focused canonical-proof test resolves the valid attempt while leaving the
+malformed attempt outstanding and admission-blocking. Reports derive from journals; the
+old column remained solely for intermediate schema compatibility until C22 removed it
+from the fresh layout.
 
-**C09 funding inventory traversal contract (reviewed narrow slice):** Remove the
-`state != COMPLETE OR readiness_disputed` SQL filter. Traverse the existing funding
-job primary key in bounded 64-row pages under the captured insertion boundary;
-coherent operation facts select actual credit, provider and submitted-source lanes.
-A stale completion projection must not hide those observations, including after
-restart. No new ledger, financial authority, preparation or submission is introduced.
-This does not yet cover prepared-but-unsubmitted bytes hidden by a stale phase or
-historical operations replaced in the current progress row. The review fixup skips timeout bookkeeping only for inert completed history,
-retaining timeout-triggered recovery for other phases. Shared obligation facts keep
-active observation errors, streaks and polling diagnostics visible despite stale
-completion labels. Historical schema reports retain their existing read-only
-projection without querying newer fact columns. `29bc0d2` implements traversal;
-the accompanying fixup addresses both review findings. Validation: 18 scheduler
-tests and 129 store tests passed (two ignored subprocess helpers), including stale
-completion across reopen, preserved signed bytes, provider-outage diagnostics,
+**Disputed-resolution membership and schema17 provenance:** The initial schema17 implementation added
+`payment_attempts.resolution_disputed` with a partial `(wallet_id,id)` index. C15
+replaces per-row dispute updates with one wallet-level payment-resolution dispute state
+and paged revision-checked activation; the conservative membership and exact liability
+invariants remain. In the schema17 gate, runtime open and identity checks rejected
+schema16 before mutation;
+historical read-only reports remain available, with schema16 no longer claiming current
+pool capacity fields. No private conversion or runtime migration is included.
+Chain/checkpoint invalidation conservatively includes every RESOLVED attempt for the
+affected wallet in disputed exposure in the same transaction as generation invalidation.
+The final implementation does so through `wallets.payment_resolutions_disputed`, not
+individual per-attempt writes; indexed RESOLVED membership supplies the exact amounts. Amount-only conflicts leave nonce
+membership unchanged. Exposure is an exact checked sum of disjoint pending and
+disputed-resolved sets; missing resolution rows, ownership mismatches, malformed amounts
+and overflow remain failures. No full history scan is added to admission. A duplicate
+same-outcome nonce observation cannot clear membership. Exact historical repair includes
+the membership state in its digest/exposure invariant and clears it only with the verified repair
+commit, with rollback on any failed guard. Original proof bytes remain immutable.
+Endpoint-derived membership, canonical release and remaining-capacity admission use the
+C09 dependency contract, C14 repair and C12 admission below. Validation: 259 rotation
+tests passed (four ignored subprocess helpers), including 31 evidence tests; the focused
+deployment schema/identity rejection regression also passed. Review found an old-schema
+retirement-report regression, addressed in the following fixup.
+
+**Conservative membership invariant (consolidated C09/C12 design review):** A checkpoint
+mismatch does not identify the fork's starting height. Invalidating only its hash or
+later heights would leave possibly invalid releases unreserved. Affected resolved
+authorizations are conservatively included in disputed exposure; ordinary pending and
+disputed-resolved sets are disjoint, checked and exact. Membership invalidation and
+generation change commit atomically. The final wallet-level dispute state retains this
+invariant without unbounded per-attempt updates. Repair activation checks
+membership/revision and rolls back completely on failure. Endpoint provenance includes
+original and effective replacement supports. C12's separate current-evidence path
+preserves debit constraints while omitting the disproven historical checkpoint; deleting
+a repair flag alone could not authorize it. The original schema17 per-attempt proposal
+is implementation history, not a second current membership authority. Supported-schema
+rejection precedes mutation; no implicit private-state conversion is introduced.
+
+**Qualification exposure followup:** Explicit qualification snapshots now use the same
+pending/disputed exposure authority as payment admission, enumerating wallets by actual
+pool ownership and emitting only positive totals. Corrupted journal pool bindings cannot
+hide a sole obligation. Missing original resolution proofs and malformed amounts fail
+for the affected pool; unrelated wallet amounts are not decoded. Focused regression
+passed; independent review found no findings.
+
+**Durable payment endpoint dependency prerequisite:** Typed endpoint distrust now finds
+original resolution dependencies through guarded JSON authority fields. It atomically
+reserves every resolved liability of each affected wallet, preserves original proofs and
+financial/debit anchors, bumps wallet and endpoint generations, and evicts affected
+wallet caches even when acquired through another endpoint. Malformed or missing
+provenance blocks its identifiable owner without treating its liability as zero;
+existing stronger amount/evidence repair is never downgraded. Ordinary RPC outages do
+not invalidate facts. No schema change is needed because current compact payment
+checkpoints originate only from original resolutions. C14 extends this dependency lookup
+to adopted replacement proofs/checkpoints before enabling replacement release. The
+focused regression passed rollback, restart, sibling isolation, malformed provenance and
+repeated invalidation checks; independent review found no actionable findings.
+
+**Funding inventory traversal contract:** Remove the `state != COMPLETE OR
+readiness_disputed` SQL filter. Traverse the existing funding job primary key in bounded
+64-row pages under the captured insertion boundary; coherent operation facts select
+actual credit, provider and submitted-source lanes. A stale completion projection must
+not hide those observations, including after restart. No new ledger, financial
+authority, preparation or submission is introduced. The hidden-prepared-obligation
+contract below covers prepared-but-unsubmitted bytes hidden by a stale phase;
+C13/C18/C20 traverse historical operations. The review fixup skips timeout bookkeeping
+only for inert completed history, retaining timeout-triggered recovery for other phases.
+Shared obligation facts keep active observation errors, streaks and polling diagnostics
+visible despite stale completion labels. Historical schema reports retain their existing
+read-only projection without querying newer fact columns. `29bc0d2` implements
+traversal; the accompanying fixup addresses both review findings. Validation: 18
+scheduler tests and 129 store tests passed (two ignored subprocess helpers), including
+stale completion across reopen, preserved signed bytes, provider-outage diagnostics,
 multi-page traversal, and historical completed schema reports. Final focused
 health/late-result regressions, formatting checks and all-target Clippy passed.
 
-**C10 current-capacity historical-dependency deletion contract (reviewed):**
-Current balance captures retain financial checkpoint/debit support and namespace,
-wallet/endpoint generations, freshness and cache ordering. They no longer decode
-or require archival funding/retirement balance anchors. Payment identity uses the
-enabled pool, configured cap, existing eligible role and exact READY claim binding;
-historical funding support remains validated by explicit bootstrap inventory and
-accounting. Same-anchor contradictions and disputed resolution repair restrictions
-remain enforced in this slice; their decision-specific separation is subsequent
-work. ALLOCATED eligibility awaits C11's separate contract; RETIRED wallets remain
-excluded from serving capacity.
+**Schema17 historical-report review fixup:** Independent review found that schema16
+retirement totals lost their per-wallet records when current admission reporting moved
+to schema17. Historical reporting now reads exact retained retirement records
+independently of current admission fields. The regression uses an actual schema16 layout
+and query-only connection, retaining nonzero totals without fabricating current
+capacity. Focused regression and all-target Clippy passed; independent re-review found
+no remaining actionable findings.
 
-**C10 resolution-only observation contract (reviewed):** Namespace and wallet/endpoint
-generation validity remain universal certificate checks. The wallet repair halt
-belongs to current balance/capacity decisions, not an independently bound canonical
-nonce result. Resolution-only maintenance may commit USED or EXPIRED_UNUSED under
-the original exact authorization, expiry and checkpoint compatibility checks while
-leaving repair flags and previous resolution support intact. Mixed balance/resolution
-views still fail atomically when capacity is blocked. Historical funding restoration
-explicitly retains the repair halt because it can publish roles/close accounting.
-This slice neither reopens admission nor repairs disputed resolved membership; those
-remaining C09/C12 obligations still prevent blanket repair-gate deletion.
-Validation: all 28 evidence/repair tests and all-target Clippy passed; independent
-review found no actionable findings.
+**Hidden prepared-obligation followup:** Exact PREPARED treasury bytes with zero
+submission attempts remain observable when a stale derived phase says ALLOCATED, QUOTED
+or COMPLETE. Inventory and health use that durable obligation, and route it through the
+source lane independently of quote slots. A captured observer-only fact fences the
+entire pass against new quote, preparation or submission even if canonical observation
+changes the phase. Ordinary PREPARING/PREPARED work keeps its existing path without an
+extra lookup; explicit recovery dispositions retain their separate authority.
 
-**C10 wallet-local ownership decode followup:** Ownership row-conversion failures
-for the bound wallet's role/claim fields now produce the existing typed malformed
-support result. Pool authority decoding and shared SQL failures retain their wider
-scope. Candidate selection retains that failure for an all-malformed result while
-still selecting an independent healthy payer, including cached, hinted and
-challenge-time selection. No ownership checks, liabilities or payment limits are
-removed. All 36 selection tests passed, including both candidate orderings,
-malformed joined claim generations, all-malformed diagnostics, shared failures and
-absence of journal side effects. Independent commit review found no issues.
+The restart regression passed all three phases with enabled and disabled pools,
+preserving exact bytes, operation, reservation, zero attempts and recovery count. It
+verifies actual inventory routing and forbids quote/preparation/submission or provider
+polling. All 27 funding tests passed, including the concrete backend reconciliation
+check with the current wallet profile removed and auto-funding disabled. Independent
+review cleared the core behavior; root review cleared the lane-routing followup. C19
+retains removed-pool Base observation ownership.
 
-**C09 schema17 historical-report review fixup:** Independent review found that
-schema16 retirement totals lost their per-wallet records when current admission
-reporting moved to schema17. Historical reporting now reads exact retained
-retirement records independently of current admission fields. The regression uses
-an actual schema16 layout and query-only connection, retaining nonzero totals
-without fabricating current capacity. Focused regression and all-target Clippy
-passed; independent re-review found no remaining actionable findings.
+**Recurring review lesson.** Phase labels and independently writable totals repeatedly
+drifted from exact durable obligations. Observation membership and exposure must derive
+from authoritative journals; scoped reporting cannot make an unrelated malformed
+liability veto a valid proof publication.
 
-**C12 conservative remaining-capacity contract (reviewed):** A separate payment
-capture may omit disputed historical checkpoint RPC dependencies only for exact
-`chain_repair_required` state when every RESOLVED authorization is again reserved.
-An indexed absence check for undisputed resolutions and checked pending/disputed
-exposure establish that conservative inventory; unknown amounts or missing original
-resolution rows fail. The capture binds original financial/debit tuples as an exact
-commit-time snapshot, retains the numeric debit-height floor, and uses ordinary
-fresh canonical confirmed/latest balances and namespace/wallet/endpoint generations.
-Any new undisputed resolution or changed snapshot invalidates admission. Cache
-rechecks preserve purpose and original validity, never converting payment-only
-proofs into historical proof. This does not release disputed liabilities or claim
-individual endpoint-membership completeness.
+#### C10 — Decision-specific current capacity and historical reporting
+
+Implementation provenance: archival independence `ff9db28`, resolution-only separation
+`3904c78`, and wallet-local ownership decode `e559f28`. Bootstrap/status inventory uses
+shared explicit ownership: malformed archival support reports incomplete inventory with
+a fixed warning, current serving identity remains independent, and shared SQL failures
+propagate. Startup/status parity and shared-error regressions passed.
+
+**Current-capacity historical-dependency deletion contract:** Current balance captures
+retain financial checkpoint/debit support and namespace, wallet/endpoint generations,
+freshness and cache ordering. They no longer decode or require archival
+funding/retirement balance anchors. Payment identity uses the enabled pool, configured
+cap, existing eligible role and exact READY claim binding; historical funding support
+remains validated by explicit bootstrap inventory and accounting. Same-anchor
+contradictions and disputed resolution repair restrictions remain enforced. The
+resolution-only contract below separates their decision-specific consumers. C11 defines
+ALLOCATED eligibility separately; RETIRED wallets remain excluded from serving capacity.
+
+**Resolution-only observation contract:** Namespace and wallet/endpoint generation
+validity remain universal certificate checks. The wallet repair halt belongs to current
+balance/capacity decisions, not an independently bound canonical nonce result.
+Resolution-only maintenance may commit USED or EXPIRED_UNUSED under the original exact
+authorization, expiry and checkpoint compatibility checks while leaving repair flags and
+previous resolution support intact. Mixed balance/resolution views still fail atomically
+when capacity is blocked. Historical funding restoration explicitly retains the repair
+halt because it can publish roles/close accounting. This slice neither reopens admission
+nor repairs disputed resolved membership; those C09/C12 obligations still prevent
+indiscriminate repair-gate deletion. Validation: all 28 evidence/repair tests and
+all-target Clippy passed; independent review found no actionable findings.
+
+**Wallet-local ownership decode followup:** Ownership row-conversion failures for the
+bound wallet's role/claim fields now produce the existing typed malformed support
+result. Pool authority decoding and shared SQL failures retain their wider scope.
+Candidate selection retains that failure for an all-malformed result while still
+selecting an independent healthy payer, including cached, hinted and challenge-time
+selection. No ownership checks, liabilities or payment limits are removed. All 36
+selection tests passed, including both candidate orderings, malformed joined claim
+generations, all-malformed diagnostics, shared failures and absence of journal side
+effects. Independent commit review found no issues.
+
+**Recurring review lesson.** Current capacity and archival accounting shared unnecessary
+readers. Separating those contracts required historical-report tests so admission
+simplification did not erase old read-only records. Reporting compatibility is distinct
+from runtime state compatibility.
+
+#### C11 — Initial payment capacity and atomic claim transitions
+
+Implementation provenance: `8760345`; the readiness-publication ownership fixup
+recaptures the post-publication claim in the same preparation transaction.
+
+**Initial-capacity contract:** ALLOCATED is an owned identity with an exact enabled
+slot/wallet/generation claim, not a financial minimum. Fresh payment-sized capacity and
+ordinary liability/cap checks may admit it below the allocation target. First signed
+admission atomically promotes it to ACTIVE and demotes the prior active wallet,
+retaining its original claim, funding job, operation and reservations. An occupied claim
+suppresses replacement allocation. Quote/recovery continuation follows that exact claim
+through ACTIVE/RETAINED roles; role projection cannot strand accepted source work.
+Independent destination readiness later detaches the original claim once, without
+changing the serving role or fabricating source/provider completion. Bootstrap inventory
+still requires original destination readiness. `serving_ready` continues to mean a
+serving identity is available, not that a balance or payment is guaranteed.
+
+Readiness balance observations and exact operation-correlated destination delivery are
+separate facts. C18 establishes historical delivery even after spending; claims and
+observations remain owned while independently proven payment service continues. It never
+lowers readiness requirements, treats signed exposure as delivery, or treats USED nonce
+state as an exact debit proof. Schema18 records honest ALLOCATED admission and paired
+claim metadata for early ACTIVE/RETAINED use; older runtime schemas are rejected before
+mutation, with no private conversion. The real restarted paid-call regression passed
+($0.10 from $2 against a $10 target), including zero-signature controls for
+disabled/mismatched claims and insufficient capacity. Promotion rollback/claim retention
+and ACTIVE/RETAINED quote-refresh/recovery tests passed. Store validation passed 133
+tests with two ignored helpers; obsolete bootstrap/schema expectations and one fixture
+job-count assertion were corrected; all six bootstrap tests and the focused funding
+continuation rerun passed. Version2 qualification ownership and four saved-payment
+evidence tests passed while preserving version1 semantics. The deployment identity/
+schema rejection regression passed. Independent review found a preparation race when
+strict balance publication establishes readiness and changes the captured role/claim.
+The reviewed fixup binds preparation to post-publication ownership inside the same
+transaction. Both paid-call regressions passed: target-reaching ALLOCATED and
+already-ACTIVE claim holders each dispatch exactly one signature with correct journal
+ownership and a single claim-generation advance. All-target Clippy, formatting and diff
+checks passed for the core slice.
+
+**Recurring review lesson.** A correct freshness/readiness publication can itself change
+the role or claim captured before it. Final preparation must bind the resulting
+ownership inside the same transaction; caller-side validation alone cannot close this
+race.
+
+#### C12 — Conservative service during disputed-release repair
+
+Implementation provenance: `f7ec2b0`; its separate additive lookup-index fixup covers
+reopen without changing financial rows or authority.
+
+**Conservative remaining-capacity contract:** A separate payment capture may omit
+disputed historical checkpoint RPC dependencies only for exact `chain_repair_required`
+state when every RESOLVED authorization is again reserved. An indexed absence check for
+undisputed resolutions and checked pending/disputed exposure establish that conservative
+inventory; unknown amounts or missing original resolution rows fail. The capture binds
+original financial/debit tuples as an exact commit-time snapshot, retains the numeric
+debit-height floor, and uses ordinary fresh canonical confirmed/latest balances and
+namespace/wallet/endpoint generations. Any new undisputed resolution or changed snapshot
+invalidates admission. Cache rechecks preserve purpose and original validity, never
+converting payment-only proofs into historical proof. This does not release disputed
+liabilities or claim individual endpoint-membership completeness.
 
 Payment acquisition, candidate publication/selection, preparation and final journal
 commit share that validator. Conservative publication updates only current wallet
-balance projections; it cannot record funding readiness, publish funded roles,
-retire wallets or release authorizations. Strict funding/history consumers reject
-the purpose before publishing observations. Existing payment caps, ownership and
-atomic exposure comparisons remain authoritative. Amount-only repair remains
-blocked because restored authorization maxima do not explain contradictory balances.
-Validation: the rotation suite passed 260 tests with four ignored helpers and two
-fixture failures; the invalid ACTIVE/claim fixture and obsolete blanket-chain-repair
-expectation were corrected, and both focused regressions passed. The real
-PaidClient restart test also passed: $20 balance with $1 disputed exposure refuses
-$20 before signing and sends exactly one journaled $19 payment, without historical
-checkpoint RPC reads. Review identified the missing lookup index on existing
-schema17 reopen; the reviewed fixup adds it through existing additive lookup
-setup, without changing financial rows or format. Its dropped-index reopen
-regression passed and independent re-review cleared the finding. Final
-all-target Clippy, formatting and diff checks passed.
+balance projections; it cannot record funding readiness, publish funded roles, retire
+wallets or release authorizations. Strict funding/history consumers reject the purpose
+before publishing observations. Existing payment caps, ownership and atomic exposure
+comparisons remain authoritative. Amount-only repair remains blocked because restored
+authorization maxima do not explain contradictory balances. Validation: the rotation
+suite passed 260 tests with four ignored helpers and two fixture failures; the invalid
+ACTIVE/claim fixture and obsolete blanket-chain-repair expectation were corrected, and
+both focused regressions passed. The real PaidClient restart test also passed: $20
+balance with $1 disputed exposure refuses $20 before signing and sends exactly one
+journaled $19 payment, without historical checkpoint RPC reads. Review identified the
+missing lookup index on existing schema17 reopen; the reviewed fixup adds it through
+existing additive lookup setup, without changing financial rows or format. Its
+dropped-index reopen regression passed and independent re-review cleared the finding.
+Final all-target Clippy, formatting and diff checks passed.
 
-**C11 initial-capacity contract (reviewed narrow slice):** ALLOCATED is an owned
-identity with an exact enabled slot/wallet/generation claim, not a financial
-minimum. Fresh payment-sized capacity and ordinary liability/cap checks may admit
-it below the allocation target. First signed admission atomically promotes it to
-ACTIVE and demotes the prior active wallet, retaining its original claim, funding
-job, operation and reservations. An occupied claim suppresses replacement allocation.
-Quote/recovery continuation follows that exact claim through ACTIVE/RETAINED roles;
-role projection cannot strand accepted source work. Independent destination readiness
-later detaches the original claim once, without changing the serving role or
-fabricating source/provider completion. Bootstrap inventory still requires original
-destination readiness. `serving_ready` continues to mean a serving identity is
-available, not that a balance or payment is guaranteed.
+**T44 / T04 paid HTTP acceptance (implemented and reviewed):** The existing
+remaining-capacity test now holds the production canonical repair on its nonce read
+while an actual PaidClient call proceeds. With $20 current balance and a $1 disputed
+release, a $20 challenge fails unsigned and a $19 payment succeeds. Repair then adopts
+EXPIRED_UNUSED while retaining the concurrent $19 pending authorization and immutable
+original USED proof. After Store/manager reopen, a separate $1 payment succeeds with a
+distinct nonce; both new pending authorizations total $20, and no funding job is added.
+The fixture uses an owned ACTIVE payer without synthetic readiness support. The focused
+default-build test passed and independent review found no issues.
 
-The existing readiness rule compares current balance with original/accepted output.
-Spending after delivery but before readiness observation can prevent that accounting
-closure. C18 must establish exact operation-correlated destination delivery evidence;
-this slice retains the claim and observations, while independently proven payment
-service continues. It never lowers readiness requirements, treats signed exposure
-as delivery, or treats USED nonce state as an exact debit proof. Schema18 records
-honest ALLOCATED admission and paired claim metadata for early ACTIVE/RETAINED use;
-older runtime schemas are rejected before mutation, with no private conversion.
-The real restarted paid-call regression passed ($0.10 from $2 against a $10
-target), including zero-signature controls for disabled/mismatched claims and
-insufficient capacity. Promotion rollback/claim retention and ACTIVE/RETAINED
-quote-refresh/recovery tests passed. Store validation passed 133 tests with two
-ignored helpers; obsolete bootstrap/schema expectations and one fixture job-count
-assertion were corrected; all six bootstrap tests and the focused funding
-continuation rerun passed. Version2 qualification ownership and four saved-payment
-evidence tests passed while preserving version1 semantics. The deployment identity/
-schema rejection regression passed. Independent review found a preparation
-race when strict balance publication establishes readiness and changes the captured
-role/claim. The reviewed fixup binds preparation to post-publication ownership
-inside the same transaction. Both paid-call regressions passed: target-reaching
-ALLOCATED and already-ACTIVE claim holders each dispatch exactly one signature
-with correct journal ownership and a single claim-generation advance.
-All-target Clippy, formatting and diff checks passed for the core slice.
+**T39 production-library disputed capacity (`c582bba`; fixture correction `7f834f3`):**
+The normal library build uses the real PaidClient and manager. A real released $1 USED
+authorization becomes disputed after a fork while the production repair nonce RPC is
+held. A $5 challenge is refused unsigned; a $4 payment succeeds with admission balance
+$5 and reserved exposure $1. The same manager recaptures after concurrent liability;
+original proof is immutable and effective USED support has the new canonical hash. After
+restart, a distinct $1 payment brings pending exposure to $5, with no extra funding jobs
+or retained dispute flag. Fixture reconciliation advances bounded public passes because
+an older balance conflict can precede the payment checkpoint. The focused gate and
+nonce-outage/expired-unused siblings passed; the existing reorg regression now binds an
+actual released payment checkpoint.
 
-**C13 source-history expiry contract (reviewed narrow slice):** A fresh scanned
-height at or beyond the original nonzero expiry plus required confirmations ends
-that transaction's ability to spend on this chain. Before omitting the historical
-wallet-transaction lookup, decode original retained signed bytes and require exact
-transaction-ID/expiry binding to the journal. Metadata alone never establishes
-expired authority. Zero expiry and still-live signed transactions retain the source
-reorg guard. Current SDK spendability, outgoing PREPARED restrictions, freshness,
-reservation ownership and the separate two-sync reservation-release proof remain
-unchanged. Original bytes, attempts, consumed expenses and historical dispositions
-remain intact; bypass makes no new canonical confirmation claim.
+#### C13 — Current spendability, source history and retained input ownership
 
-The local synthetic-chain regression passed pre-expiry rejection, exact burial
-progress without source reappearance, metadata/bytes mismatch rejection, restored
-independent spendability, reopen, height-regression protection and a subsequent
-prepared operation with its reservation retained. The zero-expiry/boundary test also
-passed. Independent review found no blocking findings; its requested provenance
-negative cases were added and passed. This does not remove live-input global guards,
-refund issues or full-history traversal; their scoped ownership/fairness work remains.
+Implementation provenance: source expiry `de6d93e`, scoped refund observations `46489cf`
+and `c172c62`, unidentifiable attribution `2ea6762`, and retained input ownership/exact
+expiry correction `c3d4d5a`.
 
-**C13 refund-observation contract (reviewed scoped slice):** Known credited
-outpoints enter deduplication before canonicality, amount or ownership checks.
-Disputes become typed operation-scoped observations without deleting original
-credits, rewriting costs or preventing unrelated SDK spendability. Positive
-ownership contradictions affect both original and asserted owners. Malformed
-identity can be isolated only with an unambiguous original address; otherwise the
-existing wider unresolved-attribution stop remains explicit. New issue categories
-are visible through fixed warning categories/counts. Explicit shielding repeats
-fresh refund evidence checks for its operation before proposal or reservation.
-No replacement credit, liability closure or automatic shielding is authorized.
+**Source-history expiry contract:** A fresh scanned height at or beyond the original
+nonzero expiry plus required confirmations ends that transaction's ability to spend on
+this chain. Before omitting the historical wallet-transaction lookup, decode original
+retained signed bytes and require exact transaction-ID/expiry binding to the journal.
+Metadata alone never establishes expired authority. Zero expiry and still-live signed
+transactions retain the source reorg guard. Current SDK spendability, outgoing PREPARED
+restrictions, freshness, reservation ownership and the separate two-sync
+reservation-release proof remain unchanged. Original bytes, attempts, consumed expenses
+and historical dispositions remain intact; bypass makes no new canonical confirmation
+claim.
 
-Three synthetic refund-observation tests passed. Independent review identified
-that missing original outpoints and contradictory owners must also suppress fresh
-credit attribution for their affected operations, not only shielding. The immediate
-review fixup adds per-pass affected-owner suppression and independent-owner controls.
-All four synthetic refund-observation tests and all-target/all-feature Clippy passed;
-independent review cleared the fixup. This closes this narrow scoped slice; the
-unidentifiable-ownership stop and broader C13 work remain outstanding.
+The local synthetic-chain regression passed pre-expiry rejection, exact burial progress
+without source reappearance, metadata/bytes mismatch rejection, restored independent
+spendability, reopen, height-regression protection and a subsequent prepared operation
+with its reservation retained. The zero-expiry/boundary test also passed. Independent
+review found no blocking findings; its requested provenance negative cases were added
+and passed. The live-input gate is retained under C16's SDK invariant. Refund
+attribution, source ownership and bounded traversal are specified in C13/C18 below.
 
-**C13 unidentifiable refund attribution followup:** The consumer audit found that
-refund accounting does not authorize source retries, source reservation release or
-current SDK spendability. Unidentifiable historical refund identity/ownership now
-returns explicit `Unidentifiable` attribution with a fixed warning, suppressing all
-new refund credits and all explicit refund shielding while synchronization can
-finish. Original credits and costs remain unchanged. Store failures and unusable
-owner records still propagate. `SyncObservation::Ready` describes current SDK
-freshness/spendability, never completed refund accounting; future C18 closure must
-acquire complete fresh accounting independently. All five synthetic refund tests
-passed, including the actual asynchronous reconciliation stage preserving exact
-old rows and suppressing an independent fresh credit. Independent review found no
-blocking issues. Full synthetic-chain spendability acceptance remains outstanding.
+**Refund-observation contract:** Known credited outpoints enter deduplication before
+canonicality, amount or ownership checks. Disputes become typed operation-scoped
+observations without deleting original credits, rewriting costs or preventing unrelated
+SDK spendability. Positive ownership contradictions affect both original and asserted
+owners. Malformed identity can be isolated only with an unambiguous original address;
+otherwise the existing wider unresolved-attribution stop remains explicit. New issue
+categories are visible through fixed warning categories/counts. Explicit shielding
+repeats fresh refund evidence checks for its operation before proposal or reservation.
+This observation result authorizes no replacement credit, liability closure or
+automatic shielding. C20 supplies separate current serving and exact-input authority
+for automatic shielding.
 
-**C14 complete-wallet canonical replacement contract (implementation gate):**
-For an exact payment chain dispute with all resolved liabilities reserved, acquire
-current nonce facts in bounded pages at one pinned confirmed anchor. A pass uses
-one configured endpoint; only initial selection may use ordinary configured
-failover. No original admission, readiness or resolution hash is fetched. Original
-proof bytes remain in the audit/digest, not a historical truth prerequisite. A
-fresh balance is acquired last, covering the pinned anchor and retained numeric
-debit floor. Temporary SQLite staging is owned by the invocation and grants no
+Three synthetic refund-observation tests passed. Independent review identified that
+missing original outpoints and contradictory owners must also suppress fresh credit
+attribution for their affected operations, not only shielding. The immediate review
+fixup adds per-pass affected-owner suppression and independent-owner controls. All four
+synthetic refund-observation tests and all-target/all-feature Clippy passed; independent
+review cleared the fixup. The attribution contract below resolves unidentifiable
+historical ownership without claiming input ownership or completed accounting.
+
+**Unidentifiable refund attribution followup:** The consumer audit found that refund
+accounting does not authorize source retries, source reservation release or current SDK
+spendability. Unidentifiable historical refund identity/ownership now returns explicit
+`Unidentifiable` attribution with a fixed warning, suppressing new attribution-derived
+refund credits and manual attribution-dependent shielding while synchronization can
+finish. C20 separately requires exact owned inputs and current serving authority for
+automatic shielding; incomplete attribution grants no accounting closure. Original credits and
+costs remain unchanged. Store failures and unusable owner records still propagate.
+`SyncObservation::Ready` describes current SDK freshness/spendability, never completed
+refund accounting; C18 closure acquires complete fresh accounting independently. All
+five synthetic refund tests passed, including the actual asynchronous reconciliation
+stage preserving exact old rows and suppressing an independent fresh credit. Independent
+review found no blocking issues. The source-support and ownership lifecycle evidence
+below supplies integrated synthetic-chain acceptance.
+
+**Retained source ownership and exact expiry correction (C13/C18):** Fresh schema26
+retains operation-specific source input disputes independently of historical scan
+retention. Live confirmation loss or concrete contradictory history revokes accounting
+support immediately without failing independent sync work. Burial/restart cannot release
+that ownership; buried archival absence alone creates no new dispute. Staged exact
+re-confirmation clears ownership only with final sync publication. Cleanup advances over
+physical 64-row pages and retains only needed pass headers, invalidating abandoned
+inventories before reclaiming their rows. Generic shielded preparation and submission
+recheck input ownership; exact internal shielding retains independent immutable
+transparent claims.
+
+Previously confirmed operations use the existing two-sync zero-lag expiry/input proof.
+Original consensus expiry zero is non-expiring. Every owned input must remain confirmed,
+matching and unspent; shielding additionally checks every immutable exact outpoint. The
+expiry proof records the reversed original debit while preserving signed bytes, facts,
+attempts and original confirmation label. Current consumed cost is corrected once;
+repeated/reopened recovery cannot recharge or duplicate it. A contradiction of an old
+expiry proof retains ownership until a new exact proof. Ordinary source observation and
+recovery invoke this proof without preparing, submitting or authorizing a replacement.
+Existing current-policy recovery limits remain separate.
+
+Validation: five focused ownership tests, five source-support tests, and three real
+synthetic-chain lifecycle regressions passed, including ordinary recovery with
+new-attempt authority disabled and restart/idempotence. Independent review found
+physical-page cleanup, zero-expiry and pre-existing generic submission guard issues;
+these were addressed before the gate passed. C20 activation, remaining production-build
+acceptance and final repository checks subsequently passed under their own gates.
+
+**Recurring review lesson.** Current spendability, historical accounting and retained
+signed-input ownership are separate decisions. Removing blanket history vetoes was safe
+only with operation-specific ownership that survives burial, reorg and restart;
+canonical expiry must prove the exact original inputs, not merely enough value.
+
+#### C14 — Complete-wallet canonical replacement
+
+**Complete-wallet canonical replacement contract:** For an exact payment chain dispute
+with all resolved liabilities reserved, acquire current nonce facts in bounded pages at
+one pinned confirmed anchor. A pass uses one configured endpoint; only initial selection
+may use ordinary configured failover. No original admission, readiness or resolution
+hash is fetched. Original proof bytes remain in the audit/digest, not a historical truth
+prerequisite. A fresh balance is acquired last, covering the pinned anchor and retained
+numeric debit floor. Temporary SQLite staging is owned by the invocation and grants no
 release; cancellation and restart discard it.
 
 Atomic adoption verifies the complete resolved set, original/effective raw proofs,
 authorization ownership/amounts, endpoint/wallet generations and original
 financial/debit tuple. New pending liabilities remain reserved; changed resolved
 membership rejects adoption. New immutable replacement rows become effective proof
-authority, while original rows remain unchanged. The adopted checkpoint carries
-its final endpoint provenance and the audit retains the previous anchors. An
-existing or newly proven debit is reanchored without inventing a debit for an
-all-unused history. Only the payment chain flag/membership clears; funding and
-retirement disputes remain independent. Effective proofs and the adopted
-checkpoint participate in later conflict invalidation and qualification export.
-Fresh schema19 rejects older runtime state before mutation; no automatic or private
-state conversion is performed. Original historical read-only reports remain valid.
+authority, while original rows remain unchanged. The adopted checkpoint carries its
+final endpoint provenance and the audit retains the previous anchors. An existing or
+newly proven debit is reanchored without inventing a debit for an all-unused history.
+Only the payment chain flag/membership clears; funding and retirement disputes remain
+independent. Effective proofs and the adopted checkpoint participate in later conflict
+invalidation and qualification export. Fresh schema19 rejects older runtime state before
+mutation; no automatic or private state conversion is performed. Original historical
+read-only reports remain valid.
 
 Independent review corrected initial-anchor fallback, unnecessary old-support
-validation, creation of a nonexistent debit, an empty-inventory/retained-anchor
-case and missing indexed conflict checks for the adopted balance support after
-restart. Malformed historical endpoint provenance alone now restores conservative
-liabilities and requests canonical repair; it does not invent an unknown amount.
-Same-hash amount conflicts still reject the affected observation without adding a
-blanket historical stop. Four real RPC tests and all 42 integrated evidence tests
-passed with localhost permission, including the production repair owner after
-restart, both outcome reversals, paging, duplicate/new conflicting provenance,
-rollback and immutable audit checks. Another 108 store tests passed (two ignored
-subprocess helpers), including historical reports and qualification exports.
-The deployment identity/schema test and all-target/all-feature Clippy passed.
-The deployment fixture now disables irrelevant external pricing probes; its
-first external-dependent run was stopped and the local-only rerun passed after
-firewall permission. Formatting and diff checks passed. The older exact-revalidation path for
-unmatched legacy/manual flags remains; selected canonical repair never falls back
-to it after failure or an unresolved nonce. C15 fairness and final production
-acceptance remain separate work.
+validation, creation of a nonexistent debit, an empty-inventory/retained-anchor case and
+missing indexed conflict checks for the adopted balance support after restart. Malformed
+historical endpoint provenance alone now restores conservative liabilities and requests
+canonical repair; it does not invent an unknown amount. Same-hash amount conflicts still
+reject the affected observation without adding a blanket historical stop. Four real RPC
+tests and all 42 integrated evidence tests passed with localhost permission, including
+the production repair owner after restart, both outcome reversals, paging, duplicate/new
+conflicting provenance, rollback and immutable audit checks. Another 108 store tests
+passed (two ignored subprocess helpers), including historical reports and qualification
+exports. The deployment identity/schema test and all-target/all-feature Clippy passed.
+The deployment fixture now disables irrelevant external pricing probes; its first
+external-dependent run was stopped and the local-only rerun passed after firewall
+permission. Formatting and diff checks passed. The older exact-revalidation path for
+unmatched legacy/manual flags remains; selected canonical repair never falls back to it
+after failure or an unresolved nonce. C15 supplies fairness; C12/C14 production
+acceptance is recorded below.
 
-**C15 separate repair-owner contract:** A residual canonical repair owns one
-dedicated pass per pool, independently of the four current-balance readers and
-four authorization-history readers. The pass retains its staging and cursor
-while useful work continues. Existing process-wide query/RPC bounds still apply;
-the extra owner bound protects retained repair staging, not spending capacity.
-Physical wallet pages advance even through ineligible rows. Failure backoff is
-per wallet; shutdown cancels unsigned reads while accepted serialized store jobs
-and staging cleanup retain ownership.
+**Recurring review lesson.** Replacement evidence needed complete consumer coverage:
+endpoint provenance, effective proof pointers, debit anchors and qualification exports
+all participate in invalidation. Original immutable audit rows cannot silently become
+current proof authority.
 
-Current maintenance uses C12's all-liabilities-reserved capacity path during a
-known payment dispute. It cannot release liabilities, publish readiness or retire
-a wallet. This also avoids repeatedly invalidating a progressing repair by
-rechecking its already-disputed old checkpoint. A one-pass caller receives the
-final repair disposition rather than an intermediate balance deferral.
+#### C15 — Bounded repair, fair shared resources and retained accounting
 
-The separate owner and capacity path passed independent review. All 15 maintenance
-tests passed, followed by two new one-pass success/unresolved-nonce tests and the
-retired/healthy physical-page regression. The final one-pass rerun also passed.
-Tests retain a repair beyond the normal cadence, verify current capacity prefetch
-and independent history progress, then require adoption; shutdown/restart retains
-liabilities and cleans staging. This slice does not close G12: complete final replacement validation and activation still occupy
-one serialized database job. Moving that work out requires complete revision
-coverage and short atomic activation, not weaker validation or a work deadline.
+Implementation provenance: independent repair owner `07b5cad`; bounded publication
+`55d5b3b`; cleanup ownership `0f36e2f`; historical report fixup `110f2e0`; sole bounded
+repair path `525069f`; process-wide RPC fairness `6bdc853`.
 
-**C15 bounded adoption followup (reviewed design; implemented below):**
-Publish bounded replacement-proof pages into an inactive set, then activate an exact
-wallet-bound set with a short atomic pointer update. Original proofs remain audit;
-inactive pages cannot affect effective resolution, balance support, endpoint
-membership or qualification. Replace bulk disputed-row clearing with one wallet
-payment-resolution dispute state, separate from stronger malformed-evidence stops.
-Use complete database mutation-revision coverage for resolved membership and pending
-liabilities. Historical RPC work survives new pending admissions; pending validation
-repeats separately, while changed resolved membership invalidates the historical
-set. Checked liability validation and original-proof hashing are paged before fresh
-balance acquisition. Activation validates owner, revisions, capture, endpoint, debit,
-completeness and original freshness without rescanning/copying history. The
-existing same-hash journal-support check also requires paged physical validation:
-its indexed LIMIT does not bound successful scans. Recheck its mutation revision
-and balance freshness at activation; expiry reacquires balance/support validation
-without discarding historical proof pages. Cleanup is
-paged; cancelled or restarted inactive work never releases liability. Follow the
-single supported schema policy, without adding runtime migration machinery.
+**Separate repair-owner contract:** A residual canonical repair owns one dedicated pass
+per pool, independently of the four current-balance readers and four
+authorization-history readers. The pass retains its staging and cursor while useful work
+continues. Existing process-wide query/RPC bounds still apply; the extra owner bound
+protects retained repair staging, not spending capacity. Physical wallet pages advance
+even through ineligible rows. Failure backoff is per wallet; shutdown cancels unsigned
+reads while accepted serialized store jobs and staging cleanup retain ownership.
+
+Current maintenance uses C12's all-liabilities-reserved capacity path during a known
+payment dispute. It cannot release liabilities, publish readiness or retire a wallet.
+This also avoids repeatedly invalidating a progressing repair by rechecking its
+already-disputed old checkpoint. A one-pass caller receives the final repair disposition
+rather than an intermediate balance deferral.
+
+The separate owner and capacity path passed independent review. All 15 maintenance tests
+passed, followed by two new one-pass success/unresolved-nonce tests and the
+retired/healthy physical-page regression. The final one-pass rerun also passed. Tests
+retain a repair beyond the normal cadence, verify current capacity prefetch and
+independent history progress, then require adoption; shutdown/restart retains
+liabilities and cleans staging. The bounded adoption contract below completes G12 by
+moving paged validation outside the short activation transaction with complete revision
+coverage; no validation is weakened and no work deadline replaces it.
+
+**Bounded adoption followup:** Publish bounded replacement-proof pages into an inactive
+set, then activate an exact wallet-bound set with a short atomic pointer update.
+Original proofs remain audit; inactive pages cannot affect effective resolution, balance
+support, endpoint membership or qualification. Replace bulk disputed-row clearing with
+one wallet payment-resolution dispute state, separate from stronger malformed-evidence
+stops. Use complete database mutation-revision coverage for resolved membership and
+pending liabilities. Historical RPC work survives new pending admissions; pending
+validation repeats separately, while changed resolved membership invalidates the
+historical set. Checked liability validation and original-proof hashing are paged before
+fresh balance acquisition. Activation validates owner, revisions, capture, endpoint,
+debit, completeness and original freshness without rescanning/copying history. The
+existing same-hash journal-support check also requires paged physical validation: its
+indexed LIMIT does not bound successful scans. Recheck its mutation revision and balance
+freshness at activation; expiry reacquires balance/support validation without discarding
+historical proof pages. Cleanup is paged; cancelled or restarted inactive work never
+releases liability. Follow the single supported schema policy, without adding runtime
+migration machinery.
 
 Independent design audit identified every active-proof consumer and the existing
-unbounded acquisition-time exposure scan; both must change with publication. Tests
-must cover interleaved store work, membership mutation, new pending admission, stale
-final balance, cancellation/reopen, later repair supersession and immutable audit.
-The implementation and remaining acceptance limits follow.
+unbounded acquisition-time exposure scan; both changed with publication. The acceptance
+gates cover interleaved store work, membership mutation, new pending admission, stale
+final balance, cancellation/reopen, later repair supersession and immutable audit. The
+implemented adoption contract and qualification limits follow.
 
-**C15 bounded canonical adoption (implemented and reviewed):** Supported schema21
-uses one wallet payment-resolution dispute field and separate resolved-inventory and
-liability/support revisions. SQL triggers cover authoritative membership/proof and
-support changes with overflow rejection. Replacement proofs publish in physical
-pages into inactive sets; effective resolutions, endpoint membership and balance
-support exclude those sets until the short activation transaction commits. Original
-proofs remain immutable. Pending admission and final-balance expiry repeat only
-current liability/support validation, retaining completed historical RPC work.
-Same-hash support validation and abandoned-set deletion also yield between pages.
-No full-history scan, bulk copy or per-attempt dispute update remains in canonical
-activation. The older exact-revalidation fallback still requires a separate
-boundedness audit; this does not claim every G12 path is complete.
+**Bounded canonical adoption:** Introduced in schema21 and retained in final schema26,
+`wallets.payment_resolutions_disputed` supplies one wallet-wide dispute state, alongside
+separate resolved-inventory and liability/support revisions. The old per-attempt
+`resolution_disputed` decoder is limited to historical saved-schema exposure reporting. SQL
+triggers cover authoritative membership/proof and support changes with overflow
+rejection. Replacement proofs publish in physical pages into inactive sets; effective
+resolutions, endpoint membership and balance support exclude those sets until the short
+activation transaction commits. Original proofs remain immutable. Pending admission and
+final-balance expiry repeat only current liability/support validation, retaining
+completed historical RPC work. Same-hash support validation and abandoned-set deletion
+also yield between pages. No full-history scan, bulk copy or per-attempt dispute update
+remains in canonical activation. The single-repair-path contract below removes the older
+exact-revalidation fallback.
 
 Independent financial review and root review cleared the implementation. All 17
 replacement tests passed, including inactive visibility, concurrent membership and
-pending changes, overflow rollback, stale final evidence, restart and bounded
-cleanup. The store suite passed 178 tests with three ignored helpers and one obsolete
-fixture reset; the corrected fixture passed its focused rerun. All-target/all-feature
-Clippy passed. Review identified two followups: transient cleanup must retain its
-owner and retry only idempotent deletion on the existing five-second cadence; archived
-schema19/20 reports must retain their read-only row-dispute decoder. Both fixes and
-their new regressions passed review and focused tests; no runtime migration or private
-state conversion is introduced.
+pending changes, overflow rollback, stale final evidence, restart and bounded cleanup.
+The store suite passed 178 tests with three ignored helpers and one obsolete fixture
+reset; the corrected fixture passed its focused rerun. All-target/all-feature Clippy
+passed. Review identified two followups: transient cleanup must retain its owner and
+retry only idempotent deletion on the existing five-second cadence; archived schema19/20
+reports must retain their read-only row-dispute decoder. Both fixes and their new
+regressions passed review and focused tests; no runtime migration or private state
+conversion is introduced.
 
-**C15 single repair path followup (implemented and reviewed):** Removed the old
-exact-revalidation fallback and its unused historical-resolution verifier. Supported
-production invalidation marks payment resolutions disputed atomically; canonical
-replacement is now the sole repair path. Undisputed history with a chain block, or
-an empty resolution journal retaining financial/debit anchors, fails before RPC.
-A genuinely empty journal without such anchors uses the existing bounded owner,
-pending/support validation and fresh balance activation without inventing a financial
-checkpoint or releasing pending liability. Ordinary cached-balance invalidation with
-no historical resolution creates no financial block and refreshes normally.
-Historical balance accounting and read-only audit records remain available.
-Root review found no further correctness issue. All six repair tests and 17
-replacement tests passed. This removes the previously documented unbounded fallback;
-final cross-layer acceptance remains a separate gate.
+**Single repair path followup:** Removed the old exact-revalidation fallback and its
+unused historical-resolution verifier. Supported production invalidation marks payment
+resolutions disputed atomically; canonical replacement is now the sole repair path.
+Undisputed history with a chain block, or an empty resolution journal retaining
+financial/debit anchors, fails before RPC. A genuinely empty journal without such
+anchors uses the existing bounded owner, pending/support validation and fresh balance
+activation without inventing a financial checkpoint or releasing pending liability.
+Ordinary cached-balance invalidation with no historical resolution creates no financial
+block and refreshes normally. Historical balance accounting and read-only audit records
+remain available. Root review found no further correctness issue. All six repair tests
+and 17 replacement tests passed. This removes the previously documented unbounded
+fallback; Cross-layer production acceptance is recorded with C12/C14 below.
 
-**C15 cross-pool resource fairness fixup (implemented and reviewed):** Per-group
-repair lanes alone did not prevent enough historical queries from occupying every
-process-wide RPC socket. Historical query/caller/socket subsets now leave one current
-evidence slot at each existing boundary: 63 of 64 queries, 127 of 128 callers and
-31 of 32 sockets. Aggregate bounds are unchanged. Classification follows isolated
-endpoint and fallback clones; waiting historical calls cannot take the reserved
-current socket. Query and caller admission stay bounded, and cancellation releases
-both subset and aggregate ownership without abandoning accepted financial work.
+**Cross-pool resource fairness fixup:** Per-group repair lanes alone did not prevent
+enough historical queries from occupying every process-wide RPC socket. Historical
+query/caller/socket subsets now leave one current evidence slot at each existing
+boundary: 63 of 64 queries, 127 of 128 callers and 31 of 32 sockets. Aggregate bounds
+are unchanged. Classification follows isolated endpoint and fallback clones; waiting
+historical calls cannot take the reserved current socket. Query and caller admission
+stay bounded, and cancellation releases both subset and aggregate ownership without
+abandoning accepted financial work.
 
 Independent review is clear. The Base filter passed 41 tests with one ignored helper;
-resource accounting, 36-pool historical saturation, four-pool aggregate saturation
-and actual managed-payment saturation tests passed. With 31 historical RPCs held,
-every pool's current balance reads and independent Store work progressed. Original
-liabilities and immutable proofs survive shutdown. A production repair/reopen test
-also passed after the original RPC was stopped and an explicitly configured alternate
-was selected, retaining original endpoint provenance and funding disputes (T06).
+resource accounting, 36-pool historical saturation, four-pool aggregate saturation and
+actual managed-payment saturation tests passed. With 31 historical RPCs held, every
+pool's current balance reads and independent Store work progressed. Original liabilities
+and immutable proofs survive shutdown. A production repair/reopen test also passed after
+the original RPC was stopped and an explicitly configured alternate was selected,
+retaining original endpoint provenance and funding disputes (T06).
 
-**C21 Base observation clock contract:** Measure the existing validity window
-from a clock capture before the latest-header request. The elapsed clock includes
-suspend on macOS and Linux; no new timeout or durable clock halt is introduced.
-Wall-clock expiry, elapsed expiry and elapsed regression retire that observation's
-shared lease. Clones, rechecks and equal-observation cache merges cannot renew it.
-Equal merges retire detached incoming handles so eviction cannot restore their
-discarded authority; supersession alone must not expire an independent retained
-lease. Unsupported elapsed-clock platforms fail the affected acquisition explicitly.
+**T33 retained accounting ownership (`8abcfcc`):** A one-shot test gate pauses the
+actual source-accounting continuation after its SDK wallet read guard drops and before
+Store staging. Exact Store reads and a real Base RPC complete while it is paused; SDK
+`try_write` succeeds. A refund-address command enters the bounded actor queue and waits.
+Cancelling the sync waiter does not cancel the owned continuation: release lets
+accounting finish and the queued SDK command complete, preserving exact gross debit,
+original bytes, attempts and reservations. The corrected fixture drains its owned HTTP
+server and drops dependent Store handles before awaiting actor close; the passing local
+lifecycle gate took 22.55s. This proves retention across a deliberately held accounting
+boundary, not a general latency bound.
 
-Payment selection, admission, repair activation and retirement consume the same
-lease. Admission repeats the check after journal writes immediately before commit;
-failure rolls back the payment and reservation. A qualified payment retains its
-existing nonretryable classification after external qualification recording.
-Historical resolution evidence does not acquire a balance-age prerequisite.
-Independent review identified detached-clone/cache-eviction and final-commit gaps;
-their regression fixes passed independent re-review. Final focused validation:
-seven freshness-filter tests, all 42 evidence tests and all 32 selection tests
-passed; the earlier 38 Base tests also passed. The final selection run waited in
-the macOS loader before the harness started, then completed normally; no timeout
-or security workaround was added. All-target/all-feature Clippy passed with
-warnings denied. Absolute funding quote deadlines, treasury runtime freshness and
-persisted polling remain separate C21 work; this is not blanket G24 closure.
+**Recurring review lesson.** Separate tasks and per-pool lanes did not guarantee
+independence when every path shared serialized Store jobs or process-wide RPC sockets.
+Physical paging, short revision-checked activation and reserved current-evidence
+capacity were necessary at the actual shared bottlenecks.
 
-**C21 funding deadline clock followup:** Polling/backoff and health metadata keep
-their elapsed scheduling clock. Quote-window decisions after awaited readiness
-and operation reads now use actual wall time. The supplied `tick` epoch controls
-scheduling only; it cannot grant or revoke financial authority. Production
-treasury preparation and submission retain their own checks at the mutation
-boundary. The existing 300-second submission margin is unchanged. Independent
-review found no issues. The exact-boundary unit test, all 24 funding integration
-tests and seven concrete-backend unit tests passed. Integrations preserve prepared
-bytes and attempts after actual expiry, and artificial future scheduling ticks
-cannot expire a valid quote. All-target/all-feature Clippy also passed with these
-changes present.
+#### C16 — Preparation provenance and safe cleanup
 
-**C16 preparation provenance contract (implemented and reviewed):** Before SDK
-proposal mutation, atomically bind the exact operation/job and starting committed
-snapshot revision to version 1 of the calculate-only contract. Its private owner
-capability must accompany reservation and atomic publication. This contract cannot
-submit or expose signed bytes before the existing snapshot/outgoing/facts commit.
-Generic unstarted/closure paths must respect accepted provenance even if a derived
-phase says QUOTED or ALLOCATED. Unknown contracts and legacy PREPARING records do
-not acquire cleanup authority.
+Implementation provenance: calculate-only ownership `d4d5407`.
 
-After a synchronous preparation error, first take the SDK offline and drop it
-without saving. Then a serialized cleanup job may close only the exact owner with
-the unchanged starting snapshot, no outgoing bytes or unexplained durable effects,
-and only its own unconsumed reservation. Archive managed closure through existing
-`funding_recovery`; a terminal provenance marker also fences unmanaged operations.
-An already accepted outgoing commit wins over a missing acknowledgement and keeps
-its exact bytes and liability. Closure cannot restore SDK health; reconstruction
-on the existing shared store is separate C17 work. Process death currently retains
-open provenance for that explicit ownership handoff rather than guessing cleanup.
+**T12 proof-completion/expiry acceptance (`f188ecb`):** The actual SDK calculation and
+verified Orchard proof retain an immutable accepted deadline fixed before proof. The
+test supplies simulated late serialized-command times at the 300-second margin, at
+expiry and after expiry, with both retry flags. It does not measure a wall-clock proving
+overrun. No broadcast capability or attempt is minted; exact facts, bytes and cost
+reservation survive reopen. The serialized authority checks add no network calls after
+reopen; read-only observations retain their separate permission. The focused
+actual-proof gate passed (22.23s).
 
-Retain the global pending-outgoing preparation gate for now: the pinned SDK can
-clear input-spend markers when its transaction status becomes Failed while the
-application still owns PREPARED bytes until independent expiry recovery. Relaxing
-the gate requires exact exclusion of every application-live input, including after
-restart and reorg, rather than trusting SDK spendability alone. Synthetic multi-note
-evidence confirms this invariant. Two real-SDK preparation tests, nine provenance
-and crash tests, and 26 funding/classifier regressions passed. The subprocess
-helper exercised three process-death boundaries. Independent review cleared the
-qualification-retirement and generic-abandonment guards. All-target/all-feature
-Clippy, formatting and diff checks passed. Fresh schema20 adds the
-provenance boundary; there is no automatic state conversion.
+**Preparation provenance contract:** Before SDK proposal mutation, atomically bind the
+exact operation/job and starting committed snapshot revision to version 1 of the
+calculate-only contract. Its private owner capability must accompany reservation and
+atomic publication. This contract cannot submit or expose signed bytes before the
+existing snapshot/outgoing/facts commit. Generic unstarted/closure paths must respect
+accepted provenance even if a derived phase says QUOTED or ALLOCATED. Unknown contracts
+and legacy PREPARING records do not acquire cleanup authority.
 
-**C21 treasury observation lease (implemented and reviewed):** Capture the
-suspend-inclusive elapsed origin before the starting tip RPC and carry the same
-lease through scan, teardown and final snapshot publication. Only the exact
-committed observation/revision receives process-local freshness. Plain persisted
-JSON, reopen and phase restoration cannot mint it; snapshot and phase mutations
-revoke even held preflight clones. Saved `sync_fresh` remains an explicitly labeled
-wall-age diagnostic. Ordinary three-block lag and exact-tip expiry checks remain
-unchanged. A final checkpoint that outlives the original window retains the scan
-and continues incremental catch-up before reporting successful fresh completion.
+After a synchronous preparation error, first take the SDK offline and drop it without
+saving. Then a serialized cleanup job may close only the exact owner with the unchanged
+starting snapshot, no outgoing bytes or unexplained durable effects, and only its own
+unconsumed reservation. Archive managed closure through existing `funding_recovery`; a
+terminal provenance marker also fences unmanaged operations. An already accepted
+outgoing commit wins over a missing acknowledgement and keeps its exact bytes and
+liability. Closure cannot restore SDK health. C17 reconstructs on the existing shared
+Store; process death retains open provenance for that explicit ownership handoff.
 
-Validation passed: eight store freshness tests, one expiry regression, 18 rotation
-integration tests, 24 funding tests and 18 treasury-sync tests (one public-network
-test ignored). The actual synthetic-chain final-checkpoint expiry regression also
-passed, proving a second observation/final checkpoint is required before fresh
-capacity and reuse. Independent review found and cleared missing shared-lease
-revocation on the atomic preparation commit; its held-clone regression passed.
+Retain the global pending-outgoing preparation gate: the pinned SDK can clear
+input-spend markers when its transaction status becomes Failed while the application
+still owns PREPARED bytes until independent expiry recovery. Relaxing the gate requires
+exact exclusion of every application-live input, including after restart and reorg,
+rather than trusting SDK spendability alone. Synthetic multi-note evidence confirms this
+invariant. Two real-SDK preparation tests, nine provenance and crash tests, and 26
+funding/classifier regressions passed. The subprocess helper exercised three
+process-death boundaries. Independent review cleared the qualification-retirement and
+generic-abandonment guards. All-target/all-feature Clippy, formatting and diff checks
+passed. Fresh schema20 adds the provenance boundary; there is no automatic state
+conversion.
 
-**C17 live SDK ownership recovery (implemented and reviewed):** Treasury retains
-and drains the sync worker handle across cancelled waiters before retiring the SDK
-and fencing accepted store jobs. Reconstruction reads the committed snapshot,
-checks its revision before publication, and preserves the same shared store and
-worker while Base consumers retain handles. Failed commands are not replayed;
-queued commands retain normal admission checks. Only typed snapshot reconstruction
-failures retry at the existing maintenance cadence; shared SQL/ownership failures
-remain scoped stops.
+**Recurring review lesson.** Absence of outgoing bytes is weaker than proof that
+mutation never began. Lost acknowledgements and synchronous SDK failure require exact
+versioned provenance and retired-owner cleanup; accepted commits win over missing
+replies. The pending-input gate remains justified by observed SDK behavior, not generic
+caution.
 
-The retired-owner capability binds the store namespace. Both live reconstruction
-and initial exclusive reopen close only eligible calculate-only preparation
-markers, traversing at most 64 physical rows per store job. Unknown contracts,
-changed revisions, committed bytes and unexplained effects retain their obligations.
-Nine ownership tests and two real SDK preparation/proving tests passed, including
-cancelled drain, accepted late commits, lost acknowledgement, refund mutation,
-retained Base handles, shutdown, reopen and physical paging. Independent review
-cleared the implementation. Actual deployment task-exit cancellation and funding
-scheduler restart handling remain a separate C17 followup; this slice recovers
-poisoned SDK state without exiting those owners.
+#### C17 — SDK retirement, reconstruction and live Store continuity
 
-**C17 reconstruction read-contention fixup (implemented and reviewed):** Only
-Busy/Locked errors from the two read-only snapshot/revision checks receive a
-retryable reconstruction marker. The retired SDK, shared store and queued commands
-retain ownership under the existing maintenance cadence. Retirement fences and
-preparation handoff mutations remain outside this retry classification. Root review
-and the focused regression passed for both boundaries, with corruption and untagged
-SQLite errors remaining fatal; successful retry preserves exact snapshot bytes and
-revision. All-target, all-feature Clippy passed before this narrow followup.
+Implementation provenance: live reconstruction `929b6ca` and snapshot-read contention
+continuation `3639bbb`.
 
-**C19 durable Base observation ownership (implemented and reviewed):** Ordinary
-serving retains policy-free reconciliation owners for durable pool identities,
-including removed and disabled profiles. Existing explicit treasury/funding
-configuration and state are required; scoped inspection and qualification do not
-inherit unrelated journals. Observation owners cannot sign, allocate or fund, and
-retired wallets remain excluded from payment capacity. Shutdown drops observer
-handles before joining the shared store. Independent review cleared this slice;
-all 55 deployment tests and 17 maintenance tests passed. C11 fixture corrections
-also passed independent review, preserving captured-claim obstruction checks while
-allowing initial-capacity serving. The reviewed followup removes the retired-role
-exclusion only for already-disputed payment liabilities. Canonical replacement
-releases exact liability while preserving retired role, unassigned claims and
-funding readiness; fresh positive balances still cannot admit that payer. The
-production repair regression and physical paging past a healthy retired prefix
-passed, along with existing retired-wallet regressions.
+**Live SDK ownership recovery:** Treasury retains and drains the sync worker handle
+across cancelled waiters before retiring the SDK and fencing accepted store jobs.
+Reconstruction reads the committed snapshot, checks its revision before publication, and
+preserves the same shared store and worker while Base consumers retain handles. Failed
+commands are not replayed; queued commands retain normal admission checks. Only typed
+snapshot reconstruction failures retry at the existing maintenance cadence; shared
+SQL/ownership failures remain scoped stops.
 
-**C18 external-satisfaction closure (implemented and reviewed):** An exact
-unstarted source closure or already proved signed expiry, together with undisputed
-independent destination readiness, may finish EXTERNAL/RECOVERED despite historical
-provider status flags. This does not claim provider delivery. Keep every status
-flag and original operation, and prevent later status ingestion from turning this
-proven disposition into a provider-review phase. The unsigned closure proof also
-excludes orphan source-operation or expiry records, not just bytes and reservations.
-Open/unknown preparation provenance, unexplained source effects and disputed
-readiness still prohibit closure. The SUCCESS path remains strict pending exact
-operation-correlated canonical delivery evidence. This narrow contract and implementation passed independent review. All 21
-completion tests passed, including reopen, retained status flags, mismatched or
-missing archives, malformed accepted terms, unexplained source effects and disputed
-readiness negatives. External readiness validates exact archived operation identity
-without treating retained accepted terms as a new delivery claim.
+The retired-owner capability binds the store namespace. Both live reconstruction and
+initial exclusive reopen close only eligible calculate-only preparation markers,
+traversing at most 64 physical rows per store job. Unknown contracts, changed revisions,
+committed bytes and unexplained effects retain their obligations. Nine ownership tests
+and two real SDK preparation/proving tests passed, including cancelled drain, accepted
+late commits, lost acknowledgement, refund mutation, retained Base handles, shutdown,
+reopen and physical paging. Independent review cleared the implementation. This
+reconstructs poisoned SDK state without exiting its financial owner.
 
-**C18 provider-proof assessment (implementation pending):** The official
-[1Click status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
-was inspected on 2026-10-16. It correlates status by the original deposit address
-and echoed quote, and exposes origin/destination transaction hashes and actual
-swap/refund amounts. The inspected contract does not establish that a later
-terminal label supersedes an earlier contradictory label. Do not invent that rule.
-The current adapter validates the deposit and quote echo but discards transaction
-correlations; current destination readiness uses a balance checkpoint. Neither a
-balance change nor a provider label alone proves exact delivery after funds have
-already been spent.
+**Unresolved original C17 follow-up:** Actual deployment task-exit cancellation and
+funding-scheduler restart handling were explicitly left separate in the original
+implementation journal. Current `RunningDeployment::serve` still shares the treasury/
+funding stop token and reports restart required after it is cancelled
+([task ownership](../../src/deployment.rs#L1751),
+[stop handling](../../src/deployment.rs#L1838)). Listeners and Base reconciliation
+remain available. The recorded in-owner reconstruction and read-retry tests do not
+establish automatic replacement after actual task termination. This is an original
+stage 6 acceptance gap, not a newly proposed H follow-up or authority to blindly
+restart corrupted or ambiguously owned work. Close it by auditing actual exits and
+justifying each retained restart boundary, or implementing only proven eligible
+handoff with accepted-work ownership and shutdown-race acceptance. Containment
+after injected cancellation alone does not prove recovery; no new supervisor is
+implied by this gap.
 
-The remaining implementation must retain validated original-operation settlement
-correlations and independently acquire canonical transfer evidence for the accepted
-Base USDC recipient/amount. Existing source accounting and any return obligations
-remain separate. Persisted provider observations remain audit facts; closure may
-ignore a historical status veto only after every relevant obligation is actually
-proved discharged. Missing hashes, ambiguous attribution and unavailable proofs
-remain scoped incomplete outcomes, without replay or replacement authority.
+**Reconstruction read-contention fixup:** Only Busy/Locked errors from the two read-only
+snapshot/revision checks receive a retryable reconstruction marker. The retired SDK,
+shared store and queued commands retain ownership under the existing maintenance
+cadence. Retirement fences and preparation handoff mutations remain outside this retry
+classification. Root review and the focused regression passed for both boundaries, with
+corruption and untagged SQLite errors remaining fatal; successful retry preserves exact
+snapshot bytes and revision. All-target, all-feature Clippy passed before this narrow
+followup.
 
-**C18 provider observation prerequisite (implemented and reviewed):** The adapter
-now exposes a private-constructor, exact-quote-digest-bound status observation with
-explicitly unverified origin/destination transaction candidates and optional atomic
-amounts. Missing values remain unknown. Malformed known fields, duplicate/invalid
-hashes or financial quote-echo mismatch suppress the complete candidate set without
-losing the ordinary provider status. Original deposit/request mismatch still fails.
-No explorer URLs, provider prose or tracing correlation IDs are retained. Existing
-status polling delegates to this parser and retains its behavior; persistence,
-canonical verification and closure are still pending. Root and independent review
-cleared the slice; all 17 near-adapter tests passed with one intentional child helper
-ignored. The official live `/v0/status` documentation linked above supplied field
-shapes; it declares no standalone schema revision.
+**Recurring review lesson.** Waiter cancellation, task failure, SDK lifetime and Store
+lifetime are different ownership boundaries. Reconstruction can reuse the live shared
+Store only after the old SDK worker and accepted jobs are fenced; only specifically
+audited read contention is retryable.
 
-**C18 canonical transfer prerequisite (implemented and reviewed):** An opaque
-expectation joins the exact saved quote digest, original source-transaction hint,
-recipient and accepted amount to one destination candidate. The Base verifier checks
-successful receipt, pinned USDC contract, unique exact recipient transfer/log index,
-configured confirmations and canonical block rechecks. The proof carries original
-capture, endpoint generation and the pre-request monotonic freshness lease. Provider
-amounts can contradict a candidate but cannot prove delivery. Wrong chain is typed;
-only a changed anchor already bound by the capture becomes a durable evidence
-conflict. Unknown candidate changes remain local verification failures. The payment
-receipt's payer/nonce validator is unchanged.
+#### C18 — Canonical source, destination and finite return closure
+
+Implementation provenance: external closure `33689ec` with fixture fixup `9e7396f`;
+provider observations `891f848`; canonical transfer verification `63354df`; immutable
+delivery support `4585782`; canonical source support `05b8346`; return closure `f8c8194`
+with refresh fixup `bdc90b5`; production worker acceptance `2d434a8`. Source-input
+ownership and correction is cross-referenced in C13 (`c3d4d5a`).
+
+**External-satisfaction closure:** An exact unstarted source closure or already proved
+signed expiry, together with undisputed independent destination readiness, may finish
+EXTERNAL/RECOVERED despite historical provider status flags. This does not claim
+provider delivery. Keep every status flag and original operation, and prevent later
+status ingestion from turning this proven disposition into a provider-review phase. The
+unsigned closure proof also excludes orphan source-operation or expiry records, not just
+bytes and reservations. Open/unknown preparation provenance, unexplained source effects
+and disputed readiness still prohibit closure. SUCCESS requires the exact
+operation-correlated canonical delivery and source/return evidence specified below. This
+narrow contract and implementation passed independent review. All 21 completion tests
+passed, including reopen, retained status flags, mismatched or missing archives,
+malformed accepted terms, unexplained source effects and disputed readiness negatives.
+External readiness validates exact archived operation identity without treating retained
+accepted terms as a new delivery claim.
+
+**Provider-proof assessment:** The official [1Click status
+contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
+was inspected on 2026-10-16. It correlates status by the original deposit address and
+echoed quote, and exposes origin/destination transaction hashes and actual swap/refund
+amounts. The inspected contract does not establish that a later terminal label
+supersedes an earlier contradictory label. Do not invent that rule. The pre-change
+adapter discarded transaction correlations and destination readiness used a balance
+checkpoint. Neither a balance change nor a provider label alone proves exact delivery
+after funds have already been spent.
+
+The implemented contracts below retain validated original-operation settlement
+correlations and independently acquire canonical transfer evidence for the accepted Base
+USDC recipient/amount. Existing source accounting and any return obligations remain
+separate. Persisted provider observations remain audit facts; closure may ignore a
+historical status veto only after every relevant obligation is actually proved
+discharged. Missing hashes, ambiguous attribution and unavailable proofs remain scoped
+incomplete outcomes, without replay or replacement authority.
+
+**Provider observation prerequisite:** The adapter now exposes a private-constructor,
+exact-quote-digest-bound status observation with explicitly unverified
+origin/destination transaction candidates and optional atomic amounts. Missing values
+remain unknown. Malformed known fields, duplicate/invalid hashes or financial quote-echo
+mismatch suppress the complete candidate set without losing the ordinary provider
+status. Original deposit/request mismatch still fails. No explorer URLs, provider prose
+or tracing correlation IDs are retained. Existing status polling delegates to this
+parser and retains its behavior; persistence, canonical verification and closure use the
+distinct contracts below. Root and independent review cleared the slice; all 17
+near-adapter tests passed with one intentional child helper ignored. The official live
+`/v0/status` documentation linked above supplied field shapes; it declares no standalone
+schema revision.
+
+**Canonical transfer prerequisite:** An opaque expectation joins the exact saved quote
+digest, original source-transaction hint, recipient and accepted amount to one
+destination candidate. The Base verifier checks successful receipt, pinned USDC
+contract, unique exact recipient transfer/log index, configured confirmations and
+canonical block rechecks. The proof carries original capture, endpoint generation and
+the pre-request monotonic freshness lease. Provider amounts can contradict a candidate
+but cannot prove delivery. Wrong chain is typed; only a changed anchor already bound by
+the capture becomes a durable evidence conflict. Unknown candidate changes remain local
+verification failures. The payment receipt's payer/nonce validator is unchanged.
 
 Root and independent review cleared this destination-proof-only slice. Three focused
 tests passed, including a receipt mutation matrix, 13 local RPC scenarios and original
-quote/source/amount binding. Durable publication still must CAS wallet/address and
-original operation/source/quote, enforce unique event ownership and discharge source
-and return accounting separately. Multiple source/destination candidates remain
-unsupported/incomplete. No financial closure is enabled by this prerequisite alone.
+quote/source/amount binding. Durable publication below CASes wallet/address and original
+operation/source/quote, enforces unique event ownership, and discharges source and
+return accounting separately. Multiple source/destination candidates remain
+unsupported/incomplete. This proof discharges destination delivery only, with no
+independent closure authority.
 
-**C18 canonical delivery publication (implemented and reviewed):**
-Retain validated original quote/deposit and source-transaction correlation from the
-provider observation independently of its status label. That mapping supplies
-attribution; a canonical transfer alone cannot identify a swap. Validate a unique
-Base USDC transfer event for the exact accepted recipient/output amount, with
-successful canonical receipt/header, configured confirmations and opaque runtime
-freshness/generation binding. Preserve the stricter payer/nonce validation in the
-existing payment receipt path. Do not invent a bridge sender/nonce contract. Missing,
-multiple or split candidates remain incomplete until separately supported.
+**Canonical delivery publication:** Retain validated original quote/deposit and
+source-transaction correlation from the provider observation independently of its status
+label. That mapping supplies attribution; a canonical transfer alone cannot identify a
+swap. Validate a unique Base USDC transfer event for the exact accepted recipient/output
+amount, with successful canonical receipt/header, configured confirmations and opaque
+runtime freshness/generation binding. Preserve the stricter payer/nonce validation in
+the existing payment receipt path. Do not invent a bridge sender/nonce contract.
+Missing, multiple or split candidates remain incomplete until separately supported.
 
-Publish immutable delivery support under exact operation/quote/source CAS and
-unique chain/token/transaction/log identity, preventing one event from closing two
-operations. No present-balance threshold is needed to prove historical delivery.
-Provider outage after retained correlation need not block canonical verification;
-conflicting correlations do not supersede one another. Delivery discharges only the
-destination obligation. Complete financial closure separately requires original
-source debit/reservation/outgoing accounting and explicit return obligations; status
-flags remain audit and never erase ambiguous refunds. Typed endpoint/hash conflicts
-reopen only dependent support; unsigned outages grant no replay or replacement.
+Publish immutable delivery support under exact operation/quote/source CAS and unique
+chain/token/transaction/log identity, preventing one event from closing two operations.
+No present-balance threshold is needed to prove historical delivery. Provider outage
+after retained correlation need not block canonical verification; conflicting
+correlations do not supersede one another. Delivery discharges only the destination
+obligation. Complete financial closure separately requires original source
+debit/reservation/outgoing accounting and explicit return obligations; status flags
+remain audit and never erase ambiguous refunds. Typed endpoint/hash conflicts reopen
+only dependent support; unsigned outages grant no replay or replacement.
 
-Independent audit identified the status adapter/scheduler's discarded correlation,
-the payment-only receipt validator, and destination/completion consumers as the
+Independent audit identified the status adapter/scheduler's discarded correlation, the
+payment-only receipt validator, and destination/completion consumers as the
 implementation seams. Required tests include zero-current-balance delivery, wrong
 correlation/amount/token/recipient, receipt/reorg negatives, unique-event ownership,
-operation rollover, retained correlation through outage, and unresolved source or
-return obligations despite valid destination proof.
+operation rollover, retained correlation through outage, and unresolved source or return
+obligations despite valid destination proof.
 
 Schema22 retains one active and one queued encrypted hint per operation, permanent
 unique event ownership, immutable proof versions and one current proof pointer.
@@ -1485,215 +1529,410 @@ alternates with a corrected candidate after completed reads. Cancellation retain
 ownership. Old proofs never become fallback authority after the current proof is
 disputed. Publication rechecks freshness and original source/quote bindings.
 
-Positive or malformed return claims survive missing candidates and subsequent
-status labels. A late claim withdraws effective completion while preserving the
-historical outcome and gross debit. Exact source-closed external/recovered cases
-remain exempt by proof. Historical schema reports preserve their saved diagnostics.
-Eleven delivery-store tests and 22 funding tests passed. The scheduler gate passed
-20 tests, then its corrected terminal-status restart fixture passed separately;
-independent review is clear.
-Full canonical source/return reconciliation remains a separate next gate, so this
-slice does not claim complete G23 or automatic refund recovery.
+Positive or malformed return claims survive missing candidates and subsequent status
+labels. A late claim withdraws effective completion while preserving the historical
+outcome and gross debit. Exact source-closed external/recovered cases remain exempt by
+proof. Historical schema reports preserve their saved diagnostics. Eleven delivery-store
+tests and 22 funding tests passed. The scheduler gate passed 20 tests, then its
+corrected terminal-status restart fixture passed separately; independent review is
+clear. Canonical source/return reconciliation below completes the financial proof; it
+does not authorize automatic refund replacement.
 
-**C20 shielding implementation contract (reviewed design; implementation pending):**
-Automatic shielding uses the serialized treasury owner and existing maintenance
-cadence. Bind each accepted calculation to C16 preparation provenance, one original
-transparent address, exact selected outpoints/amounts, snapshot revision and actual
-fee cap. Commit immutable input correlation with the outgoing bytes, transaction
-facts, snapshot and fee-only reservation. Principal is internal wallet movement;
-never charge it again or require shielded funds to pay a transparent-input fee.
-Use checked amounts, exact raw-input equality, no transparent outputs, and verified
-internal shielded output/value balance. Preserve the demonstrated pending-outgoing
-SDK guard. Precommit cleanup requires drained owner provenance; uncertain committed
-work resumes its exact bytes, never fresh selection. Canonical expiry may release
-only the original operation under existing recovery proof rules.
+**Canonical source support:** Schema23 adds bounded inactive source observations,
+activated with the final wallet snapshot only after exact inventory and fresh
+observation checks. Saved CONFIRMED labels and immutable gross debit entries alone no
+longer grant source accounting support. Known canonical loss revokes support
+immediately; completed jobs remain observable with `source_accounting_pending`, without
+new submission. The existing sync reuse path shares current unavailable observations
+across jobs.
 
-New automatic work requires enabled auto-funding, effective configured profile
-policy and the existing refund-shielding fee safeguard. Removed/disabled profiles
-wait; existing signed work still receives observation. Qualification permits cannot
-be borrowed from source funding: the current permit contract does not authorize a
-new shielding operation. Deny it before mutation unless explicit run authority is
+A sealed historical pass retains its original scanned block anchor across an expired
+observation window. Incremental catch-up rechecks that hash and unchanged inventory
+before binding publication to the fresh snapshot; original balance freshness is never
+renewed. Restart cannot adopt an inactive pass.
+
+Independent review passed. Focused validation: source Store5, completed-job source
+scheduler1, accounting1, canonical-delivery/source-loss1, and real synthetic-chain
+lifecycle1. The latter checks one historical staging pass across expiry/catch-up, eight
+unavailable observations without another scan, canonical reorg/reappearance, and
+unchanged gross debit, original bytes and submission attempts. Earlier completion20 and
+delivery10 siblings passed before localized fixture corrections. C22 documents the
+separately implemented restoration declaration. Canonical return closure follows below;
+C13 supplies operation-scoped live orphan recovery. The C16 generic live-input guard
+retains its separate SDK invariant.
+
+**SDK enumeration qualification limit.** Store inventory, staging, publication and cleanup
+use physical pages, but SDK output accounting retains one linear traversal of the
+resident output map. The local progress gates do not establish a bounded SDK-internal
+traversal or a live-provider settlement contract.
+
+**Canonical return closure:** Schema25 binds finite return accounting to the same
+bounded historical source pass. Production loads original return bindings and immutable
+credits in pages, publishes one discovered output per Store job, and carries exact
+credited totals under the shared inventory revision. Duplicate provider observations do
+not invalidate useful history. Canonical original outputs remain accounting evidence
+after shielding or spending; pending positive outputs are scoped incomplete, and
+invalidated never-credited outputs do not create permanent obligations.
+
+SUCCESS now requires exact canonical destination delivery and current source/return
+proofs. Unknown amounts are not zero. Explicit zero or a positive amount must bind to
+the original source, accepted quote and delivered transaction; positive amounts need
+complete canonical owned-output coverage. Historical provider terminal labels remain
+audit rather than a permanent veto after all proofs discharge the obligations. Changed
+or malformed claims remain incomplete. New outputs or canonical contradictions reopen
+accounting without erasing historical completion or duplicating return credit. Explicit
+zero describes the current finite claim, never absence of future returns.
+
+Independent review covered financial correlation, revision coverage, bounded publication
+and historical readers. Focused gates: delivery/return13, completion21, source Store5
+and synthetic SDK refund6 passed; the latter includes spent origins, ambiguity
+isolation, pending positives and the failed-output negative control. The follow-up
+storage-error propagation regression also passed (1 test). Production funding-worker
+acceptance follows below. Full returned-principal accounting does not authorize a
+replacement attempt: refunded retry still requires review under the explicit repository
+instructions. C13 records the separate schema26 operation-scoped live orphan recovery
+contract.
+
+**T48 production worker acceptance (`2d434a8`; return-refresh fixup `bdc90b5`):** The
+real funding worker, treasury actor and synthetic chains now exercise persisted FAILED,
+REFUNDED and INCOMPLETE observations followed by exactly correlated delivery hints, a
+missing-receipt control, and provider outage. Completion occurs only after canonical
+destination, original source and finite return proofs are present. Original bytes,
+operation facts, gross debit and one submission remain unchanged; no SUCCESS label or
+replacement attempt supplies authority.
+
+This acceptance exposed a missing refresh dependency: semantic return-inventory changes
+revoked return proof but did not schedule its canonical reobservation. Fixup `bdc90b5`
+routes confirmed sources with pending returns through the existing source lane. Reuse
+requires the original pass's inventory revision; an unchanged observed issue remains
+reusable and does not trigger repeated historical scans.
+
+Independent review and focused validation passed: T48 worker (1), source support (6),
+and existing concurrent bootstrap/rotation worker (1). The latter retains actual
+lookup-progress and unchanged-snapshot assertions while allowing existing poll jitter.
+These local fixtures do not establish an external provider contract or prove absence of
+future returns. Refund replacement still requires review.
+
+**Recurring review lesson.** SUCCESS/FAILED/REFUNDED labels repeatedly stood in for
+discharging financial obligations. Exact correlated source, destination and finite
+return proofs are separate authorities. Invalidating return support without scheduling
+its owner caused a real liveness defect; unchanged unresolved evidence must also remain
+reusable to avoid repeat scans. Worker fixture upgrades supply canonical proof rather
+than weakening completion to match status prose.
+
+#### C19 — Observation after removal, disablement and retirement
+
+Implementation provenance: durable observation ownership `8bdcc3e`; retired liability
+repair `8b7d78b`.
+
+**Durable Base observation ownership:** Ordinary serving retains policy-free
+reconciliation owners for durable pool identities, including removed and disabled
+profiles. Existing explicit treasury/funding configuration and state are required;
+scoped inspection and qualification do not inherit unrelated journals. Observation
+owners cannot sign, allocate or fund, and retired wallets remain excluded from payment
+capacity. Shutdown drops observer handles before joining the shared store. Independent
+review cleared this slice; all 55 deployment tests and 17 maintenance tests passed. C11
+fixture corrections also passed independent review, preserving captured-claim
+obstruction checks while allowing initial-capacity serving. The reviewed followup
+removes the retired-role exclusion only for already-disputed payment liabilities.
+Canonical replacement releases exact liability while preserving retired role, unassigned
+claims and funding readiness; fresh positive balances still cannot admit that payer. The
+production repair regression and physical paging past a healthy retired prefix passed,
+along with existing retired-wallet regressions.
+
+#### C20 — Owned automatic shielding under serving authority
+
+Implementation provenance: inactive substrate `4c2f79d`, physical inventory fixup
+`3f5df1f`, serving activation `9863d95`, and actual ciphertext ownership fixup
+`7e82183`. These are distinct calculation, authority, input-proof and scheduling
+boundaries, not additional spending ceilings.
+
+**Shielding implementation contract:** Automatic shielding uses the serialized treasury
+owner and existing maintenance cadence. Bind each accepted calculation to C16
+preparation provenance, one original transparent address, exact selected
+outpoints/amounts, snapshot revision and actual fee cap. Commit immutable input
+correlation with the outgoing bytes, transaction facts, snapshot and fee-only
+reservation. Principal is internal wallet movement; never charge it again or require
+shielded funds to pay a transparent-input fee. Use checked amounts, exact raw-input
+equality, no transparent outputs, and verified internal shielded output/value balance.
+Preserve the demonstrated pending-outgoing SDK guard. Precommit cleanup requires drained
+owner provenance; uncertain committed work retains its exact bytes for observation and explicitly
+authorized recovery, never fresh selection. Canonical expiry may release only the original operation under existing
+recovery proof rules.
+
+New automatic work requires enabled auto-funding, effective configured profile policy
+and the existing refund-shielding fee safeguard. Removed/disabled profiles wait;
+existing signed work still receives observation. Qualification permits cannot be
+borrowed from source funding: the current permit contract does not authorize a new
+shielding operation. Deny it before mutation unless explicit run authority is
 implemented separately. No new cumulative budget or whole-work deadline is added.
 
-Current confirmed, unspent SDK-owned transparent inputs may be shielded despite
-partial or unresolved return attribution when exact input ownership, script and
-reservation exclusion are proved. Keep one original address per transaction. An
-attribution warning alone is not an input-ownership veto; unknown selected inputs
-or reservations are. Preserve unresolved source/refund accounting and immutable
-outpoint-to-shielding correlation across reorg, spending and restart; shielding is
-never provider settlement, refund credit or new funding authority.
+Current confirmed, unspent SDK-owned transparent inputs may be shielded despite partial
+or unresolved return attribution when exact input ownership, script and reservation
+exclusion are proved. Keep one original address per transaction. An attribution warning
+alone is not an input-ownership veto; unknown selected inputs or reservations are.
+Preserve unresolved source/refund accounting and immutable outpoint-to-shielding
+correlation across reorg, spending and restart; shielding is never provider settlement,
+refund credit or new funding authority.
 
 Acceptance requires restored confirmed spendability from zero shielded capital,
-partial/unattributed owned inputs with unresolved accounting preserved, exact fee
-and single-address bounds, disabled-policy resumption, qualification denial before
-mutation, cancellation/lost acknowledgement/restart with no duplicate selection,
-and canonical confirmation/expiry with fee consumed once. Existing CLI shielding
-lacks this durable input correlation and automatic command path; no implementation
-or acceptance completion is claimed by this design.
+partial/unattributed owned inputs with unresolved accounting preserved, exact fee and
+single-address bounds, disabled-policy resumption, qualification denial before mutation,
+cancellation/lost acknowledgement/restart with no duplicate selection, and canonical
+confirmation/expiry with fee consumed once. The owned calculation, submission,
+maintenance and activation contracts below implement the durable input correlation and
+automatic command path.
 
-Independent C20 review identified additional required boundaries: attach automatic
-work only to explicitly authorized serving/funding maintenance, never ordinary wallet
-sync; observe standalone shielding operation IDs independently of funding-job phase.
-Reject all qualification permits that lack explicit shielding authority before even
-creating a preparation marker, including positive source-funding permits. Internal
-shielding submission follows transaction expiry, not the existing invented one-day
-external-style deadline; source funding retains its accepted quote deadline/margin.
-Expiry must prove the exact selected input set, not merely inputs sufficient to cover
-the fee-only accounting amount. A confirmed shielding transaction reorg must not
-free its original inputs for reselection while its old signed bytes could still be
-valid: immutable input ownership survives outgoing RESOLVED until canonical closure
-or expiry proves reassignment safe. These are implementation requirements, not new
-spending ceilings or reasons to require completed provider attribution.
+Independent C20 review identified additional required boundaries: attach automatic work
+only to explicitly authorized serving/funding maintenance, never ordinary wallet sync;
+observe standalone shielding operation IDs independently of funding-job phase. Reject
+all qualification permits that lack explicit shielding authority before even creating a
+preparation marker, including positive source-funding permits. Internal shielding
+submission follows transaction expiry, not the existing invented one-day external-style
+deadline; source funding retains its accepted quote deadline/margin. Expiry must prove
+the exact selected input set, not merely inputs sufficient to cover the fee-only
+accounting amount. A confirmed shielding transaction reorg must not free its original
+inputs for reselection while its old signed bytes could still be valid: immutable input
+ownership survives outgoing RESOLVED until canonical closure or expiry proves
+reassignment safe. These are implementation requirements, not new spending ceilings or
+reasons to require completed provider attribution.
 
-**C20 owned shielding calculation (implemented and reviewed):** Schema22 stores
-immutable operation/policy/address and exact outpoint/value/script bindings beside
-the existing outgoing journal. Manual shielding now uses C16 calculate-only ownership
-and atomic publication of these bindings, signed bytes, facts, snapshot and fee-only
-reservation. It checks SDK ownership, confirmation, unspent status, one original
-address, exact raw inputs, no transparent outputs and owned shielded output/value
-balance. Original transparent principal is not charged again. Input claims survive
-confirmation and reopen; only canonical expiry can release them. Qualification
-permits, including positive source-funding permits, cannot authorize shielding.
-Failure retires the SDK before proven owner cleanup; accepted commits remain intact.
+**Owned shielding calculation:** Schema22 stores immutable operation/policy/address and
+exact outpoint/value/script bindings beside the existing outgoing journal. Manual
+shielding now uses C16 calculate-only ownership and atomic publication of these
+bindings, signed bytes, facts, snapshot and fee-only reservation. It checks SDK
+ownership, confirmation, unspent status, one original address, exact raw inputs, no
+transparent outputs and owned shielded output/value balance. Original transparent
+principal is not charged again. Input claims survive confirmation and reopen; only
+canonical expiry can release them. Qualification permits, including positive
+source-funding permits, cannot authorize shielding. Failure retires the SDK before
+proven owner cleanup; accepted commits remain intact.
 
-Independent review is clear. Four store tests passed, and a real synthetic-chain
-proving test passed both injected commit rollback and successful fee-only publication
-with exact-byte reopen. This gate retains the existing manual attribution check. The following gate removes
-the invented internal-transfer deadline; canonical source/input reorg support and
-automatic owned-input maintenance under explicit serving policy remain.
-No automatic shielding or full T30 acceptance is claimed yet.
+Independent review is clear. Four store tests passed, and a real synthetic-chain proving
+test passed both injected commit rollback and successful fee-only publication with
+exact-byte reopen. Manual calculation retains its attribution check. The expiry-only,
+owned-input maintenance and activation contracts below establish the automatic T30 path.
 
-**C20 internal submission constraint (implemented and reviewed):** Transaction facts
-now distinguish an external deadline from no external deadline. Historical numeric
-deadlines remain readable. Only an opaque constraint reconstructed from the immutable
-shielding header, exact inputs, decrypted original address, signed bytes and fee
-permits expiry-only submission. A missing deadline or zero amount alone grants no
-such authority. New manual shielding omits the invented one-day timer. Source funding
-still requires its accepted deadline and shared first-submission margin. The Store,
-gRPC preflight and final local check share that calculation; consensus block expiry
-continues to reject every expired transaction. Automatic shielding is not activated.
+**Internal submission constraint:** Transaction facts now distinguish an external
+deadline from no external deadline. Historical numeric deadlines remain readable. Only
+an opaque constraint reconstructed from the immutable shielding header, exact inputs,
+decrypted original address, signed bytes and fee permits expiry-only submission. A
+missing deadline or zero amount alone grants no such authority. New manual shielding
+omits the invented one-day timer. Source funding still requires its accepted deadline
+and shared first-submission margin. The Store, gRPC preflight and final local check
+share that calculation; consensus block expiry continues to reject every expired
+transaction. Automatic activation below uses this same constraint.
 
 Six Store tests passed, and the real synthetic SDK proof/reopen test passed with
 expiry-only submission, legacy header-bound numeric facts and block-expiry rejection.
-The fixture now awaits production owner close before reopening. Independent review
-is clear; no live-funded work was run.
+The fixture now awaits production owner close before reopening. Independent review is
+clear; no live-funded work was run.
 
-**C20 serving capability (implemented; activation deferred):** After every listener
-bind succeeds, ordinary enabled managed serving may capture the current enabled
-profile/pool fee policy in an opaque Store-owner-bound capability. The command owner
-retains it across SDK reconstruction; generic sync, bootstrap, administration and
-reopened state cannot create or inherit it. Positive and zero qualification limits,
-paused policy and declared restoration prevent capture or new preparation. The
-accepted policy source determines the immutable automatic flag; callers supply no
-flag. Current policy is checked before the C16 marker, fee reservation and new
-publication, while an exact already-accepted commit remains readable after policy
-changes. Invalid optional shielding policy retains the scoped listener startup path.
+**Serving capability:** After every listener bind succeeds, ordinary enabled managed
+serving may capture the current enabled profile/pool fee policy in an opaque
+Store-owner-bound capability. The command owner retains it across SDK reconstruction;
+generic sync, bootstrap, administration and reopened state cannot create or inherit it.
+Positive and zero qualification limits, paused policy and declared restoration prevent
+capture or new preparation. The accepted policy source determines the immutable
+automatic flag; callers supply no flag. Current policy is checked before the C16 marker,
+fee reservation and new publication, while an exact already-accepted commit remains
+readable after policy changes. Invalid optional shielding policy retains the scoped
+listener startup path.
 
-Automatic scheduling is still disabled until canonical input reorg/expiry accounting
-is complete. Focused tests cover removed/disabled profiles, policy changes, namespace
-mismatch after reopen, qualification/restoration denial and unchanged pre-mutation
-journals. The real SDK regression repeats an accepted exact commit after policy is
-paused to qualify lost-acknowledgement handling.
-Ten focused Store cases and the real SDK shielding regression passed; independent
-review is clear. No automatic scheduling or live-funded qualification was run.
+Automatic scheduling was activated only after the canonical input reorg/expiry
+accounting gate described under C13/C18 was complete. Focused tests cover
+removed/disabled profiles, policy changes, namespace mismatch after reopen,
+qualification/restoration denial and unchanged pre-mutation journals. The real SDK
+regression repeats an accepted exact commit after policy is paused to qualify
+lost-acknowledgement handling. Ten focused Store cases and the real SDK shielding
+regression passed; independent review is clear. This prerequisite was tested before
+scheduling activation; no live-funded qualification was run.
 
-**C20 inactive maintenance substrate (implemented and reviewed):** Bounded original
-journal pages retain every shielding operation for observation and current/historical
-refund addresses independent of funding-job completion or provider attribution.
-An opaque address candidate rechecks its exact journal binding and current serving
-policy before C16 ownership. The staged preparation helper selects confirmed,
-unspent SDK inputs, excludes retained input claims, and shares the existing proposal
-minimum before any mutation; it uses the same calculate-only atomic publication.
-The command owner retains the address cursor across SDK reconstruction, but no actor
-schedule or automatic submission is enabled in this commit. First-submit candidate
-inspection excludes manual bytes and all attempted bytes; actual intent still needs
-the forthcoming atomic serving-policy gate. Validation:13 Store tests, both real SDK
-manual/automatic proving tests, and repeated dust-only passes with no preparation,
-reservation, snapshot mutation or SDK retirement. Activation follows the separately
-reviewed scoped canonical orphan/expiry recovery gate.
+**Bounded maintenance substrate:** Bounded original journal pages retain every shielding
+operation for observation and current/historical refund addresses independent of
+funding-job completion or provider attribution. An opaque address candidate rechecks its
+exact journal binding and current serving policy before C16 ownership. The staged
+preparation helper selects confirmed, unspent SDK inputs, excludes retained input
+claims, and shares the existing proposal minimum before any mutation; it uses the same
+calculate-only atomic publication. The command owner retains the address cursor across
+SDK reconstruction, with actor scheduling and automatic submission enabled by the
+activation gate below. First-submit candidate inspection excludes manual bytes and all
+attempted bytes; actual intent uses the atomic serving-policy gate specified under
+activation. Validation:13 Store tests, both real SDK manual/automatic proving tests, and
+repeated dust-only passes with no preparation, reservation, snapshot mutation or SDK
+retirement. Activation followed the separately reviewed scoped canonical orphan/expiry
+recovery gate.
 
-**C20 inventory review fixup:** Independent review found that the combined
-current/archive UNION could scan and sort complete history before its LIMIT.
-Separate indexed keyset queries now bound physical rows before filtering absent
-historical addresses. The pending-slot query uses the existing unique
-`one_outgoing` partial index. Query-plan assertions and a sparse 130-row history
-regression pass with the 14-test shielding Store suite; no activation is included.
+**Inventory review fixup:** Independent review found that the combined current/archive
+UNION could scan and sort complete history before its LIMIT. Separate indexed keyset
+queries now bound physical rows before filtering absent historical addresses. The
+pending-slot query uses the existing unique `one_outgoing` partial index. Query-plan
+assertions and a sparse 130-row history regression pass with the 14-test shielding Store
+suite; the activation contract below uses these bounds.
 
-**C20 automatic maintenance activation (implemented and independently reviewed):**
-After a successful persisted scan, the serialized serving actor observes bounded
-pages of original shielding operations before selecting exact confirmed owned
-transparent inputs. Only captured serving authority can prepare automatic bytes;
-first submission atomically rechecks the current enabled policy, actual fee cap,
-automatic header and zero attempts. Manual bytes and already-attempted bytes never
-receive an automatic submission. Disabled profiles and absent capability retain
+**Automatic maintenance activation:** After a successful persisted scan, the serialized
+serving actor observes bounded pages of original shielding operations before selecting
+exact confirmed owned transparent inputs. Only captured serving authority can prepare
+automatic bytes; first submission atomically rechecks the current enabled policy, actual
+fee cap, automatic header and zero attempts. Manual bytes and already-attempted bytes
+never receive an automatic submission. Disabled profiles and absent capability retain
 observation/recovery of original IDs. Typed per-operation indexer outages preserve
-independent history progress without advancing a prefix from the prioritized
-pending slot; storage/ownership failures and retired SDK capability remain fatal.
-Actual local-chain gates pass for fresh actor preparation/submission/confirmation,
-exact fee-only accounting and spendable increase, policy change before intent,
-restart without replay, and disabled-profile observation (two tests, 53.57s).
-The injected pending-outage/prefix regression also passes. A separate review fixup
-validates original UFVK ownership directly from exact Orchard/Ironwood ciphertext,
-including consensus-promoted change, with wrong-key/wrong-value controls passing
-in the actual proving regression (22.97s). These are unfunded local fixtures, not
-live qualification. Broad repository validation remains the final gate.
+independent history progress without advancing a prefix from the prioritized pending
+slot; storage/ownership failures and retired SDK capability remain fatal. Actual
+local-chain gates pass for fresh actor preparation/submission/confirmation, exact
+fee-only accounting and spendable increase, policy change before intent, restart without
+replay, and disabled-profile observation (two tests, 53.57s). The injected
+pending-outage/prefix regression also passes. A separate review fixup validates original
+UFVK ownership directly from exact Orchard/Ironwood ciphertext, including
+consensus-promoted change, with wrong-key/wrong-value controls passing in the actual
+proving regression (22.97s). These are unfunded local fixtures, not live qualification.
+Final repository validation passed; this does not add live qualification.
 
-**C20 exact shielding expiry inputs (implemented and reviewed):**
-The ordinary two-sync expiry path additionally reloads the validated immutable
-shielding binding and checks every journaled outpoint against the current SDK wallet.
-Value, original address, locking script, confirmation depth and unspent status must
-all match. A subset covering the fee-only reservation is insufficient. The original
-snapshot proof, zero-lag scans, buried block expiry, indexer observation and final
-snapshot revision check remain required. This check adds no release transition for
-an orphaned previously confirmed transaction; that accounting recovery remains a
-separate source-support gate.
+**Exact shielding expiry inputs:** The ordinary two-sync expiry path additionally
+reloads the validated immutable shielding binding and checks every journaled outpoint
+against the current SDK wallet. Value, original address, locking script, confirmation
+depth and unspent status must all match. A subset covering the fee-only reservation is
+insufficient. The original snapshot proof, zero-lag scans, buried block expiry, indexer
+observation and final snapshot revision check remain required. The separate
+source-support contract under C13/C18 supplies the release correction for an orphaned
+previously confirmed transaction; this check alone cannot release it.
 
-The focused synthetic-wallet test passed exact success and missing, changed,
-duplicate, insufficiently confirmed and spent-input controls, including a remaining
-input worth more than the fee. The real SDK shielding proof/reopen test also passed
-after the shared immutable-binding loader refactor. Independent review is clear.
+The focused synthetic-wallet test passed exact success and missing, changed, duplicate,
+insufficiently confirmed and spent-input controls, including a remaining input worth
+more than the fee. The real SDK shielding proof/reopen test also passed after the shared
+immutable-binding loader refactor. Independent review is clear.
 
-**C22 declared restoration contract (implemented and reviewed):** Ordinary reopen
-cannot detect an undeclared filesystem rollback. The explicit offline
-`wallet mark-restored` command declares a manually restored working copy before
-serving or submission. Its durable, one-way missing-provenance marker fences new
-managed payments, source/qualification allocation, treasury preparation, shielding,
-all submission including saved bytes, and funding reauthorization. Known-operation
-observations, scans, accounting and read-only inspection remain available. Current
-balances, reconstructed projections and canonical expiry of known operations cannot
-clear unknown later authorizations or missing journals. Original bytes, gross debit,
-known liabilities and attempt counts remain intact; backups retain the declaration.
+**Recurring review lesson.** The exact selected input set and owned shielded outputs
+must be proved from actual serialized transactions, not assumptions about SDK note
+population or fee-only value coverage. Scheduling also needed physical SQL bounds and
+priority-prefix independence; activation tests exercise actual actor preparation and
+first intent, with no automatic retry of attempted bytes.
 
-This is not an atomic file-restoration tool or automatic rollback detection.
-Operators must stop the original process and declare the restored working copy before
-use. Unrelated static credentials remain independent; reusing restored keys as a static
+#### C21 — Separate clocks and financial authority
+
+Implementation provenance: Base lease `7c4f0ae`, financial versus scheduler time
+`06af797`, treasury lease `d8b4dbc`, and canonical-time acceptance `8ffb521`.
+
+**Base observation clock contract:** Measure the existing validity window from a clock
+capture before the latest-header request. The elapsed clock includes suspend on macOS
+and Linux; no new timeout or durable clock halt is introduced. Wall-clock expiry,
+elapsed expiry and elapsed regression retire that observation's shared lease. Clones,
+rechecks and equal-observation cache merges cannot renew it. Equal merges retire
+detached incoming handles so eviction cannot restore their discarded authority;
+supersession alone must not expire an independent retained lease. Unsupported
+elapsed-clock platforms fail the affected acquisition explicitly.
+
+Payment selection, admission, repair activation and retirement consume the same lease.
+Admission repeats the check after journal writes immediately before commit; failure
+rolls back the payment and reservation. A qualified payment retains its existing
+nonretryable classification after external qualification recording. Historical
+resolution evidence does not acquire a balance-age prerequisite. Independent review
+identified detached-clone/cache-eviction and final-commit gaps; their regression fixes
+passed independent re-review. Final focused validation: seven freshness-filter tests,
+all 42 evidence tests and all 32 selection tests passed; the earlier 38 Base tests also
+passed. The final selection run waited in the macOS loader before the harness started,
+then completed normally; no timeout or security workaround was added.
+All-target/all-feature Clippy passed with warnings denied. Funding quote deadlines,
+treasury freshness and persisted polling have distinct C21 contracts and acceptance
+below.
+
+**Funding deadline clock followup:** Polling/backoff and health metadata keep their
+elapsed scheduling clock. Quote-window decisions after awaited readiness and operation
+reads now use actual wall time. The supplied `tick` epoch controls scheduling only; it
+cannot grant or revoke financial authority. Production treasury preparation and
+submission retain their own checks at the mutation boundary. The existing 300-second
+submission margin is unchanged. Independent review found no issues. The exact-boundary
+unit test, all 24 funding integration tests and seven concrete-backend unit tests
+passed. Integrations preserve prepared bytes and attempts after actual expiry, and
+artificial future scheduling ticks cannot expire a valid quote. All-target/all-feature
+Clippy also passed with these changes present.
+
+**Treasury observation lease:** Capture the suspend-inclusive elapsed origin before the
+starting tip RPC and carry the same lease through scan, teardown and final snapshot
+publication. Only the exact committed observation/revision receives process-local
+freshness. Plain persisted JSON, reopen and phase restoration cannot mint it; snapshot
+and phase mutations revoke even held preflight clones. Saved `sync_fresh` remains an
+explicitly labeled wall-age diagnostic. Ordinary three-block lag and exact-tip expiry
+checks remain unchanged. A final checkpoint that outlives the original window retains
+the scan and continues incremental catch-up before reporting successful fresh
+completion.
+
+Validation passed: eight store freshness tests, one expiry regression, 18 rotation
+integration tests, 24 funding tests and 18 treasury-sync tests (one public-network test
+ignored). The actual synthetic-chain final-checkpoint expiry regression also passed,
+proving a second observation/final checkpoint is required before fresh capacity and
+reuse. Independent review found and cleared missing shared-lease revocation on the
+atomic preparation commit; its held-clone regression passed.
+
+**T49 canonical-time progress acceptance (implemented and reviewed):** A local RPC
+fixture runs the production payment repair owner twice while canonical time is before
+the immutable signed expiry, although host wall time is already past it. Both passes
+retain the exact disputed liability and repair reason without any activated release.
+Advancing the canonical head and timestamp permits the same StoreHandle/Base owner to
+adopt EXPIRED_UNUSED and clear the payment repair reason; the original USED audit row
+and single authorization remain intact. The focused default-build test passed. Together
+with shared sticky clock/suspend freshness, treasury late-checkpoint catch-up and
+future-poll restart tests, this covers the separate time domains without replacing
+canonical expiry with local elapsed time.
+
+**Recurring review lesson.** One numerical time value had been used for unrelated
+purposes. Observation age, scheduling cadence, immutable quote authority and canonical
+chain expiry now retain separate origins; clock/suspend tests prevent freshness renewal
+through clones, cache merges or artificial scheduler ticks.
+
+#### C22 — Restoration fencing, final schema and evidence compatibility
+
+Implementation provenance: restoration declaration `78c3b0c`; fresh exposure cleanup
+`dc284e2`. Final runtime supports schema26 only, with no runtime/private-state
+migration. Frozen historical reporting retains schema-specific readers, including
+schema16 retirement records (`6bfdf75`), schema19/20 row-dispute records (`110f2e0`) and
+saved source-report dependencies (`f0a249c`). Final fixture corrections (`121ed57`)
+preserve canonical-pending observations and actual readiness assertions; fixture and
+lint corrections are not additional financial-policy changes.
+
+**Declared restoration contract:** Ordinary reopen cannot detect an undeclared
+filesystem rollback. The explicit offline `wallet mark-restored` command declares a
+manually restored working copy before serving or submission. Its durable, one-way
+missing-provenance marker fences new managed payments, source/qualification allocation,
+treasury preparation, shielding, all submission including saved bytes, and funding
+reauthorization. Known-operation observations, scans, accounting and read-only
+inspection remain available. Current balances, reconstructed projections and canonical
+expiry of known operations cannot clear unknown later authorizations or missing
+journals. Original bytes, gross debit, known liabilities and attempt counts remain
+intact; backups retain the declaration.
+
+This is not an atomic file-restoration tool or automatic rollback detection. Operators
+must stop the original process and declare the restored working copy before use.
+Unrelated static credentials remain independent; reusing restored keys as a static
 wallet bypasses this state's ownership and is not protected. Complete externally
 retained authorization/submission journals and a separately reviewed reconciliation
 would be required to recover dependent spending; there is no generic reset switch or
 claim that scanning known chains recovers unseen off-chain liabilities.
 
-The Store backup/reopen test preserves exact known bytes and attempts while blocking
-new authority and startup readiness. A current Base balance cannot recover a missing
-signed authorization from an older backup. The actual CLI test verifies exclusive
-ownership, offline declaration and persistent status without opening the SDK. All
-three focused gates passed; independent review is clear. No private backup was used.
+The Store backup/reopen test preserves exact known bytes and attempts while blocking new
+authority and startup readiness. A current Base balance cannot recover a missing signed
+authorization from an older backup. The actual CLI test verifies exclusive ownership,
+offline declaration and persistent status without opening the SDK. All three focused
+gates passed; independent review is clear. No private backup was used.
 
-**C09 hidden prepared-obligation followup (implemented and reviewed):** Exact
-PREPARED treasury bytes with zero submission attempts remain observable when a
-stale derived phase says ALLOCATED, QUOTED or COMPLETE. Inventory and health use
-that durable obligation, and route it through the source lane independently of
-quote slots. A captured observer-only fact fences the entire pass against new
-quote, preparation or submission even if canonical observation changes the phase.
-Ordinary PREPARING/PREPARED work keeps its existing path without an extra lookup;
-explicit recovery dispositions retain their separate authority.
+**Fresh-schema exposure cleanup:** Fresh schema 24 removes the independently writable
+`wallets.unresolved_exposure` projection. Runtime admission continues deriving exact
+pending and disputed liabilities from authoritative journals; no financial limit
+changes. Test-only incremental projection helpers are removed. Frozen historical schemas
+remain readable, and explicit legacy-shaped corrupt projections remain in fault tests to
+prove they cannot override journal authority. Runtime identity guards require the new
+layout without an on-open migration. Independent review cleared the cleanup. Default
+Store and manager coverage passed after separately committed reporting/fixture
+corrections, including historical read-only reports and the actual process-loss
+regression; the deployment schema/identity gate and treasury recovery tests also passed.
+This does not claim automatic rollback detection; C18 and C20 record canonical return
+and shielding acceptance independently.
 
-The restart regression passed all three phases with enabled and disabled pools,
-preserving exact bytes, operation, reservation, zero attempts and recovery count.
-It verifies actual inventory routing and forbids quote/preparation/submission or
-provider polling. All 27 funding tests passed, including the concrete backend
-reconciliation check with the current wallet profile removed and auto-funding
-disabled. Independent review cleared the core behavior; root review cleared the
-lane-routing followup. Removed-pool Base observation ownership remains C19 work.
+**Recurring review lesson.** Schema evolution exposed historical readers that
+accidentally inherited current admission requirements. Explicit saved-layout readers
+preserve evidence without migration or new authority. Restoration declarations protect
+missing provenance only when the operator declares the backup; chain scans cannot
+recreate unknown off-chain liabilities.
 
 ### Stage 1 — Minimal authority and dependency specification
 
@@ -1753,13 +1992,12 @@ for malformed jobs, and treasury lock/actor fairness. Audit foreground cached an
 challenge-time payer selection as well as background inventory isolation. Include
 certificate merging before candidate filtering: a wallet-local comparison conflict
 must not prevent consideration of an independent healthy payer. Distinguish wallet-local
-malformed data from shared database failures; neither may become zero exposure. Specify automatic reconstruction of
-`wallets.unresolved_exposure` from complete authoritative attempts and resolution
-support, including invalidated support, with explicit triggers and atomic publication.
-Resolve how valid-but-incorrect totals are detected before admission under a stated
-fault model; reconstruction after a test-injected repair signal is insufficient.
-Compare deriving exposure from indexed unresolved obligations with retaining a
-validated projection, and choose the simpler justified contract. Resolve the shared
+malformed data from shared database failures; neither may become zero exposure. Specify authoritative exposure derivation from complete payment attempts
+and resolution support, including invalidated support. G14 resolved the original
+projection-versus-reconstruction alternative in favor of indexed journal derivation:
+the independently writable `wallets.unresolved_exposure` projection is removed.
+Reconstruction after a test-injected repair signal would have been insufficient;
+the implemented admission path reads the authoritative obligations directly. Resolve the shared
 G04/G14/G20/G21 admission algorithm and exact predicate deletions before building
 residual repair for admission. Prefer indexed authoritative derivation where practical;
 retaining a projection must not introduce another independently enforced consistency
@@ -1816,7 +2054,16 @@ owner and trigger. Do not refactor from an unverified incident hypothesis.
 **Tests:** T03, T08, T15, T40–T49 as applicable to each slice; define expected
 outcomes for its cases before implementation.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Reviewed slice contracts and gate decisions are recorded
+above, with the original C17 / stage 6 task-exit follow-up explicitly unresolved.
+The shared admission contract derives payment-sized capacity from current canonical balances and complete bounded liabilities, with atomic ownership/exposure
+checks; historical readiness and diagnostic prose are not authority. The pending-input
+gate is deliberately retained because the real SDK `reset_spends` contract can clear
+pending markers (T29). Versioned preparation provenance, exact canonical
+source/delivery/return obligations, independent observation ownership, clock domains and
+scoped startup prerequisites are implemented. Unknown preparation, shared-state
+integrity failures and declared-restoration fences remain explicit restrictions, not
+claims of automatic repair.
 
 ### Stage 2 — Remove redundant gates; share typed assessment
 
@@ -1838,8 +2085,9 @@ Scope malformed live-record failures to identifiable obligations without treatin
 them as resolved or absent. Include foreground candidate scans: a wallet-local
 exposure/eligibility failure or certificate-merge comparison conflict must not abort
 selection of another provably usable payer. Preserve the affected dispute; shared
-store/ownership failures are not absent candidates. Rebuild damaged derived exposure
-under the stage-1 trigger and revision contract; missing authoritative records remain a scoped unresolved liability.
+store/ownership failures are not absent candidates. Derive exposure from authoritative
+journals instead of rebuilding a competing stored total; missing authoritative
+records remain a scoped unresolved liability.
 Preserve independent same-pool observation and admission
 where no shared authority is affected; justify any wider stop when scope is unknowable.
 Apply the same scope analysis to funding job/fact decoding across the shared
@@ -1864,7 +2112,16 @@ unavailable irrelevant history, not merely successful historical repair.
 
 **Tests:** T15, T17, T18, T21, T24–T27, T29, T32, T34, T38, T40, T42–T49.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Completed: typed consumer-specific assessments replace prose gates; journal-derived
+pending/disputed exposure replaces the writable projection; payment-sized initial
+capacity and conservative remaining capacity operate independently of the original
+funding target. Narrow identity reads and scoped malformed-row/job handling preserve
+independent service without treating failed exposure reads as zero. C13/C18 source and
+return proof replace whole-sync historical vetoes. Inventory membership follows
+outstanding obligations, including completed labels; `bdc90b5` couples changed return
+evidence to refresh scheduling and tests unchanged unresolved reuse. T39 `c582bba`
+verifies actual PaidClient/manager enforcement in the normal library build; T43/T44 and
+scoped-decode gates cover adjacent paths.
 
 ### Stage 3 — Preparation provenance and crash recovery
 
@@ -1883,7 +2140,15 @@ no missing bytes, reservation or ambiguous commit grants replay authority.
 
 **Tests:** T08–T12, T29.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Completed by versioned boundary provenance `d4d5407` and reviewed crash/reopen
+acceptance. Committed facts, original identities, bytes, reservations and uncertain
+attempts survive loss of acknowledgement; only proven pre-commit cleanup can close an
+attempt. Real two-note SDK acceptance justifies retaining the pending-input exclusion
+(T29). T12 `f188ecb` calculates and proves actual transaction bytes, then applies
+simulated later authority-check times around the unchanged accepted deadline: no late
+capability or submission is created, and reopen retains the exact work. This tests
+expiry enforcement after proving, not measured slow proving beyond a wall-clock
+duration. Unknown/legacy preparation provenance remains unresolved.
 
 ### Stage 4 — Canonical replacement and scoped residual disputes
 
@@ -1900,7 +2165,15 @@ contradiction classification.
 
 **Tests:** T01, T02, T04–T06, T14, T17–T19, T24–T27, T43–T44.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Completed: C10–C15 remove obsolete historical admission dependencies and provide the
+sole bounded canonical replacement path while retaining immutable audit proofs.
+Explicitly configured replacement endpoint selection occurs before a pass, never mid-
+pass. T39 `c582bba` and T44/T04 use real paid calls during held repair, preserve
+concurrent liabilities, and reopen with distinct authorizations. C13 `05b8346`, C18
+`f8c8194` and schema26 `c3d4d5a` extend scoped replacement to original source/return
+accounting and exact input ownership. Concrete live contradictions revoke dependent
+support; burial alone does not create a new dispute or release existing ownership. Exact
+existing two-sync expiry correction is idempotent and grants no replacement authority.
 
 ### Stage 5 — Incremental repair with fair scheduling
 
@@ -1922,7 +2195,16 @@ for dependencies retained after stages 2 and 4.
 
 **Tests:** T03, T04, T07, T33.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Completed by separate repair lanes `07b5cad`, bounded inactive publication `55d5b3b`,
+the sole repair path `525069f`, and process-wide resource partition `6bdc853` at
+unchanged aggregate limits. T03/T04/T07 cover physical paging, current RPC/socket
+progress across saturated pools, coherent activation and concurrent liabilities. T33
+`8abcfcc` pauses real residual source-accounting work after the SDK read guard is
+dropped: independent Store/Base work progresses and a cancelled sync waiter does not
+abandon the serialized treasury owner; queued SDK work resumes after accounting. It does
+not assert concurrent SDK mutation. Shielding inventory fixup `3f5df1f` verifies indexed
+keyset work on sparse physical history. The SDK's single resident output-map traversal
+remains linear and is documented separately from bounded SQLite work.
 
 ### Stage 6 — Supervised owner recovery and treasury reconstruction
 
@@ -1971,7 +2253,19 @@ malformed live obligations. Nonrecoverable stops name the invariant and affected
 
 **Tests:** T23, T35, T37, T38, T42, T45, T49.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Partially complete: C17 `929b6ca` fences/drains the old SDK owner and reconstructs against the
+same live Store without waiting for healthy Base holders to disappear; accepted commands
+and shared Store jobs retain ownership. Read/completion fixups `3639bbb`, `dd64f58` and
+`1a8dc14` preserve completed work and original permits through eligible local
+contention/cancellation. Base and funding owners resume eligible Busy/Locked reads under
+existing backoff, while identifiable malformed rows/jobs remain scoped and shared
+corruption/lost ownership remain explicit stops. Clock correction, suspended freshness
+and persisted future-poll restart retain original authority anchors; T49 `8ffb521`
+requires canonical time advancement. T23/T35/T37/T38/T42/T45 and retained-owner T33 pass
+without a second store owner or workflow engine. Actual treasury/funding task-exit
+cancellation and scheduler restart handling remain the original unresolved C17
+follow-up. The current restart-required boundary is recorded above; the passing
+in-owner tests do not establish the separate worker-generation acceptance.
 
 ### Stage 7 — Automatic closure and resumption
 
@@ -2010,7 +2304,20 @@ invariant. No manual shielding step may substitute for the supported T30 automat
 
 **Tests:** T13, T14, T16, T20, T23, T27, T30, T31, T48.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Completed: exact canonical source support (`05b8346`), destination delivery and finite
+return accounting (`f8c8194`) discharge only the financial obligations they prove. T48
+`2d434a8` runs the real funding worker/treasury actor across conflicting
+FAILED/REFUNDED/INCOMPLETE observations and provider outage: exact bytes, facts, debit
+and one submission remain unchanged, and completion waits for canonical source,
+destination and bound return proof. Semantic inventory changes trigger one required
+refresh (`bdc90b5`), while unchanged unresolved observations reuse it. Durable policy-
+free observation survives disablement/removal/retirement. Automatic shielding
+(`9863d95`) creates/submits only under current captured serving authority, exact owned
+inputs and fee safeguards; manual bytes and previously attempted bytes are excluded from
+automatic submission. Existing operations remain observable after authority removal.
+Returned principal and shielding fee count once. Partial/unattributed owned outputs may
+be shielded without guessed accounting credit or closure. Refund replacement, unknown
+preparation and unresolved confirmed swaps still require review.
 
 ### Stage 8 — Scoped serving startup
 
@@ -2080,7 +2387,17 @@ previously accepted financial work retains its owner and durable obligations.
 
 **Tests:** T15, T22, T40–T41.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Completed by scoped startup slices `51c4aef`/`151369f`, `59f9b83`, `fc7fed1`,
+`3d3305a`/`68e5ef4`, narrow identity reads and the implemented deferred-discovery
+lifecycle. T15/T22/T40/T41 start at deployment entry and distinguish independent
+static/Base service from unavailable SDK/funding prerequisites, no initially usable
+payer and required/qualification completeness. Listener binding precedes new funding;
+partial bind failure rolls back resources while accepted financial work drains under its
+existing owner. Dependent discovery uses existing immutable catalog publication and
+bounded retained ownership; recovery does not grant another paid relay attempt after
+possibly submitted failure. Restored canonical capacity wakes the same serving process
+without listener reconstruction. Broader deferred-provider work remains outside this
+implementation where not required by these gates.
 
 ### Stage 9 — Cross-layer regression, single-schema rollout and documentation
 
@@ -2103,7 +2420,21 @@ deletion inventory.
 
 **Tests:** T01–T49 and applicable repository checks.
 
-**Completion evidence:** Pending.
+**Completion evidence:** Final schema and validation evidence: fresh schema26,
+incompatible-schema rejection and no on-open migration;
+read-only historical reports use saved-schema contracts. The declared
+`wallet mark-restored` fence blocks new financial actions and saved-byte submission while preserving
+observations/accounting, and explicitly cannot detect undeclared rollback or reconstruct
+missing off-chain journals. T01–T49 evidence is recorded in the matrix and maintained
+lifecycle/testing guides, with T12's simulated-time, T33's serialized-owner and retained
+linear SDK scan limitations stated. All required repository validation passed in
+segmented runs after focused fixture corrections: default all-target tests,
+synthetic-chain treasury/refund lifecycle gates, vendor/toolchain/format checks, all-feature
+Clippy, dependency compatibility and complexity tooling (hotspots advisory). Maintained
+guides reflect current boundaries. Passing repository checks do not resolve the
+original C17 / stage 6 actual-task-exit acceptance gap. These checks use local unfunded fixtures and do not
+establish external provider settlement contracts, Docker consensus acceptance,
+live-funded qualification or automatic arbitrary-corruption recovery.
 
 All stages are required for this plan's completion. Proof contracts precede new
 automatic transitions, but stages 6–8 are not optional follow-up work. Unsupported
@@ -2117,7 +2448,6 @@ applicable standard checks in [AGENTS.md](../../AGENTS.md) and
 [testing](../testing.md). Run synthetic proving/local consensus suites only under
 their documented prerequisites; live-funded qualification remains a separate
 operator-authorized step.
-
 
 Use the existing production paths with temporary unfunded state and deterministic
 local RPC/indexer/provider fixtures. Extend the current crash and SQLite fault
@@ -2176,6 +2506,29 @@ the production phase branches.
 | T47 | Malformed, too-high and too-low derived exposure under an explicit fault model; production detection/derivation before admission; complete versus missing authoritative records; concurrent admission/resolution/invalidation and restart | Complete authoritative liability reconstruction or derivation, atomic revision check and admission fencing; no invented resolution, erased liability or unsupported corruption-detection claim | Production owner automatically restores eligible capacity when provable; independent wallets progress without unconditional startup/payment history sweeps |
 | T48 | Duplicate, reordered and contractually corrected provider observations; provider disappearance after exactly correlated canonical settlement; genuine unresolved-obligation controls | Preserve original observations and exact operation/source/destination/refund accounting; no closure from arbitrary balance changes, replay, erased liability or invented provider semantics | Where the reviewed G23 contract proves all relevant obligations discharged, closure and independent capacity progress without a permanent historical-status veto; otherwise identify the precise missing proof |
 | T49 | Forward/backward wall-clock correction, suspend/resume, restart with persisted polling times, stalled then advancing chain | Local elapsed time never establishes canonical expiry; old evidence never becomes fresh again; signed deadlines and durable retry counts are not reset | Observation scheduling resumes through its production owner once valid time/evidence is available; temporary clock/chain conditions do not leave permanent repair flags |
+
+### Acceptance evidence and interpretation
+
+The matrix records required invariants; it does not imply 49 separate standalone
+executables or live-provider qualification. Consolidated contract evidence supplies
+the implementation and controls for each boundary. These frequently conflated
+acceptance scopes are explicit:
+
+| Cases | Implemented acceptance and location | Qualification boundary |
+| --- | --- | --- |
+| T12 | C16 / `f188ecb`: actual SDK calculation and verified proof, followed by simulated later checks at the production serialized submission-authority API, including reopen. | Checks the unchanged submission margin and accepted deadline; it does not measure proving that physically lasts beyond a wall-clock bound. |
+| T33 | C15 / `8abcfcc`: hold real residual accounting after its SDK read guard is released; independent Store/Base work progresses, the cancelled waiter retains its owner, and a queued SDK command resumes after release. | Proves serialized-owner resumption, not concurrent SDK mutation or incremental SDK output-map discovery. |
+| T39, T43, T44 | C11/C12/C14: actual PaidClient and ordinary-library admission under real certificate enforcement, held repair, concurrent liabilities and restart. | Local deterministic chain/provider fixtures; no mainnet-funded payment qualification. |
+| T48 | C18 / `2d434a8`, with `bdc90b5`: real worker and treasury actor close exact source/delivery/finite-return obligations during provider outage while contradictory historical labels remain. | Explicit zero is a finite current claim, not absence of future returns or a refund-replacement permit. |
+| T49 | C21 / `8ffb521`: expired host time cannot release a liability while canonical time stalls; canonical advancement permits exact expiry recovery. | Separate original evidence age, canonical expiry and scheduling clocks; no new runtime timer. |
+
+The schema26 source-ownership and C20 actor gates additionally exercise actual
+synthetic confirmation/reorg/expiry, automatic preparation, policy changes at
+preflight/intent, one submission, confirmation, disabled restart, and fee-only
+accounting. Final integrated validation and the retained linear SDK traversal
+limit are recorded in stages 5 and 9 and the C13/C18/C20/C22 evidence above.
+
+### Cross-layer fixture requirements
 
 T48 exercises production status acquisition, persisted facts, scheduling selection
 and closure, not only a classifier. Record which status transitions the applicable
@@ -2369,9 +2722,15 @@ contracts or live finality.
 
 ## Completion criteria
 
+The original implementation criteria are retained here for review. Implemented
+dispositions and the unresolved original C17 / stage 6 task-exit follow-up are
+recorded in the gate inventory, C01–C22 contracts and stage evidence.
+The proposed H01–H06 hazard-reduction follow-up below is a separate review scope.
+
 Per-slice stage-1 review permits incremental delivery; it does not reduce final
-scope. Completion includes foreground payer and funding-page isolation, automatic
-provable reconstruction of derived exposure, obligation-driven scheduling,
+scope. Completion includes foreground payer and funding-page isolation,
+authoritative journal-derived exposure with the competing projection removed,
+obligation-driven scheduling,
 end-to-end payment eligibility below funding targets with empty caches after restart,
 and a resolved bounded-disputed-exposure decision with either implemented progress
 or a demonstrated invariant requiring the
@@ -2422,11 +2781,17 @@ Preserve the current atomic snapshot/outgoing commit, exact-byte submission
 capabilities, accepted-work ownership after waiter cancellation, immutable financial
 support, durable recovery counts, operation-bound callback checks, and separate
 historical/fresh evidence clocks. Existing tests already exercise real SQLite
-write failures, process crashes, stale callbacks and owner drain; the gap is not
-an absence of testing, but incomplete composition of these boundaries and limited
-assertions of eventual progress. See [testing](../testing.md#qualification-status).
+write failures, process crashes, stale callbacks and owner drain. The initial review
+identified gaps in how those boundaries composed and how eventual progress was
+asserted; the consolidated evidence records their implemented resolutions and
+remaining qualification limits. See [testing](../testing.md#qualification-status).
 
 ## Target design
+
+These decision contracts retain the design rationale for review. The gate inventory
+and consolidated C01–C22 evidence state the implemented choices; alternatives
+discussed here are not additional live authority or an instruction to rebuild
+removed machinery.
 
 ### Minimal authoritative state and dependency removal
 
@@ -2458,30 +2823,22 @@ current evidence cannot resolve. Audit retention alone is never that obligation.
 Delete unnecessary dependencies before designing cross-endpoint certificates,
 incident records or residual repair; do not build those mechanisms for removed gates.
 
-Derived exposure is an optimization of authoritative liabilities, not a competing
-source of spending authority. For `wallets.unresolved_exposure`, specify which
-attempts and resolution supports contribute, including obligations restored after
-invalidation. Define when automatic reconstruction runs, how completeness is
-established, and how admission is fenced until an atomic revision-checked result
-commits if a stored projection is retained. Evaluate direct derivation from indexed
-outstanding obligations first. Retain incremental aggregate updates only if that
-decision establishes a concrete need for the projection and its single authority
-model; do not preserve the aggregate merely because it already exists. Never use
-both the derived result and stored aggregate as independent admission gates, or
-substitute repeated full-history validation for indexed derivation. A damaged projection
-with complete authoritative records is repairable; missing authority cannot be
-reconstructed from a balance or assumed absent. Scope repair to the affected wallet
-and preserve independent service.
+Exposure must have one authoritative derivation. C09/C22 resolve the original
+projection-versus-reconstruction question by deriving pending and disputed amounts
+from indexed payment journals and removing `wallets.unresolved_exposure`. Original
+resolution audit facts remain immutable; canonical invalidation restores exact
+affected liabilities before admission can commit. Missing authority cannot be
+reconstructed from a balance or assumed absent.
 
-A syntactically valid incorrect aggregate is not self-identifying. Resolve G14/T47's
-fault model before promising pre-admission repair: evaluate direct derivation from
-the indexed unresolved obligation set versus a projection with a demonstrated
-validation mechanism. Prefer removal of competing authority when practical, not
-another permanent ledger or unconditional full-history scan. State which failures
-are prevented by atomic transactions, which inconsistencies production can detect,
-and which arbitrary internally consistent edits are outside that guarantee.
+The fault model distinguishes interrupted atomic writes, application projection
+bugs and arbitrary internally consistent edits. Atomic journals and exact
+generation/input checks protect supported transitions; they do not promise
+detection of every plausible database rewrite. The declared-restoration fence
+prevents financial actions on acknowledged incomplete backups without pretending
+that rescanning detects undeclared rollback. No replacement aggregate, second
+ledger or unconditional full-history admission scan is required.
 
-### Current decisions and canonical replacement evidence
+### Decision contracts and canonical replacement evidence
 
 Assess current payment capacity, source accounting, swap/refund closure, and
 permission for new funding separately. A disputed historical readiness record
@@ -2527,8 +2884,9 @@ Qualification and explicit bootstrap retain their own completeness requirements.
 
 Before requiring historical repair for every disputed resolution, evaluate whether
 retaining each affected authorization's full maximum liability permits safe use of
-the remaining current capacity. G21 is a proof decision: the plan does not yet
-establish that the existing accounting supports this transition.
+the remaining current capacity. C09/C12 implement that G21 contract for complete,
+exactly bounded affected membership and compatible fresh balance/debit evidence;
+unbounded or unidentifiable liabilities retain their justified dependent stops.
 
 The contract must identify all affected authorizations and their exact maximum
 amounts, use compatible fresh canonical balances, preserve debit-floor semantics,
@@ -2545,25 +2903,16 @@ balance/debit evidence still require a justified dependent-action stop. Distingu
 inability to release a liability from inability to admit any payment. Resolve this
 option before designing residual historical repair solely to unblock that capacity.
 
-C09/C12 membership review (2026-10-16): the existing resolution rows have no
-individual dispute membership. A checkpoint mismatch does not reveal the fork's
-starting height, so marking only its hash or later heights is insufficient. The
-next prerequisite should retain original immutable resolution proofs, mark affected
-resolved authorizations conservatively in the existing journal, and derive exposure
-from disjoint pending/disputed sets with exact checked amounts. Membership changes
-must commit with generation invalidation. Admission still requires a separate
-current-evidence path that does not depend on the disproven checkpoint while
-preserving debit constraints; removing the store repair flag alone cannot provide it.
-The reviewed placement is `payment_attempts.resolution_disputed`, with an indexed
-wallet-scoped disputed subset. Ordinary pending and disputed RESOLVED sets must be
-disjoint; invalidation and generation changes are atomic. Exact historical repair
-must include membership in its revision digest and clear it only in the verified
-repair transaction, rolling back on failure. Endpoint invalidation needs a separate
-provenance audit because its current implementation only marks funding/retirement
-support; the chain-conflict slice must not claim endpoint completeness.
-A durable format change requires a new single supported schema and rejection of
-incompatible versions, never implicit conversion of existing private state. This
-review is a proposed contract, not an implemented release or admission mechanism.
+The membership decision is implemented in C09/C12 and extended by C14/C15:
+the final `wallets.payment_resolutions_disputed` marker conservatively covers the
+affected wallet's resolved authorizations, with indexed journal membership and
+revision-checked staged replacement publication. Pending and disputed-resolved
+sets remain disjoint, and generation invalidation commits atomically with dispute
+changes. Earlier schema17 per-attempt `resolution_disputed` records remain a
+historical read-only format, not the final runtime layout. Canonical replacement participates in
+later endpoint/chain invalidation while preserving original resolution audit rows.
+The detailed review evidence is consolidated in those contracts rather than kept
+as an unresolved chronological prerequisite here.
 
 ### Facts, assessments and actions
 
@@ -2696,7 +3045,116 @@ is satisfied. Archival unavailability is not itself a permanent current-capacity
 veto when sufficient replacement evidence exists. Missing necessary evidence stays
 explicit and never authorizes an unconfigured transport or liability deletion.
 
+## Hazard reduction follow-up
+
+This section retains the design lessons from implementation and review. The
+recommendations below are proposed design work, with separate H identifiers. They
+are distinct from the original unresolved C17 / stage 6 task-exit follow-up recorded
+above and grant no permission for live-funded qualification.
+
+At the plan-retirement commit, `main..593e703` contained 125 commits, including 41
+explicitly titled `fixup!`. This is a classification aid, not
+a defect count. Fixups include correctness repairs, stronger assertions and
+fixtures, feature-boundary compatibility, documentation, and lint cleanup. Some
+substantive hazard reductions were ordinary implementation commits rather than
+fixups. The recurring patterns matter more than the label or count.
+
+### Patterns observed in implementation and review
+
+| Hazard category | Evidence from the branch | Recurring mechanism and implication |
+| --- | --- | --- |
+| Workflow labels and projections substitute for obligations or authority. | `08a5c5d` retained observation inventory beyond completion labels; `bdc90b5` connected changed return inventory to refresh scheduling; `8384e4e` removed remaining reliance on a redundant exposure projection. | A status can be correct as a summary yet insufficient to decide what work remains. Separately maintained validity, scheduling, and accounting projections can disagree. Derive effective exposure and outstanding work from authoritative journals and evidence dependencies. |
+| Ownership ends between external completion and local publication. | `dd64f58` retained completed funding results and their original permit across admission-read contention; `d4d5407` bound preparation cleanup to durable provenance; `0f36e2f` retained repair ownership through transient staging-cleanup contention. | External completion, durable commit, acknowledgement, and publication are different boundaries. A late local failure must not discard an accepted result, release its owner prematurely, or authorize repeated financial I/O. |
+| Task separation conceals shared bottlenecks or unbounded physical work. | `6bdc853` separated historical repair and current-balance RPC resources; `3f5df1f` replaced a superficially paged shielding inventory with indexed physical keyset traversal. | Independent tasks still block one another through sockets, semaphores, queues, serialized Store turns, or SQL scans. A small returned page does not prove a small scan or sort. Independence must hold at the resource actually being protected. |
+| Historical readers inherit live admission contracts. | `6bfdf75`, `110f2e0`, and `f0a249c` preserved reporting across older journal/evidence schemas and source-accounting dependencies. | Current authority decoders and saved evidence readers have different jobs. Updating live validation must not make committed historical evidence unreadable, normalize away diagnostics, or manufacture present execution authority. |
+| SDK stage projections are mistaken for exact transaction evidence. | `7e82183` verified owned shielded outputs against actual Orchard/Ironwood transaction ciphertext instead of expecting newly calculated outputs in the wallet's note inventory; `3da65a7` required every owned shielding input for expiry recovery. | An SDK's in-memory representation is stage-dependent. Preparation, proving, submission, scanning, and canonical recovery need explicit contracts tied to exact serialized bytes and immutable inputs. |
+| Test models preserve old shortcuts after runtime authority becomes more precise. | `1932d13`, `6aeb41b`, and `121ed57` updated completion and lifecycle fixtures after canonical return accounting became required. | Provider success, destination readiness, source confirmation, delivery, returns, and submission authority had been conflated. Fixtures that recreate credit on each status poll can also hide duplicate side effects. Establish these distinctions in production-path tests early. |
+| Validation orchestration invalidates its own evidence. | Frozen-build runner checks were invalidated by concurrent source edits or executable replacement; an isolated EOF fixture subsequently passed without a runtime change. | A test that pins source or executable identity requires a frozen checkout and executable throughout execution. Such failures must be separated from reproduced product defects. |
+| Mechanical integration remains distinct from financial redesign. | `c870b03` corrected feature boundaries between durable journal readers and Zcash-specific delivery construction; `f45d07b` addressed Clippy findings. | Compatibility and lint checks remain necessary completion gates. These fixes are not evidence by themselves for another runtime state machine or wider authority. |
+
+Across these categories, the common danger is disagreement between two adjacent
+contracts: evidence validity and scheduling; completed I/O and publication;
+logical independence and physical resources; live authority and historical
+readability; exact transaction facts and SDK projections. Several failures were
+revealed only when tests crossed that boundary using the actual worker, ordinary
+library build, real SDK calculation/proving, restart, or retained owner. Review
+should explicitly identify those boundaries before treating a focused predicate
+or mocked result as sufficient evidence.
+
+Restoration review exposed the same evidence-scope hazard in the plan itself:
+passing in-owner reconstruction and task-exit containment tests had been summarized
+too broadly as completion of actual worker-generation recovery. The original C17 /
+stage 6 follow-up remains explicit above. Acceptance summaries must state which
+boundary a passing test crosses, rather than infer adjacent lifecycle guarantees.
+
+### Recommended follow-up design and acceptance sequence
+
+| ID and priority | Recommendation | Acceptance and integration gate |
+| --- | --- | --- |
+| H01 — first | Consolidate each obligation's evidence dependencies, invalidation, and refresh eligibility into one shared calculation. Begin with funding source/delivery/return facts and their scheduler consumers. Keep operation-specific failures separately readable; phases remain summaries. | For every input change, test both loss of dependent validity and eligibility of its owner to refresh, including after terminal workflow labels. Repeated unchanged unresolved polls reuse the completed observation rather than restarting a scan. Preserve source, delivery, and return distinctions, scoped failures, and all original financial authority. Integrate incrementally, starting with one obligation rather than replacing all recovery logic at once. |
+| H02 — next | Strengthen the existing owned-completion and treasury-reconstruction mechanisms so the accepted operation carries its identity, permit, completed result, and publication disposition through terminal publication or exact recovery. | Inject local read/publication/cleanup contention after external completion, then cancellation and restart where durable work applies. Assert no repeated external request, released financial ownership, lost bytes, duplicate credit, or second SDK mutation owner. Extend existing owners; do not introduce a generic supervisor or another durable status ledger without a concrete missing invariant. |
+| H03 — next | Establish a physical keyset-paging convention for serialized Store maintenance, with predicates and indexes that bound rows visited before filtering. Review the shared RPC/queue resources behind claims of independent progress. | Include sparse long prefixes, pending-priority work plus independent history, cursor progress after scoped failures, and query-plan assertions. Use event barriers to hold the actual historical operation while a current read/admission completes through its production path. Retain justified existing resource partitions; add no generic second policy ceiling. |
+| H04 — next | Keep schema-aware historical decoding separate from live admission validation. Reuse historical fixture contracts across changes that affect evidence representation. | Read committed historical evidence fixtures under their saved-schema contracts without wallet credentials or current admission prerequisites. Preserve saved diagnostics and unknowns. Assert that read-only interpretation grants no preparation, submission, replay, or replacement authority. |
+| H05 — ongoing | Define the SDK stage contract alongside each adapter and move real SDK/ordinary production-path gates earlier in implementation. Make fixture credit publication idempotent by operation identity. | Cover exact serialized inputs and outputs, actual output ownership verification, lost acknowledgement, expiry during proving, restart, status conflict, and zero versus missing return evidence. Keep destination readiness distinct from complete financial closure. A repeated status poll must not mint additional fake credit. |
+| H06 — validation process | Reserve an exclusive source/executable window for suites that pin build identity; coordinate Cargo and CLI tests that share an executable path. | Record the source/executable pins before launch, prevent mutation until drain completes, and rerun an invalidated gate against a frozen checkout. Use owned process handles and explicit event barriers. Do not treat a fixture timing failure as justification for changing runtime deadlines without a reproduced runtime cause. |
+
+H01 is the strongest redesign candidate because a shared dependency calculation
+prevents a class of safety/liveness disagreement rather than documenting each
+instance. H02–H05 are targeted strengthening of boundaries already established by
+this branch. They should not collapse independently usable evidence into a
+whole-treasury validation gate or replace retained obligations with another
+omnibus state enum. None requires a new spending budget, blanket deadline,
+financial retry authority, or automatic replacement after a refund.
+
+### Rules to make explicit in AGENTS.md
+
+The current instructions already cover retained ownership, fresh canonical
+admission, scoped failures, exact preparation provenance, timer ownership, and
+forbidden redundant budgets. Keep those rules and add the following narrow
+requirements in their relevant sections instead of creating another broad safety
+checklist. These are proposed documentation changes; this plan does not itself
+modify AGENTS.md.
+
+1. **Evidence invalidation and refresh:** Changes to evidence inputs must invalidate
+   dependent observations and make their owner eligible to refresh, including
+   after terminal workflow labels. Share the dependency calculation between
+   validity and scheduling; test changed inputs and repeated unchanged unresolved
+   observations.
+2. **Accepted results through publication:** Retain accepted external results and
+   their original concurrency permits through transient local validation,
+   publication, and cleanup failures. Retry only the failed local boundary when its
+   idempotence is established; do not repeat external or financial work.
+3. **Physical work bounds:** Bound serialized maintenance by physical work, using
+   indexed keyset traversal before filtering. Verify sparse-history behavior and
+   query plans; a returned-row limit alone does not establish bounded work.
+4. **Historical interpretation:** Read-only historical reporting uses saved-schema
+   contracts and must not require current admission credentials, synthesize live
+   execution authority, or rewrite committed diagnostics. Extend historical
+   fixtures when evidence representation changes.
+5. **Independent progress:** Claims of independent progress must account for shared
+   sockets, permits, queues, and Store turns. Test the actual shared bottleneck
+   with event barriers while unrelated production-path work completes.
+6. **SDK and fixture contracts:** Treat SDK representations as stage-specific. Test
+   exact serialized transaction facts through real calculation/proving where
+   applicable, and keep readiness, provider status, canonical settlement, returns,
+   and execution authority distinct. Fixture credits must be idempotent by
+   operation identity.
+7. **Frozen validation:** Freeze the checkout and executable for tests that pin
+   either identity. Do not overlap source mutation or executable-replacing builds
+   with those suites; coordinate CLI tests sharing a binary path and invalidate
+   results if their declared pins changed.
+
+Rules 1–4 close gaps not stated explicitly by the existing high-level policy.
+Rule 5 makes the existing scope/independence requirement testable. Rule 6 adds an
+adapter-specific check to the existing financial-proof discipline. Rule 7 extends
+the existing shared-executable test instruction to the full pinned-run lifecycle.
+
 ## Supporting review findings
+
+These findings describe the source baseline that motivated implementation. Source
+descriptions and proposed actions below preserve that review context; they are not
+claims that the old defects remain in current HEAD. Use the gate inventory and
+C01–C22 contracts for each implemented resolution and retained restriction.
 
 Priorities are implementation order, not claims of a demonstrated loss of funds.
 “Confirmed” means source control flow establishes the behavior; it does not mean
@@ -3177,71 +3635,3 @@ expiry/freshness policy merely from the use of different clocks. Prove that elap
 time cannot substitute for canonical expiry, old evidence cannot become fresh
 again, and temporary clock conditions cannot strand recovery after valid evidence
 returns. Add no timer, deadline or permanent repair flag to address this test gap.
-
-
-**T44 / T04 paid HTTP acceptance (implemented and reviewed):** The existing
-remaining-capacity test now holds the production canonical repair on its nonce
-read while an actual PaidClient call proceeds. With $20 current balance and a
-$1 disputed release, a $20 challenge fails unsigned and a $19 payment succeeds.
-Repair then adopts EXPIRED_UNUSED while retaining the concurrent $19 pending
-authorization and immutable original USED proof. After Store/manager reopen,
-a separate $1 payment succeeds with a distinct nonce; both new pending
-authorizations total $20, and no funding job is added. The fixture uses an owned
-ACTIVE payer without synthetic readiness support. The focused default-build
-test passed and independent review found no issues.
-
-
-**C22 / G14 fresh-schema exposure cleanup (implemented and reviewed):** Fresh
-schema 24 removes the independently writable `wallets.unresolved_exposure`
-projection. Runtime admission continues deriving exact pending and disputed
-liabilities from authoritative journals; no financial limit changes. Test-only
-incremental projection helpers are removed. Frozen historical schemas remain
-readable, and explicit legacy-shaped corrupt projections remain in fault tests
-to prove they cannot override journal authority. Runtime identity guards require
-the new layout without an on-open migration. Independent review cleared the
-cleanup. Default Store and manager coverage passed after separately committed
-reporting/fixture corrections, including historical read-only reports and the
-actual process-loss regression; the deployment schema/identity gate and treasury
-recovery tests also passed. This does not claim automatic rollback detection or
-completion of the remaining canonical-return and shielding acceptance work.
-
-
-**T49 canonical-time progress acceptance (implemented and reviewed):** A local RPC
-fixture runs the production payment repair owner twice while canonical time is
-before the immutable signed expiry, although host wall time is already past it.
-Both passes retain the exact disputed liability and repair reason without any
-activated release. Advancing the canonical head and timestamp permits the same
-StoreHandle/Base owner to adopt EXPIRED_UNUSED and clear the payment repair reason;
-the original USED audit row and single authorization remain intact. The focused
-default-build test passed. Together with shared sticky clock/suspend freshness,
-treasury late-checkpoint catch-up and future-poll restart tests, this covers the
-separate time domains without replacing canonical expiry with local elapsed time.
-
-**C13/C18 retained source ownership and exact expiry correction (implemented and reviewed):**
-Fresh schema26 retains operation-specific source input disputes independently of
-historical scan retention. Live confirmation loss or concrete contradictory history
-revokes accounting support immediately without failing independent sync work.
-Burial/restart cannot release that ownership; buried archival absence alone creates
-no new dispute. Staged exact re-confirmation clears ownership only with final sync
-publication. Cleanup advances over physical 64-row pages and retains only needed
-pass headers, invalidating abandoned inventories before reclaiming their rows.
-Generic shielded preparation and submission recheck input ownership; exact internal
-shielding retains independent immutable transparent claims.
-
-Previously confirmed operations use the existing two-sync zero-lag expiry/input
-proof. Original consensus expiry zero is non-expiring. Every owned input must remain
-confirmed, matching and unspent; shielding additionally checks every immutable exact
-outpoint. The expiry proof records the reversed original debit while preserving
-signed bytes, facts, attempts and original confirmation label. Current consumed cost
-is corrected once; repeated/reopened recovery cannot recharge or duplicate it.
-A contradiction of an old expiry proof retains ownership until a new exact proof.
-Ordinary source observation and recovery invoke this proof without preparing,
-submitting or authorizing a replacement. Existing current-policy recovery limits
-remain separate.
-
-Validation: five focused ownership tests, five source-support tests, and three
-real synthetic-chain lifecycle regressions passed, including ordinary recovery
-with new-attempt authority disabled and restart/idempotence. Independent review
-found physical-page cleanup, zero-expiry and pre-existing generic submission guard
-issues; these were addressed before the gate passed. Automatic shielding activation,
-remaining production-build acceptance and final repository checks remain pending.
