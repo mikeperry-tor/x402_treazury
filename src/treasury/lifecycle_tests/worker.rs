@@ -1,5 +1,6 @@
 //! Real scheduler + Backend + treasury actor; only the chains and bridge are local fixtures.
 mod accounting;
+mod settlement;
 use super::*;
 use crate::rotation::{
     base::BaseRpc,
@@ -64,19 +65,32 @@ async fn status(
         .as_str()
         .unwrap()
         .to_owned();
-    let delivered = credited(&f.store, recipient).await;
-    Json(
-        json!({"status":if delivered {"SUCCESS"} else {"PENDING_DEPOSIT"},"quoteResponse":response}),
-    )
+    let source = credited(&f.store, recipient.clone()).await;
+    let mut value = json!({"status":if source.is_some() {"SUCCESS"} else {"PENDING_DEPOSIT"},"quoteResponse":response});
+    if let Some(source) = source {
+        value["swapDetails"] = json!({"originChainTxHashes":[{"hash":source}],"destinationChainTxHashes":[{"hash":delivery_hash(&recipient)}],"amountOut":response["quoteRequest"]["amount"],"refundedAmount":"0"});
+    }
+    Json(value)
 }
-async fn credited(store: &StoreHandle, recipient: String) -> bool {
+fn delivery_hash(recipient: &str) -> alloy_primitives::B256 {
+    alloy_primitives::keccak256(format!(
+        "canonical fixture delivery:{}",
+        recipient.to_ascii_lowercase()
+    ))
+}
+async fn credited(store: &StoreHandle, recipient: String) -> Option<String> {
     store
         .call(move |s| {
-            Ok(s.funding_jobs()?.into_iter().any(|j| {
-                j.recipient.eq_ignore_ascii_case(&recipient)
-                    && s.operation(&j.operation_id)
-                        .is_ok_and(|o| o.submission == "CONFIRMED")
-            }))
+            for job in s.funding_jobs()? {
+                if job.recipient.eq_ignore_ascii_case(&recipient) {
+                    if let Ok(operation) = s.operation(&job.operation_id) {
+                        if operation.submission == "CONFIRMED" {
+                            return Ok(Some(operation.facts.txid));
+                        }
+                    }
+                }
+            }
+            Ok(None)
         })
         .await
         .unwrap()
@@ -116,6 +130,27 @@ async fn base(State(f): State<Bridge>, Json(v): Json<Value>) -> Json<Value> {
                 u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
             };
             json!({"number":format!("0x{h:x}"),"hash":format!("0x{h:064x}"),"timestamp":format!("0x{:x}",f.timestamp)})
+        }
+        "eth_getTransactionReceipt" => {
+            let transaction = v["params"][0]
+                .as_str()
+                .unwrap()
+                .parse::<alloy_primitives::B256>()
+                .unwrap();
+            match chain
+                .credits
+                .iter()
+                .find(|(recipient, _)| delivery_hash(recipient) == transaction)
+            {
+                Some((recipient, height)) => {
+                    let recipient = recipient.parse::<alloy_primitives::Address>().unwrap();
+                    let hash = format!("0x{height:064x}");
+                    json!({"status":"0x1","transactionHash":transaction,"blockNumber":format!("0x{height:x}"),"blockHash":hash,"logs":[{
+                        "address":crate::payment::USDC,"removed":false,"transactionHash":transaction,"blockNumber":format!("0x{height:x}"),"blockHash":hash,"logIndex":"0x0",
+                        "topics":[alloy_primitives::keccak256("Transfer(address,address,uint256)"),alloy_primitives::B256::ZERO,alloy_primitives::B256::left_padding_from(recipient.as_slice())],"data":format!("0x{:064x}",5_000_000u64)}]})
+                }
+                None => Value::Null,
+            }
         }
         "eth_call" => {
             let data = v["params"][0]["data"].as_str().unwrap();
@@ -387,7 +422,12 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     tick(&worker).await;
     let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
     let observed = lookups.load(Ordering::SeqCst);
-    for _ in 0..2 {
+    // The one-second poll has deterministic per-job jitter; a pass before its
+    // due time is not a source observation. Require actual lookup progress.
+    for _ in 0..6 {
+        if lookups.load(Ordering::SeqCst) >= observed + 2 {
+            break;
+        }
         tick(&worker).await;
     }
     let after = store.call(|s| s.treasury_sync_state()).await.unwrap();

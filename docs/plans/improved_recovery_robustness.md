@@ -5,6 +5,27 @@ Working sections: [gate inventory](#gate-inventory-and-implementation-evidence),
 The [target design](#target-design) and [findings](#supporting-review-findings)
 provide supporting context.
 
+## C18/T48 production worker acceptance — 2026-10-17
+
+The real funding worker, treasury actor and synthetic chains now exercise persisted
+FAILED, REFUNDED and INCOMPLETE observations followed by exactly correlated delivery
+hints, a missing-receipt control, and provider outage. Completion occurs only after
+canonical destination, original source and finite return proofs are present. Original
+bytes, operation facts, gross debit and one submission remain unchanged; no SUCCESS
+label or replacement attempt supplies authority.
+
+This acceptance exposed a missing refresh dependency: semantic return-inventory
+changes revoked return proof but did not schedule its canonical reobservation.
+Fixup `bdc90b5` routes confirmed sources with pending returns through the existing
+source lane. Reuse requires the original pass's inventory revision; an unchanged
+observed issue remains reusable and does not trigger repeated historical scans.
+
+Independent review and focused validation passed: T48 worker (1), source support
+(6), and existing concurrent bootstrap/rotation worker (1). The latter retains
+actual lookup-progress and unchanged-snapshot assertions while allowing existing
+poll jitter. These local fixtures do not establish an external provider contract
+or prove absence of future returns. Refund replacement still requires review.
+
 ## C18 canonical return closure checkpoint — 2026-10-17
 
 Schema25 binds finite return accounting to the same bounded historical source pass.
