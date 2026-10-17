@@ -36,6 +36,7 @@ struct UnsignedGate {
 }
 #[derive(Clone)]
 struct ChainSnapshot {
+    nonces: BTreeMap<String, bool>,
     balances: BTreeMap<String, u64>,
     used: bool,
     timestamp: u64,
@@ -53,6 +54,8 @@ struct Fake {
     rpc_calls: Arc<AtomicUsize>,
     rpc_hold: Arc<AtomicBool>,
     nonce_delay: Arc<AtomicBool>,
+    nonces: Arc<Mutex<BTreeMap<String, bool>>>,
+    nonce_gates: Arc<Mutex<BTreeMap<String, Arc<tokio::sync::Semaphore>>>>,
     balance_delay: Arc<AtomicBool>,
     balance_unavailable: Arc<Mutex<std::collections::BTreeSet<String>>>,
     balance_delays: Arc<Mutex<BTreeMap<String, u64>>>,
@@ -103,6 +106,18 @@ async fn rpc(
             return Json(
                 json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32005,"message":"fixture wallet unavailable"}}),
             );
+        }
+    }
+    if v["method"] == "eth_call"
+        && let Some(data) = v["params"][0]["data"]
+            .as_str()
+            .filter(|data| !data.starts_with("0x70a08231"))
+    {
+        let nonce = format!("0x{}", &data[data.len() - 64..]);
+        let gate = f.nonce_gates.lock().unwrap().get(&nonce).cloned();
+        if let Some(gate) = gate {
+            f.arrived.notify_one();
+            gate.acquire().await.unwrap().forget();
         }
     }
     if f.rpc_hold.swap(false, Ordering::SeqCst) {
@@ -167,6 +182,7 @@ async fn rpc(
                     chain.latest + 24
                 };
                 let snapshot = ChainSnapshot {
+                    nonces: f.nonces.lock().unwrap().clone(),
                     balances: f.balances.lock().unwrap().clone(),
                     used: f.used.load(Ordering::SeqCst),
                     timestamp: now().unwrap(),
@@ -221,7 +237,12 @@ async fn rpc(
                     .push((peer, "balance".into(), address.clone()));
                 *snapshot.balances.get(&address).unwrap_or(&0)
             } else {
-                u64::from(snapshot.used)
+                u64::from(
+                    *snapshot
+                        .nonces
+                        .get(&format!("0x{}", &data[data.len() - 64..]))
+                        .unwrap_or(&snapshot.used),
+                )
             };
             json!(format!("0x{n:064x}"))
         }
@@ -359,6 +380,8 @@ impl Harness {
             rpc_calls: Arc::default(),
             rpc_hold: Arc::default(),
             nonce_delay: Arc::default(),
+            nonces: Arc::default(),
+            nonce_gates: Arc::default(),
             balance_delay: Arc::default(),
             balance_unavailable: Arc::default(),
             balance_delays: Arc::default(),
@@ -2342,6 +2365,161 @@ async fn replacement_credit_survives_restart_without_releasing_old_authorization
             .unwrap()
             .role,
         "ACTIVE"
+    );
+    drop(db);
+    h.close().await;
+}
+
+#[tokio::test]
+async fn disputed_release_capacity_repairs_and_reopens_with_production_certificates() {
+    let mut h = Harness::new().await;
+    exhaust_ready(&h).await;
+    *h.f.challenge.lock().unwrap() = challenge("1000000");
+    h.client.execute(h.route()).await.unwrap();
+    let old_nonce = h.f.signed.lock().unwrap()[0]["payload"]["authorization"]["nonce"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.f.nonces.lock().unwrap().insert(old_nonce.clone(), true);
+    reconcile_complete_history(&h).await;
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let original: (String,String,String,String) = db.query_row("SELECT a.id,a.wallet_id,r.hash,r.support FROM payment_attempts a JOIN payment_resolutions r ON r.attempt_id=a.id WHERE a.nonce=?1", [&old_nonce], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+    let jobs: i64 = db
+        .query_row("SELECT COUNT(*) FROM funding_jobs", [], |r| r.get(0))
+        .unwrap();
+    h.f.reorg.store(true, Ordering::SeqCst);
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    h.f.nonce_gates
+        .lock()
+        .unwrap()
+        .insert(old_nonce.clone(), gate.clone());
+    let manager = make_pool(h.store.clone(), h.pool.clone(), &h.base);
+    let repair_owner = manager.clone();
+    let mut repair = tokio::spawn(async move {
+        // An older saved balance can be disputed before the payment
+        // checkpoint. Each public pass retains that scoped observation.
+        let mut failures = Vec::new();
+        for _ in 0..3 {
+            match repair_owner.reconcile().await {
+                Ok(()) => return Ok(()),
+                Err(error) => failures.push(format!("{error:#}")),
+            }
+        }
+        Err(failures)
+    });
+    tokio::select! {
+        result = &mut repair => panic!("repair ended before nonce gate: {result:?}"),
+        result = tokio::time::timeout(std::time::Duration::from_secs(10), h.f.arrived.notified()) => result.unwrap(),
+    }
+    let disputed: (String, i64) = db
+        .query_row(
+            "SELECT evidence_repair,payment_resolutions_disputed FROM wallets WHERE id=?1",
+            [&original.1],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(disputed, ("chain_repair_required".into(), 1));
+    *h.f.challenge.lock().unwrap() = challenge("5000000");
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            h.client.execute(h.route())
+        )
+        .await
+        .expect("remaining-capacity rejection must not wait for historical repair")
+        .is_err()
+    );
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    *h.f.challenge.lock().unwrap() = challenge("4000000");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        h.client.execute(h.route()),
+    )
+    .await
+    .expect("current payment must progress while historical repair is held")
+    .unwrap();
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    let admitted: (String,String) = db.query_row("SELECT e.balance,e.reserved_before FROM payment_admission_evidence e JOIN payment_attempts a ON a.id=e.attempt_id WHERE a.amount='4000000'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(admitted, ("5000000".into(), "1000000".into()));
+    h.f.nonce_gates.lock().unwrap().remove(&old_nonce);
+    gate.add_permits(1);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), repair)
+        .await
+        .unwrap()
+        .unwrap();
+    // A concurrent admission can invalidate staged publication. The same public
+    // owner recaptures; it cannot erase the newly signed liability.
+    for _ in 0..3 {
+        let reason: Option<String> = db
+            .query_row(
+                "SELECT evidence_repair FROM wallets WHERE id=?1",
+                [&original.1],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if reason.is_none() {
+            break;
+        }
+        let _ = manager.reconcile().await;
+    }
+    let reason: Option<String> = db
+        .query_row(
+            "SELECT evidence_repair FROM wallets WHERE id=?1",
+            [&original.1],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(reason.is_none());
+    let saved: (String, String) = db
+        .query_row(
+            "SELECT hash,support FROM payment_resolutions WHERE attempt_id=?1",
+            [&original.0],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(saved, (original.2.clone(), original.3.clone()));
+    let effective: (String, String) = db
+        .query_row(
+            "SELECT outcome,hash FROM effective_payment_resolutions WHERE attempt_id=?1",
+            [&original.0],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(effective.0, "USED");
+    assert_ne!(effective.1, original.2);
+    drop(db);
+    drop(manager);
+    h = restart(h).await;
+    *h.f.challenge.lock().unwrap() = challenge("1000000");
+    h.client.execute(h.route()).await.unwrap();
+    let signed = h.f.signed.lock().unwrap().clone();
+    assert_eq!(signed.len(), 3);
+    let nonces: std::collections::BTreeSet<_> = signed
+        .iter()
+        .map(|s| s["payload"]["authorization"]["nonce"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        nonces.len(),
+        3,
+        "restart cannot replay an old authorization"
+    );
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let pending: (i64,i64) = db.query_row("SELECT COUNT(*),SUM(CAST(amount AS INTEGER)) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(pending, (2, 5_000_000));
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM funding_jobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        jobs
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM wallets WHERE payment_resolutions_disputed=1",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
     );
     drop(db);
     h.close().await;

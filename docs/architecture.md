@@ -107,9 +107,10 @@ Clients must inspect this metadata; it does not imply a UI notification. Unsigne
 dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
 Local authored catalogs remain validated before serving; strict inspection and
-qualification still require complete discovery. Remaining recovery acceptance is
-tracked in the
-[recovery plan](plans/improved_recovery_robustness.md).
+qualification still require complete discovery. Financial recovery and retained
+operation ownership are described in [wallet rotation](wallet-rotation.md);
+[testing and qualification](testing.md#qualification-status) distinguishes local
+proofs from external funded acceptance.
 
 ## MCP and output boundaries
 

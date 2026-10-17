@@ -126,6 +126,22 @@ bindings, cancellation and reopen. Shared balance-read fixtures verify coalescin
 and retained acquisition ownership after a waiter leaves. These tests preserve
 serialized treasury prerequisites and accepted financial work.
 
+Cross-pool saturation tests fill the historical subsets of the shared query,
+caller and socket limits while a current balance and serialized Store work still
+progress. Cancelling a waiter retains accepted acquisition ownership until its
+actual requests finish. Historical repair also keeps the original authorization
+expiry: a host clock past that expiry cannot release a liability while canonical
+chain time remains behind it.
+
+Synthetic source-recovery fixtures distinguish a completed scan from reusable
+input authority. A previously confirmed transaction displaced by a live fork
+keeps its original input dispute until exact re-confirmation or the full two-sync
+expiry proof. Expiry reverses only its recorded debit, once, while preserving the
+original confirmation and bytes across reopen. SDK reconstruction tests drain the
+retained scan owner and accepted Store work before replacing the SDK; live Base
+handles keep using the same Store. These are local ownership and accounting
+checks, not external settlement qualification.
+
 Managed payment crash fixtures use SIGKILL on an owned signing subprocess at
 private-signature, journal-acknowledgement and provider-receipt boundaries. They
 reopen the real SQLite state, retain committed nonce/exposure records without
