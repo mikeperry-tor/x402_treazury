@@ -65,7 +65,7 @@ impl std::error::Error for AlreadyOwned {}
 enum Observation<Q> {
     None,
     Status(SwapStatus),
-    StatusDetails(super::super::near::StatusObservation),
+    StatusDetails(Box<super::super::near::StatusObservation>),
     Prerequisite(Q),
     Quote(Quote),
 }
@@ -628,7 +628,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                                     .await
                                     .map(|(status, details)| {
                                         details
-                                            .map(Observation::StatusDetails)
+                                            .map(|details| {
+                                                Observation::StatusDetails(Box::new(details))
+                                            })
                                             .unwrap_or(Observation::Status(status))
                                     })
                             }

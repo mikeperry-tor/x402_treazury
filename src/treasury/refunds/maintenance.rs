@@ -2,12 +2,15 @@
 use super::*;
 use crate::rotation::store::shielding::{ServingAuthority, maintenance::AddressCursor};
 
+#[cfg(test)]
+type ObservationOverride = Box<dyn FnMut(&str) -> Result<bool> + Send + Sync>;
+
 #[derive(Default)]
 pub(crate) struct ShieldingMaintenance {
     address: AddressCursor,
     operation: String,
     #[cfg(test)]
-    observation_override: Option<Box<dyn FnMut(&str) -> Result<bool> + Send + Sync>>,
+    observation_override: Option<ObservationOverride>,
 }
 
 impl Treasury {

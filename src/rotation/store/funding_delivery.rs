@@ -21,6 +21,9 @@ struct Hint {
     deposited: Option<U256>,
     refunded: Option<U256>,
 }
+#[cfg(feature = "zcash")]
+type DeliveryHintRow = (Option<Vec<u8>>, Option<Vec<u8>>, Option<String>, bool);
+
 /// The ticket owns observation only. It cannot release any financial liability.
 #[cfg(feature = "zcash")]
 pub(crate) struct DeliveryRead {
@@ -176,7 +179,7 @@ impl Store {
         job: &str,
         operation: &str,
     ) -> Result<Option<DeliveryRead>> {
-        let row:Option<(Option<Vec<u8>>,Option<Vec<u8>>,Option<String>,bool)>=self.db.query_row("SELECT active,queued,ticket,prefer_event FROM funding_delivery_hints WHERE operation_id=?1 AND job_id=?2",params![operation,job],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        let row:Option<DeliveryHintRow>=self.db.query_row("SELECT active,queued,ticket,prefer_event FROM funding_delivery_hints WHERE operation_id=?1 AND job_id=?2",params![operation,job],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
         let (active, queued, ticket, prefer_event) = row.unwrap_or((None, None, None, true));
         let accepted:Option<(String,String)>=self.db.query_row("SELECT e.transaction_hash,COALESCE(d.reason,'') FROM funding_delivery_events e JOIN funding_delivery_current c ON c.event_id=e.id AND c.operation_id=e.operation_id JOIN funding_delivery_proofs p ON p.id=c.proof_id AND p.event_id=e.id LEFT JOIN funding_delivery_disputes d ON d.proof_id=p.id WHERE e.job_id=?1 AND e.operation_id=?2 ORDER BY e.id DESC LIMIT 1",params![job,operation],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         if active.is_none() && queued.is_none() && accepted.is_none() {

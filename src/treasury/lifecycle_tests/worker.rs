@@ -82,12 +82,11 @@ async fn credited(store: &StoreHandle, recipient: String) -> Option<String> {
     store
         .call(move |s| {
             for job in s.funding_jobs()? {
-                if job.recipient.eq_ignore_ascii_case(&recipient) {
-                    if let Ok(operation) = s.operation(&job.operation_id) {
-                        if operation.submission == "CONFIRMED" {
-                            return Ok(Some(operation.facts.txid));
-                        }
-                    }
+                if job.recipient.eq_ignore_ascii_case(&recipient)
+                    && let Ok(operation) = s.operation(&job.operation_id)
+                    && operation.submission == "CONFIRMED"
+                {
+                    return Ok(Some(operation.facts.txid));
                 }
             }
             Ok(None)

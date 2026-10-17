@@ -61,11 +61,13 @@ async fn pending_outage_preserves_independent_history_and_prefix_cursor() {
     }
     let seen = Arc::new(Mutex::new(Vec::new()));
     let captured = seen.clone();
-    let mut maintenance = ShieldingMaintenance::default();
-    maintenance.observation_override = Some(Box::new(move |id| {
-        captured.lock().unwrap().push(id.to_owned());
-        if id == "z" { Err(outage()) } else { Ok(false) }
-    }));
+    let mut maintenance = ShieldingMaintenance {
+        observation_override: Some(Box::new(move |id| {
+            captured.lock().unwrap().push(id.to_owned());
+            if id == "z" { Err(outage()) } else { Ok(false) }
+        })),
+        ..Default::default()
+    };
     owner
         .maintain_shielding(
             &mut maintenance,
