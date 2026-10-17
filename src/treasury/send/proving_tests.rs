@@ -35,6 +35,68 @@ async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
     qualify_preparation(None).await;
 }
 
+#[tokio::test]
+async fn funded_proving_cannot_renew_an_exhausted_submission_window() {
+    qualify_preparation(Some("window")).await;
+}
+
+async fn assert_elapsed_window_retains_preparation(
+    treasury: &Treasury,
+    state: &std::path::Path,
+    prepared: &PreparedTransaction,
+) {
+    let operation = prepared.operation_id().to_owned();
+    let bytes = prepared.bytes().to_vec();
+    let facts = prepared.facts().unwrap().clone();
+    let deadline = facts.deadline.unwrap();
+    // The serialized authority API accepts the command's clock reading. Model
+    // arbitrarily slow real proving deterministically, without sleeping until
+    // expiry or changing the immutable accepted deadline.
+    treasury
+        .store
+        .call(move |s| {
+            for (at, expected) in [
+                (deadline - 299, "funding_deadline_too_close"),
+                (deadline, "funding_deadline_expired"),
+                (deadline + 1, "funding_deadline_expired"),
+            ] {
+                for retry in [false, true] {
+                    let error = BroadcastTransaction::request(s, &operation, at, TIP.into(), retry)
+                        .err()
+                        .expect("elapsed proving cannot mint submission authority");
+                    assert_eq!(error.to_string(), expected);
+                    let saved = s.operation(&operation)?;
+                    assert_eq!(saved.submission, "PREPARED");
+                    assert_eq!(saved.attempts, 0);
+                    assert_eq!(saved.facts, facts);
+                    assert_eq!(s.prepared_bytes(&operation)?.as_slice(), bytes);
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+    let retained: (i64, i64, i64) = db
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM outgoing),reserved,consumed FROM budget_entries WHERE id=?1",
+            [prepared.operation_id()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        retained,
+        (
+            1,
+            i64::try_from(
+                prepared.facts().unwrap().amount_zatoshis + prepared.facts().unwrap().fee_zatoshis
+            )
+            .unwrap(),
+            0
+        )
+    );
+}
+
 async fn qualify_preparation(failure: Option<&str>) {
     let fail_commit = failure == Some("commit");
     let dir = tempfile::tempdir().unwrap();
@@ -128,19 +190,20 @@ async fn qualify_preparation(failure: Option<&str>) {
         axum::serve(listener, app).await.unwrap();
     });
     let operation = uuid::Uuid::new_v4().to_string();
+    let accepted_deadline = now().unwrap() + 600;
     let request = || PrepareRequest {
         managed_funding: None,
 
         operation_id: operation.clone(),
         pool_id: None,
 
-        deadline: now().unwrap() + 600,
+        deadline: accepted_deadline,
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,
         max_fee_zatoshis: if failure == Some("fee") { 1 } else { 120_000 },
         max_input_zatoshis: 180_000,
     };
-    if failure.is_some() {
+    if matches!(failure, Some("fee" | "commit")) {
         let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
         if fail_commit {
             db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
@@ -245,11 +308,25 @@ async fn qualify_preparation(failure: Option<&str>) {
         "preparation must not broadcast"
     );
     assert!(treasury.healthy);
+    if failure == Some("window") {
+        assert_eq!(facts.deadline, Some(accepted_deadline));
+        assert_elapsed_window_retains_preparation(&treasury, &state, &prepared).await;
+    }
     let revision = treasury.revision;
     assert!(treasury.status().await.unwrap().outgoing_pending);
     treasury.close().await.unwrap();
 
-    let restored = Treasury::open(state, key, treasury_id).await.unwrap();
+    let restored = Treasury::open(state.clone(), key, treasury_id)
+        .await
+        .unwrap();
+    if failure == Some("window") {
+        assert_elapsed_window_retains_preparation(&restored, &state, &prepared).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "serialized authority checks add no network calls after reopen"
+        );
+    }
     assert_eq!(restored.addresses().await.unwrap(), addresses);
     assert_eq!(restored.revision, revision);
     let id = operation.clone();
