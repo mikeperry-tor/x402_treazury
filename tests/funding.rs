@@ -57,19 +57,19 @@ impl FundingObservations for Fake {
     async fn credit(&self, j: FundingJob) -> Result<()> {
         self.credit_calls.fetch_add(1, Ordering::SeqCst);
         let id = j.id.clone();
-        let phase = self
+        let provider_success = self
             .store
             .call(move |s| {
-                Ok(s.funding_jobs()?
+                let job = s
+                    .funding_jobs()?
                     .into_iter()
                     .find(|job| job.id == id)
-                    .unwrap()
-                    .phase)
+                    .unwrap();
+                Ok(s.funding_facts(&job.id, &job.operation_id)?
+                    .provider_success)
             })
             .await?;
-        if phase != x402_treazury::rotation::store::funding::FundingPhase::VerifyingCredit
-            && !self.external_credit
-        {
+        if !provider_success && !self.external_credit {
             return Ok(());
         }
         anyhow::ensure!(self.chain_credit, "no independent Base credit");
@@ -281,23 +281,35 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     let status = store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
-        x402_treazury::rotation::store::funding::FundingPhase::VerifyingCredit
+        x402_treazury::rotation::store::funding::FundingPhase::RefundPending
     );
     assert_eq!(status.pools[0].addresses[0].role, "ALLOCATED");
     assert_eq!(status.treasury_operations[0].attempts, 1);
     worker.backend.lock().await.chain_credit = true;
     worker.tick(now + 9000).await.unwrap();
+    let credited = store.call(|s| s.status()).await.unwrap();
     assert_eq!(
-        store.call(|s| s.status()).await.unwrap().funding_jobs[0].phase,
-        x402_treazury::rotation::store::funding::FundingPhase::Complete
+        credited.funding_jobs[0].phase,
+        x402_treazury::rotation::store::funding::FundingPhase::RefundPending
     );
+    assert_ne!(credited.pools[0].addresses[0].role, "ALLOCATED");
+    assert_eq!(credited.treasury_operations[0].attempts, 1);
+    assert_eq!(worker.backend.lock().await.sends, 1);
+    let id = credited.funding_jobs[0].id.clone();
+    let operation = credited.funding_jobs[0].operation_id.clone();
+    let facts = store
+        .call(move |s| s.funding_facts(&id, &operation))
+        .await
+        .unwrap();
+    assert!(facts.readiness_recorded && facts.return_pending && !facts.delivery_verified);
+    assert!(facts.source_accounting_pending);
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
         logs.contains("Funding progress wallet=a size=small status=Quoted"),
         "{logs}"
     );
     assert!(
-        logs.contains("Funding progress wallet=a size=small status=Complete"),
+        !logs.contains("Funding progress wallet=a size=small status=Complete"),
         "{logs}"
     );
     assert!(
@@ -568,7 +580,7 @@ async fn unsigned_outage_past_health_threshold_does_not_authorize_recovery() {
 }
 
 #[tokio::test]
-async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
+async fn timeout_keeps_reconciling_after_credit_without_resending_or_hiding_missing_proofs() {
     let (_dir, worker, task) = fixture().await;
     worker.backend.lock().await.timeout = 1;
     let now = x402_treazury::rotation::base::now().unwrap();
@@ -583,24 +595,28 @@ async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,
-        x402_treazury::rotation::store::funding::FundingPhase::Complete
+        x402_treazury::rotation::store::funding::FundingPhase::RefundPending
     );
-    assert!(!status.funding_jobs[0].timed_out);
-    assert!(status.funding_jobs[0].last_error.is_none());
-    let completed = status.funding_jobs[0].id.clone();
+    assert!(status.funding_jobs[0].timed_out);
+    assert_eq!(
+        status.funding_jobs[0].last_error.as_deref(),
+        Some("return_accounting_pending")
+    );
+    assert_ne!(status.pools[0].addresses[0].role, "ALLOCATED");
+    let pending = status.funding_jobs[0].id.clone();
     worker
         .store
-        .call(move |s| s.mark_funding_timeout(&completed))
+        .call(move |s| s.mark_funding_timeout(&pending))
         .await
         .unwrap();
     assert!(
-        !worker
+        worker
             .store
             .call(|s| Ok(s.status()?.funding_jobs[0].timed_out))
             .await
             .unwrap()
     );
-    // The intentionally disabled sibling fixture remains independently degraded.
+    // Destination readiness does not close missing source/return proofs or renew submission authority.
     assert_eq!(worker.backend.lock().await.sends, 1);
     drop(worker);
     task.await.unwrap();
@@ -773,7 +789,7 @@ async fn preparing_recovery_uses_saved_bytes_and_existing_intent_never_resubmits
             worker.tick(now + 300).await.unwrap();
             assert_eq!(worker.backend.lock().await.sends, 0);
             let after = worker.store.call(|s| s.status()).await.unwrap();
-            assert_eq!(after.funding_jobs[0].phase, FundingPhase::VerifyingCredit);
+            assert_eq!(after.funding_jobs[0].phase, FundingPhase::RefundPending);
             assert_eq!(after.treasury_operations[0].attempts, 1);
         }
         drop(worker);
@@ -794,11 +810,12 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
         || SwapStatus::Failed,
         || SwapStatus::IncompleteDeposit,
     ];
-    for phase in [
-        FundingPhase::Swapping,
-        FundingPhase::VerifyingCredit,
-        FundingPhase::RefundPending,
-    ] {
+    let initial_statuses: [fn() -> SwapStatus; 3] = [
+        || SwapStatus::Processing,
+        || SwapStatus::Success,
+        || SwapStatus::Refunded,
+    ];
+    for initial_status in initial_statuses {
         for status in statuses {
             let (_dir, worker, task) = fixture().await;
             worker.backend.lock().await.swap_status = || SwapStatus::Processing;
@@ -806,14 +823,15 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
             for i in 0..5 {
                 worker.tick(now + i * 100).await.unwrap();
             }
-            if phase != FundingPhase::Swapping {
-                worker.backend.lock().await.swap_status = if phase == FundingPhase::RefundPending {
-                    || SwapStatus::Refunded
-                } else {
-                    || SwapStatus::Success
-                };
+            if !matches!(initial_status(), SwapStatus::Processing) {
+                worker.backend.lock().await.swap_status = initial_status;
                 worker.tick(now + 500).await.unwrap();
             }
+            let initial_phase = if matches!(initial_status(), SwapStatus::Processing) {
+                FundingPhase::Swapping
+            } else {
+                FundingPhase::RefundPending
+            };
             assert_eq!(
                 worker
                     .store
@@ -822,7 +840,7 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
                     .unwrap()
                     .funding_jobs[0]
                     .phase,
-                phase
+                initial_phase
             );
             let calls = worker
                 .backend
@@ -835,29 +853,55 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
             worker.tick(now + 600).await.unwrap();
             worker.tick(now + 700).await.unwrap();
             let after = worker.store.call(|s| s.status()).await.unwrap();
-            let expected = match phase {
-                FundingPhase::VerifyingCredit => FundingPhase::Complete,
-                FundingPhase::RefundPending => FundingPhase::RefundPending,
-                _ => match status() {
-                    SwapStatus::Success => FundingPhase::Complete,
-                    SwapStatus::Refunded | SwapStatus::Failed => FundingPhase::RefundPending,
-                    SwapStatus::IncompleteDeposit => FundingPhase::RecoveryRequired,
-                    _ => FundingPhase::Swapping,
-                },
+            let success = matches!(initial_status(), SwapStatus::Success)
+                || matches!(status(), SwapStatus::Success);
+            let refund_or_failure = matches!(initial_status(), SwapStatus::Refunded)
+                || matches!(status(), SwapStatus::Refunded | SwapStatus::Failed);
+            let expected = if matches!(status(), SwapStatus::IncompleteDeposit)
+                || (success && refund_or_failure)
+            {
+                FundingPhase::RecoveryRequired
+            } else if success || refund_or_failure {
+                // These coarse provider labels supply no exact return/delivery proof.
+                FundingPhase::RefundPending
+            } else {
+                FundingPhase::Swapping
             };
             assert_eq!(after.funding_jobs[0].phase, expected);
-            if phase != FundingPhase::Swapping {
-                assert_eq!(
-                    worker
-                        .backend
-                        .lock()
-                        .await
-                        .status_calls
-                        .load(Ordering::SeqCst),
-                    calls,
-                    "saved SUCCESS/REFUNDED stops ordinary status polling"
-                );
-            }
+            let (id, operation) = (
+                after.funding_jobs[0].id.clone(),
+                after.funding_jobs[0].operation_id.clone(),
+            );
+            let facts = worker
+                .store
+                .call(move |s| s.funding_facts(&id, &operation))
+                .await
+                .unwrap();
+            assert_eq!(facts.provider_success, success);
+            assert_eq!(
+                facts.provider_refunded,
+                matches!(initial_status(), SwapStatus::Refunded)
+                    || matches!(status(), SwapStatus::Refunded)
+            );
+            assert_eq!(
+                facts.provider_failed,
+                matches!(status(), SwapStatus::Failed)
+            );
+            assert_eq!(
+                facts.provider_incomplete,
+                matches!(status(), SwapStatus::IncompleteDeposit)
+            );
+            assert!(facts.source_accounting_pending && !facts.delivery_verified);
+            assert!(
+                worker
+                    .backend
+                    .lock()
+                    .await
+                    .status_calls
+                    .load(Ordering::SeqCst)
+                    > calls,
+                "saved provider labels cannot stop collection of missing exact proofs"
+            );
             assert_eq!(worker.backend.lock().await.sends, 1);
             assert_eq!(after.treasury_operations[0].attempts, 1);
             let db = rusqlite::Connection::open(_dir.path().join("state/state.sqlite")).unwrap();
@@ -1050,15 +1094,27 @@ async fn credit_completion_clears_old_errors_and_rejects_late_stale_deferrals() 
                 rpc_evidence::credit(&mut s, &j.wallet_id, "5000000", 13).unwrap();
             }
         }
-        assert!(
-            s.funding_jobs()
-                .unwrap()
-                .iter()
-                .all(|j| j.last_error.is_none() && j.error_streak == 0)
-        );
+        for job in s.funding_jobs().unwrap() {
+            assert_eq!(
+                job.phase,
+                x402_treazury::rotation::store::funding::FundingPhase::Complete
+            );
+            assert!(job.last_error.is_none());
+            // Health is updated by successful observation publication, not synthesized by reports.
+            s.defer_funding(&job.id, 101, None, false).unwrap();
+            assert_eq!(s.funding_job(&job.id).unwrap().unwrap().error_streak, 0);
+        }
         // Simulate a persisted completed row written by the older implementation.
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
         db.execute("UPDATE funding_progress SET last_error='funding_quote_failed; historical' WHERE job_id=?1", [&jobs[0].id]).unwrap();
+        assert_eq!(
+            s.funding_jobs().unwrap()[0].last_error.as_deref(),
+            Some("funding_quote_failed; historical")
+        );
+        assert!(
+            s.finish_funding_if_proven(&jobs[0].id, &jobs[0].operation_id)
+                .unwrap()
+        );
         assert!(s.funding_jobs().unwrap()[0].last_error.is_none());
         // A quote/credit response can finish after a separate reconciliation credits the wallet.
         s.defer_funding(
