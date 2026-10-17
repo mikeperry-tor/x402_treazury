@@ -635,14 +635,18 @@ fn maintenance_address_pages_are_bounded_and_stale_candidates_cannot_mutate() {
     let first = store
         .shielding_address_page(&authority, &maintenance::AddressCursor::default())
         .unwrap();
-    assert_eq!(first.candidates.len(), 64);
+    assert_eq!(first.candidates.len(), 1);
     let second = store
         .shielding_address_page(&authority, first.next.as_ref().unwrap())
         .unwrap();
-    assert_eq!(second.candidates.len(), 7);
+    assert_eq!(second.candidates.len(), 64);
+    let third = store
+        .shielding_address_page(&authority, second.next.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(third.candidates.len(), 6);
     assert!(
         store
-            .shielding_address_page(&authority, second.next.as_ref().unwrap())
+            .shielding_address_page(&authority, third.next.as_ref().unwrap())
             .unwrap()
             .next
             .is_none()
@@ -673,5 +677,84 @@ fn maintenance_address_pages_are_bounded_and_stale_candidates_cannot_mutate() {
                 .get::<_, i64>(0))
             .unwrap(),
         0
+    );
+}
+
+#[test]
+fn maintenance_queries_seek_keys_and_page_sparse_physical_history() {
+    let (_dir, store, job, _) = fixture();
+    for sql in [
+        maintenance::CURRENT_ADDRESSES,
+        maintenance::ARCHIVED_ADDRESSES,
+    ] {
+        let details = store
+            .db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(params!["", 64], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(details.iter().any(|d| d.contains("SEARCH")), "{details:?}");
+        assert!(
+            details
+                .iter()
+                .all(|d| !d.contains("SCAN") && !d.contains("TEMP B-TREE")),
+            "{details:?}"
+        );
+    }
+    let details = store
+        .db
+        .prepare(&format!(
+            "EXPLAIN QUERY PLAN {}",
+            maintenance::PENDING_OPERATION
+        ))
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        details.iter().any(|d| d.contains("one_outgoing")),
+        "{details:?}"
+    );
+    assert!(
+        details
+            .iter()
+            .all(|d| !d.contains("SCAN shielding_operations") && !d.contains("TEMP B-TREE")),
+        "{details:?}"
+    );
+    for index in 0..130 {
+        store.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,refund) SELECT ?1,job_id,phase,CASE WHEN ?2=129 THEN address ELSE NULL END FROM funding_progress JOIN funding_refunds USING(job_id) WHERE job_id=?3",params![format!("sparse-{index:03}"),index,job]).unwrap();
+    }
+    store
+        .db
+        .execute("DELETE FROM funding_refunds WHERE job_id=?1", [&job])
+        .unwrap();
+    let authority = store
+        .capture_serving_shielding(
+            &std::collections::BTreeMap::from([("shield".into(), 10)]),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+    let first = store
+        .shielding_address_page(&authority, &maintenance::AddressCursor::default())
+        .unwrap();
+    assert!(first.candidates.is_empty());
+    let second = store
+        .shielding_address_page(&authority, first.next.as_ref().unwrap())
+        .unwrap();
+    assert!(second.candidates.is_empty());
+    let third = store
+        .shielding_address_page(&authority, second.next.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(third.candidates.len(), 1);
+    assert!(
+        store
+            .shielding_address_page(&authority, third.next.as_ref().unwrap())
+            .unwrap()
+            .next
+            .is_none()
     );
 }

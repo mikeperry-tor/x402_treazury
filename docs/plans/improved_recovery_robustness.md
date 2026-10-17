@@ -1591,6 +1591,13 @@ manual/automatic proving tests, and repeated dust-only passes with no preparatio
 reservation, snapshot mutation or SDK retirement. Activation follows the separately
 reviewed scoped canonical orphan/expiry recovery gate.
 
+**C20 inventory review fixup:** Independent review found that the combined
+current/archive UNION could scan and sort complete history before its LIMIT.
+Separate indexed keyset queries now bound physical rows before filtering absent
+historical addresses. The pending-slot query uses the existing unique
+`one_outgoing` partial index. Query-plan assertions and a sparse 130-row history
+regression pass with the 14-test shielding Store suite; no activation is included.
+
 **C20 exact shielding expiry inputs (implemented and reviewed):**
 The ordinary two-sync expiry path additionally reloads the validated immutable
 shielding binding and checks every journaled outpoint against the current SDK wallet.

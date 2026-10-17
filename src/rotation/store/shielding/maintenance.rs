@@ -4,6 +4,10 @@
 use super::*;
 
 const PAGE_SIZE: i64 = 64;
+pub(super) const CURRENT_ADDRESSES: &str =
+    "SELECT job_id,job_id,address FROM funding_refunds WHERE job_id>?1 ORDER BY job_id LIMIT ?2";
+pub(super) const ARCHIVED_ADDRESSES: &str = "SELECT operation_id,job_id,refund FROM funding_recovery WHERE operation_id>?1 ORDER BY operation_id LIMIT ?2";
+pub(super) const PENDING_OPERATION: &str = "SELECT id FROM outgoing WHERE state='PREPARED' AND EXISTS(SELECT 1 FROM shielding_operations WHERE operation_id=outgoing.id)";
 
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub(crate) struct AddressCursor {
@@ -102,23 +106,42 @@ impl Store {
             authority.namespace == self.evidence_namespace && authority.treasury == self.id,
             "shielding serving owner mismatch"
         );
-        let mut query = self.db.prepare(
-            "SELECT archive,key,job,address FROM (SELECT 0 AS archive,job_id AS key,job_id AS job,address FROM funding_refunds UNION ALL SELECT 1,operation_id,job_id,refund FROM funding_recovery WHERE refund IS NOT NULL) WHERE (archive,key)>(?1,?2) ORDER BY archive,key LIMIT ?3")?;
-        let rows = query
-            .query_map(params![after.archive, after.key, PAGE_SIZE], |r| {
+        let sql = if after.archive {
+            ARCHIVED_ADDRESSES
+        } else {
+            CURRENT_ADDRESSES
+        };
+        let rows = self
+            .db
+            .prepare(sql)?
+            .query_map(params![after.key, PAGE_SIZE], |r| {
                 Ok((
-                    r.get::<_, bool>(0)?,
+                    r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, Vec<u8>>(3)?,
+                    r.get::<_, Option<Vec<u8>>>(2)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        if rows.is_empty() && !after.archive {
+            return self.shielding_address_page(
+                authority,
+                &AddressCursor {
+                    archive: true,
+                    key: String::new(),
+                },
+            );
+        }
         let mut candidates = Vec::new();
         let mut next = None;
-        for (archive, key, job, bytes) in rows {
-            let cursor = AddressCursor { archive, key };
+        for (key, job, bytes) in rows {
+            let cursor = AddressCursor {
+                archive: after.archive,
+                key,
+            };
             next = Some(cursor.clone());
+            // Page physical history before filtering absent addresses, so a long
+            // sparse prefix cannot monopolize the serialized Store worker.
+            let Some(bytes) = bytes else { continue };
             let funding = self
                 .funding_job(&job)?
                 .context("shielding address owner missing")?;
