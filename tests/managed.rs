@@ -936,11 +936,18 @@ async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
     assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     h.close().await;
 
-    // An undisputed historical anchor must detect its first replacement. The
-    // wrong-chain case above already disputes readiness and intentionally permits
-    // independent fresh capacity without clearing that historical dispute.
+    // A released authorization's financial checkpoint must detect its first
+    // replacement. Archival funding readiness alone is not a current-capacity
+    // dependency; acquire a genuine USED proof for the original payment.
     let h = Harness::new().await;
+    exhaust_ready(&h).await;
     h.client.execute(h.route()).await.unwrap();
+    let nonce = h.f.signed.lock().unwrap()[0]["payload"]["authorization"]["nonce"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.f.nonces.lock().unwrap().insert(nonce, true);
+    reconcile_complete_history(&h).await;
     h.f.reorg.store(true, Ordering::SeqCst);
     let h = restart(h).await;
     assert!(
