@@ -261,9 +261,11 @@ impl Store {
                 params![pool, claim.slot, claim.generation],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             ).context("bootstrap confirmed wallet balance unavailable")?;
-            ensure!(height.is_some() && hash.is_some(), "bootstrap confirmed wallet balance has no saved block evidence");
-            let amount = balance.parse::<U256>().context("invalid saved bootstrap wallet balance")?;
-            Ok((claim.slot.clone(), alloy_primitives::utils::format_units(amount, 6)?))
+            let observed = height.is_some() && hash.is_some();
+            let display = amount(&balance).ok().filter(|_| observed)
+                .map(|value| alloy_primitives::utils::format_units(value, 6))
+                .transpose()?.unwrap_or_else(|| "unknown".into());
+            Ok((claim.slot.clone(), display))
         }).collect()
     }
 

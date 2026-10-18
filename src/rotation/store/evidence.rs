@@ -1,5 +1,4 @@
 //! Exact supporting values live with the journal; runtime credentials never survive reopen.
-pub(crate) mod repair;
 use super::*;
 use crate::rotation::base::{
     Anchor,
@@ -71,30 +70,28 @@ pub struct BalanceSupport {
 }
 
 pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
-    let value: String = db.query_row(
+    let mut query = db.prepare(
+        "SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state='POSSIBLY_SUBMITTED'",
+    )?;
+    let mut total = U256::ZERO;
+    for value in query.query_map([wallet], |row| row.get::<_, String>(0))? {
+        let value = amount(&value?).map_err(|_| EvidenceFailure::MalformedExposure)?;
+        total = total
+            .checked_add(value)
+            .context("reported authorization total overflow")?;
+    }
+    Ok(total)
+}
+#[cfg(test)]
+pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
+    let saved: String = db.query_row(
         "SELECT unresolved_exposure FROM wallets WHERE id=?1",
         [wallet],
         |row| row.get(0),
     )?;
-    amount(&value).map_err(|_| EvidenceFailure::MalformedExposure.into())
-}
-pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
-    let total = exposure(db, wallet)?
+    let total = amount(&saved)?
         .checked_add(value)
         .context("reservation overflow")?;
-    ensure!(
-        db.execute(
-            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
-            params![wallet, total.to_string()]
-        )? == 1,
-        "missing liability wallet"
-    );
-    Ok(())
-}
-pub(super) fn subtract_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
-    let total = exposure(db, wallet)?
-        .checked_sub(value)
-        .context("reservation underflow")?;
     ensure!(
         db.execute(
             "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
@@ -664,43 +661,6 @@ mod tests {
             checkpoint(&store.db, &wallets[0].id).unwrap(),
             Some(anchor(20))
         );
-    }
-
-    #[test]
-    fn exposure_arithmetic_is_checked_and_rollback_preserves_total() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture",
-        )
-        .unwrap();
-        crate::rotation::store::test_support::declare_two_reserves(
-            &mut store,
-            "history",
-            "1",
-            Some(alloy_primitives::U256::from(100_000_000u64)),
-            0,
-        )
-        .unwrap();
-        let wallet = store
-            .status()
-            .unwrap()
-            .pools
-            .remove(0)
-            .addresses
-            .remove(0)
-            .id;
-        add_exposure(&store.db, &wallet, U256::MAX).unwrap();
-        assert!(add_exposure(&store.db, &wallet, U256::from(1)).is_err());
-        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::MAX);
-        subtract_exposure(&store.db, &wallet, U256::MAX).unwrap();
-        assert!(subtract_exposure(&store.db, &wallet, U256::from(1)).is_err());
-        let tx = store.db.transaction().unwrap();
-        add_exposure(&tx, &wallet, U256::from(10)).unwrap();
-        tx.rollback().unwrap();
-        assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
     }
 }
 

@@ -56,10 +56,10 @@ impl RetirementAccounting {
             }
         }
         Ok(Self {
-            automatic_recorded_confirmed_atomic: (schema == 16).then(|| total.to_string()),
-            automatic_count: (schema == 16).then_some(automatic),
-            manual_recorded_confirmed_atomic: (schema == 16).then(|| "0".into()),
-            manual_count: (schema == 16).then_some(0),
+            automatic_recorded_confirmed_atomic: (schema == 17).then(|| total.to_string()),
+            automatic_count: (schema == 17).then_some(automatic),
+            manual_recorded_confirmed_atomic: (schema == 17).then(|| "0".into()),
+            manual_count: (schema == 17).then_some(0),
             historical_unknown_count: unknown,
         })
     }
@@ -124,7 +124,7 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
     for row in rows {
         let mut pool = row?;
         pool.addresses = read_addresses(db, &pool.id)?;
-        if version == 16 {
+        if version == 17 {
             populate_current_pool(db, &mut pool)?;
         }
         pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses, version)?;
@@ -163,13 +163,21 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     for wallet in &mut pool.addresses {
-        wallet.signed_exposure_atomic = Some(evidence::exposure(db, &wallet.id)?.to_string());
+        wallet.signed_exposure_atomic = match evidence::exposure(db, &wallet.id) {
+            Ok(value) => Some(value.to_string()),
+            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => None,
+            Err(error) => return Err(error),
+        };
         wallet.financial_repair = db.query_row(
             "SELECT evidence_repair FROM wallets WHERE id=?1",
             [&wallet.id],
             |r| r.get(0),
         )?;
-        wallet.destination_recorded = funding::readiness_recorded_valid(db, &wallet.id)?;
+        wallet.destination_recorded = match funding::readiness_recorded_valid(db, &wallet.id) {
+            Ok(value) => value,
+            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => false,
+            Err(error) => return Err(error),
+        };
         wallet.destination_disputed = db.query_row(
             "SELECT readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
             [&wallet.id],

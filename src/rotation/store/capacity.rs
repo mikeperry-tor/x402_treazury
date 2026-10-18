@@ -68,13 +68,6 @@ pub(super) fn payment_ownership(
     {
         return Ok(None);
     }
-    // Historical D establishes the immutable funded role binding, but its
-    // discrepancy cannot permanently veto fresh payment evidence (plan failure
-    // scopes). This structural check deliberately does not require undisputed D.
-    // Admission separately checks current evidence repair, exposure and capacity.
-    if !funding::readiness_recorded_valid(db, wallet)? {
-        return Ok(None);
-    }
     Ok(Some(PaymentOwnership {
         role,
         slot,

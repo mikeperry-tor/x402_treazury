@@ -236,7 +236,12 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
         .unwrap();
     let view = rpc.view(query).await.unwrap();
     store.publish_scoped_evidence(&pool, view).unwrap();
-    assert!(store.cached_payment_view(&pool, &wallet).unwrap().is_none());
+    assert!(
+        store
+            .cached_payment_candidate(&pool, U256::from(1), Some(&wallet))
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         store
             .db

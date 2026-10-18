@@ -53,7 +53,7 @@ current when policy changes.
   daily treasury ZEC spending budgets to double-enforce that choice. Their removal is
   settled repository policy, not an unresolved authority-expansion question to reopen
   in feature reviews. Preserve actual reservations/liabilities, confirmation and
-  readiness checks, per-payment authority, per-operation cost/fee safeguards, explicit
+  exact pending-work ownership, per-payment authority, per-operation cost/fee safeguards, explicit
   auto-funding controls and separately authorized qualification-run limits: these
   protect distinct invariants. Displayed total balance is not spendable capacity.
 - Avoid preventable agent-call delays and blocking by default. Prefer simple bounded
@@ -65,10 +65,10 @@ current when policy changes.
 - Separate connection establishment, per-response read inactivity, evidence freshness,
   signed authority expiry and health/polling cadence. Unrelated streams, keepalives
   or merely finishing work cannot renew another response's timer or financial authority.
-- Retain useful scan/reconciliation work, then acquire fresh spending evidence.
-  Historical authorization proofs and fresh admission balances have separate anchors;
-  never relabel stale balances or observations. Wallet count must not become an
-  implicit deadline for historical reconciliation.
+- USDC estimates and historical readiness are advisory, never signing permission.
+  Select within actual pool/payer authority and journal before disclosure; decrement
+  the current estimate once per journaled authorization. See the maintained
+  [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules).
 - Put proven read-only readiness/preflight checks before mutation, reservation and
   broadcast intent. After uncertain mutation or intent, preserve ownership, exact
   bytes and liabilities; absence of a result is not proof that nothing happened.

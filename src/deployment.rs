@@ -1747,7 +1747,7 @@ impl RunningDeployment {
                 _ = stop.cancelled(), if !funding_stopped => {
                     funding_stopped = true;
                     tracing::error!(category = "treasury_funding_stopped",
-                        "Treasury/funding stopped; restart required for funding. Listeners and Base reconciliation remain available; payments still require confirmed capacity and retain all liabilities");
+                        "Treasury/funding stopped; restart required for funding. Listeners and Base reconciliation remain available; payments retain payer permission checks, durable journals and all liabilities");
                 },
                 ended = tasks.join_next() => break match ended {
                     Some(Ok(Err(e))) => Err(e),

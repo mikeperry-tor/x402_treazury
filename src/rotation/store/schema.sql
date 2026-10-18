@@ -4,7 +4,7 @@
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
 CREATE TABLE snapshots(revision INTEGER PRIMARY KEY,bytes BLOB NOT NULL);
 CREATE TABLE pools(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,generation INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), payment_limit TEXT, retirement_tolerance TEXT);
-CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),sequence INTEGER NOT NULL,address TEXT UNIQUE NOT NULL,key BLOB NOT NULL,target TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('ALLOCATED','READY','ACTIVE','RETAINED','RETIRED')),balance TEXT NOT NULL DEFAULT '0',block_hash TEXT,block_height INTEGER, financial_height INTEGER, financial_hash TEXT, debit_height INTEGER, debit_hash TEXT, evidence_repair TEXT, unresolved_exposure TEXT NOT NULL DEFAULT '0',UNIQUE(pool_id,sequence));
+CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),sequence INTEGER NOT NULL,address TEXT UNIQUE NOT NULL,key BLOB NOT NULL,target TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('ALLOCATED','READY','ACTIVE','RETAINED','RETIRED')),balance TEXT NOT NULL DEFAULT '',block_hash TEXT,block_height INTEGER, financial_height INTEGER, financial_hash TEXT, debit_height INTEGER, debit_hash TEXT, evidence_repair TEXT, unresolved_exposure TEXT NOT NULL DEFAULT '0',UNIQUE(pool_id,sequence));
 CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REFERENCES wallets(id),state TEXT NOT NULL CHECK(state IN ('QUEUED','COMPLETE')),target TEXT NOT NULL, readiness_operation TEXT, readiness_requirement TEXT, readiness_capacity TEXT, readiness_hash TEXT, readiness_height INTEGER, readiness_support TEXT, readiness_latest_hash TEXT, readiness_endpoint TEXT, readiness_checkpoint_hash TEXT, readiness_disputed TEXT, completion_outcome TEXT, pool_id TEXT NOT NULL REFERENCES pools(id), allocation_kind TEXT NOT NULL CHECK(allocation_kind IN ('small','large')), claim_generation INTEGER NOT NULL CHECK(claim_generation>=0));
 CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT REFERENCES pools(id),day INTEGER NOT NULL,original_day INTEGER NOT NULL,requested INTEGER NOT NULL CHECK(requested>0),reserved INTEGER NOT NULL CHECK(reserved>=0),consumed INTEGER NOT NULL CHECK(consumed>=0));
 CREATE TABLE outgoing(id TEXT PRIMARY KEY REFERENCES budget_entries(id),state TEXT NOT NULL CHECK(state IN ('PREPARED','RESOLVED')),raw BLOB NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
@@ -20,7 +20,7 @@ CREATE TABLE funding_health(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),
 CREATE TABLE operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT NOT NULL);
 CREATE TABLE payment_resolutions(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),outcome TEXT NOT NULL CHECK(outcome IN ('USED','EXPIRED_UNUSED')),height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL, support TEXT);
 CREATE TABLE funding_quote_refreshes(operation_id TEXT PRIMARY KEY REFERENCES funding_recovery(operation_id));
-CREATE TABLE payment_admission_evidence(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),block_height INTEGER NOT NULL,block_hash TEXT NOT NULL,balance TEXT NOT NULL,reserved_before TEXT NOT NULL,valid_until TEXT NOT NULL, support TEXT, latest_height INTEGER, latest_hash TEXT, endpoint TEXT, payer_role TEXT NOT NULL CHECK(payer_role IN ('ACTIVE','RETAINED','READY')), reserve_slot TEXT CHECK(reserve_slot IN ('small','large')), claim_generation INTEGER, CHECK((payer_role='READY' AND reserve_slot IS NOT NULL AND claim_generation IS NOT NULL AND claim_generation>=0) OR (payer_role!='READY' AND reserve_slot IS NULL AND claim_generation IS NULL)));
+CREATE TABLE payment_admission_evidence(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),block_height INTEGER,block_hash TEXT,balance TEXT,reserved_before TEXT,valid_until TEXT, support TEXT, latest_height INTEGER, latest_hash TEXT, endpoint TEXT, payer_role TEXT NOT NULL CHECK(payer_role IN ('ACTIVE','RETAINED','READY')), reserve_slot TEXT CHECK(reserve_slot IN ('small','large')), claim_generation INTEGER, CHECK((payer_role='READY' AND reserve_slot IS NOT NULL AND claim_generation IS NOT NULL AND claim_generation>=0) OR (payer_role!='READY' AND reserve_slot IS NULL AND claim_generation IS NULL)));
 CREATE TABLE reserve_claims(
  pool_id TEXT NOT NULL REFERENCES pools(id),
  slot TEXT NOT NULL CHECK(slot IN ('small','large')),
@@ -73,7 +73,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=16;
+PRAGMA user_version=17;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
