@@ -1713,7 +1713,7 @@ fn commit_chain_view(
             wallet,
             block_height = view.anchor.height,
             balance_atomic = 0,
-            "EVM wallet confirmed USDC balance reached zero; payment admission checks remaining funded capacity"
+            "EVM wallet observed USDC balance reached zero; saved estimate updated"
         );
     }
     for (confirmed, latest) in &depleted.retired_remainders {
