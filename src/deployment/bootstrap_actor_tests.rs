@@ -53,7 +53,7 @@ async fn base(State(f): State<Endpoints>, Json(v): Json<Value>) -> Json<Value> {
             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",f.timestamp)})
         }
         "eth_call" => {
-            assert_eq!(v["params"][1]["requireCanonical"], true);
+            assert_eq!(v["params"][1], "latest");
             let data = v["params"][0]["data"].as_str().unwrap();
             let amount = if data.starts_with("0x70a08231")
                 && data
@@ -215,7 +215,7 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
                 .call(move |s| s.funding_facts(&job, &operation))
                 .await
                 .unwrap();
-            if facts.readiness_recorded && facts.provider_success {
+            if facts.initial_credit_recorded && facts.provider_success {
                 break;
             }
             tokio::task::yield_now().await;

@@ -448,7 +448,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 18,
+                version == 19,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -756,7 +756,7 @@ impl Store {
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         ensure!(
-            funding::record_readiness(&tx, wallet, &support)?,
+            funding::record_initial_credit(&tx, wallet, support.observation.available())?,
             "insufficient confirmed credit"
         );
         tx.execute(
@@ -768,7 +768,7 @@ impl Store {
                 i64::try_from(height)?
             ],
         )?;
-        funding::publish_destination_readiness(&tx, wallet)?;
+        funding::publish_initial_credit(&tx, wallet)?;
         tx.commit()?;
         Ok(())
     }
@@ -971,6 +971,11 @@ impl Store {
             |r| r.get(0),
         )?)
     }
+    /// The existing SDK input fence permits one pending transaction. Funding
+    /// jobs have their worker; the treasury actor owns observation of jobless shielding.
+    pub(crate) fn jobless_pending_operation(&self) -> Result<Option<String>> {
+        Ok(self.db.query_row("SELECT x.id FROM outgoing x WHERE x.state='PREPARED' AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=x.id)",[],|r|r.get(0)).optional()?)
+    }
     pub fn prepared_bytes(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
         let bytes: Vec<u8> =
             self.db
@@ -1082,7 +1087,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 18,
+        schema == 19,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1290,7 +1295,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 18,
+        version == 19,
         "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
     );
     // Additive lookup optimization for existing schema16 stores; financial
@@ -1753,13 +1758,33 @@ impl Store {
             "explicit_rebroadcast_required"
         );
         if operation.attempts == 0 {
-            let enabled: bool = self.db.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1", [id], |r| r.get(0))?;
-            ensure!(enabled, "pool disabled");
-            let candidate: Option<bool> = self.db.query_row("SELECT j.phase IN ('\"PREPARED\"','\"DEPOSIT_PENDING\"') FROM funding_progress j WHERE j.operation_id=?1", [id], |r| r.get(0)).optional()?;
-            ensure!(
-                candidate.unwrap_or(true),
-                "funding candidate no longer needs deposit"
-            );
+            self.funding_restriction
+                .require_new_funding("source_submission")?;
+            let job: Option<String> = self
+                .db
+                .query_row(
+                    "SELECT job_id FROM funding_progress WHERE operation_id=?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(job) = job {
+                self.check_job_permit(
+                    &job,
+                    operation
+                        .facts
+                        .amount_zatoshis
+                        .checked_add(operation.facts.fee_zatoshis)
+                        .context("source cost overflow")?,
+                )?;
+                ensure!(
+                    capacity::current_funding_claim(&self.db, &job)?.is_some(),
+                    "initial funding claim consumed or disabled"
+                );
+            } else {
+                let enabled: bool = self.db.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1", [id], |r| r.get(0))?;
+                ensure!(enabled, "pool disabled");
+            }
             ensure!(
                 operation.facts.deadline - now >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
                 "funding_deadline_too_close"
@@ -2012,8 +2037,8 @@ fn publish_chain_balances(
         )?;
         if let Some(certificate) = view.balance_certificates.get(id) {
             let support = evidence::check_balance(tx, namespace, certificate)?;
-            if funding::record_readiness(tx, id, &support)? {
-                funding::publish_destination_readiness(tx, id)?;
+            if funding::record_initial_credit(tx, id, support.observation.available())? {
+                funding::publish_initial_credit(tx, id)?;
             }
             if retire
                 && capacity::retire_with_support(tx, pool, id, &support, super::base::now()?)?
@@ -2063,8 +2088,8 @@ fn publish_chain_balances(
                     valid_until: view.admission_valid_until,
                 },
             };
-            if funding::record_readiness(tx, id, &support)? {
-                funding::publish_destination_readiness(tx, id)?;
+            if funding::record_initial_credit(tx, id, support.observation.available())? {
+                funding::publish_initial_credit(tx, id)?;
             }
         }
     }

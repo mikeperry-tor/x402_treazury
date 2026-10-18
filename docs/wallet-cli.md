@@ -68,7 +68,7 @@ x402_treazury wallet bootstrap --config examples/deployments/privacy.local.toml
 ```
 
 This declares configured groups, runs the production treasury/funding workers,
-and waits for confirmed credit on its captured enabled
+and waits for the first positive credit on its captured enabled
 reserve generations. It closes treasury ownership before exiting, requires
 `funding.auto_fund=true`, and respects source, fee, attempt and qualification limits. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
@@ -76,11 +76,11 @@ signing keys or MCP listeners are needed. Network traffic follows the deployment
 policy, including Tor.
 
 By default, successful bootstrap prints each captured wallet name, its small/large
-type, and its saved confirmed balance in USDC. These are confirmed balance
-observations, not funding targets. Errors are reported on stderr with a nonzero
+type, and its saved advisory balance estimate in USDC. These estimates can be stale, include
+partial credit, and are independent of funding targets. Errors are reported on stderr with a nonzero
 exit status. Add `--json` for the versioned machine-readable result, including
-`confirmed_balances` with `wallet_name`, `wallet_type`, and decimal
-`confirmed_balance_usdc` fields. The JSON result separates current serving/inventory readiness from
+`balance_estimates` with `wallet_name`, `wallet_type`, and decimal
+`balance_estimate_usdc` fields. The JSON result separates current serving/inventory readiness from
 completion of captured work (see [capacity output](#versioned-capacity-output)).
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
 transactions are replaced only after the existing canonical expiry and unspent-input

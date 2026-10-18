@@ -588,10 +588,10 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
             let summary = good(output);
             assert_eq!(summary["captured_completed_groups"], json!(["web"]));
             assert_eq!(
-                summary["confirmed_balances"],
+                summary["balance_estimates"],
                 json!([
-                    {"wallet_name":"web", "wallet_type":"large", "confirmed_balance_usdc":"2.123456"},
-                    {"wallet_name":"web", "wallet_type":"small", "confirmed_balance_usdc":"2.123456"}
+                    {"wallet_name":"web", "wallet_type":"large", "balance_estimate_usdc":"2.123456"},
+                    {"wallet_name":"web", "wallet_type":"small", "balance_estimate_usdc":"2.123456"}
                 ])
             );
         } else {
@@ -603,7 +603,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
             let text = String::from_utf8(output.stdout).unwrap();
             assert_eq!(
                 text,
-                "Wallet bootstrap completed.\n\nConfirmed wallet balances (USDC):\n  web (large): 2.123456 USDC\n  web (small): 2.123456 USDC\n"
+                "Wallet bootstrap completed.\n\nAdvisory wallet balance estimates (USDC):\n  web (large): 2.123456 USDC\n  web (small): 2.123456 USDC\n"
             );
         }
         // Closed ownership is immediately available and no new jobs were queued.

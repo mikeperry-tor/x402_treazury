@@ -73,16 +73,16 @@ struct Completion<Q> {
 // step includes quote prerequisites; the Quote kind is the subsequent HTTP read.
 fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
     [
-        !facts.readiness_recorded || facts.readiness_disputed,
+        !facts.initial_credit_recorded,
         facts.status_needed(),
         facts.source_reconciliation_needed()
             || crate::treasury::recovery::needs_recovery(job)
             || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
             || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-                && (facts.enabled || (facts.readiness_recorded && !facts.readiness_disputed))),
+                && (facts.enabled || facts.initial_credit_recorded)),
         job.phase == FundingPhase::Allocated
             && facts.enabled
-            && !facts.readiness_recorded
+            && !facts.initial_credit_recorded
             && !facts.accepted_quote,
     ]
 }
@@ -682,38 +682,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 if current.operation_id != operation {
                     return Ok(None);
                 }
-                // Completion consumes wallet-local readiness evidence. Its typed
-                // rejection must not terminate observation of independent jobs.
-                // Untyped/storage failures still stop the shared owner.
-                let failure = match s.finish_funding_if_proven(&id, &operation) {
-                    Ok(_) => None,
-                    Err(error)
-                        if error
-                            .downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                            == Some(
-                                &super::super::base::evidence::EvidenceFailure::MalformedSupport,
-                            ) =>
-                    {
-                        Some(error)
-                    }
-                    Err(error) => return Err(error),
-                };
+                // The initial-credit claim is a scalar fact. Storage failures
+                // belong to this shared serialized owner.
+                s.finish_funding_if_proven(&id, &operation)?;
                 let current = s.funding_job(&id)?.context("funding job missing")?;
                 let facts = s.funding_facts(&id, &operation)?;
-                let mut applicable = applicable_work(&current, &facts);
-                // Even a terminal provider outcome cannot hide a rejected local
-                // completion proof when it makes its observation lane unnecessary.
-                applicable[kind as usize] |= failure.is_some();
-                Ok(Some((applicable, failure)))
+                Ok(Some(applicable_work(&current, &facts)))
             })
             .await?;
-        let Some((applicable, completion_failure)) = completion else {
+        let Some(applicable) = completion else {
             return Ok(None);
         };
-        if completion_failure.is_some() {
-            prerequisite = None;
-        }
-        let failure = completion_failure.or_else(|| result.err());
+        let failure = result.err();
         let wait = failure
             .as_ref()
             .and_then(|error| waiting_reason(error, &phase));

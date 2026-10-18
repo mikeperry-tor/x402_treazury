@@ -276,7 +276,7 @@ async fn conflicting_resolution_rejects_each_changed_field_before_balance_public
             &saved.observations[&fixture.wallets[1]],
             Some("chain_repair_required"),
         );
-        for (index, wallet) in fixture.wallets.iter().enumerate() {
+        for wallet in &fixture.wallets {
             let dispute: Option<String> = fixture
                 .store
                 .db
@@ -286,9 +286,9 @@ async fn conflicting_resolution_rejects_each_changed_field_before_balance_public
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(
-                dispute.as_deref(),
-                (index == 0).then_some("chain_repair_required")
+            assert!(
+                dispute.is_none(),
+                "a chain conflict cannot reopen the initial claim"
             );
         }
         let retained: (String, i64, String, u64) = fixture.store.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id='proof'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,sql_u64(r,3)?))).unwrap();
@@ -350,7 +350,7 @@ async fn publication_rolls_back_resolution_and_first_balance_after_late_failure(
         "CREATE TEMP TRIGGER reject_late_publication BEFORE UPDATE OF balance ON wallets
          WHEN NEW.id='{sibling}' AND EXISTS(SELECT 1 FROM payment_resolutions WHERE attempt_id='proof')
          AND EXISTS(SELECT 1 FROM wallets WHERE id='{}' AND balance='1000000')
-         AND EXISTS(SELECT 1 FROM funding_jobs WHERE readiness_hash IS NOT NULL)
+         AND EXISTS(SELECT 1 FROM funding_jobs WHERE readiness_requirement IS NOT NULL)
          BEGIN SELECT RAISE(ABORT,'fixture_late_publication'); END;", fixture.wallets[0])).unwrap();
     let error = fixture
         .store

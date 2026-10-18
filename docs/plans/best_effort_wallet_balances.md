@@ -5,9 +5,9 @@
 
 Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
 branch `best_effort_wallet_balances`, based on
-`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 and its fixup passed independent review. BE03 implementation and focused
-acceptance are complete pending exact-commit and payment-transition review.
-BE04–BE07 remain pending.
+`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 (`798b211`, fixup `0951464`) and BE03 (`879d712`, fixup `59f8317`)
+passed independent exact-commit and combined payment-transition review. BE04 is in
+focused acceptance; BE05–BE07 remain pending.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -339,6 +339,24 @@ payment retry loop never allocates or waits for them.
 - Check existing serving/admin/bootstrap/recovery/qualification
   permission before new financial effects, including disabled or declared-restored
   contexts. Credentials and spendable funds alone grant no new action permission.
+
+BE04 implementation uses the existing unique claim and operation journal. The
+first positive scalar observation consumes it, without a target threshold or
+historical readiness repair. Pending source bytes are enumerated independently of
+workflow phases; jobless accepted operations remain with the treasury actor.
+First submission rechecks the existing context restriction and current claim.
+The narrow retirement guard for an actual incoming source obligation remains:
+a USDC snapshot cannot prove a pending Zcash deposit cannot later credit it.
+Bootstrap schema 3 now displays saved advisory estimates without block anchors.
+Complexity artifact `20261018T015325Z-b8386faf` records the complete changed
+production chains: `source_step` CogC/CycC 27/59, `finish_if_proven` 10/36,
+`funding_work_page` 3/14 and actor `run_commands` 9/17. Historical credit repair
+and its old proof tests are deleted; BE06 still owns source monetary closure.
+All-target compilation passed. Focused acceptance is recorded with the exact
+commit review below once complete.
+Independent precommit review identified that stale display dependency; the fix
+removes it without another RPC or signing check. Development schema 19 rejects
+older mutation without conversion; no private state was converted.
 
 ### BE05: Treasury and receipt age removal
 

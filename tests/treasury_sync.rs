@@ -1377,3 +1377,106 @@ async fn command_scan_defers_the_immediate_background_tick_without_extra_network
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     server.abort();
 }
+
+#[tokio::test]
+async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_lookup() {
+    use x402_treazury::rotation::{
+        store::Store,
+        transaction::{
+            BroadcastTransaction, PreparedTransaction, SubmissionOutcome, TransactionFacts,
+            TransactionPresence, TransactionSubmission,
+        },
+    };
+    use x402_treazury::treasury::actor;
+    struct Observer {
+        seen: tokio::sync::oneshot::Sender<()>,
+        finish: tokio::sync::oneshot::Receiver<()>,
+    }
+    impl TransactionSubmission for Observer {
+        async fn submit(&mut self, _: BroadcastTransaction) -> anyhow::Result<SubmissionOutcome> {
+            panic!("observation must never submit");
+        }
+        async fn lookup(
+            &mut self,
+            prepared: &PreparedTransaction,
+        ) -> anyhow::Result<TransactionPresence> {
+            assert_eq!(prepared.operation_id(), "jobless");
+            assert_eq!(prepared.bytes(), b"original jobless bytes");
+            let (unused, _) = tokio::sync::oneshot::channel();
+            let _ = std::mem::replace(&mut self.seen, unused).send(());
+            let _ = (&mut self.finish).await;
+            Ok(TransactionPresence::Unknown)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (endpoint, calls, server, _) = mock("main").await;
+    let treasury = wallet(dir.path()).await;
+    crate::capacity_fixture::treasury_pair(
+        &treasury,
+        "disabled",
+        "5",
+        Some(alloy_primitives::U256::from(1)),
+        0,
+    )
+    .await
+    .unwrap();
+    let id = treasury.status().await.unwrap().treasury_id;
+    treasury.close().await.unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut store = Store::open(&state, &key, &id).unwrap();
+    let (revision, snapshot) = store.snapshot().unwrap();
+    store.reserve("jobless", None, 1, 100).unwrap();
+    store
+        .prepare_with_facts(
+            "jobless",
+            revision,
+            &snapshot,
+            b"original jobless bytes",
+            Some(TransactionFacts {
+                txid: "original".into(),
+                expiry_height: TIP as u32 + 100,
+                amount_zatoshis: 80,
+                fee_zatoshis: 20,
+                deadline: u64::MAX,
+            }),
+        )
+        .unwrap();
+    store.disable_pool("disabled").unwrap();
+    drop(store);
+    let mut treasury = Treasury::open(state.clone(), key.clone(), id.clone())
+        .await
+        .unwrap();
+    treasury.configure_sync(SyncSettings::new(endpoint, 3, 300).unwrap());
+    let (seen, observed) = tokio::sync::oneshot::channel();
+    let (finish, drained) = tokio::sync::oneshot::channel();
+    let (handle, commands) = actor::channel();
+    let stop = CancellationToken::new();
+    let owner = tokio::spawn(treasury.run_commands(
+        commands,
+        Observer {
+            seen,
+            finish: drained,
+        },
+        stop.clone(),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(10), observed)
+        .await
+        .unwrap()
+        .unwrap();
+    // A disconnected waiter does not repeat or erase the original operation.
+    drop(handle);
+    finish.send(()).unwrap();
+    stop.cancel();
+    owner.await.unwrap().unwrap();
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    let store = Store::open(&state, &key, &id).unwrap();
+    assert_eq!(
+        store.prepared_bytes("jobless").unwrap().as_slice(),
+        b"original jobless bytes"
+    );
+    assert!(store.operation_pending("jobless").unwrap());
+    assert_eq!(store.operation("jobless").unwrap().attempts, 0);
+    assert_eq!(store.status().unwrap().treasury_operations.len(), 1);
+    server.abort();
+}

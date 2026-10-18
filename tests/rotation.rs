@@ -1073,8 +1073,14 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
         "2500000"
     );
     rpc_evidence::credit(&mut s, &job.wallet_id, "2000000", 13).unwrap();
-    assert!(!s.destination_requirement(&job.id).unwrap().recorded);
-    assert!(state.treasury_operations.is_empty());
+    let initial = s.destination_requirement(&job.id).unwrap();
+    assert!(
+        initial.recorded,
+        "partial credit consumes the unique initial claim"
+    );
+    assert_eq!(initial.amount, "2000000");
+    assert_eq!(s.funding_jobs().unwrap()[0].target, "2000000");
+    assert!(s.status().unwrap().treasury_operations.is_empty());
 }
 
 #[tokio::test]

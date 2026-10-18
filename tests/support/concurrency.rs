@@ -43,6 +43,7 @@ pub(super) async fn other_pool(h: &Harness) -> PaidClient {
             .unwrap()
             .insert(a.address.clone(), 5_000_000);
     }
+    publish_initial_credit(&h.store, &pool, &h.base).await;
     make_pool(h.store.clone(), pool.clone(), &h.base)
         .reconcile()
         .await

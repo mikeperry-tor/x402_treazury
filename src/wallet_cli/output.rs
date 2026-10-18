@@ -148,16 +148,16 @@ fn formats_zec_without_rounding_and_preserves_unknown_values() {
 #[cfg(feature = "zcash")]
 pub(super) fn bootstrap(summary: &crate::deployment::BootstrapSummary) -> String {
     let mut text =
-        String::from("Wallet bootstrap completed.\n\nConfirmed wallet balances (USDC):\n");
-    for balance in &summary.confirmed_balances {
+        String::from("Wallet bootstrap completed.\n\nAdvisory wallet balance estimates (USDC):\n");
+    for balance in &summary.balance_estimates {
         writeln!(
             text,
             "  {} ({}): {} USDC",
-            balance.wallet_name, balance.wallet_type, balance.confirmed_balance_usdc
+            balance.wallet_name, balance.wallet_type, balance.balance_estimate_usdc
         )
         .unwrap();
     }
-    if summary.confirmed_balances.is_empty() {
+    if summary.balance_estimates.is_empty() {
         text.push_str("  No enabled small/large wallets were captured.\n");
     }
     text

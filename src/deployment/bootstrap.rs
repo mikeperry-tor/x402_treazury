@@ -12,14 +12,14 @@ pub struct BootstrapSummary {
     pub inventory_ready_groups: Vec<String>,
     pub captured_completed_groups: Vec<String>,
     pub incomplete_captured_jobs: Vec<String>,
-    pub confirmed_balances: Vec<BootstrapBalance>,
+    pub balance_estimates: Vec<BootstrapBalance>,
 }
 
 #[derive(Serialize)]
 pub struct BootstrapBalance {
     pub wallet_name: String,
     pub wallet_type: String,
-    pub confirmed_balance_usdc: String,
+    pub balance_estimate_usdc: String,
 }
 
 async fn bootstrap_summary(
@@ -28,12 +28,12 @@ async fn bootstrap_summary(
     captured: &BTreeMap<String, Vec<StartupClaim>>,
 ) -> Result<BootstrapSummary> {
     let mut summary = BootstrapSummary {
-        schema_version: 2,
+        schema_version: 3,
         serving_ready_groups: Vec::new(),
         inventory_ready_groups: Vec::new(),
         captured_completed_groups: names.iter().cloned().collect(),
         incomplete_captured_jobs: Vec::new(),
-        confirmed_balances: Vec::new(),
+        balance_estimates: Vec::new(),
     };
     let names: Vec<_> = names.iter().cloned().collect();
     for page in names.chunks(GROUP_PAGE) {
@@ -44,14 +44,14 @@ async fn bootstrap_summary(
                 .context("bootstrap captured claims missing")?
                 .clone();
             let pool = group.pool.clone();
-            for (wallet_type, confirmed_balance_usdc) in store
+            for (wallet_type, balance_estimate_usdc) in store
                 .call(move |s| s.startup_claim_balances(&pool, &claims))
                 .await?
             {
-                summary.confirmed_balances.push(BootstrapBalance {
+                summary.balance_estimates.push(BootstrapBalance {
                     wallet_name: group.name.clone(),
                     wallet_type,
-                    confirmed_balance_usdc,
+                    balance_estimate_usdc,
                 });
             }
             if group.serving_ready {
@@ -201,7 +201,7 @@ async fn supervise(
         funding_runtime.context("bootstrap funding worker unavailable")?;
     tracing::info!(
         wallets = names.len(),
-        "Explicit wallet bootstrap waiting for captured confirmed USDC credit"
+        "Explicit wallet bootstrap waiting for captured initial USDC credit"
     );
     let monitored_names = names.clone();
     let monitor = async move {
@@ -358,7 +358,7 @@ fn assess_startup_paths(
             {
                 "another treasury transaction to confirm"
             } else {
-                "confirmed USDC funding"
+                "initial USDC credit"
             };
             tracing::info!(wallet=%group.name,size=%path.wallet_type,status=?path.job.phase,waiting_for,"Bootstrap funding in progress");
             tracing::debug!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap funding observation details");
@@ -472,15 +472,15 @@ mod tests {
     #[test]
     fn bootstrap_output_contract_v2_separates_current_and_captured_inventory() {
         let summary = BootstrapSummary {
-            schema_version: 2,
+            schema_version: 3,
             serving_ready_groups: vec!["web".into()],
             inventory_ready_groups: vec![],
             captured_completed_groups: vec!["web".into()],
             incomplete_captured_jobs: vec![],
-            confirmed_balances: vec![],
+            balance_estimates: vec![],
         };
         let expected: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/capacity/bootstrap-output-v2.json"
+            "../../tests/fixtures/capacity/bootstrap-output-v3.json"
         ))
         .unwrap();
         assert_eq!(serde_json::to_value(summary).unwrap(), expected);

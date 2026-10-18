@@ -408,6 +408,7 @@ impl Harness {
             .await
             .unwrap()
         });
+        publish_initial_credit(&store, &pool, &base).await;
         make_pool(store.clone(), pool.clone(), &base)
             .reconcile()
             .await
@@ -441,6 +442,33 @@ impl Harness {
             query: BTreeMap::new(),
             body: None,
         }
+    }
+}
+// Establish prior initial funding through its owner, not ordinary hint refresh.
+async fn publish_initial_credit(store: &StoreHandle, pool: &str, base: &str) {
+    let status = store.call(|s| s.status()).await.unwrap();
+    let wallets: Vec<_> = status
+        .pools
+        .iter()
+        .find(|p| p.id == pool)
+        .unwrap()
+        .addresses
+        .iter()
+        .filter(|w| w.role == "ALLOCATED")
+        .map(|w| w.id.clone())
+        .collect();
+    for wallet in wallets {
+        let pool = pool.to_owned();
+        let query = store.call(move |s| s.chain_query(&pool)).await.unwrap();
+        let view = BaseRpc::new(&format!("{base}/rpc"), 12)
+            .unwrap()
+            .view(query)
+            .await
+            .unwrap();
+        store
+            .call(move |s| s.record_verified_credit(&wallet, view).map(|_| ()))
+            .await
+            .unwrap();
     }
 }
 async fn restart(h: Harness) -> Harness {
@@ -1365,6 +1393,7 @@ async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
             }
         }
     }
+    publish_initial_credit(&h.store, &other_id, &h.base).await;
     make_pool(h.store.clone(), other_id.clone(), &h.base)
         .reconcile()
         .await

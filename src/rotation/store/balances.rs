@@ -39,7 +39,7 @@ impl Store {
     ) -> Result<Vec<(i64, Option<String>)>> {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::WalletPage)?;
-        let mut query=self.db.prepare("SELECT sequence,id FROM wallets WHERE pool_id=?1 AND role!='RETIRED' AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
+        let mut query=self.db.prepare("SELECT sequence,id FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','RETAINED','READY') AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
         Ok(query
             .query_map(
                 params![pool, after, through, super::history::PAGE_SIZE as i64],
